@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using KyberWeave.Application.Squad.Packaging;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Host;
@@ -101,6 +103,12 @@ internal static class SquadTestCommands
             new SquadConsoleOptions(isInteractive, readAnswer));
     }
 
+    public static SquadPackCommand Pack(string? workingDirectory = null) =>
+        new(new SquadPackService(
+            new WorkingDirectoryEnvironment(workingDirectory),
+            new FileSquadSourceLocator(),
+            new FileSquadPackager()));
+
     public static SquadRunCommand Run(
         ISquadUserPaths? userPaths = null,
         SquadModelPresetSelectionStore? selectionStore = null,
@@ -117,6 +125,8 @@ internal static class SquadTestCommands
                 : new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(paths)),
             selectionStore ?? new SquadModelPresetSelectionStore(paths),
             ensureOverride is not null ? new AnyPresetStore() : new SquadModelPresetStore(paths),
+            new ProcessSquadHarnessLauncher(),
+            new ProcessEnvironment(),
             new SquadRunOptions(runner, getEnv, findOnPath, workingDirectory));
     }
 
@@ -153,6 +163,11 @@ internal static class SquadTestCommands
             new FileSquadDeploymentPlanner(),
             new FileSquadResponseGuidanceStore(),
             new ReaderEnvironment(environmentReader),
+            new FileSquadSourceLocator(),
+            new FileSquadSourceLoader(),
+            new FileSquadSkillShadowing(),
+            new FileDevinImportOverlapInspector(),
+            new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory));
     }
 
@@ -273,5 +288,18 @@ internal static class SquadTestCommands
         public string TempDirectory => _real.TempDirectory;
 
         public string? GetVariable(string name) => (reader ?? _real.GetVariable)(name);
+    }
+
+    private sealed class WorkingDirectoryEnvironment(string? workingDirectory) : IProcessEnvironment
+    {
+        private readonly ProcessEnvironment _real = new();
+
+        public string CurrentDirectory => workingDirectory ?? _real.CurrentDirectory;
+
+        public string HomeDirectory => _real.HomeDirectory;
+
+        public string TempDirectory => _real.TempDirectory;
+
+        public string? GetVariable(string name) => _real.GetVariable(name);
     }
 }

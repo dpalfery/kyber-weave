@@ -3,10 +3,8 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text.Json;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Configuration;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
-using KyberWeave.Core.Squad.Deployment;
 
 namespace KyberWeave.Cli.Update;
 
@@ -58,27 +56,6 @@ internal sealed class SelfUpdater : IDisposable
     /// <summary>Where <c>kyberdash menubar</c> records what it installed.</summary>
     private const string TrayRecordFile = "tray.json";
 
-    /// <summary>
-    /// The bound for a KyberDash verb whose output decides the next step (engine ensure, plugin install). It may
-    /// start or stop an engine, so it gets two minutes; a verb that outlasts that is stopped and named.
-    /// </summary>
-    private static readonly TimeSpan CaptureVerbTimeout = TimeSpan.FromSeconds(120);
-
-    /// <summary>
-    /// The bound for the tray update. It quits, replaces and relaunches the tray, so it is the longest step.
-    /// </summary>
-    private static readonly TimeSpan TrayUpdateTimeout = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// The bound for the finish-update child the old process starts after every binary is committed. The child may run
-    /// the engine verb (120 s), the tray (5 min) and two plugin steps (120 s each), so 15 minutes is longer than all of
-    /// them together and a hung child is still stopped.
-    /// </summary>
-    private static readonly TimeSpan FinishUpdateTimeout = TimeSpan.FromMinutes(15);
-
-    /// <summary>The bound for the pre-swap rehearsal, which runs the installed command with <c>--version</c> and must return at once.</summary>
-    private static readonly TimeSpan RehearsalTimeout = TimeSpan.FromSeconds(30);
-
     private readonly GitHubReleaseClient _releases;
     private readonly SelfUpdateHost _host;
     private readonly Action<string> _log;
@@ -86,9 +63,20 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Func<string, string?> _readEnvironment;
     private readonly Func<string, bool> _canWriteDirectory;
     private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
+    private readonly ISelfUpdateSystem _system;
+    private readonly IArbiterRefreshTargets? _arbiterTargets;
     private readonly IArbiterHookRefresher? _arbiterHookRefresher;
     private readonly Func<string, IReadOnlyList<string>, bool, int>? _finishingProcess;
 
+    /// <param name="handler">The transport the release client sends through.</param>
+    /// <param name="host">The running binary's snapshot.</param>
+    /// <param name="log">Receives one line per step.</param>
+    /// <param name="readEnvironment">Reads one environment variable.</param>
+    /// <param name="runProcess">Runs the tray verb; defaults to the system adapter's.</param>
+    /// <param name="canWriteDirectory">Probes the install directory; defaults to the system adapter's.</param>
+    /// <param name="finishingProcess">Starts the hand-off child and the rehearsal; defaults to the system adapter's.</param>
+    /// <param name="system">The processes, files and archives the update touches.</param>
+    /// <param name="arbiterTargets">What the arbiter hook refresh covers; required when a refresher is given.</param>
     /// <param name="captureProcess">
     /// Runs a KyberDash verb whose output decides the next step (the engine verdict, the plugin verdict).
     /// Separate from <paramref name="runProcess"/> because that seam returns only an exit code, and the guidance
@@ -107,20 +95,26 @@ internal sealed class SelfUpdater : IDisposable
         Func<string, bool>? canWriteDirectory = null,
         Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null,
         IArbiterHookRefresher? arbiterHookRefresher = null,
-        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null)
+        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null,
+        ISelfUpdateSystem? system = null,
+        IArbiterRefreshTargets? arbiterTargets = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
+        if (arbiterHookRefresher is not null)
+            ArgumentNullException.ThrowIfNull(arbiterTargets);
         _host = host;
         _log = log ?? (_ => { });
-        _runProcess = runProcess ?? RunProcess;
-        _captureProcess = captureProcess ?? RunCapture;
+        _system = system ?? new SelfUpdateSystem();
+        _arbiterTargets = arbiterTargets;
+        _runProcess = runProcess ?? _system.RunProcess;
+        _captureProcess = captureProcess ?? _system.RunCapture;
         _arbiterHookRefresher = arbiterHookRefresher;
         _finishingProcess = finishingProcess;
         _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
         // A seam because the refusal cannot be provoked through mode bits everywhere:
         // root and Windows both write through a read-only POSIX mode.
-        _canWriteDirectory = canWriteDirectory ?? CanWriteDirectory;
+        _canWriteDirectory = canWriteDirectory ?? _system.CanWriteDirectory;
         _releases = new GitHubReleaseClient(
             handler,
             host.CurrentVersion,
@@ -135,14 +129,20 @@ internal sealed class SelfUpdater : IDisposable
         SelfUpdateHost host,
         Action<string>? log = null,
         IArbiterHookRefresher? arbiterHookRefresher = null,
-        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null)
+        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null,
+        ISelfUpdateSystem? system = null,
+        IArbiterRefreshTargets? arbiterTargets = null,
+        Func<string, string?>? readEnvironment = null)
     {
         return new SelfUpdater(
             new SocketsHttpHandler { AllowAutoRedirect = true },
             host,
             log,
+            readEnvironment,
             arbiterHookRefresher: arbiterHookRefresher,
-            finishingProcess: finishingProcess);
+            finishingProcess: finishingProcess,
+            system: system,
+            arbiterTargets: arbiterTargets);
     }
 
     internal SelfUpdateOutcome Run(SelfUpdateOptions options)
@@ -449,64 +449,7 @@ internal sealed class SelfUpdater : IDisposable
         if (_finishingProcess is not null)
             return _finishingProcess(fileName, arguments, discardOutput);
 
-        return StartFinishingProcess(
-            fileName,
-            arguments,
-            discardOutput,
-            discardOutput ? RehearsalTimeout : FinishUpdateTimeout);
-    }
-
-    /// <summary>
-    /// Starts a child that inherits this console, or discards its output when <paramref name="discardOutput"/> is set,
-    /// and waits at most <paramref name="timeout"/>. A child still running at the bound has its whole process tree
-    /// stopped, and the caller gets a <see cref="TimeoutException"/>: a hung step must not hang the update.
-    /// </summary>
-    private static int StartFinishingProcess(
-        string fileName,
-        IReadOnlyList<string> arguments,
-        bool discardOutput,
-        TimeSpan timeout)
-    {
-        ProcessStartInfo child = new(fileName) { UseShellExecute = false };
-        if (discardOutput)
-        {
-            child.RedirectStandardOutput = true;
-            child.RedirectStandardError = true;
-        }
-
-        foreach (string argument in arguments)
-            child.ArgumentList.Add(argument);
-
-        using Process? started = Process.Start(child);
-        if (started is null)
-            throw new InvalidOperationException($"the process could not be started: {fileName}");
-
-        // Redirected output must be drained, or a child that writes a lot blocks on a full pipe. With no handler attached,
-        // the asynchronous reads discard what they read.
-        if (discardOutput)
-        {
-            started.BeginOutputReadLine();
-            started.BeginErrorReadLine();
-        }
-
-        if (started.WaitForExit(timeout))
-            return started.ExitCode;
-
-        try
-        {
-            if (!started.HasExited)
-                started.Kill(true);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception or AggregateException)
-        {
-            // It exited between the check and the kill, or the tree kill itself failed (Process.Kill(true)
-            // aggregates the per-process results into one exception when any member refuses to die). The
-            // timeout below still reports the step.
-        }
-
-        started.WaitForExit(TimeSpan.FromSeconds(5));
-        throw new TimeoutException(
-            $"The process did not exit within {(int)timeout.TotalSeconds} seconds, and its process tree was stopped.");
+        return _system.StartFinishingProcess(fileName, arguments, discardOutput);
     }
 
     /// <summary>The forwarded opt-outs as a single leading-space token, empty when none were forwarded.</summary>
@@ -646,7 +589,7 @@ internal sealed class SelfUpdater : IDisposable
 
         try
         {
-            bool rewritten = new CopilotPromptRefresher(home, message => _log($"warning: {message}")).Refresh();
+            bool rewritten = _system.RefreshCopilotPrompt(home, message => _log($"warning: {message}"));
             if (rewritten)
                 _log("refreshed the installed Copilot system prompt");
         }
@@ -681,7 +624,7 @@ internal sealed class SelfUpdater : IDisposable
             bool registryRead = true;
             try
             {
-                roots = CollectArbiterEnabledProjectRoots();
+                roots = _arbiterTargets!.CollectEnabledProjectRoots();
             }
             catch (Exception ex) when (IsRegistryReadFailure(ex))
             {
@@ -698,7 +641,7 @@ internal sealed class SelfUpdater : IDisposable
             if (string.IsNullOrWhiteSpace(home))
                 home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
-                && UserHostConfig.ReadGlobalTargets(home).Count > 0;
+                && _arbiterTargets!.ReadGlobalTargets(home).Count > 0;
 
             if (!registryRead && !hasConfiguredGlobalTargets)
                 return;
@@ -724,29 +667,6 @@ internal sealed class SelfUpdater : IDisposable
         {
             WarnArbiterHooksNotRefreshed(DescribeFailure(ex), version, options);
         }
-    }
-
-    /// <summary>
-    /// The registered, non-stale projects whose configuration enables the arbiter. A registry that cannot be read throws
-    /// to the caller, which names it as a registry failure; a program component that cannot load is not caught here,
-    /// so it is never reported as a registry failure.
-    /// </summary>
-    private IReadOnlyList<string> CollectArbiterEnabledProjectRoots()
-    {
-        ISquadUserPaths userPaths = SquadHostDefaults.ResolveUserPaths(null, _readEnvironment);
-        SquadStateStore stateStore = new(userPaths);
-        List<string> roots = [];
-        foreach (SquadProjectRegistryEntry entry in stateStore.ListProjects())
-        {
-            if (entry.Stale)
-                continue;
-
-            KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(entry.Path);
-            if (loaded.Success && loaded.Config?.Arbiter.Enabled == true)
-                roots.Add(entry.Path);
-        }
-
-        return roots;
     }
 
     /// <summary>
@@ -985,26 +905,6 @@ internal sealed class SelfUpdater : IDisposable
         return first.Length == 0 ? string.Empty : $": {first}";
     }
 
-    /// <summary>
-    /// Runs a verb and captures what it printed. A process that cannot start surfaces as the caller's named failure.
-    /// A verb that outlasts <see cref="CaptureVerbTimeout"/> is killed and throws <see cref="TimeoutException"/>,
-    /// which each caller names.
-    /// </summary>
-    private static ProcessResult RunCapture(string fileName, IReadOnlyList<string> arguments)
-    {
-        ProcessStartInfo start = new(fileName)
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        foreach (string argument in arguments)
-            start.ArgumentList.Add(argument);
-
-        return ProcessRunner.Run(start, string.Empty, CaptureVerbTimeout);
-    }
-
     private void UpdateTray(bool windows, string version)
     {
         string kyberdash = Path.Combine(
@@ -1059,36 +959,6 @@ internal sealed class SelfUpdater : IDisposable
             ?? _readEnvironment("USERPROFILE")
             ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         return Path.Combine(home, ".kyberdash");
-    }
-
-    private static int RunProcess(string fileName, IReadOnlyList<string> arguments)
-    {
-        ProcessStartInfo start = new(fileName) { UseShellExecute = false };
-        foreach (string argument in arguments)
-            start.ArgumentList.Add(argument);
-
-        using Process? process = Process.Start(start);
-        if (process is null)
-            throw new SelfUpdateException($"the KyberDash tray step could not start {fileName}.");
-
-        // The tray step writes to this console, so its streams are inherited rather than captured, and the
-        // runner cannot bound it. The wait is bounded instead: a tray that never returns must not hang the update.
-        if (process.WaitForExit(TrayUpdateTimeout))
-            return process.ExitCode;
-
-        try
-        {
-            if (!process.HasExited)
-                process.Kill(true);
-        }
-        catch (Exception ex) when (ex is InvalidOperationException or Win32Exception)
-        {
-            // It exited between the check and the kill. The timeout below still reports the step.
-        }
-
-        process.WaitForExit(TimeSpan.FromSeconds(5));
-        throw new TimeoutException(
-            $"The process did not exit within {(int)TrayUpdateTimeout.TotalSeconds} seconds.");
     }
 
     private (string BaseName, string ExtractedPath, string Destination) StageBinary(
@@ -1152,7 +1022,7 @@ internal sealed class SelfUpdater : IDisposable
         ChecksumVerifier.Verify(expected, hash, archiveName);
 
         string extractDir = Path.Combine(workDirectory, baseName + "-extract");
-        BinaryInstaller.ExtractArchive(archivePath, extractDir, windows);
+        _system.ExtractArchive(archivePath, extractDir, windows);
         return extractDir;
     }
 
@@ -1163,7 +1033,7 @@ internal sealed class SelfUpdater : IDisposable
         string extractedPath,
         string destination)
     {
-        BinaryInstaller.Replace(extractedPath, destination, windows, _host.IsMacOs);
+        _system.ReplaceBinary(extractedPath, destination, windows, _host.IsMacOs);
         _log($"installed {baseName} {ReleaseVersion.Normalize(tag)} → {destination}");
     }
 
@@ -1262,24 +1132,6 @@ internal sealed class SelfUpdater : IDisposable
         string normalized = processPath.Replace('\\', '/');
         return normalized.Contains("/.dotnet/tools/", StringComparison.OrdinalIgnoreCase)
                || normalized.EndsWith("/.dotnet/tools", StringComparison.OrdinalIgnoreCase);
-    }
-
-    internal static bool CanWriteDirectory(string directory)
-    {
-        try
-        {
-            string probe = Path.Combine(directory, ".kyber-weave-update-" + Guid.NewGuid().ToString("N"));
-            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1,
-                       FileOptions.DeleteOnClose))
-            {
-            }
-
-            return true;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
     }
 
     private static string FindExtractedBinary(string extractDir, string fileName) =>

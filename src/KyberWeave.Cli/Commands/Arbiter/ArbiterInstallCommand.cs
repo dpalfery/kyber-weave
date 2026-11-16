@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Application.Squad;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;

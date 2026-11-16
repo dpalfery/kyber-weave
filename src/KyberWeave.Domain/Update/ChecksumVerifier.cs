@@ -7,9 +7,9 @@ namespace KyberWeave.Cli.Update;
 /// A regex over the name would let <c>.</c> match anything and let one asset's line
 /// satisfy a different asset. The install script matches the same way.
 /// </remarks>
-internal static class ChecksumVerifier
+public static class ChecksumVerifier
 {
-    internal static string ExpectedHex(string sha256SumsText, string archiveName)
+    public static string ExpectedHex(string sha256SumsText, string archiveName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sha256SumsText);
         ArgumentException.ThrowIfNullOrWhiteSpace(archiveName);

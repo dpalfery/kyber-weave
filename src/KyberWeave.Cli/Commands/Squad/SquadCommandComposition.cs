@@ -324,7 +324,7 @@ internal static class SquadCommandComposition
     ///     then applies the looser, canonicalizing rule: it strips a leading 'v' and '+build'
     ///     metadata (so 'v1.2.3+sha' becomes '1.2.3') and rejects input that is not a Release
     ///     tag shape at all. The strict SemVer check runs last and reuses
-    ///     <see cref="GitHubSquadReleaseSource.IsValidReleaseVersion" /> — the one rule the
+    ///     <see cref="ReleaseVersion.IsStrictSemVer" /> — the one rule the
     ///     release source itself enforces, reused rather than duplicated so the two cannot
     ///     diverge — to reject tag-shaped forms the stricter rule still forbids, like '1.0'
     ///     or '01.2.3'. The release source keeps its own check as defense-in-depth.
@@ -345,7 +345,7 @@ internal static class SquadCommandComposition
 
         EnsureValidBuildMetadata(version);
         string normalized = ReleaseVersion.Normalize(version);
-        if (!GitHubSquadReleaseSource.IsValidReleaseVersion(normalized))
+        if (!ReleaseVersion.IsStrictSemVer(normalized))
             throw new ArgumentException(
                 "--version must be a semantic version (X.Y.Z or X.Y.Z-prerelease); " +
                 "a leading 'v' and '+build' metadata are accepted and stripped. " +

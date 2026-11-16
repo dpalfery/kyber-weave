@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Application.Squad;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -94,7 +95,7 @@ internal static class SquadHostDefaults
     {
         SquadStateStore store = stateStore ?? ResolveStateStore(userPaths, environmentReader);
         ISquadReleaseSource source = releaseSource
-                                     ?? new GitHubSquadReleaseSource(ReleaseOrigin
+                                     ?? SquadReleaseSources.GitHub(ReleaseOrigin
                                          .Resolve(environmentReader ?? Environment.GetEnvironmentVariable)
                                          .ApiRoot);
         return CreateLifecycleService(
@@ -150,8 +151,8 @@ internal static class SquadHostDefaults
         SquadStateStore stateStore = ResolveStateStore(resolvedPaths);
         string? local = new PhysicalSquadFileAccess().FindCheckoutSquadSourceRoot();
         ISquadReleaseSource releaseSource = local is not null
-            ? new LocalCheckoutSquadReleaseSource(local)
-            : new GitHubSquadReleaseSource(ReleaseOrigin.Resolve(Environment.GetEnvironmentVariable).ApiRoot);
+            ? SquadReleaseSources.LocalCheckout(local)
+            : SquadReleaseSources.GitHub(ReleaseOrigin.Resolve(Environment.GetEnvironmentVariable).ApiRoot);
         SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore, releaseSource);
         return new SquadInstanceService(
             lifecycleService,

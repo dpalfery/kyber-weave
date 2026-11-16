@@ -507,14 +507,14 @@ public sealed class UpdateCommandTests : IDisposable
     [Fact]
     public void CanWriteDirectoryReportsAWritableDirectoryAndLeavesNoProbeBehind()
     {
-        Assert.True(SelfUpdater.CanWriteDirectory(_install.Path));
+        Assert.True(SelfUpdateSystem.CanWriteDirectory(_install.Path));
         Assert.Empty(Directory.GetFiles(_install.Path, ".kyber-weave-update-*"));
     }
 
     [Fact]
     public void CanWriteDirectoryReportsFalseWhenTheProbeCannotBeCreated()
     {
-        Assert.False(SelfUpdater.CanWriteDirectory(Path.Combine(_install.Path, "missing")));
+        Assert.False(SelfUpdateSystem.CanWriteDirectory(Path.Combine(_install.Path, "missing")));
     }
 
     [Fact]
@@ -544,13 +544,10 @@ public sealed class UpdateCommandTests : IDisposable
             """{"tag_name":"v0.2.0","draft":false}""");
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         LoopbackFinishingProcess loopback = new(handler, host, _ => { }, _ => null);
-        UpdateCommand command = new()
-        {
-            Host = host,
-            Handler = handler,
-            ReadEnvironment = _ => null,
-            FinishingProcess = loopback.Invoke
-        };
+        UpdateCommand command = UpdateCommandTestServices.Create(
+            host,
+            handler,
+            loopback.Invoke);
 
         CapturedConsoleExecution<int> execution =
             ProcessConsoleCapture.Run(() => command.Execute(null!, new UpdateSettings()));
@@ -569,17 +566,14 @@ public sealed class UpdateCommandTests : IDisposable
         using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<IReadOnlyList<string>> handOffs = [];
-        UpdateCommand command = new()
-        {
-            Host = host,
-            Handler = handler,
-            ReadEnvironment = _ => null,
-            FinishingProcess = (_, arguments, _) =>
+        UpdateCommand command = UpdateCommandTestServices.Create(
+            host,
+            handler,
+            (_, arguments, _) =>
             {
                 handOffs.Add(arguments);
                 return 0;
-            }
-        };
+            });
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
             command.Execute(null!, new UpdateSettings { Version = "0.2.0" }));
@@ -601,20 +595,17 @@ public sealed class UpdateCommandTests : IDisposable
         using MapHandler handler = MapRelease("0.2.0", "osx-arm64", false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<IReadOnlyList<string>> handOffs = [];
-        UpdateCommand command = new()
-        {
-            Host = host,
-            Handler = handler,
-            ReadEnvironment = _ => null,
-            FinishingProcess = (_, arguments, _) =>
+        UpdateCommand command = UpdateCommandTestServices.Create(
+            host,
+            handler,
+            (_, arguments, _) =>
             {
                 handOffs.Add(arguments);
                 if (arguments[0] == "update")
                     throw failure;
 
                 return 0;
-            }
-        };
+            });
 
         // The error line names the retry at the end of a long message; a width that fits it keeps the line whole.
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
@@ -638,12 +629,7 @@ public sealed class UpdateCommandTests : IDisposable
     {
         using MapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0", "osx-arm64");
-        UpdateCommand command = new()
-        {
-            Host = host,
-            Handler = handler,
-            ReadEnvironment = _ => null
-        };
+        UpdateCommand command = UpdateCommandTestServices.Create(host, handler);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
             command.Execute(null!, new UpdateSettings { Version = "0.2.0", FinishUpdate = true }));
@@ -982,7 +968,8 @@ public sealed class UpdateCommandTests : IDisposable
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
-            arbiterHookRefresher: refresher);
+            arbiterHookRefresher: refresher,
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -990,6 +977,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -1015,7 +1003,8 @@ public sealed class UpdateCommandTests : IDisposable
             log.Add,
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
-            arbiterHookRefresher: refresher);
+            arbiterHookRefresher: refresher,
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null));
         using SelfUpdater updater = new(
             handler,
             host,
@@ -1023,6 +1012,7 @@ public sealed class UpdateCommandTests : IDisposable
             _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
+            arbiterTargets: new CliArbiterRefreshTargets(_ => null),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 

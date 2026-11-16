@@ -172,7 +172,7 @@ internal sealed class KyberDashCapturePluginStep
         IReadOnlyList<SquadTarget> deployedTargets,
         bool noCapturePlugin,
         bool dryRun,
-        ISquadGlobalRootResolver? globalRoots)
+        ISquadGlobalRootResolver globalRoots)
     {
         if (step is null || noCapturePlugin)
             return;
@@ -189,7 +189,7 @@ internal sealed class KyberDashCapturePluginStep
             }
 
             IReadOnlyList<(SquadTarget Target, string GlobalRoot)> roots =
-                SquadCommandComposition.ResolveGlobalTargetRoots([harness], globalRoots ?? SquadHostDefaults.ResolveGlobalRoots());
+                SquadCommandComposition.ResolveGlobalTargetRoots([harness], globalRoots);
             if (roots.Count == 0)
             {
                 AnsiConsole.MarkupLine(

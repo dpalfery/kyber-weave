@@ -1,6 +1,8 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Cli.Update;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,6 +39,14 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();
         services.TryAddSingleton<ISquadInstanceLinkSync, FileSquadInstanceLinkSync>();
         services.TryAddSingleton<ISquadFileAccess, PhysicalSquadFileAccess>();
+        services.TryAddSingleton<ISelfUpdateSystem, SelfUpdateSystem>();
+        services.TryAddSingleton<ISquadPackager, FileSquadPackager>();
+        services.TryAddSingleton<ISquadSkillShadowing, FileSquadSkillShadowing>();
+        services.TryAddSingleton<IDevinImportOverlapInspector, FileDevinImportOverlapInspector>();
+        services.TryAddSingleton<IZCodeMcpInspector, FileZCodeMcpInspector>();
+        services.TryAddSingleton<ISquadHookJsonFile, FileSquadHookJsonFile>();
+        services.TryAddSingleton<ISquadHarnessLauncher, ProcessSquadHarnessLauncher>();
+        services.TryAddSingleton<ISquadSourceLocator, FileSquadSourceLocator>();
         services.TryAddSingleton<ISquadTargetResolver, FileSquadTargetResolver>();
         services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
             sp.GetRequiredService<SquadStateStore>(),

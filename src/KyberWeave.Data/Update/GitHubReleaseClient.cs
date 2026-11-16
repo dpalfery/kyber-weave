@@ -14,8 +14,8 @@ namespace KyberWeave.Cli.Update;
 /// </remarks>
 internal sealed class GitHubReleaseClient : IDisposable
 {
-    internal const string Owner = "dpalfery";
-    internal const string Repo = "kyber-weave";
+    internal const string Owner = GitHubReleaseEndpoints.Owner;
+    internal const string Repo = GitHubReleaseEndpoints.Repo;
 
     /// <summary>The largest page the Releases API serves.</summary>
     internal const int ReleasesPerPage = 100;
@@ -23,16 +23,13 @@ internal sealed class GitHubReleaseClient : IDisposable
     /// <summary>How many Releases pages the newest-release scan reads at most.</summary>
     internal const int MaxReleasePages = 10;
 
-    internal static readonly Uri ApiRoot = new("https://api.github.com/");
+    internal static readonly Uri ApiRoot = GitHubReleaseEndpoints.ApiRoot;
 
-    internal static readonly Uri LatestApi =
-        new($"https://api.github.com/repos/{Owner}/{Repo}/releases/latest");
+    internal static readonly Uri LatestApi = GitHubReleaseEndpoints.LatestApi;
 
-    internal static readonly Uri ReleasesApi =
-        new($"https://api.github.com/repos/{Owner}/{Repo}/releases");
+    internal static readonly Uri ReleasesApi = GitHubReleaseEndpoints.ReleasesApi;
 
-    internal static readonly Uri ReleaseDownloadBase =
-        new($"https://github.com/{Owner}/{Repo}/releases/download/");
+    internal static readonly Uri ReleaseDownloadBase = GitHubReleaseEndpoints.ReleaseDownloadBase;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

@@ -49,7 +49,7 @@ public sealed class SquadKyberWeavePackFixture : IDisposable
     {
         string outDirectory = Path.Combine(_temp.Path, format);
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
-            new SquadPackCommand(workingDirectory: KyberWeaveTestPaths.ToolRoot).Execute(
+            SquadTestCommands.Pack(KyberWeaveTestPaths.ToolRoot).Execute(
                 null!,
                 new SquadPackSettings { Format = format, Out = outDirectory, Version = PackedVersion }));
         return new SquadPackRun(run.Result, run.Output, outDirectory);
@@ -315,7 +315,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string outDirectory = Path.Combine(_temp.Path, "clash-out");
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
-            new SquadPackCommand(workingDirectory: repository).Execute(
+            SquadTestCommands.Pack(repository).Execute(
                 null!,
                 new SquadPackSettings { Format = "all", Out = outDirectory, Version = PackedVersion }));
 
@@ -875,7 +875,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     private static SquadPackRun PackInto(string repository, string format, string outDirectory)
     {
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
-            new SquadPackCommand(workingDirectory: repository).Execute(
+            SquadTestCommands.Pack(repository).Execute(
                 null!,
                 new SquadPackSettings { Format = format, Out = outDirectory, Version = PackedVersion }));
         return new SquadPackRun(run.Result, run.Output, outDirectory);

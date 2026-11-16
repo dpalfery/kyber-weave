@@ -214,19 +214,12 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
         }
     }
 
-    [GeneratedRegex(
-        @"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$",
-        RegexOptions.CultureInvariant)]
-    private static partial Regex ReleaseVersionPattern();
-
     /// <summary>
     /// The strict release-tag rule <see cref="ValidateRequest"/> enforces before any
     /// network call: X.Y.Z or X.Y.Z-prerelease, no leading zeros, no build metadata.
-    /// Internal so the command boundary validates pinned <c>--version</c> input with this
-    /// one rule rather than a duplicate regex that could diverge from it.
     /// </summary>
     internal static bool IsValidReleaseVersion(string version) =>
-        ReleaseVersionPattern().IsMatch(version);
+        ReleaseVersion.IsStrictSemVer(version);
 
     private Uri BuildReleaseUri(string repository, string version)
     {

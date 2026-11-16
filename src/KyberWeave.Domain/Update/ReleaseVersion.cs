@@ -1,16 +1,17 @@
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace KyberWeave.Cli.Update;
 
 /// <summary>Normalizes GitHub tags and assembly informational versions for comparison.</summary>
-internal static class ReleaseVersion
+public static partial class ReleaseVersion
 {
-    internal static string Normalize(string version)
+    public static string Normalize(string version)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
 
         // Same prefix and build-metadata cut the probe comparison uses.
-        string trimmed = CliAssemblyVersion.Normalize(version);
+        string trimmed = StripPrefixAndBuildMetadata(version);
 
         if (trimmed.Length == 0)
             throw new SelfUpdateException("version is empty after removing a leading 'v'.");
@@ -26,7 +27,41 @@ internal static class ReleaseVersion
         return trimmed;
     }
 
-    internal static string Tag(string normalizedVersion) => "v" + normalizedVersion;
+    /// <summary>
+    /// Drops <c>+build</c> metadata and one leading <c>v</c> or <c>V</c> so a probe
+    /// semver can match the informational version.
+    /// </summary>
+    public static string StripPrefixAndBuildMetadata(string version)
+    {
+        ArgumentNullException.ThrowIfNull(version);
+
+        string trimmed = version.Trim();
+        if (trimmed.StartsWith('v') || trimmed.StartsWith('V'))
+        {
+            trimmed = trimmed[1..];
+        }
+
+        int plus = trimmed.IndexOf('+', StringComparison.Ordinal);
+        if (plus >= 0)
+        {
+            trimmed = trimmed[..plus];
+        }
+
+        return trimmed;
+    }
+
+    [GeneratedRegex(
+        @"^(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?$",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex StrictVersionPattern();
+
+    /// <summary>
+    /// The strict release-tag rule: X.Y.Z or X.Y.Z-prerelease, no leading zeros, no build metadata.
+    /// One rule for the command boundary and the release source, so the two cannot diverge.
+    /// </summary>
+    public static bool IsStrictSemVer(string version) => StrictVersionPattern().IsMatch(version);
+
+    public static string Tag(string normalizedVersion) => "v" + normalizedVersion;
 
     /// <summary>
     /// Compares two versions by SemVer 2.0.0 precedence: negative when <paramref name="left"/>
@@ -38,7 +73,7 @@ internal static class ReleaseVersion
     /// the first-install path; the two gates decide which releases publish a given asset, so
     /// they have to agree.
     /// </remarks>
-    internal static int Compare(string left, string right)
+    public static int Compare(string left, string right)
     {
         (string leftCore, string leftPre) = SplitPreRelease(Normalize(left));
         (string rightCore, string rightPre) = SplitPreRelease(Normalize(right));
