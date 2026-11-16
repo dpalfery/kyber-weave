@@ -1138,13 +1138,34 @@ internal sealed class SelfUpdater : IDisposable
         TryFindExtractedBinary(extractDir, fileName)
         ?? throw new SelfUpdateException($"archive did not contain {fileName}");
 
-    private static string? TryFindExtractedBinary(string extractDir, string fileName)
+    /// <summary>
+    ///     Finds <paramref name="fileName" /> in the extracted archive without following links: a directory link
+    ///     in a tarball could otherwise lead the search to a binary outside <paramref name="extractDir" />.
+    /// </summary>
+    internal static string? TryFindExtractedBinary(string extractDir, string fileName)
     {
         string direct = Path.Combine(extractDir, fileName);
-        if (File.Exists(direct))
+        if (File.Exists(direct) && new FileInfo(direct).LinkTarget is null)
             return direct;
 
-        string[] matches = Directory.GetFiles(extractDir, fileName, SearchOption.AllDirectories);
-        return matches.Length == 1 ? matches[0] : null;
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        List<string> matches = [];
+        Stack<string> pending = new();
+        pending.Push(extractDir);
+        while (pending.Count > 0)
+        {
+            foreach (FileSystemInfo entry in new DirectoryInfo(pending.Pop()).EnumerateFileSystemInfos())
+            {
+                if (entry.LinkTarget is not null)
+                    continue;
+
+                if (entry is DirectoryInfo child)
+                    pending.Push(child.FullName);
+                else if (string.Equals(entry.Name, fileName, comparison))
+                    matches.Add(entry.FullName);
+            }
+        }
+
+        return matches.Count == 1 ? matches[0] : null;
     }
 }
