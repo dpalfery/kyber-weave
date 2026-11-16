@@ -3,7 +3,7 @@ id: squad/architecture
 title: Kyber-Squad architecture
 doc-type: architecture
 component: KyberSquad
-source-root: src/KyberWeave.Core.Squad
+source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
 last-reviewed: 2026-11-12
 status: current
