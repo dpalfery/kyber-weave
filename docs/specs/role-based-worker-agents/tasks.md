@@ -550,7 +550,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 - [ ] 4.4 Enforce a technology's allowed commands
   - **Objective:** Let a technology's Arbiter rules file declare the command forms a research agent may run, and refuse any other command where the Arbiter sees a sub-agent's own tool calls.
   - **Files:**
-    - `src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs`: raise a `worker.command` trigger
+    - `src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs`: raise a trigger named worker.command
     - `src/KyberWeave.Domain/Arbiter/Rules/RuleValidator.cs`: the trigger and its facts
     - `products/kyber-squad/standards/azure/azure.arbiter-rules.yml`, `products/kyber-squad/standards/aws/aws.arbiter-rules.yml`: allowed read forms
     - `tests/KyberWeave.Tests/ArbiterCommandAllowListTests.cs` (new): `KyberWeave.Tests.ArbiterCommandAllowListTests`
