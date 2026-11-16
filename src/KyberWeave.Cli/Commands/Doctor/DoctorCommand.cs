@@ -1,5 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Core.Doctor;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Doctor;
 using Spectre.Console.Cli;
 
@@ -20,7 +20,7 @@ namespace KyberWeave.Cli.Commands.Doctor;
 ///         production defaults are the actual stdin and process environment.
 ///     </para>
 /// </remarks>
-public sealed class DoctorCommand : Command<DoctorSettings>
+public sealed class DoctorCommand(IRepositoryDoctor doctor) : Command<DoctorSettings>
 {
     /// <summary>The line a bare, non-interactive run prints so its user knows how to provision.</summary>
     internal const string NonInteractiveHint = "provisioning skipped: non-interactive; rerun with --provision";
@@ -108,8 +108,8 @@ public sealed class DoctorCommand : Command<DoctorSettings>
         IProcessExecutor executor = Executor ?? ProcessExecutor.WithTimeout(options.IndexTimeout);
         // The hook's own mode skips the MCP and Copilot probes and installs nothing, so it is routed apart from the doctor run.
         DoctorReport report = settings.PostCheckout
-            ? RepositoryDoctor.RunPostCheckout(root, options, executor)
-            : RepositoryDoctor.Run(root, mode, options, executor, environment);
+            ? doctor.RunPostCheckout(root, options, executor)
+            : doctor.Run(root, mode, options, executor, environment);
 
         if (hint && !settings.Json)
             Console.Out.WriteLine(NonInteractiveHint);

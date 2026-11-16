@@ -60,7 +60,7 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => true,
@@ -113,7 +113,7 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => true,
@@ -187,7 +187,7 @@ public sealed class DoctorCommandTests : IDisposable
                 ? new ProcessResult(128, string.Empty, "fatal: not a git repository")
                 : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
 
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => true,
@@ -251,7 +251,7 @@ public sealed class DoctorCommandTests : IDisposable
             _ => throw DoctorHarness.BinaryNotFound());
 
         int exitCode = DoctorAppHarness.Run(
-            new DoctorCommand
+            new DoctorCommand(DoctorServices.Doctor)
             {
                 Executor = executor,
                 IsTerminal = () => false,

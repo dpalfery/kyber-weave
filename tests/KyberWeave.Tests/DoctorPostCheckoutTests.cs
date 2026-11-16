@@ -153,7 +153,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new()
+        DoctorCommand command = new(DoctorServices.Doctor)
         {
             Executor = executor,
             IsTerminal = () => false,

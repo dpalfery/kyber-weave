@@ -1,3 +1,4 @@
+using KyberWeave.Application.Doctor;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Core.Squad.Briefs;
@@ -28,6 +29,11 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<ISquadBriefService, SquadBriefService>();
+        services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();
+        services.TryAddSingleton<IWorktreeIndexGuard, WorktreeIndexEnsurer>();
+        services.TryAddSingleton<McpServerLiveProbe>();
+        services.TryAddSingleton<PostCheckoutHookInstaller>();
+        services.TryAddSingleton<IRepositoryDoctor, RepositoryDoctorService>();
         return services;
     }
 }

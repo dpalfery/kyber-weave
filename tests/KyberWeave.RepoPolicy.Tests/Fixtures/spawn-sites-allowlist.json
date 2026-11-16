@@ -920,13 +920,13 @@
       "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console. This line only selects the delegate; the spawn happens at line 183 (runner(startInfo)), starting the harness built at line 161 from SquadHarnessLauncher.BuildStartInfo. An injected _runner replaces it in tests."
     },
     {
-      "file": "src/KyberWeave.Core/Doctor/CodeGraphProvisioner.cs",
+      "file": "src/KyberWeave.Application/Doctor/CodeGraphIndexProvisioner.cs",
       "text": "ProcessStartInfo startInfo = new(fileName)",
       "count": 1,
       "bound": "Builds the codegraph start info only; every run goes through IProcessExecutor, bounded by DoctorOptions.IndexTimeout (ProcessExecutor.WithTimeout kills the tree on expiry)."
     },
     {
-      "file": "src/KyberWeave.Core/Doctor/RepositoryDoctor.cs",
+      "file": "src/KyberWeave.Application/Doctor/RepositoryDoctorService.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "Builds the git rev-parse start info only; runs through IProcessExecutor, bounded by its timeout (ProcessExecutor kills the tree on expiry)."
@@ -1046,7 +1046,7 @@
       "bound": "ProcessRunner.Run with the fact-builder timeout kills the child tree; git argv only, self-exiting."
     },
     {
-      "file": "src/KyberWeave.Core/Doctor/PostCheckoutHook.cs",
+      "file": "src/KyberWeave.Application/Doctor/PostCheckoutHookInstaller.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "Started through the injected IProcessExecutor. The doctor command passes ProcessExecutor.WithTimeout(DoctorOptions.IndexTimeout), 600 s by default, which kills the child tree on expiry; git argv only, in the repository root."
