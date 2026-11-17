@@ -104,9 +104,10 @@ public sealed class TaskPromptService(
         int failedAttempts)
     {
         if (named is null || technology is null
+            || !PlanTaskAgentPick.RemovedAgents.TryGetValue(named, out string? replacement)
+            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal)
             || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(named, out ArbiterSquadAgent? agent)
-            || !string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal)
-            || !string.Equals(agent.TargetClass, "implementation", StringComparison.Ordinal))
+            || !string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
         {
             return null;
         }

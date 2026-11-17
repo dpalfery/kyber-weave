@@ -90,6 +90,29 @@ public sealed class RemovedAgentResolutionTests
         Assert.Null(PlanTaskAgentPick.ResolveRemovedAgent(null, "hard"));
     }
 
+    /// <summary>
+    /// Two removed agents are not developers: their replacement is a named role, so an explicit tiered dispatch must
+    /// follow the removal map instead of being told to use a developer tier.
+    /// </summary>
+    [Theory]
+    [InlineData("github-devops", "devops")]
+    [InlineData("sql-database-architect", "architect")]
+    public void AnExplicitDispatchToANonDeveloperRemovedAgentResolvesToItsReplacement(
+        string named,
+        string expected)
+    {
+        using DocFixture fixture = Ready(Tiered);
+
+        TaskPromptResult result = Service().Build(
+            new TaskPromptRequest(fixture.Root, TaskId: "T1", Plan: Plan, Agent: named),
+            Tiered);
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Equal(expected, result.Agent);
+        Assert.NotNull(result.Substitution);
+        Assert.Contains(expected, result.Substitution, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ADispatchThatNamesARemovedAgentUnderTheTieredRosterGoesToTheTierAndReportsIt()
     {
