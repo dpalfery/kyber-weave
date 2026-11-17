@@ -98,6 +98,29 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
+    public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = renderedCaller;
+
+        if (!string.Equals(GetString(payload, "hook_event_name"), "PreToolUse", StringComparison.Ordinal)
+            || !IsDispatchTool(GetString(payload, "tool_name")))
+        {
+            return null;
+        }
+
+        JsonElement toolInput = RequireToolInput(payload);
+        string prompt = GetString(toolInput, "prompt") ?? string.Empty;
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        return insertion.Kind switch
+        {
+            DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            _ => null,
+        };
+    }
+
+    /// <inheritdoc/>
     public string Handle(
         JsonElement payload,
         string rawJson,
@@ -151,16 +174,32 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
             ?? throw new InvalidOperationException(
                 "Malformed Factory hook event: Task input carries no prompt.");
         HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+
+        // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        if (insertion.Kind == DispatchInsertionKind.Stopped)
+        {
+            return RenderPreDeny(insertion.Reason!);
+        }
+
+        bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
-            HookOutcomeKind.PassThrough => string.Empty,
-            HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
-                ? RenderPreAllowStrip(toolInput, prompt)
+            HookOutcomeKind.PassThrough => inserted
+                ? RenderPreAllowPrompt(toolInput, insertion.Text)
                 : string.Empty,
+            HookOutcomeKind.Allow => inserted
+                ? RenderPreAllowPrompt(toolInput, insertion.Text)
+                : ReadGuard.IsImplementationSpecialist(target)
+                    ? RenderPreAllowStrip(toolInput, prompt)
+                    : string.Empty,
             HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                    "Hook engine returned allow-with-rewrite without rewritten input.")),
+                    "Hook engine returned allow-with-rewrite without rewritten input."),
+                inserted ? insertion.Text : null),
             HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                toolInput,
+                inserted ? insertion.Text : null,
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderPreDeny(
@@ -331,16 +370,30 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
     private static bool IsDispatchTool(string? tool) =>
         string.Equals(tool, DispatchTool, StringComparison.Ordinal);
 
-    private static string RenderPreAllowNote(string note) =>
-        new JsonObject
+    private static string RenderPreAllowNote(JsonElement toolInput, string? insertedPrompt, string note)
+    {
+        JsonObject output = new()
         {
-            ["hookSpecificOutput"] = new JsonObject
-            {
-                ["hookEventName"] = "PreToolUse",
-                ["permissionDecision"] = "allow",
-                ["permissionDecisionReason"] = note,
-            },
-        }.ToJsonString();
+            ["hookEventName"] = "PreToolUse",
+            ["permissionDecision"] = "allow",
+            ["permissionDecisionReason"] = note,
+        };
+        if (insertedPrompt is not null)
+        {
+            output["updatedInput"] = UpdatedInput(toolInput, insertedPrompt);
+        }
+
+        return new JsonObject { ["hookSpecificOutput"] = output }.ToJsonString();
+    }
+
+    private static JsonObject UpdatedInput(JsonElement toolInput, string prompt)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Factory hook event: tool_input is not a JSON object.");
+        updated["prompt"] = prompt;
+        return updated;
+    }
 
     private static string RenderPreDeny(string reason) =>
         new JsonObject
@@ -359,7 +412,14 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
                 "Malformed Factory hook event: tool_input is not a JSON object."),
             node => node["prompt"] = HeaderBlock.Strip(prompt));
 
-    private static string RenderPreAllowRaw(string rewrittenInputJson)
+    /// <summary>The allow that writes the prompt in place of the dispatch's identity line, every other field kept.</summary>
+    private static string RenderPreAllowPrompt(JsonElement toolInput, string prompt) =>
+        RenderPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Factory hook event: tool_input is not a JSON object."),
+            node => node["prompt"] = prompt);
+
+    private static string RenderPreAllowRaw(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -373,7 +433,13 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned invalid rewritten input JSON: {ex.Message}", ex);
         }
 
-        return RenderPreAllow(rewritten, _ => { });
+        return RenderPreAllow(rewritten, node =>
+        {
+            if (insertedPrompt is not null)
+            {
+                node["prompt"] = insertedPrompt;
+            }
+        });
     }
 
     private static string RenderPreAllow(JsonNode updatedInput, Action<JsonObject> mutate)

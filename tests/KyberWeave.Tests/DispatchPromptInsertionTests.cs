@@ -160,20 +160,49 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     }
 
     /// <summary>The dispatch prompt each rewrite harness received, read from the field that harness documents.</summary>
-    private static string InsertedPrompt(string harness, string stdout)
+    private static string InsertedPrompt(string harness, string stdout) =>
+        TryInsertedPrompt(harness, stdout)
+        ?? throw new InvalidOperationException($"The document for '{harness}' carries no inserted prompt: {stdout}");
+
+    /// <summary>The inserted prompt in the field the harness documents, or null when the document carries none.</summary>
+    private static string? TryInsertedPrompt(string harness, string stdout)
     {
         using JsonDocument document = JsonDocument.Parse(stdout);
         JsonElement root = document.RootElement;
-        return harness switch
+        if (harness == "antigravity")
         {
-            "claude" or "copilot-vscode" => root.GetProperty("hookSpecificOutput")
-                .GetProperty("updatedInput").GetProperty("prompt").GetString()!,
-            "copilot-cli" => root.GetProperty("modifiedArgs").GetProperty("prompt").GetString()!,
-            "codex" => root.GetProperty("hookSpecificOutput")
-                .GetProperty("updatedInput").GetProperty("message").GetString()!,
-            "cursor" => root.GetProperty("updated_input").GetProperty("prompt").GetString()!,
-            _ => root.GetProperty("args").GetProperty("prompt").GetString()!,
+            return root.TryGetProperty("overwrite", out JsonElement overwrite)
+                && overwrite.TryGetProperty("Subagents", out JsonElement subagents)
+                && subagents.ValueKind == JsonValueKind.Array
+                && subagents.GetArrayLength() > 0
+                && subagents[0].TryGetProperty("Prompt", out JsonElement prompt)
+                && prompt.ValueKind == JsonValueKind.String
+                    ? prompt.GetString()
+                    : null;
+        }
+
+        string[] path = harness switch
+        {
+            "claude" or "copilot-vscode" or "factory" or "devin" =>
+                ["hookSpecificOutput", "updatedInput", "prompt"],
+            "copilot-cli" => ["modifiedArgs", "prompt"],
+            "codex" => ["hookSpecificOutput", "updatedInput", "message"],
+            "cursor" => ["updated_input", "prompt"],
+            _ => ["args", "prompt"],
         };
+
+        JsonElement current = root;
+        foreach (string name in path)
+        {
+            if (!current.TryGetProperty(name, out JsonElement next))
+            {
+                return null;
+            }
+
+            current = next;
+        }
+
+        return current.ValueKind == JsonValueKind.String ? current.GetString() : null;
     }
 
     /// <summary>One recorded dispatch payload per harness, carrying <paramref name="prompt"/>.</summary>
@@ -218,6 +247,38 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["subagent_type"] = "csharp-dev" },
             ["tool_use_id"] = "toolu-cursor-dispatch-1",
         }.ToJsonString(),
+        "antigravity" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["conversationId"] = "conv-1",
+            ["stepIdx"] = 4,
+            ["workspacePaths"] = new JsonArray("/repo"),
+            ["toolCall"] = new JsonObject
+            {
+                ["name"] = "invoke_subagent",
+                ["args"] = new JsonObject
+                {
+                    ["Subagents"] = new JsonArray(
+                        new JsonObject { ["TypeName"] = "csharp-dev", ["Prompt"] = prompt, ["Model"] = "keep" }),
+                },
+            },
+        }.ToJsonString(),
+        "factory" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["cwd"] = "/repo",
+            ["tool_name"] = "Task",
+            ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["subagent_type"] = "csharp-dev" },
+            ["session_id"] = "session-factory-1",
+        }.ToJsonString(),
+        "devin" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["cwd"] = "/repo",
+            ["tool_name"] = "run_subagent",
+            ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["profile"] = "csharp-dev" },
+            ["session_id"] = "session-devin-1",
+        }.ToJsonString(),
         _ => new JsonObject
         {
             ["schema"] = PluginEnvelope.SchemaV1,
@@ -229,7 +290,7 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         }.ToJsonString(),
     };
 
-    /// <summary>Every harness whose dispatch hook rewrites the call; Antigravity stays a file harness until its check passes.</summary>
+    /// <summary>Every harness whose dispatch hook rewrites the call, as the delivery table records it.</summary>
     public static TheoryData<string> RewriteHarnesses => new()
     {
         "claude",
@@ -240,7 +301,37 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         "opencode",
         "kilo",
         "pi",
+        "antigravity",
+        "factory",
+        "devin",
     };
+
+    /// <summary>
+    /// Every served harness has a path to the prompt: one listed as rewriting must insert it in its adapter, and one
+    /// not listed takes the prompt file instead. A harness listed without an insertion would leave the worker with
+    /// the short dispatch and no prompt at all.
+    /// </summary>
+    [Fact]
+    public void EveryServedHarnessEitherRewritesTheDispatchOrTakesThePromptFile()
+    {
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(new RecordingEngine());
+        string expected = TaskPrompt + "\n\nImplement the plan parser.";
+
+        foreach (string token in registry.Tokens.Order(StringComparer.Ordinal))
+        {
+            Assert.True(registry.TryGet(token, out IHarnessHookAdapter? adapter), $"No adapter for '{token}'.");
+            string payload = Payload(token, TaskDispatch);
+            string stdout = adapter!.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+            string? inserted = stdout.Length == 0 ? null : TryInsertedPrompt(token, stdout);
+
+            bool rewrites = DispatchPromptInsertion.CanRewriteDispatch(token);
+            Assert.True(
+                rewrites ? string.Equals(inserted, expected, StringComparison.Ordinal) : inserted is null,
+                rewrites
+                    ? $"Harness '{token}' is listed as rewriting the dispatch but its adapter inserted no prompt: {stdout}"
+                    : $"Harness '{token}' is not listed as rewriting, so the prompt file must serve it, but its adapter inserted a prompt.");
+        }
+    }
 
     [Theory]
     [MemberData(nameof(RewriteHarnesses))]

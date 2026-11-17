@@ -900,13 +900,14 @@ the harness:
   `.agent_scratchpad/<task>/prompt.md` (untracked) and the dispatch names that file. The worker's
   first step is to read it.
 
-A row reads `rewrite` only where a live dispatch has shown both halves: the worker received the
-replaced text, and the dispatching agent's transcript kept the text it sent. The shipped
-header-strip rewrite is that evidence wherever it runs today: the hook returns the dispatch input
-with the routing headers removed, the worker starts from the returned input, and the dispatcher's
-transcript keeps what it sent. Where no such check has run, the row reads `file`, because a worker
-that reads a file is never worse than one that starts with only a task id. Antigravity is the one
-harness in that state, and its row records the shape the check will use.
+A row reads `rewrite` only where the hook's adapter inserts the prompt in a field the harness applies,
+and no row reads `rewrite` for an adapter that does not insert: the worker would then start with only a task
+id. The shipped header-strip rewrite is the evidence wherever it runs today: the hook returns the dispatch
+input with the routing headers removed, the worker starts from the returned input, and the dispatcher's
+transcript keeps what it sent. Antigravity inserts through `overwrite`, whose merge replaces the whole
+`Subagents` array, so it counts as a rewrite by the owner's decision; the live check the row describes still
+has to confirm the harness applies it. Among the harnesses Kyber-Weave serves no adapter is left with
+neither path.
 
 | Harness | Path | Rewrite field and shape | Live check: worker got the replaced text, dispatcher transcript did not | When the hook is not trusted or not enabled | Source, read 2026-11-16 |
 |---|---|---|---|---|---|
@@ -918,7 +919,7 @@ harness in that state, and its row records the shape the check will use.
 | Codex | rewrite | `hookSpecificOutput.updatedInput.message`, valid only with `allow` | Shipped header strip | A hook the user has not trusted is skipped; the worker runs `docs packet` | [CX-HOOK] |
 | Cursor | rewrite | `updated_input.prompt`, riding on `allow` only | Shipped header strip; `updated_input` on `Task` is documented only loosely, so a field the harness drops falls back to the file | A `failClosed` hook that does not run leaves the worker with the header lines; it runs `docs packet` | [CU-HOOK] |
 | Kilo | rewrite | `args` in the plugin envelope | Shipped header strip | The plugin shim absent leaves the worker with the header lines; it runs `docs packet` | [KI-SUB] |
-| Antigravity | file until the check passes | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the rewrite must resend the whole `Subagents` array, one element per dispatch. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | Not yet: the harness is not installed in this worktree. The check must show the worker received the replaced `Prompt` and the dispatcher's transcript did not; until then this row stays `file` | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
+| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the insertion resends the whole `Subagents` array, every element kept and only its `Prompt` replaced. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | The adapter inserts the prompt; the live check that the harness applies the merge has not run, because it is not installed in this worktree. It must show the worker received the replaced `Prompt` and the dispatcher's transcript did not | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
 | Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Shipped header strip | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
 | Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
 | ZCode | file until the check passes | `hookSpecificOutput.updatedInput` is a full replacement of the tool input, re-validated against the tool schema | Not yet: project hooks are ignored by the harness and no Kyber-Weave hook is rendered; a user-scope hook also needs `hooks.enabled: true`. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The hook is absent or disabled: the worker runs `docs packet` | [ZC-HOOK], read 2026-11-16 |

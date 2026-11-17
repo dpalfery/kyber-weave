@@ -131,6 +131,7 @@ public static partial class DispatchPromptInsertion
         "opencode",
         "pi",
         "kilo",
+        "antigravity",
         "factory",
         "devin",
     };
