@@ -213,11 +213,16 @@ public sealed partial class HeaderBlock
         return false;
     }
 
+    /// <summary>Whether a value has the shape of a task id: a plan id such as <c>T3</c> or a spec id such as <c>2.6</c>.</summary>
+    /// <param name="value">The value a dispatch wrote after <c>TASK:</c>.</param>
+    public static bool IsTaskId(string value) =>
+        value is not null && (PlanTaskIdRegex().IsMatch(value) || SpecTaskIdRegex().IsMatch(value));
+
     private static bool IsValidValue(string name, string value) => name switch
     {
         "KYBER-ARBITER" => string.Equals(value, "true", StringComparison.Ordinal),
         "PLAN_FILE" => IsValidPlanFile(value),
-        "TASK" => PlanTaskIdRegex().IsMatch(value) || SpecTaskIdRegex().IsMatch(value),
+        "TASK" => IsTaskId(value),
         "LENS" => LensNames.Contains(value),
         "REFUTE" => IsValidRefute(value),
         // Any non-empty value: the store keys it by digest, so its characters and length name no path.

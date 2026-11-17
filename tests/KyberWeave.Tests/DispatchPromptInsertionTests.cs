@@ -529,6 +529,45 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.DoesNotContain("updatedInput", output.ToString(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Only the closed task-dispatch headers count, in their canonical spelling, with a task id the task files use.
+    /// An ordinary dispatch that starts with a capitalized word is not a task dispatch and is left untouched.
+    /// </summary>
+    [Theory]
+    [InlineData("Task: find usages of X")]
+    [InlineData("task: T3")]
+    [InlineData("TASK: find usages of X")]
+    [InlineData("STATUS: blocked")]
+    public void ADispatchThatIsNotATaskDispatchPassesThroughUntouched(string dispatch)
+    {
+        ScriptedPrompts prompts = new();
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", dispatch));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Empty(prompts.Requests);
+    }
+
+    [Fact]
+    public void ARetryFailureLineUnderTheHeadersSurvivesInsteadOfBeingReadAsAHeader()
+    {
+        const string dispatch =
+            "TASK: T3\nPLAN_FILE: docs/plans/plan.md\nFAILED_ATTEMPTS: 2\nError: build failed\n\nFix the build.";
+        ScriptedPrompts prompts = new();
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", dispatch));
+
+        Assert.Equal(0, exit);
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Equal("T3", request.TaskId);
+        Assert.Equal(2, request.FailedAttempts);
+        string sent = InsertedPrompt("claude", stdout);
+        Assert.EndsWith("Error: build failed\n\nFix the build.", sent, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AFreshHostWithTheArbiterOffInstallsTheDispatchHookOnTheDispatchersOnly()
     {
