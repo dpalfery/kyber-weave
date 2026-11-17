@@ -290,7 +290,7 @@ failed gate.
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
 | `KW-REVIEW-026` | Info | A gate does not apply to this change: no changed path matched its `applies-when.paths` or `include`, or its `os` does not match the host, so it was not executed |
-| `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
+| `KW-REVIEW-027` | Error / Warning | No task gate resolves for the named agent: the task's technology and its parent declare nothing under `review.technology-gates`, and the agent and the technology agent the shipped map names declare nothing under `review.task-gates`, so its change has no executed evidence (`--agent`). Error when the task names a technology, warning when it names none. |
 | `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}`, `{task}` or `{tests}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
 | `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |

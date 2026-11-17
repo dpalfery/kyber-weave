@@ -1,5 +1,6 @@
 using KyberWeave.Application.Review;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Closeout;
@@ -19,7 +20,8 @@ public static partial class PlanTaskTarget
 {
     private static readonly IPlanTaskTargetService Service = new PlanTaskTargetService(
         new PlanTaskService(LegacyPorts.Files),
-        new TaskGateSelectionService(new FileRepositoryTreeProbe(), new FileTestClassSources()));
+        new TaskGateSelectionService(new FileRepositoryTreeProbe(), new FileTestClassSources()),
+        new GitFacts());
 
     /// <inheritdoc cref="IPlanTaskTargetService.Find" />
     public static PlanTaskTargetMatch? Find(string root, KyberWeaveConfig config, string typedTask, out string? reason) =>
