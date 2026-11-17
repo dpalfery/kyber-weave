@@ -43,6 +43,73 @@ public sealed class TaskPromptService(
     private const string SkillsUnit = "skills";
     private const string StandardUnitPrefix = "standard:";
 
+    /// <summary>
+    /// The developer tier for a task: <c>min(hard, rated difficulty + failed attempts)</c>. A task with no rating
+    /// is a medium task, as the task file writes it, so a dispatch that belongs to no task also starts at medium.
+    /// </summary>
+    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    /// <param name="failedAttempts">How many attempts at this task already failed.</param>
+    public static string DeveloperTier(string? difficulty, int failedAttempts)
+    {
+        int rated = Clean(difficulty) switch
+        {
+            "easy" => 0,
+            "hard" => DeveloperTiers.Count - 1,
+            _ => 1,
+        };
+
+        int climbed = Math.Min(
+            DeveloperTiers.Count - 1,
+            rated + Math.Max(failedAttempts, 0));
+        return DeveloperTiers[climbed];
+    }
+
+    private static IReadOnlyList<string> DeveloperTiers => PlanTaskAgentPick.DeveloperTiers;
+
+    /// <summary>
+    /// The agent a tiered-roster dispatch goes to. The developer kind — which the task file records, never a tier —
+    /// resolves to the tier the rating and the failed attempts give. A dispatch that already names a tier never
+    /// moves down: a failed attempt is never retried on a lower tier (Requirement 3.5). Any other agent the dispatch,
+    /// the plan or the pick names — <c>docs-dev</c>, <c>devops</c>, <c>platform-researcher</c> — is left as it is. A
+    /// task that names neither an agent nor a technology is documentation or delivery work, so it keeps its empty
+    /// agent.
+    /// </summary>
+    private static string? TieredAgent(
+        string? requested,
+        string? recorded,
+        PlanTaskFileEntry? entry,
+        string? technology,
+        int failedAttempts)
+    {
+        int tier = TierIndexOf(DeveloperTier(entry?.Difficulty, failedAttempts));
+        if ((requested ?? recorded) is not { } named)
+            return entry is null || technology is not null ? DeveloperTiers[tier] : null;
+
+        if (string.Equals(named, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
+            return DeveloperTiers[tier];
+
+        return Raised(named, tier) ?? named;
+    }
+
+    /// <summary>The higher of a named tier and the computed one, or null when the name is not a developer tier.</summary>
+    private static string? Raised(string name, int computed)
+    {
+        int named = TierIndexOf(name);
+        return named < 0 ? null : DeveloperTiers[Math.Max(named, computed)];
+    }
+
+    /// <summary>The tier's position on the ladder, or -1 when the name is not a developer tier.</summary>
+    private static int TierIndexOf(string name)
+    {
+        for (int index = 0; index < DeveloperTiers.Count; index++)
+        {
+            if (string.Equals(DeveloperTiers[index], name, StringComparison.Ordinal))
+                return index;
+        }
+
+        return -1;
+    }
+
     /// <inheritdoc />
     public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
     {
@@ -54,6 +121,7 @@ public sealed class TaskPromptService(
         string? taskId = Clean(request.TaskId);
 
         PlanTaskFileEntry? entry = null;
+        string? fileRoster = null;
         if (taskId is not null)
         {
             string? plan = Clean(request.Plan);
@@ -87,6 +155,9 @@ public sealed class TaskPromptService(
                 return TaskPromptResult.NotBuilt(
                     $"No prompt: '{taskId}' names no one task in {plan}. Its tasks are: {ids}.");
             }
+
+            // The roster is taken from the task file, so a file outlives a configuration change (Requirement 12.2).
+            fileRoster = outcome.File.WorkerRoster;
         }
 
         string? technology = Clean(entry?.Technology) ?? Clean(request.Technology);
@@ -118,7 +189,13 @@ public sealed class TaskPromptService(
             }
         }
 
-        string? agent = Clean(request.Agent) ?? Clean(entry?.Role) ?? Clean(entry?.Agent);
+        string? requested = Clean(request.Agent) ?? Clean(entry?.Role);
+        string? recorded = Clean(entry?.Agent);
+        string? agent = requested ?? recorded;
+        if (string.Equals(fileRoster ?? config.WorkerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
+        {
+            agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts);
+        }
         string? taskText = entry is null ? null : PlanTaskPacket.Fill(entry, root, priorResults);
         // The dispatch header is routing metadata, so the count is put back where the worker reads it: a retry
         // starts knowing how many attempts already failed.

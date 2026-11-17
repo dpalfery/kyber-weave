@@ -469,7 +469,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 3.1, 3.3
   - _Requirements: 1.4, 1.10, 1.14, 8.1, 8.7_
 
-- [ ] 3.6 Pick the worker by kind and tier, and step up on failure
+- [x] 3.6 Pick the worker by kind and tier, and step up on failure
   - **Objective:** Under the tiered roster, pick the kind of worker as today and the tier from difficulty plus failed attempts, and list the new agents wherever the old ones may be dispatched.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs`: candidates by roster

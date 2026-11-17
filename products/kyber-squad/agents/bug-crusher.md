@@ -14,7 +14,7 @@ copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/
 # starts the reviewer's seats for it. `root-fixer` grants `delegate` for exactly this; the roster is what keeps
 # the grant scoped to these agents. Discovery stays off it on purpose: the architect owns
 # its own discovery delegates, and the reviewer names the lenses this session seats.
-delegates-to: [architect, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, pulumi-dev, python-dev, react-dev, review-lens, review-triage, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
+delegates-to: [architect, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, dev-easy, dev-hard, dev-medium, devops, docs-dev, github-devops, go-dev, maui-dev, pulumi-dev, python-dev, react-dev, review-lens, review-triage, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
 fallback: role-skill
 aliases: []
 ---
