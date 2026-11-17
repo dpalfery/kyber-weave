@@ -152,7 +152,7 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
 
         Assert.Contains($"kw-arbiter_*: allow", ContentOf(result, ".opencode/agents/conductor.md"), StringComparison.Ordinal);
         Assert.Contains($"kw-arbiter_*: allow", ContentOf(result, ".opencode/agents/code-reviewer.md"), StringComparison.Ordinal);
-        foreach (string agent in new[] { "architect", "product-owner", "csharp-dev", "test-dev", "github-devops", "docs-dev", "research-agent" })
+        foreach (string agent in new[] { "architect", "product-owner", "dev-easy", "dev-medium", "devops", "docs-dev", "research-agent" })
         {
             Assert.DoesNotContain(
                 "kw-arbiter_*",

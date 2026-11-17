@@ -144,15 +144,19 @@ public sealed class TieredRosterConductorContractTests
             $"The tiered workers must be dispatchable (KW-ARB-ROSTER-001): {string.Join("; ", missing)}.");
     }
 
+    /// <summary>
+    /// There is one roster, so the conductor names it and the ladder it dispatches on, and offers no other: a
+    /// technology developer is not a choice it can make anywhere in its body.
+    /// </summary>
     [Fact]
-    public void TheTechnologyDevelopersAreNotOfferedUnderTiered()
+    public void TheConductorOffersTheOneRosterAndNoTechnologyDeveloper()
     {
         string conductor = Read(ConductorPath);
 
-        Assert.Contains(
-            "The technology developers are not offered under `tiered`: the dispatch tool refuses one and names the tier the task belongs on",
-            conductor,
-            StringComparison.Ordinal);
+        Assert.Contains("There is one roster: the three developer tiers.", conductor, StringComparison.Ordinal);
+        Assert.Contains("`dev-easy`, `dev-medium`, `dev-hard`", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("`csharp-dev`", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("`test-dev`", conductor, StringComparison.Ordinal);
     }
 
     [Fact]

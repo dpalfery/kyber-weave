@@ -131,20 +131,6 @@ public sealed class TieredRosterDispatchTests : IDisposable
     }
 
     /// <summary>
-    /// The technology roster keeps every name it lists: the roster translation is the tiered roster's alone.
-    /// </summary>
-    [Fact]
-    public void ATechnologyRosterDispatchToATechnologyDeveloperIsAllowed()
-    {
-        WriteConfig(WorkerRosters.Technology);
-
-        string output = Dispatch("csharp-dev");
-
-        using JsonDocument document = JsonDocument.Parse(output);
-        Assert.Equal("allow", document.RootElement.GetProperty("decision").GetString());
-    }
-
-    /// <summary>
     /// A conductor whose embedded catalog predates the developer tiers still receives them, because the roster comes
     /// from the host configuration: that stale snapshot is what refused <c>dev-medium</c> in the second pass. The
     /// technology developers the roster replaced are dropped from the same list.

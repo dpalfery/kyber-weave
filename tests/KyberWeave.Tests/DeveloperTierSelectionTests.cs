@@ -227,18 +227,6 @@ public sealed class DeveloperTierSelectionTests
         Assert.Contains("tiered", result.Refusal, StringComparison.Ordinal);
     }
 
-    /// <summary>The same name is untouched under the technology roster, which is the roster it belongs to.</summary>
-    [Fact]
-    public void UnderTechnologyADispatchToATechnologyDeveloperIsNotRefused()
-    {
-        using DocFixture fixture = Ready(Technology, "easy");
-
-        TaskPromptResult result = Prompt(fixture, Technology, agent: "csharp-dev");
-
-        Assert.True(result.Built, result.Refusal);
-        Assert.Equal("csharp-dev", result.Agent);
-    }
-
     [Fact]
     public void TheTieredCandidatesAreTheDeveloperKindAndTheDocumentationAndDeliveryAgents()
     {
@@ -271,27 +259,27 @@ public sealed class DeveloperTierSelectionTests
     }
 
     /// <summary>
-    /// A host that switches roster rewrites the task file rather than deleting it first. The file must follow the
-    /// roster now configured: keeping the previous roster's pick would name <c>csharp-dev</c> beside
-    /// <c>worker-roster: tiered</c>.
+    /// A task file written before the removal records the retired roster and a deleted agent's name. A rewrite must
+    /// re-pick every agent for the roster now shipped, because keeping the stale pick would name a deleted agent
+    /// beside <c>worker-roster: tiered</c>.
     /// </summary>
     [Fact]
-    public void ARewriteAfterARosterSwitchPicksEveryAgentForTheRosterNowConfigured()
+    public void ARewriteOfAStaleTaskFileRepicksEveryAgentForTheOneRoster()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        using PlanTaskAgentPick technologyPicker = new(
-            new StubProvider("csharp-dev"),
-            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Technology));
-        PlanTaskFileOutcome first = new PlanTaskFileGenerator(fixture.Root, Technology, DocsPorts.Files, technologyPicker)
-            .Run(Plan, PlanTaskFileMode.Write);
-        Assert.False(first.Report.HasErrors, string.Join("; ", first.Report.Items.Select(item => item.Message)));
-        Assert.Equal("csharp-dev", first.File!.Tasks![0].Agent);
+        using DocFixture fixture = Ready(Tiered, "easy");
+        string path = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath);
+        PlanTaskFile stale = PlanTaskFileFormat.Deserialize(path, File.ReadAllText(path))!;
+        PlanTaskFile previousRoster = stale with
+        {
+            WorkerRoster = WorkerRosters.Technology,
+            Tasks = [.. stale.Tasks!.Select(task => task.Id == "T1" ? task with { Agent = "csharp-dev" } : task)]
+        };
+        File.WriteAllText(path, PlanTaskFileFormat.Serialize(previousRoster));
 
-        using PlanTaskAgentPick tieredPicker = new(
+        using PlanTaskAgentPick picker = new(
             new StubProvider("dev-medium"),
             PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
-        PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, tieredPicker)
+        PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, picker)
             .Run(Plan, PlanTaskFileMode.Write);
 
         Assert.False(second.Report.HasErrors, string.Join("; ", second.Report.Items.Select(item => item.Message)));

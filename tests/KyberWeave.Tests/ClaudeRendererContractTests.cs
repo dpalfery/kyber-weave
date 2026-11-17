@@ -466,7 +466,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
         {
             ".claude/agents/bug-crusher.md",
             ".claude/agents/dev-easy.md",
-            ".claude/agents/docs-dev.md",
             ".claude/agents/platform-researcher.md",
             ".claude/agents/research-agent.md"
         };
