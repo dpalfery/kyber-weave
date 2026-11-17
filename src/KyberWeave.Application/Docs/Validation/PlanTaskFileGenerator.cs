@@ -94,7 +94,7 @@ public sealed partial class PlanTaskFileGenerator
 
         IReadOnlyList<string> planningDirectories = PlanTaskFileRules.PlanningDirectories(
             _config.ConfigReg.Resolve(_config.Ontology));
-        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report);
+        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report, _config.WorkerRoster);
         if (file is null)
         {
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
@@ -133,11 +133,13 @@ public sealed partial class PlanTaskFileGenerator
     /// <param name="markdown">The plan, or specification task list, as authored.</param>
     /// <param name="planningDirectories">The folders holding plans, which no prompt may send a worker into.</param>
     /// <param name="report">Receives every gap found; all of them are reported in one run.</param>
+    /// <param name="workerRoster">The roster the file records; defaults to <c>technology</c>.</param>
     public static PlanTaskFile? Build(
         string artifactPath,
         string markdown,
         IReadOnlyList<string> planningDirectories,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        string? workerRoster = null)
     {
         ArgumentNullException.ThrowIfNull(markdown);
         ArgumentNullException.ThrowIfNull(planningDirectories);
@@ -193,7 +195,8 @@ public sealed partial class PlanTaskFileGenerator
                 PlanTaskFileRules.SchemaVersion,
                 artifactPath,
                 PlanDocumentParser.ExecutionDigest(parsed),
-                entries);
+                entries,
+                workerRoster ?? WorkerRosters.Technology);
     }
 
     private static PlanTaskFileEntry? BuildEntry(

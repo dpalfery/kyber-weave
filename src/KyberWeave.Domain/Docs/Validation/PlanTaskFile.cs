@@ -34,11 +34,16 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <c>KyberWeave.Core.Arbiter.Plans.PlanDocumentParser</c>.
 /// </param>
 /// <param name="Tasks">One entry per plan task, in plan order; null when the file declares none.</param>
+/// <param name="WorkerRoster">
+/// The roster the file was written under, <c>technology</c> or <c>tiered</c>; every later reader takes
+/// the run's roster from here, so a file outlives a configuration change.
+/// </param>
 public sealed record PlanTaskFile(
     [property: JsonPropertyName("schema-version")] int SchemaVersion,
     [property: JsonPropertyName("plan")] string? Plan = null,
     [property: JsonPropertyName("execution-digest")] string? ExecutionDigest = null,
-    [property: JsonPropertyName("tasks")] IReadOnlyList<PlanTaskFileEntry>? Tasks = null);
+    [property: JsonPropertyName("tasks")] IReadOnlyList<PlanTaskFileEntry>? Tasks = null,
+    [property: JsonPropertyName("worker-roster")] string? WorkerRoster = null);
 
 /// <summary>
 /// One task of a <see cref="PlanTaskFile" />: what the conductor needs to dispatch it, and the

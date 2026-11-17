@@ -398,7 +398,7 @@ public sealed partial class PlanTaskFileValidator
         {
             if (entry is not null)
             {
-                CheckTaskScope(entry, taskFile, artifact.RelativePath, report);
+                CheckTaskScope(entry, taskFile, artifact.RelativePath, file.WorkerRoster, report);
                 CheckPrompt(entry, taskFile, artifact.RelativePath, planningDirectories, report);
             }
         }
@@ -595,8 +595,22 @@ public sealed partial class PlanTaskFileValidator
         PlanTaskFileEntry entry,
         string taskFile,
         string artifactPath,
+        string? workerRoster,
         DiagnosticReport report)
     {
+        if (string.Equals(workerRoster, WorkerRosters.Tiered, StringComparison.Ordinal)
+            && string.IsNullOrWhiteSpace(entry.Technology)
+            && NeedsTechnology(entry))
+        {
+            report.Add(new Diagnostic(
+                MissingTechnologyUnderTiered,
+                Severity.Error,
+                $"Task '{entry.Id}' has no Technology: line, and under the tiered roster a developer task names the one technology it is written in.",
+                artifactPath,
+                taskFile,
+                Hint: "Add 'Technology: <declared technology>'. A documentation or delivery task names its role instead."));
+        }
+
         if (!string.IsNullOrWhiteSpace(entry.Difficulty)
             && !Difficulties.Contains(entry.Difficulty.Trim(), StringComparer.Ordinal))
         {
@@ -639,6 +653,25 @@ public sealed partial class PlanTaskFileValidator
                     ? $"Closest declared technology: '{nearest}'. Declare it in ontology.technologies, or name a declared one."
                     : "Declare it in ontology.technologies, or name a declared one."));
         }
+    }
+
+    /// <summary>
+    /// Whether a task without a technology belongs to a developer under the tiered roster. A
+    /// documentation or delivery task is named by its role or its capabilities; everything else is
+    /// developer work the conductor will hand to a developer agent.
+    /// </summary>
+    private static bool NeedsTechnology(PlanTaskFileEntry entry)
+    {
+        string role = entry.Role?.Trim() ?? string.Empty;
+        string agent = entry.Agent?.Trim() ?? string.Empty;
+        if (role is "docs-dev" or "github-devops" or "devops" || agent is "docs-dev" or "github-devops" or "devops")
+        {
+            return false;
+        }
+
+        string capabilities = entry.Capabilities ?? string.Empty;
+        return !capabilities.Contains("documentation", StringComparison.OrdinalIgnoreCase)
+               && !capabilities.Contains("delivery", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

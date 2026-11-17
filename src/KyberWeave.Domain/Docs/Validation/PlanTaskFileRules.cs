@@ -64,6 +64,9 @@ public static partial class PlanTaskFileRules
     /// <summary>Error: a task names more than one technology, which no one prompt can fit.</summary>
     public const string MultipleTechnologies = "KW-DOC-TASKS-017";
 
+    /// <summary>Error: under the tiered roster a developer task names no technology.</summary>
+    public const string MissingTechnologyUnderTiered = "KW-DOC-TASKS-018";
+
     /// <summary>The three legal difficulty values, in order.</summary>
     public static IReadOnlyList<string> Difficulties { get; } = ["easy", "medium", "hard"];
 

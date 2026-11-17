@@ -15,6 +15,9 @@ public static class KyberWeaveConfigAssembler
     /// <summary>The repository setting the git post-checkout hook reads to decide whether a new worktree is indexed.</summary>
     private const string WorktreeIndexHookKey = "worktree-index-hook";
 
+    /// <summary>The setting that chooses the worker roster a run dispatches from.</summary>
+    private const string WorkerRosterKey = "worker-roster";
+
     /// <summary>
     /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
     /// <c>working-directory</c> is refused.
@@ -63,7 +66,8 @@ public static class KyberWeaveConfigAssembler
                 document.Autonomy,
                 document.Run,
                 document.StopOnToolFailure,
-                document.Onboarding),
+                document.Onboarding,
+                ParseWorkerRoster(document.WorkerRoster)),
             Review = ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
@@ -71,7 +75,8 @@ public static class KyberWeaveConfigAssembler
                 ReviewConfigParser.UnknownKeyWarnings(yaml)),
             Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
-            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
+            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
+            WorkerRoster = ParseWorkerRoster(document.WorkerRoster)
         };
     }
 
@@ -93,7 +98,8 @@ public static class KyberWeaveConfigAssembler
                 document.Autonomy,
                 document.Run,
                 document.StopOnToolFailure,
-                document.Onboarding),
+                document.Onboarding,
+                ParseWorkerRoster(document.WorkerRoster)),
             Review = ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
@@ -103,7 +109,8 @@ public static class KyberWeaveConfigAssembler
             Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
             StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
-            WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook)
+            WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook),
+            WorkerRoster = ParseWorkerRoster(document.WorkerRoster)
         };
     }
 
@@ -127,6 +134,22 @@ public static class KyberWeaveConfigAssembler
         throw new YamlException(
             $"{WorktreeIndexHookKey} '{value}' is not a boolean. Use 'true' to index a new worktree on its first " +
             "checkout, or 'false' to leave the git hook alone, or remove the key; an absent setting is 'true'.");
+    }
+
+    /// <summary>Reads the top-level <c>worker-roster</c> setting. Absent means <c>technology</c>.</summary>
+    /// <exception cref="YamlException">The value is neither <c>technology</c> nor <c>tiered</c>.</exception>
+    private static string ParseWorkerRoster(string? value)
+    {
+        if (value is null)
+            return WorkerRosters.Technology;
+
+        string roster = value.Trim();
+        if (WorkerRosters.IsKnown(roster))
+            return roster;
+
+        throw new YamlException(
+            $"{WorkerRosterKey} '{value}' is not a roster. Use 'technology' for the per-technology workers, " +
+            "or 'tiered' for the three developer agents; remove the key for 'technology'.");
     }
 
     /// <summary>

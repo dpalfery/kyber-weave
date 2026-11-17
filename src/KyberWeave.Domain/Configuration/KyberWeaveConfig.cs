@@ -43,6 +43,12 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
     /// </remarks>
     public bool WorktreeIndexHook { get; init; } = true;
 
+    /// <summary>
+    /// The worker roster a run dispatches from: <c>technology</c> (the per-technology agents, the
+    /// default) or <c>tiered</c> (the three developer agents). The task file records it when written.
+    /// </summary>
+    public string WorkerRoster { get; init; } = WorkerRosters.Technology;
+
     public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
@@ -81,6 +87,12 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
         return Clone(configReg: configReg);
     }
 
+    public KyberWeaveConfig WithWorkerRoster(string roster)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(roster);
+        return Clone(workerRoster: roster);
+    }
+
     public KyberWeaveConfig WithArbiter(ArbiterConfig arbiter)
     {
         ArgumentNullException.ThrowIfNull(arbiter);
@@ -96,7 +108,8 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
         ReviewConfig? review = null,
         ArbiterConfig? arbiter = null,
         McpConfig? mcp = null,
-        bool? stopsOnToolFailure = null) =>
+        bool? stopsOnToolFailure = null,
+        string? workerRoster = null) =>
         new()
         {
             Ontology = ontology ?? Ontology,
@@ -108,6 +121,7 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
             Arbiter = arbiter ?? Arbiter,
             Mcp = mcp ?? Mcp,
             StopsOnToolFailure = stopsOnToolFailure ?? StopsOnToolFailure,
-            WorktreeIndexHook = WorktreeIndexHook
+            WorktreeIndexHook = WorktreeIndexHook,
+            WorkerRoster = workerRoster ?? WorkerRoster
         };
 }
