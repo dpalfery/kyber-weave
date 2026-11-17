@@ -17,7 +17,9 @@ namespace KyberWeave.Tests;
 /// Gate facts fail on behaviour until the overlay, the server-name variable, and the warning filter
 /// exist. The default-off facts guard the unchanged install, doctor, and status output. Environment
 /// variables are read through injectable delegates rather than process mutation, allowing safe
-/// parallel test execution.
+/// parallel test execution. The install for each gate and server combination runs once for the whole
+/// run through <see cref="PreparedSquadInstalls"/> and is captured here, so a test asserts the recorded
+/// command output and works on its own copy of the deployed home.
 /// </remarks>
 public sealed class SquadOperatorChannelCliTests : IDisposable
 {
@@ -37,11 +39,11 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     [Fact]
     public void Install_CopilotGlobal_GateTrueWithServerFound_WritesTheServerToolEntryAndOverlay()
     {
-        CliHarness h = NewHarness("install-on", SquadOperatorChannelFixture.ServerPresentConfig);
+        CliHarness h = NewHarness("install-on");
+        InstalledChannel channel = Channel("gate-on-server-present", "true", SquadOperatorChannelFixture.ServerPresentConfig);
+        channel.CopyInto(h);
 
-        CommandExecution execution = Run(() => Install(h, "true").Execute(null!, InstallSettings(h)));
-
-        AssertExit(execution, 0);
+        AssertExit(channel.Execution, 0);
         string conductor = ReadConductor(h);
         Assert.Single(
             SquadOperatorChannelFixture.ToolEntries(conductor),
@@ -53,37 +55,46 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     [Fact]
     public void Install_CopilotGlobal_GateTrueWithServerAbsent_WarnsOnTheCliAndWritesTheDefaultConductor()
     {
-        CliHarness h = NewHarness("install-absent", null);
+        CliHarness h = NewHarness("install-absent");
+        InstalledChannel channel = Channel("gate-on-server-absent", "true", null);
+        channel.CopyInto(h);
 
-        CommandExecution execution = Run(() => Install(h, "true").Execute(null!, InstallSettings(h)));
-
-        AssertExit(execution, 0);
-        Assert.Contains(SquadOperatorChannelFixture.ServerAbsentWarning, execution.Output, StringComparison.Ordinal);
+        AssertExit(channel.Execution, 0);
+        Assert.Contains(
+            SquadOperatorChannelFixture.ServerAbsentWarning,
+            channel.Execution.Output,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(SquadOperatorChannelFixture.ToolEntry, ReadConductor(h), StringComparison.Ordinal);
     }
 
     [Fact]
     public void Install_CopilotGlobal_GateTrueWithServerNameUnset_WarnsNameMissingAndWritesTheDefaultConductor()
     {
-        CliHarness h = NewHarness("install-name-missing", SquadOperatorChannelFixture.ServerPresentConfig);
+        CliHarness h = NewHarness("install-name-missing");
+        InstalledChannel channel = Channel("gate-on-name-missing", "true", SquadOperatorChannelFixture.ServerPresentConfig, null);
+        channel.CopyInto(h);
 
-        CommandExecution execution = Run(() => Install(h, "true", null).Execute(null!, InstallSettings(h)));
-
-        AssertExit(execution, 0);
-        Assert.Contains(SquadOperatorChannelFixture.NameMissingWarning, execution.Output, StringComparison.Ordinal);
+        AssertExit(channel.Execution, 0);
+        Assert.Contains(
+            SquadOperatorChannelFixture.NameMissingWarning,
+            channel.Execution.Output,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(SquadOperatorChannelFixture.ToolEntry, ReadConductor(h), StringComparison.Ordinal);
     }
 
     [Fact]
     public void Install_CopilotGlobal_GateTrueWithInvalidServerName_WarnsNameInvalidAndNeverEchoesTheValue()
     {
-        CliHarness h = NewHarness("install-name-invalid", SquadOperatorChannelFixture.ServerPresentConfig);
+        CliHarness h = NewHarness("install-name-invalid");
         const string invalid = "bad name zz1";
+        InstalledChannel channel = Channel("gate-on-name-invalid", "true", SquadOperatorChannelFixture.ServerPresentConfig, invalid);
+        channel.CopyInto(h);
 
-        CommandExecution execution = Run(() => Install(h, "true", invalid).Execute(null!, InstallSettings(h)));
-
-        AssertExit(execution, 0);
-        Assert.Contains(SquadOperatorChannelFixture.NameInvalidWarning, execution.Output, StringComparison.Ordinal);
+        AssertExit(channel.Execution, 0);
+        Assert.Contains(
+            SquadOperatorChannelFixture.NameInvalidWarning,
+            channel.Execution.Output,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(invalid, ReadConductor(h), StringComparison.Ordinal);
     }
 
@@ -91,12 +102,15 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     [MemberData(nameof(NonTrueGateValues))]
     public void Install_CopilotGlobal_GateNotExactlyTrue_WritesNoOperatorChannelOutput(string gateValue)
     {
-        CliHarness h = NewHarness("install-off", SquadOperatorChannelFixture.ServerPresentConfig);
+        CliHarness h = NewHarness("install-off");
+        InstalledChannel channel = Channel(
+            $"gate-not-true/{gateValue}",
+            gateValue,
+            SquadOperatorChannelFixture.ServerPresentConfig);
+        channel.CopyInto(h);
 
-        CommandExecution execution = Run(() => Install(h, gateValue).Execute(null!, InstallSettings(h)));
-
-        AssertExit(execution, 0);
-        Assert.DoesNotContain("operator-channel", execution.Output, StringComparison.Ordinal);
+        AssertExit(channel.Execution, 0);
+        Assert.DoesNotContain("operator-channel", channel.Execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("operator-channel", ReadConductor(h), StringComparison.Ordinal);
         foreach (string file in Directory.EnumerateFiles(Path.Combine(h.CopilotHome, "agents"), "*",
                      SearchOption.AllDirectories))
@@ -108,10 +122,11 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     [Fact]
     public void Install_GateTrue_ThenDoctorAndStatusReportNoDriftForTheSameEnvironment()
     {
-        CliHarness h = NewHarness("install-then-doctor", SquadOperatorChannelFixture.ServerPresentConfig);
+        CliHarness h = NewHarness("install-then-doctor");
+        InstalledChannel channel = Channel("gate-on-server-present", "true", SquadOperatorChannelFixture.ServerPresentConfig);
+        channel.CopyInto(h);
 
-        CommandExecution install = Run(() => Install(h, "true").Execute(null!, InstallSettings(h)));
-        AssertExit(install, 0);
+        AssertExit(channel.Execution, 0);
         Assert.Single(
             SquadOperatorChannelFixture.ToolEntries(ReadConductor(h)),
             entry => entry == SquadOperatorChannelFixture.ToolEntry);
@@ -136,10 +151,11 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     [Fact]
     public void Install_GateUnset_DoctorAndStatusReportNoDrift()
     {
-        CliHarness h = NewHarness("default-off-doctor", SquadOperatorChannelFixture.ServerPresentConfig);
+        CliHarness h = NewHarness("default-off-doctor");
+        InstalledChannel channel = Channel("gate-off", null, SquadOperatorChannelFixture.ServerPresentConfig);
+        channel.CopyInto(h);
 
-        CommandExecution install = Run(() => Install(h, null).Execute(null!, InstallSettings(h)));
-        AssertExit(install, 0);
+        AssertExit(channel.Execution, 0);
 
         CommandExecution doctor = Run(() => Doctor(h, null).Execute(null!, new SquadDoctorSettings
         {
@@ -161,9 +177,10 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
     [Fact]
     public void Update_CopilotGlobal_GateTrueWithServerFound_AddsTheServerToolEntryToTheInstalledConductor()
     {
-        CliHarness h = NewHarness("update-on", SquadOperatorChannelFixture.ServerPresentConfig);
-        CommandExecution install = Run(() => Install(h, null).Execute(null!, InstallSettings(h)));
-        AssertExit(install, 0);
+        CliHarness h = NewHarness("update-on");
+        InstalledChannel channel = Channel("gate-off", null, SquadOperatorChannelFixture.ServerPresentConfig);
+        channel.CopyInto(h);
+        AssertExit(channel.Execution, 0);
         Assert.DoesNotContain(SquadOperatorChannelFixture.ToolEntry, ReadConductor(h), StringComparison.Ordinal);
 
         CommandExecution update = Run(() => Update(h, "true").Execute(null!, new SquadUpdateSettings
@@ -186,7 +203,8 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         return SquadOperatorChannelFixture.NonTrueGateValues.Select(static value => new object[] { value });
     }
 
-    private CliHarness NewHarness(string name, string? mcpConfigJson)
+    /// <summary>Creates an empty home for one test; the prepared install's copy fills it.</summary>
+    private CliHarness NewHarness(string name)
     {
         string root = Path.Combine(_temp.Path, name);
         string copilotHome = Path.Combine(root, "copilot-home");
@@ -195,35 +213,24 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         Directory.CreateDirectory(copilotHome);
         Directory.CreateDirectory(anchor);
         Directory.CreateDirectory(userHome);
-        if (mcpConfigJson is not null)
-        {
-            File.WriteAllText(Path.Combine(copilotHome, "mcp-config.json"), mcpConfigJson);
-        }
 
-        CliHarness harness = new(anchor, copilotHome, userHome);
+        CliHarness harness = new(root, anchor, copilotHome, userHome);
         _harnesses.Add(harness);
         return harness;
     }
 
-    private static CommandExecution Run(Func<int> execute)
-    {
-        return Capture(execute);
-    }
-
-    private static SquadInstallCommand Install(
-        CliHarness h,
-        string? gateValue = null,
+    /// <summary>
+    /// Gets the run-wide install for one gate and server combination: the real install command ran once,
+    /// and its exit code and console output are recorded here for every test that asserts them.
+    /// </summary>
+    private static InstalledChannel Channel(
+        string name,
+        string? gateValue,
+        string? mcpConfigJson,
         string? serverName = SquadOperatorChannelFixture.DefaultServerName)
     {
-        return SquadTestCommands.Install(
-            h.UserPaths,
-            h.Store,
-            h.ReleaseSource,
-            SquadHostDefaults.ResolveRenderer(),
-            false,
-            _ => true,
-            h.GlobalRoots,
-            environmentReader: h.CreateEnvironmentReader(gateValue, serverName));
+        string key = $"operator-channel-cli/{name}";
+        return PreparedSquadInstalls.Get(key, () => InstalledChannel.Build(key, gateValue, mcpConfigJson, serverName));
     }
 
     private static SquadUpdateCommand Update(
@@ -273,18 +280,6 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
             h.CreateEnvironmentReader(gateValue, serverName));
     }
 
-    private static SquadInstallSettings InstallSettings(CliHarness h)
-    {
-        return new SquadInstallSettings
-        {
-            Path = h.Anchor,
-            Global = true,
-            Targets = ["copilot"],
-            Version = "1.2.3",
-            Yes = true
-        };
-    }
-
     private static string ReadConductor(CliHarness h)
     {
         return File.ReadAllText(Path.Combine(h.CopilotHome, "agents", "conductor.agent.md"));
@@ -297,6 +292,8 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
             $"Expected exit {expected} but got {execution.ExitCode}: {execution.Output}");
     }
 
+    private static CommandExecution Run(Func<int> execute) => Capture(execute);
+
     private static CommandExecution Capture(Func<int> execute)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
@@ -305,19 +302,99 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
+    /// <summary>
+    /// One real <c>squad install</c> of the Copilot global shape, with the command's exit code and output,
+    /// built once for the run and copied into each test's own home.
+    /// </summary>
+    private sealed class InstalledChannel : PreparedSquadInstall
+    {
+        private InstalledChannel(string key, TempDirectory directory, CommandExecution execution)
+            : base(key, directory)
+        {
+            Execution = execution;
+        }
+
+        /// <summary>What the install command printed, and its exit code.</summary>
+        public CommandExecution Execution { get; }
+
+        /// <summary>Gives <paramref name="harness"/> a copy of the deployed home, keyed to the copy's own root.</summary>
+        /// <param name="harness">The test's home. It receives the copilot home, user home and anchor contents.</param>
+        public void CopyInto(CliHarness harness)
+        {
+            ArgumentNullException.ThrowIfNull(harness);
+
+            SquadInstallCopy.Tree(TemplatePath, harness.Root);
+            SquadInstallCopy.ReRoot(
+                Path.Combine(harness.Root, "user-home", ".kyber-weave", "squad"),
+                SquadInstallCopy.Canonical(TemplatePath),
+                SquadInstallCopy.Canonical(harness.Root));
+        }
+
+        internal static InstalledChannel Build(
+            string key,
+            string? gateValue,
+            string? mcpConfigJson,
+            string? serverName)
+        {
+            TempDirectory? directory = new();
+            try
+            {
+                string root = directory.Path;
+                string copilotHome = Path.Combine(root, "copilot-home");
+                string anchor = Path.Combine(root, "anchor");
+                string userHome = Path.Combine(root, "user-home");
+                Directory.CreateDirectory(copilotHome);
+                Directory.CreateDirectory(anchor);
+                Directory.CreateDirectory(userHome);
+                if (mcpConfigJson is not null)
+                    File.WriteAllText(Path.Combine(copilotHome, "mcp-config.json"), mcpConfigJson);
+
+                using CliHarness harness = new(root, anchor, copilotHome, userHome);
+                CommandExecution execution = Capture(() => SquadTestCommands.Install(
+                        harness.UserPaths,
+                        harness.Store,
+                        harness.ReleaseSource,
+                        SquadHostDefaults.ResolveRenderer(),
+                        false,
+                        _ => true,
+                        harness.GlobalRoots,
+                        environmentReader: harness.CreateEnvironmentReader(gateValue, serverName))
+                    .Execute(null!, new SquadInstallSettings
+                    {
+                        Path = anchor,
+                        Global = true,
+                        Targets = ["copilot"],
+                        Version = "1.2.3",
+                        Yes = true
+                    }));
+
+                InstalledChannel install = new(key, directory, execution);
+                directory = null;
+                return install;
+            }
+            finally
+            {
+                directory?.Dispose();
+            }
+        }
+    }
+
     /// <summary>One isolated install context: anchor, COPILOT_HOME, user paths, state store, and a corpus source.</summary>
     private sealed class CliHarness : IDisposable
     {
         private readonly SyntheticValidSquadReleaseSource _releaseSource = new();
 
-        public CliHarness(string anchor, string copilotHome, string userHome)
+        public CliHarness(string root, string anchor, string copilotHome, string userHome)
         {
+            Root = root;
             Anchor = anchor;
             CopilotHome = copilotHome;
             UserPaths = new FakeSquadUserPaths(userHome);
             Store = new SquadStateStore(UserPaths);
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
         }
+
+        public string Root { get; }
 
         public string Anchor { get; }
 

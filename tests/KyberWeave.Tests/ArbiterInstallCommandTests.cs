@@ -773,22 +773,17 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
 
 /// <summary>
 /// The two deployments the install tests start from: one project install of kilo and one global
-/// install of claude, built once per class instead of once per test.
+/// install of claude, shared by the whole run through <see cref="PreparedSquadInstalls"/>.
 /// </summary>
-public sealed class InstallCommandTemplates : IDisposable
+public sealed class InstallCommandTemplates
 {
     private readonly InstalledSquadHome _projectKilo;
     private readonly InstalledSquadHome _globalClaude;
 
     public InstallCommandTemplates()
     {
-        Task<InstalledSquadHome> project = Task.Run(
-            () => InstalledSquadHome.Build([SquadTarget.Kilo], SquadDeploymentScope.Project));
-        Task<InstalledSquadHome> global = Task.Run(
-            () => InstalledSquadHome.Build([SquadTarget.Claude]));
-        Task.WhenAll(project, global).GetAwaiter().GetResult();
-        _projectKilo = project.Result;
-        _globalClaude = global.Result;
+        _projectKilo = InstalledSquadHome.Build([SquadTarget.Kilo], SquadDeploymentScope.Project);
+        _globalClaude = InstalledSquadHome.Build([SquadTarget.Claude]);
     }
 
     /// <summary>A project root with kilo installed.</summary>
@@ -797,10 +792,5 @@ public sealed class InstallCommandTemplates : IDisposable
     /// <summary>A home with claude installed at global scope.</summary>
     public InstalledSquadHome GlobalClaude => _globalClaude;
 
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        _projectKilo.Dispose();
-        _globalClaude.Dispose();
-    }
+
 }

@@ -698,7 +698,8 @@ public sealed class UninstallCommandHomes : IDisposable
     {
         Task<InstalledSquadHome> hooked = Task.Run(() => InstalledSquadHome.Build(
             [SquadTarget.Codex, SquadTarget.Factory, SquadTarget.OpenCode],
-            seed: SeedOperatorContent));
+            seed: SeedOperatorContent,
+            recipe: "uninstall-operator-content"));
         Task<InstalledSquadHome> claudeAndCodex = Task.Run(
             () => InstalledSquadHome.Build([SquadTarget.Claude, SquadTarget.Codex]));
         Task<InstalledSquadHome> cursorAndCodex = Task.Run(
@@ -718,12 +719,12 @@ public sealed class UninstallCommandHomes : IDisposable
     /// <summary>A home with cursor and codex, so one uninstall leaves exactly the other block.</summary>
     public InstalledSquadHome CursorAndCodex => _cursorAndCodex;
 
-    /// <inheritdoc />
+    /// <remarks>
+    /// The three homes belong to <see cref="PreparedSquadInstalls"/>, which removes them when the run
+    /// ends; a test copies one and disposes the copy.
+    /// </remarks>
     public void Dispose()
     {
-        _hookedTargets.Dispose();
-        _claudeAndCodex.Dispose();
-        _cursorAndCodex.Dispose();
     }
 
     // The operator content each converted test asserts the install merged with and the uninstall

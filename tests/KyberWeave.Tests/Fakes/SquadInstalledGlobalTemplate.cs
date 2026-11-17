@@ -5,34 +5,64 @@ using KyberWeave.Core.Squad.Rendering;
 namespace KyberWeave.Tests.Fakes;
 
 /// <summary>
-/// One real global install, built once for a test class and copied into each test's own fake home.
+/// One real global install, built once for the whole run and copied into each test's own fake home.
 /// </summary>
 /// <remarks>
 /// A global install renders and applies every entry file for its targets and fsyncs a receipt for
-/// them, which is more than a test that only exercises the next update needs to pay. The template is
-/// installed here through the real lifecycle with the real renderer and is never written again.
-/// <see cref="CopyInto"/> copies the home state, the application data directory and each target's
-/// global root with <see cref="File.Copy"/> (which uses the platform's copy-on-write clone where the
-/// file system offers one) and rewrites the template's own root inside the copied home state, so a copy
-/// looks to the next command exactly like an install that ran in the test's own home.
+/// them, which is more than a test that only exercises the next update needs to pay. The install is
+/// made here through the real lifecycle with the real renderer, once per target set for the run, and is
+/// never written again. <see cref="CopyInto"/> copies the home state, the application data directory and
+/// each target's global root with <see cref="SquadInstallCopy.Tree"/> and rewrites the template's own
+/// root inside the copied home state, so a copy looks to the next command exactly like an install that
+/// ran in the test's own home.
 /// </remarks>
 public sealed class SquadInstalledGlobalTemplate : IDisposable
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
 
-    private readonly TempDirectory _directory = new();
     private readonly string _harnessRoot;
     private readonly string _home;
     private readonly string _applicationData;
     private readonly string _globalRoots;
 
-    /// <summary>Installs the template once for the declaring class, through the real lifecycle.</summary>
+    /// <summary>Gets the shared install for this target set, building it through the real lifecycle on first request.</summary>
     /// <param name="targets">The targets the template's global deployment holds.</param>
     public SquadInstalledGlobalTemplate(params SquadTarget[] targets)
     {
         ArgumentNullException.ThrowIfNull(targets);
+        Install install = PreparedSquadInstalls.Get(RecipeKey(targets), () => Build(targets));
+        _harnessRoot = install.HarnessRoot;
+        _home = install.Home;
+        _applicationData = install.ApplicationData;
+        _globalRoots = install.GlobalRoots;
+    }
 
-        using SquadHomeHarness harness = new(Path.Combine(_directory.Path, "harness"));
+    private static string RecipeKey(SquadTarget[] targets) => string.Join(
+        "/",
+        "squad-global-template",
+        string.Join(",", targets.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal)));
+
+    /// <summary>The shared install itself, which owns the directory and removes it when the run ends.</summary>
+    private sealed class Install(
+        string key,
+        TempDirectory directory,
+        string harnessRoot,
+        string home,
+        string applicationData,
+        string globalRoots) : PreparedSquadInstall(key, directory)
+    {
+        public string HarnessRoot { get; } = harnessRoot;
+
+        public string Home { get; } = home;
+
+        public string ApplicationData { get; } = applicationData;
+
+        public string GlobalRoots { get; } = globalRoots;
+    }
+
+    private static Install Build(SquadTarget[] targets)
+    {
+        TempDirectory? directory = new();
+        using SquadHomeHarness harness = new(Path.Combine(directory.Path, "harness"));
         try
         {
             string anchor = harness.MakeDirectory("anchor");
@@ -48,17 +78,29 @@ public sealed class SquadInstalledGlobalTemplate : IDisposable
                 throw new InvalidOperationException(
                     $"The class global template install failed: {string.Join("; ", result.Errors ?? [])}");
             }
-        }
-        catch
-        {
-            _directory.Dispose();
-            throw;
-        }
 
-        _harnessRoot = harness.Root;
-        _home = harness.Home;
-        _applicationData = harness.ApplicationData;
-        _globalRoots = harness.GlobalRootsDirectory;
+            Install install = new(
+                RecipeKey(targets),
+                directory,
+                harness.Root,
+                harness.Home,
+                harness.ApplicationData,
+                harness.GlobalRootsDirectory);
+            directory = null;
+            return install;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    /// <remarks>
+    /// The install belongs to <see cref="PreparedSquadInstalls"/>, which removes it when the run ends.
+    /// A test copies it through <see cref="CopyInto"/> and disposes the copy.
+    /// </remarks>
+    public void Dispose()
+    {
     }
 
     /// <summary>Gives <paramref name="harness"/> this template's global deployment and home state.</summary>
@@ -66,54 +108,14 @@ public sealed class SquadInstalledGlobalTemplate : IDisposable
     {
         ArgumentNullException.ThrowIfNull(harness);
 
-        CopyTree(_home, harness.Home);
-        CopyTree(_applicationData, harness.ApplicationData);
-        CopyTree(_globalRoots, harness.GlobalRootsDirectory);
+        SquadInstallCopy.Tree(_home, harness.Home);
+        SquadInstallCopy.Tree(_applicationData, harness.ApplicationData);
+        SquadInstallCopy.Tree(_globalRoots, harness.GlobalRootsDirectory);
 
-        string from = Canonical(_harnessRoot);
-        string to = Canonical(harness.Root);
-        if (!string.Equals(from, to, StringComparison.Ordinal))
-            RewriteRecordedRoot(Path.Combine(harness.Home, ".kyber-weave", "squad"), from, to);
-    }
-
-    /// <inheritdoc />
-    public void Dispose() => _directory.Dispose();
-
-    private static string Canonical(string path) =>
-        SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(path, Semantics);
-
-    private static void CopyTree(string source, string destination)
-    {
-        _ = Directory.CreateDirectory(destination);
-        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
-            _ = Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
-
-        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-        {
-            string target = Path.Combine(destination, Path.GetRelativePath(source, file));
-            _ = Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
-        }
-    }
-
-    /// <summary>
-    /// Rewrites the template's own root in the copied state files. Only the state directory is
-    /// touched: a deployed file's bytes are what its receipt digest names, so rewriting one would read
-    /// as a hand edit to the next update.
-    /// </summary>
-    private static void RewriteRecordedRoot(string stateDirectory, string from, string to)
-    {
-        if (!Directory.Exists(stateDirectory))
-            return;
-
-        foreach (string file in Directory.EnumerateFiles(stateDirectory, "*", SearchOption.AllDirectories))
-        {
-            string text = File.ReadAllText(file);
-            if (!text.Contains(from, StringComparison.Ordinal))
-                continue;
-
-            File.WriteAllText(file, text.Replace(from, to, StringComparison.Ordinal));
-        }
+        SquadInstallCopy.ReRoot(
+            Path.Combine(harness.Home, ".kyber-weave", "squad"),
+            SquadInstallCopy.Canonical(_harnessRoot),
+            SquadInstallCopy.Canonical(harness.Root));
     }
 }
 
@@ -144,10 +146,11 @@ public sealed class SquadGuidanceTemplates : IDisposable
     /// <summary>A global home holding the Codex and Claude deployments.</summary>
     public SquadInstalledGlobalTemplate CodexAndClaude { get; private set; } = null!;
 
-    /// <inheritdoc />
+    /// <remarks>
+    /// The two templates belong to <see cref="PreparedSquadInstalls"/>, which removes them when the run
+    /// ends. Disposing them here would delete an install that another class still reads.
+    /// </remarks>
     public void Dispose()
     {
-        Codex?.Dispose();
-        CodexAndClaude?.Dispose();
     }
 }

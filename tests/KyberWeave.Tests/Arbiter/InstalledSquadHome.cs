@@ -5,6 +5,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -24,17 +25,15 @@ public sealed class InstalledSquadHome : IDisposable
     /// <summary>The host configuration path, which a copy leaves to the test that owns the copy.</summary>
     private const string HostConfigRelativePath = ".kyber-weave/kyber-weave.yml";
 
-    private readonly TempDirectory _directory;
-
-    private InstalledSquadHome(TempDirectory directory, IReadOnlyList<SquadTarget> targets, SquadDeploymentScope scope)
+    private InstalledSquadHome(string templatePath, IReadOnlyList<SquadTarget> targets, SquadDeploymentScope scope)
     {
-        _directory = directory;
+        TemplatePath = templatePath;
         Targets = targets;
         Scope = scope;
     }
 
     /// <summary>The template directory, which callers copy from and never write to.</summary>
-    internal string TemplatePath => _directory.Path;
+    internal string TemplatePath { get; }
 
     /// <summary>The targets this template installed.</summary>
     internal IReadOnlyList<SquadTarget> Targets { get; }
@@ -43,19 +42,42 @@ public sealed class InstalledSquadHome : IDisposable
     internal SquadDeploymentScope Scope { get; }
 
     /// <summary>
-    /// Installs <paramref name="targets"/> through the real Squad lifecycle, after
-    /// <paramref name="seed"/> writes any operator content the install should merge with.
+    /// Gets the install of <paramref name="targets"/> at <paramref name="scope"/> that the whole run
+    /// shares, building it through the real Squad lifecycle on the first request.
     /// </summary>
     /// <param name="targets">The harnesses to install, in one deployment.</param>
     /// <param name="scope">Whether the deployment is at the project root or the home.</param>
     /// <param name="seed">Writes operator-owned files into the empty root before the install.</param>
-    /// <returns>The built template, owned by the caller.</returns>
+    /// <param name="recipe">Names a seeded variant, so two different seeds never share one install.</param>
+    /// <returns>The shared template. It belongs to <see cref="PreparedSquadInstalls"/>, which removes it when the run ends.</returns>
     internal static InstalledSquadHome Build(
         IReadOnlyList<SquadTarget> targets,
         SquadDeploymentScope scope = SquadDeploymentScope.Global,
-        Action<string>? seed = null)
+        Action<string>? seed = null,
+        string recipe = "plain")
     {
-        TempDirectory directory = new();
+        ArgumentNullException.ThrowIfNull(targets);
+        string key = string.Join(
+            "/",
+            "squad-home",
+            scope,
+            string.Join(",", targets.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal)),
+            recipe);
+        return new InstalledSquadHome(
+            PreparedSquadInstalls.Get(key, () => Create(targets, scope, seed)).TemplatePath,
+            targets,
+            scope);
+    }
+
+    /// <summary>The shared install itself, which owns the directory and removes it when the run ends.</summary>
+    private sealed class Home(string key, TempDirectory directory) : PreparedSquadInstall(key, directory);
+
+    private static Home Create(
+        IReadOnlyList<SquadTarget> targets,
+        SquadDeploymentScope scope,
+        Action<string>? seed)
+    {
+        TempDirectory? directory = new();
         try
         {
             seed?.Invoke(directory.Path);
@@ -88,12 +110,13 @@ public sealed class InstalledSquadHome : IDisposable
                     targets.Select(SquadTargetCatalog.GetToken).ToArray());
             }
 
-            return new InstalledSquadHome(directory, targets, scope);
+            Home home = new("squad-home", directory);
+            directory = null;
+            return home;
         }
-        catch
+        finally
         {
-            directory.Dispose();
-            throw;
+            directory?.Dispose();
         }
     }
 
@@ -109,25 +132,45 @@ public sealed class InstalledSquadHome : IDisposable
     internal SquadReceipt? CopyInto(string destination, bool includeHostConfiguration = true)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
-        CopyTree(TemplatePath, destination, includeHostConfiguration);
+        SquadInstallCopy.Tree(
+            TemplatePath,
+            destination,
+            includeHostConfiguration
+                ? null
+                : relative => !string.Equals(
+                    relative.Replace(Path.DirectorySeparatorChar, '/'),
+                    HostConfigRelativePath,
+                    StringComparison.Ordinal));
 
         // The receipt records the root it was written for. The copy is a different root, so the
         // record is rewritten to name it rather than carrying a path outside the test's directory.
+        SquadInstallCopy.ReRoot(
+            Path.Combine(destination, ".kyber-weave", "squad"),
+            SquadInstallCopy.Canonical(TemplatePath),
+            SquadInstallCopy.Canonical(destination));
+
         string receiptPath = ResolveReceiptPath(destination);
         if (!File.Exists(receiptPath))
             return null;
 
         SquadStateStore store = Store(destination);
-        SquadReceipt receipt = store.DeserializeReceipt(File.ReadAllText(receiptPath)) with
+        SquadReceipt receipt = store.DeserializeReceipt(File.ReadAllText(receiptPath));
+        if (!string.Equals(receipt.TargetRoot, destination, StringComparison.Ordinal))
         {
-            TargetRoot = destination
-        };
-        File.WriteAllText(receiptPath, store.SerializeReceipt(receipt));
+            receipt = receipt with { TargetRoot = destination };
+            File.WriteAllText(receiptPath, store.SerializeReceipt(receipt));
+        }
+
         return receipt;
     }
 
-    /// <inheritdoc />
-    public void Dispose() => _directory.Dispose();
+    /// <remarks>
+    /// The provider removes this install when the run ends. A test copies it and disposes the copy; it
+    /// never disposes the shared install, which later tests still read.
+    /// </remarks>
+    public void Dispose()
+    {
+    }
 
     private static SquadStateStore Store(string root) =>
         new(new SquadHostDefaults.CliSquadUserPaths(root, root));
@@ -136,29 +179,6 @@ public sealed class InstalledSquadHome : IDisposable
 
     private static string ResolveReceiptPath(string root, SquadDeploymentScope scope) =>
         Store(root).ResolveReceiptPath(root, scope);
-
-    private static void CopyTree(string source, string destination, bool includeHostConfiguration)
-    {
-        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
-            _ = Directory.CreateDirectory(Path.Combine(destination, Path.GetRelativePath(source, directory)));
-
-        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-        {
-            string relative = Path.GetRelativePath(source, file);
-            if (!includeHostConfiguration
-                && string.Equals(
-                    relative.Replace(Path.DirectorySeparatorChar, '/'),
-                    HostConfigRelativePath,
-                    StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            string target = Path.Combine(destination, relative);
-            _ = Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
-        }
-    }
 
     private static string CheckoutSourceRoot() =>
         new PhysicalSquadFileAccess().FindCheckoutSquadSourceRoot()
