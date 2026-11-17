@@ -215,7 +215,9 @@ public sealed class TaskPromptService(
         RemovedAgentResolution? removed = null;
         if (string.Equals(fileRoster ?? config.WorkerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
         {
-            if (RefusedTechnologyDeveloper(requested ?? recorded, technology, entry, request.FailedAttempts) is { } refusal)
+            // Only an explicit dispatch names a worker that must be refused: a stale role in the task file is a
+            // removed name, and resolves to the tier its difficulty selects rather than blocking the prompt.
+            if (RefusedTechnologyDeveloper(Clean(request.Agent), technology, entry, request.FailedAttempts) is { } refusal)
             {
                 return refusal;
             }
