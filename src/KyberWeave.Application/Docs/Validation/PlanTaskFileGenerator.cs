@@ -619,7 +619,8 @@ public sealed partial class PlanTaskFileGenerator
         || recorded.WorkerRoster is null
         || string.Equals(recorded.WorkerRoster, _config.WorkerRoster, StringComparison.Ordinal);
 
-    private Dictionary<string, PlanTaskFileEntry> ReadExistingEntries(string taskFile)    {
+    private Dictionary<string, PlanTaskFileEntry> ReadExistingEntries(string taskFile)
+    {
         Dictionary<string, PlanTaskFileEntry> found = new(StringComparer.Ordinal);
         try
         {

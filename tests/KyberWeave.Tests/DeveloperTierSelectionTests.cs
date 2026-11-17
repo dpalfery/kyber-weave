@@ -330,7 +330,8 @@ public sealed class DeveloperTierSelectionTests
     }
 
     /// <summary>Every caller of a replaced agent lists its replacement, so the roster rule allows the dispatch.</summary>
-    [Theory]    [InlineData("conductor", "dev-easy")]
+    [Theory]
+    [InlineData("conductor", "dev-easy")]
     [InlineData("conductor", "dev-medium")]
     [InlineData("conductor", "dev-hard")]
     [InlineData("conductor", "platform-researcher")]

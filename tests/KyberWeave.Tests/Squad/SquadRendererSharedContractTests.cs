@@ -202,7 +202,8 @@ public sealed class SquadRendererSharedContractTests
             file => string.Equals(file.RelativePath, ".opencode/agents/conductor/references/plan-path.markdown", StringComparison.Ordinal));
     }
 
-    private static IReadOnlyList<string> ConductorDelegatesTo(SquadRenderResult result)    {
+    private static IReadOnlyList<string> ConductorDelegatesTo(SquadRenderResult result)
+    {
         SquadDeploymentFile conductor = Assert.Single(
             result.Files,
             file => string.Equals(file.RelativePath, ".opencode/agents/conductor.md", StringComparison.Ordinal));

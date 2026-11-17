@@ -154,7 +154,8 @@ public sealed class TieredRosterConductorContractTests
         Assert.Contains(
             "The technology developers are not offered under `tiered`: the dispatch tool refuses one and names the tier the task belongs on",
             conductor,
-            StringComparison.Ordinal);    }
+            StringComparison.Ordinal);
+    }
 
     [Fact]
     public void TheConductorDispatchesTheTieredDeliveryAgentForRunStart()
