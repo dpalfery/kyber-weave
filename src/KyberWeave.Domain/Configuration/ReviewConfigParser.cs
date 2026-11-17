@@ -176,7 +176,7 @@ public static class ReviewConfigParser
             {
                 throw new YamlException(
                     $"review.task-gates agent '{entry.Key}' is not a valid lookup name. Use the agent's slug: " +
-                    "lowercase alphanumerics separated by single hyphens, e.g. 'csharp-dev'.");
+                    "lowercase alphanumerics separated by single hyphens, e.g. 'dev-medium'.");
             }
 
             if (entry.Value is null || entry.Value.Count == 0)

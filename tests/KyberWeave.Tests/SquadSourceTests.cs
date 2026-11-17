@@ -1239,6 +1239,30 @@ public sealed class SquadSourceTests
                 StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The retired roster is not a selectable value. An agent that declares it is told the one roster that ships,
+    /// not pointed back at the value the removal deleted.
+    /// </summary>
+    [Theory]
+    [InlineData("technology", "deleted")]
+    [InlineData("side-by-side", "not a roster")]
+    public void AnAgentDeclaringARosterThisBuildDoesNotHaveIsToldTheOnlyRoster(
+        string declared,
+        string expectedMessageFragment)
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace(
+            "agents/architect.md",
+            "aliases: []\n",
+            $"aliases: []\nworker-roster: {declared}\n");
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", expectedMessageFragment);
+
+        Assert.Contains("tiered", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.DoesNotContain("both rosters", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("'technology' or", diagnostic.Hint!, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void LoadIdentitiesDifferingOnlyByReservedPrefixCaseRemainValid()
     {

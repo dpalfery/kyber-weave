@@ -63,7 +63,7 @@ public sealed partial class RunDelivery
     /// The delivery agents a run may dispatch for the step that opens the pull request. Both hold the
     /// <c>publishing-worker</c> capability profile, so run start and delivery treat them alike.
     /// </summary>
-    public const string DeliveryAgents = "github-devops or devops";
+    public const string DeliveryAgents = "devops";
 
     private const string DeliveryAgentHint =
         "Dispatch the delivery agent (" + DeliveryAgents + ") with the create-pull-request skill to open the pull request instead.";

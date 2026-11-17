@@ -6,5 +6,5 @@ public static class ArbiterRunStartRemedy
     /// <summary>The fix a refused dispatch names.</summary>
     public const string Text =
         "start the run first: kyber-weave run start --harness <harness> --type <type> --slug <slug> " +
-        "(or dispatch github-devops or devops with RUN-START: true and that command), then send this dispatch again.";
+        "(or dispatch devops with RUN-START: true and that command), then send this dispatch again.";
 }

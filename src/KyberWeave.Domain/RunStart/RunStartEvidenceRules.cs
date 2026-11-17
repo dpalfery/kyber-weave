@@ -23,7 +23,7 @@ public static class RunStartEvidenceRules
     /// <remarks>
     /// The planners (<c>architect</c>, <c>product-planning</c>) are writers here: their plan, specification and
     /// task files belong on the run branch, so planning before run start would leave them in the canonical checkout.
-    /// <c>publishing-worker</c> (github-devops and devops) is left out on purpose: it is the route that runs
+    /// <c>publishing-worker</c> (the devops agent) is left out on purpose: it is the route that runs
     /// <c>run start</c> for a harness with no shell, so gating it on a started run would refuse its own fix.
     /// </remarks>
     public static bool IsWriterProfile(string? capabilityProfile) =>

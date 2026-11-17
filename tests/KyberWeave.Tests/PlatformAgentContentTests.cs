@@ -139,24 +139,26 @@ public sealed class PlatformAgentContentTests
 
 
     /// <summary>
-    /// Run start gates on the capability profile, not on the agent name: a dispatch to <c>devops</c>
-    /// is accepted exactly as one to <c>github-devops</c> because both hold <c>publishing-worker</c>,
-    /// which is deliberately not a writer profile.
+    /// Run start gates on the capability profile, not on the agent name: a dispatch to <c>devops</c> is accepted
+    /// because it holds <c>publishing-worker</c>, which is deliberately not a writer profile.
     /// </summary>
     [Fact]
-    public void RunStartAcceptsADevopsDispatchAsItAcceptsGithubDevops()
+    public void RunStartAcceptsADevopsDispatchByItsCapabilityProfile()
     {
         Assert.Equal("publishing-worker", ArbiterSquadCatalog.LoadEmbedded().Agents["devops"].CapabilityProfile);
         Assert.False(RunWriterProfiles.IsWriter("publishing-worker"));
         Assert.False(RunStartEvidenceRules.IsWriterProfile("publishing-worker"));
         Assert.Matches(BareDevops, ArbiterRunStartRemedy.Text);
-        Assert.Contains("github-devops", ArbiterRunStartRemedy.Text, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The delivery surfaces name the one delivery agent. The retired name is gone, so a host reading the remedy
+    /// or the delivery refusal is not sent to an agent that is not installed.
+    /// </summary>
     [Fact]
-    public void DeliveryNamesDevopsWhereItNamesGithubDevops()
+    public void DeliverySurfacesNameOnlyTheShippedDeliveryAgent()
     {
-        Assert.Matches(BareDevops, RunDelivery.DeliveryAgents);
-        Assert.Contains("github-devops", RunDelivery.DeliveryAgents, StringComparison.Ordinal);
+        Assert.Equal("devops", RunDelivery.DeliveryAgents);
+        Assert.DoesNotContain("github-devops", ArbiterRunStartRemedy.Text, StringComparison.Ordinal);
     }
 }

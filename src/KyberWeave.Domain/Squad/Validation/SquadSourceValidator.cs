@@ -320,6 +320,11 @@ public static class SquadSourceValidator
     /// A roster key is optional: an agent that declares none serves both rosters. A declared value
     /// must be one of the two, and the error names both.
     /// </summary>
+    /// <summary>
+    /// A roster key is optional: an agent that declares none serves the one roster that ships. The retired
+    /// <c>technology</c> value is refused by name, because a host may still carry it and needs to be told the
+    /// roster it selected was deleted rather than that it misspelled one.
+    /// </summary>
     private static void ValidateWorkerRoster(SquadAgent agent)
     {
         if (string.IsNullOrWhiteSpace(agent.WorkerRoster) || WorkerRosters.IsKnown(agent.WorkerRoster))
@@ -327,11 +332,16 @@ public static class SquadSourceValidator
             return;
         }
 
+        string declared = agent.WorkerRoster.Trim();
+        bool retired = string.Equals(declared, WorkerRosters.Technology, StringComparison.Ordinal);
         Throw(
-            $"Agent '{agent.Name}' declares worker-roster '{agent.WorkerRoster}', which is not a roster.",
+            retired
+                ? $"Agent '{agent.Name}' declares worker-roster '{declared}', the roster the removal deleted."
+                : $"Agent '{agent.Name}' declares worker-roster '{declared}', which is not a roster.",
             agent.Name,
             agent.SourcePath,
-            "Use 'technology' or 'tiered', or remove the key; an agent with no key serves both rosters.");
+            $"There is one roster, '{WorkerRosters.Tiered}'. Set worker-roster: {WorkerRosters.Tiered}, or " +
+            "remove the key; an agent with no key serves that roster.");
     }
 
     private static void ValidateDuplicateAgents(IReadOnlyList<SquadAgent> agents)
