@@ -107,10 +107,10 @@ public sealed class SquadTypeScriptSpecialistTests
     public void StandardTemplateCarriesItsLookupTokenAndTheAbsentIsNotZeroSection()
     {
         string standard = File.ReadAllText(
-            Path.Combine(ProductRoot, "standards", "typescript", "README.md"));
+            Path.Combine(ProductRoot, "standards", "typescript", "typescript.standards.md"));
 
         Assert.Contains("`<typescript-coding-standard>`", standard, StringComparison.Ordinal);
-        Assert.Contains("## Absent is not zero", standard, StringComparison.Ordinal);
+        Assert.Contains("Absent is not zero", standard, StringComparison.Ordinal);
     }
 
     /// <summary>

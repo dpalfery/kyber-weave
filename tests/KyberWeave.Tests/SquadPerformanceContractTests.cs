@@ -32,7 +32,7 @@ public sealed class SquadPerformanceContractTests
     /// </summary>
     private const string TaskGateSkillPath = "products/kyber-squad/skills/task-gate/SKILL.md";
 
-    private const string TestCodingStandardPath = "docs/standards/test/README.md";
+    private const string TestCodingStandardPath = "docs/standards/test/test.standards.md";
     private const string ArchitectureDocPath = "docs/kyber-squad/architecture.md";
     private const string OnboardingDocPath = "docs/kyber-squad/onboarding.md";
     private const string RequirementsDocPath = "docs/kyber-squad/requirements.md";

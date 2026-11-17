@@ -594,10 +594,10 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                     continue;
                 }
 
-                if (TryGetAllowedKyberStandardTemplateInclude(path, out string technology))
+                if (TryGetAllowedKyberStandardTemplateInclude(path, out string standardLogicalName))
                 {
                     Assert.Equal(
-                        $"Standards.{technology}.md",
+                        standardLogicalName,
                         element.Attribute("LogicalName")?.Value);
                     continue;
                 }
@@ -632,26 +632,40 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     }
 
     /// <summary>
-    /// Core may embed the ten coding-standard READMEs from
-    /// <c>products/kyber-squad/standards/&lt;tech&gt;/README.md</c> only when LogicalName
-    /// remaps them to <c>Standards.&lt;tech&gt;.md</c>. Any other products/kyber-squad path
-    /// is the prohibited corpus, even if it contains the substring "standards".
+    /// Core may embed the shipped standards templates from
+    /// <c>products/kyber-squad/standards/&lt;name&gt;/&lt;name&gt;.&lt;part&gt;</c> and the shared
+    /// rules file, only when LogicalName is <c>Standards.&lt;file&gt;</c>: the embedded name keeps
+    /// the file's own name, which already begins with its folder's. Any other
+    /// products/kyber-squad path is the prohibited corpus, even if it contains the substring
+    /// "standards".
     /// </summary>
-    private static bool TryGetAllowedKyberStandardTemplateInclude(string path, out string technology)
+    private static bool TryGetAllowedKyberStandardTemplateInclude(string path, out string logicalName)
     {
         string normalized = path.Replace('\\', '/');
-        foreach (string candidate in KyberStandardsTemplates.All)
+        foreach (string scope in KyberStandardsTemplates.AllFolders)
         {
-            if (normalized.EndsWith(
-                    $"products/kyber-squad/standards/{candidate}/README.md",
-                    StringComparison.OrdinalIgnoreCase))
+            foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
             {
-                technology = candidate;
-                return true;
+                string file = KyberStandardsTemplates.FileName(scope, part);
+                if (normalized.EndsWith(
+                        $"products/kyber-squad/standards/{scope}/{file}",
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    logicalName = $"Standards.{file}";
+                    return true;
+                }
             }
         }
 
-        technology = string.Empty;
+        if (normalized.EndsWith(
+                "products/kyber-squad/standards/shared-rules.md",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            logicalName = "Standards.shared-rules.md";
+            return true;
+        }
+
+        logicalName = string.Empty;
         return false;
     }
 

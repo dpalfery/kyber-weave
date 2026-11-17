@@ -27,7 +27,7 @@ facts, security floors, and procedure belong in the skill regardless of what a h
 
 **Classification rule, in brief.** A line is **policy** — a stack, library, naming, layout, or
 required-practice choice a host could reasonably reverse — when the matching
-`standards/<tech>/README.md` template either already states it (`duplicate`, pointer added) or
+`standards/<tech>/<tech>.standards.md` template either already states it (`duplicate`, pointer added) or
 lacks it (`migrated`, added to the template). A line is **technique** when it is a
 framework-correctness fact, a security floor, or a how-to whose violation is a defect no
 matter what the host prefers; it stays in the skill. A line that names a project fact or one
@@ -270,14 +270,14 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/testing/references/integration-test-patterns.md` | 123 | `Real SQL Server only` | duplicate | test § Layer boundaries | `Use a real SQL Server instance` | — |
 | `skills/testing/references/integration-test-patterns.md` | 124 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
 | `skills/testing/references/integration-test-patterns.md` | 125 | `Regression test for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
-| `skills/testing/references/unit-test-patterns.md` | 11 | `NSubstitute (prefer over Moq` | duplicate | test § Stack | `Prefer it over Moq` | — |
-| `skills/testing/references/unit-test-patterns.md` | 20 | `MethodName_StateUnderTest_ExpectedBehavior` | duplicate | test § Stack | `MethodName_StateUnderTest_ExpectedBehavior` | — |
-| `skills/testing/references/unit-test-patterns.md` | 51 | `Blank lines between Arrange, Act, Assert sections` | duplicate | test § Stack | `Arrange / Act / Assert with blank-line separation` | — |
-| `skills/testing/references/unit-test-patterns.md` | 53 | `No test logic shared via inheritance` | duplicate | test § Stack | `no test logic shared via inheritance` | — |
+| `skills/testing/references/unit-test-patterns.md` | 11 | `NSubstitute (prefer over Moq` | duplicate | test § .NET (primary) | `Prefer it over Moq` | — |
+| `skills/testing/references/unit-test-patterns.md` | 20 | `MethodName_StateUnderTest_ExpectedBehavior` | duplicate | test § .NET (primary) | `MethodName_StateUnderTest_ExpectedBehavior` | — |
+| `skills/testing/references/unit-test-patterns.md` | 51 | `Blank lines between Arrange, Act, Assert sections` | duplicate | test § .NET (primary) | `Arrange / Act / Assert with blank-line separation` | — |
+| `skills/testing/references/unit-test-patterns.md` | 53 | `No test logic shared via inheritance` | duplicate | test § .NET (primary) | `no test logic shared via inheritance` | — |
 | `skills/testing/references/unit-test-patterns.md` | 80 | `Prefer builder classes over inline object creation` | duplicate | test § What to assert | `Prefer builder classes over inline object creation` | — |
 | `skills/testing/references/unit-test-patterns.md` | 95 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
 | `skills/testing/references/unit-test-patterns.md` | 98 | `Regression tests for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
-| `skills/testing/references/unit-test-patterns.md` | 106 | `mock at I/O boundary, never inside domain logic` | duplicate | test § Stack | `Mock at the I/O boundary, never inside domain logic` | — |
+| `skills/testing/references/unit-test-patterns.md` | 106 | `mock at I/O boundary, never inside domain logic` | duplicate | test § Python | `Mock at the I/O boundary, never inside domain logic` | — |
 | `skills/maui-dev/references/data-binding.md` | 11 | `faster than reflection-based bindings` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |
 | `skills/maui-dev/references/data-binding.md` | 27 | `this re-enables reflection and defeats compile-time checking` | retained | — | | Technique: framework-correctness detail about `x:DataType` scope, distinct from the policy choice already ledgered at :11 (D2). |
 | `skills/maui-dev/references/collectionview.md` | 25 | `enables compiled bindings and catches typos at build time` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |
