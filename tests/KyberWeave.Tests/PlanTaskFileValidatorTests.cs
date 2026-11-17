@@ -89,99 +89,99 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>The difficulty and technology a task file carries are checked before dispatch.</summary>
-private static DocFixture CorpusWithTaskFields(string? difficulty, string? technology)
-{
-    DocFixture fixture = PlanTaskFileProbe.Corpus();
-    string[] lines = PlanTaskFileProbe.TaskFile().Split('\n');
-    List<string> edited = [];
-    foreach (string line in lines)
+    private static DocFixture CorpusWithTaskFields(string? difficulty, string? technology)
     {
-        edited.Add(line);
-        if (line.TrimStart().StartsWith("- id: " + PlanTaskFileProbe.FirstTask, StringComparison.Ordinal))
+        DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string[] lines = PlanTaskFileProbe.TaskFile().Split('\n');
+        List<string> edited = [];
+        foreach (string line in lines)
         {
-            if (difficulty is not null) edited.Add("    difficulty: " + difficulty);
-            if (technology is not null) edited.Add("    technology: " + technology);
+            edited.Add(line);
+            if (line.TrimStart().StartsWith("- id: " + PlanTaskFileProbe.FirstTask, StringComparison.Ordinal))
+            {
+                if (difficulty is not null) edited.Add("    difficulty: " + difficulty);
+                if (technology is not null) edited.Add("    technology: " + technology);
+            }
         }
+
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, string.Join('\n', edited));
+        return fixture;
     }
 
-    fixture.Write(PlanTaskFileProbe.TaskFilePath, string.Join('\n', edited));
-    return fixture;
-}
+    private static readonly OntologyConfig TwoTechnologies = new()
+    {
+        Technologies = ["csharp", "typescript"]
+    };
 
-private static readonly OntologyConfig TwoTechnologies = new()
-{
-    Technologies = ["csharp", "typescript"]
-};
+    private static DiagnosticReport ValidateScope(DocFixture fixture, OntologyConfig ontology) =>
+        new PlanTaskFileValidator(
+            fixture.Root,
+            KyberWeaveConfig.ProductDefaults.WithOntology(ontology),
+            DocsPorts.Files).Validate(fixture.Load());
 
-private static DiagnosticReport ValidateScope(DocFixture fixture, OntologyConfig ontology) =>
-    new PlanTaskFileValidator(
-        fixture.Root,
-        KyberWeaveConfig.ProductDefaults.WithOntology(ontology),
-        DocsPorts.Files).Validate(fixture.Load());
+    [Fact]
+    public void AnUnknownDifficultyIsKWDOCTASKS015NamingTheThreeValues()
+    {
+        using DocFixture fixture = CorpusWithTaskFields("tricky", null);
 
-[Fact]
-public void AnUnknownDifficultyIsKWDOCTASKS015NamingTheThreeValues()
-{
-    using DocFixture fixture = CorpusWithTaskFields("tricky", null);
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
 
-    DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+        Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.InvalidDifficulty);
+        Assert.Contains("easy", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("medium", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("hard", finding.Message, StringComparison.Ordinal);
+    }
 
-    Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.InvalidDifficulty);
-    Assert.Contains("easy", finding.Message, StringComparison.Ordinal);
-    Assert.Contains("medium", finding.Message, StringComparison.Ordinal);
-    Assert.Contains("hard", finding.Message, StringComparison.Ordinal);
-}
+    [Fact]
+    public void AnUndeclaredTechnologyIsKWDOCTASKS016NamingTheDeclaredList()
+    {
+        using DocFixture fixture = CorpusWithTaskFields(null, "cobol");
 
-[Fact]
-public void AnUndeclaredTechnologyIsKWDOCTASKS016NamingTheDeclaredList()
-{
-    using DocFixture fixture = CorpusWithTaskFields(null, "cobol");
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
 
-    DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+        Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.UndeclaredTechnology);
+        Assert.Contains("csharp", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("typescript", finding.Message, StringComparison.Ordinal);
+    }
 
-    Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.UndeclaredTechnology);
-    Assert.Contains("csharp", finding.Message, StringComparison.Ordinal);
-    Assert.Contains("typescript", finding.Message, StringComparison.Ordinal);
-}
+    [Fact]
+    public void TwoTechnologiesOnOneTaskIsKWDOCTASKS017TellingTheAuthorToSplitIt()
+    {
+        using DocFixture fixture = CorpusWithTaskFields(null, "csharp, typescript");
 
-[Fact]
-public void TwoTechnologiesOnOneTaskIsKWDOCTASKS017TellingTheAuthorToSplitIt()
-{
-    using DocFixture fixture = CorpusWithTaskFields(null, "csharp, typescript");
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
 
-    DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+        Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.MultipleTechnologies);
+        Assert.Contains("Split", finding.Message, StringComparison.Ordinal);
+    }
 
-    Diagnostic finding = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.MultipleTechnologies);
-    Assert.Contains("Split", finding.Message, StringComparison.Ordinal);
-}
+    [Fact]
+    public void ADeclaredDifficultyAndTechnologyReportNothing()
+    {
+        using DocFixture fixture = CorpusWithTaskFields("hard", "csharp");
 
-[Fact]
-public void ADeclaredDifficultyAndTechnologyReportNothing()
-{
-    using DocFixture fixture = CorpusWithTaskFields("hard", "csharp");
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
 
-    DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+        Assert.DoesNotContain(report.Items, item => item.Code is
+            PlanTaskFileRules.InvalidDifficulty or
+            PlanTaskFileRules.UndeclaredTechnology or
+            PlanTaskFileRules.MultipleTechnologies);
+    }
 
-    Assert.DoesNotContain(report.Items, item => item.Code is
-        PlanTaskFileRules.InvalidDifficulty or
-        PlanTaskFileRules.UndeclaredTechnology or
-        PlanTaskFileRules.MultipleTechnologies);
-}
+    [Fact]
+    public void ATaskWithNeitherLineReportsNothing()
+    {
+        using DocFixture fixture = CorpusWithTaskFields(null, null);
 
-[Fact]
-public void ATaskWithNeitherLineReportsNothing()
-{
-    using DocFixture fixture = CorpusWithTaskFields(null, null);
+        DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
 
-    DiagnosticReport report = ValidateScope(fixture, TwoTechnologies);
+        Assert.DoesNotContain(report.Items, item => item.Code is
+            PlanTaskFileRules.InvalidDifficulty or
+            PlanTaskFileRules.UndeclaredTechnology or
+            PlanTaskFileRules.MultipleTechnologies);
+    }
 
-    Assert.DoesNotContain(report.Items, item => item.Code is
-        PlanTaskFileRules.InvalidDifficulty or
-        PlanTaskFileRules.UndeclaredTechnology or
-        PlanTaskFileRules.MultipleTechnologies);
-}
-
-/// <summary>A truncated file cannot be read at all, which is the malformed case.</summary>
+    /// <summary>A truncated file cannot be read at all, which is the malformed case.</summary>
     [Fact]
     public void ATruncatedTaskFileIsKWDOCTASKS001()
     {

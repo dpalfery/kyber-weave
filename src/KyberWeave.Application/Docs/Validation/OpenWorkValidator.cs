@@ -146,29 +146,29 @@ public sealed class OpenWorkValidator
                 continue;
 
             foreach (string pattern in TaskFileSearchPatterns)
-            foreach (string file in _files.EnumerateContainedFiles(docsRoot, pattern))
-            {
-                string name = Path.GetFileName(file);
-                if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)
-                    && !name.Equals(LegacyFolderTaskFileName, StringComparison.OrdinalIgnoreCase)
-                    && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
-                    && !name.EndsWith(LegacyPlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+                foreach (string file in _files.EnumerateContainedFiles(docsRoot, pattern))
                 {
-                    continue;
+                    string name = Path.GetFileName(file);
+                    if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)
+                        && !name.Equals(LegacyFolderTaskFileName, StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(LegacyPlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string relativePath = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
+                    if (!seen.Add(relativePath))
+                        continue;
+
+                    report.Add(new Diagnostic(
+                        LeftoverTaskFile, Severity.Error,
+                        $"Task file '{relativePath}' is left behind. A task file lives only as long as the plan or " +
+                        "specification it was written from, and a merge must not carry one.",
+                        relativePath, relativePath,
+                        "Remove it with `git rm` in the same commit that archives the plan. The archived plan keeps " +
+                        "the decisions, tasks and test contract, so nothing durable is lost."));
                 }
-
-                string relativePath = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
-                if (!seen.Add(relativePath))
-                    continue;
-
-                report.Add(new Diagnostic(
-                    LeftoverTaskFile, Severity.Error,
-                    $"Task file '{relativePath}' is left behind. A task file lives only as long as the plan or " +
-                    "specification it was written from, and a merge must not carry one.",
-                    relativePath, relativePath,
-                    "Remove it with `git rm` in the same commit that archives the plan. The archived plan keeps " +
-                    "the decisions, tasks and test contract, so nothing durable is lost."));
-            }
         }
 
         return report;
