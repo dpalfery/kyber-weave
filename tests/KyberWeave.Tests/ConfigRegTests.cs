@@ -429,6 +429,29 @@ public sealed class ConfigRegValidatorTests : IDisposable
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
     }
 
+    /// <summary>
+    /// The prose between the property lines is template text, not configuration. A block whose
+    /// properties all match is current even after its prose was edited, so the comparison must
+    /// not fall through to a contradiction finding on the text alone.
+    /// </summary>
+    [Fact]
+    public void ProseInsideTheGeneratedBlockIsNotChecked()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+        string agents = Path.Combine(_temp.Path, "AGENTS.md");
+        string original = File.ReadAllText(agents);
+        string edited = original.Replace(
+            "Agents and skills look up the following properties",
+            "Agents and skills find the following properties",
+            StringComparison.Ordinal);
+        Assert.NotEqual(original, edited);
+        Write("AGENTS.md", edited);
+
+        DiagnosticReport report = Validate(Configured());
+
+        Assert.DoesNotContain(report.Items, i => i.Code == ConfigRegValidator.StaleRendering);
+    }
+
     [Fact]
     public void ARenderedBlockThatNoLongerMatchesConfigurationIsCONFIGREG002()
     {
