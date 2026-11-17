@@ -155,6 +155,39 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         Assert.Empty(Guard("claude", Command("claude", "az vm delete --name db", agent: "dal-dev")));
     }
 
+    /// <summary>
+    /// A read-only dispatch whose header names a technology is bound by that technology's list: the same
+    /// mutating command is refused under <c>azure</c> and not judged by another technology's list.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherBoundToTheDispatchedTechnologyIsRefusedByThatTechnologysList()
+    {
+        TechnologyRepository(_repository.Path, "azure");
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_repository.Path);
+        const string command = "az vm delete --name db -g rg";
+        WorkerGuardRules.ToolCall call = WorkerGuardRules.Read("claude", Command("claude", command))!;
+
+        string? refusal = WorkerGuardRules.CommandRefusal(config.Arbiter.Rules, call, command, ["azure"]);
+
+        Assert.NotNull(refusal);
+        Assert.StartsWith("AZURE-READONLY-001", refusal, StringComparison.Ordinal);
+        Assert.Null(WorkerGuardRules.CommandRefusal(config.Arbiter.Rules, call, command, ["aws"]));
+    }
+
+    /// <summary>
+    /// A dispatch that names no technology is fail-closed: every declared technology's list still binds the
+    /// read-only agent, so a technology scoped to its own tasks never turns a refusal into an allow.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherWhoseDispatchNamesNoTechnologyIsRefusedByEveryDeclaredList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ATechnologyWithNoCommandRuleRefusesNothing()
     {
@@ -217,6 +250,29 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         foreach (string file in Directory.EnumerateFiles(source))
         {
             File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+        }
+    }
+
+    /// <summary>
+    /// A repository that declares several technologies and holds each one's shipped standards folder, so every
+    /// declared technology's rules file is loaded for one guard event that names no technology.
+    /// </summary>
+    private static void TwoTechnologyRepository(string root, params string[] technologies)
+    {
+        Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(root, ".kyber-weave", "kyber-weave.yml"),
+            $"ontology:\n  docs-root: docs\n  technologies: [{string.Join(", ", technologies)}]\n\narbiter:\n  enabled: true\n");
+
+        foreach (string technology in technologies)
+        {
+            string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", technology);
+            string target = Path.Combine(root, "docs", "standards", technology);
+            Directory.CreateDirectory(target);
+            foreach (string file in Directory.EnumerateFiles(source))
+            {
+                File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+            }
         }
     }
 
