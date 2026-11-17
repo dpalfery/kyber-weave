@@ -1,0 +1,339 @@
+using Xunit;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// The conductor, the architect and the bug flow under the tiered roster: a dispatch carries the task id and
+/// never the prompt, the docs tool names the developer, a failed attempt moves one tier up inside the existing
+/// three-dispatch limit, the architect plans the schema and the data model, and the bug flow hands its fix to a
+/// developer agent.
+/// </summary>
+/// <remarks>
+/// "The conductor's text" is its body, the path contracts it loads and the one execution contract it loads for
+/// dispatch; that skill is the single copy of the dispatch rules, so a rule repeated in the body as well would be
+/// the second copy this contract exists to prevent.
+/// </remarks>
+public sealed class TieredRosterConductorContractTests
+{
+    private const string ConductorPath = "products/kyber-squad/agents/conductor.md";
+
+    private const string BugCrusherPath = "products/kyber-squad/agents/bug-crusher.md";
+
+    private const string BugCrusherSkillPath = "products/kyber-squad/skills/bug-crusher/SKILL.md";
+
+    private const string ArchitectPath = "products/kyber-squad/agents/architect.md";
+
+    private const string DeliveryExecutionPath = "products/kyber-squad/skills/delivery-execution/SKILL.md";
+
+    private const string PlanPath = "products/kyber-squad/agents/conductor/references/plan-path.md";
+
+    private const string SpecPath = "products/kyber-squad/agents/conductor/references/spec-path.md";
+
+    private const string IntakePath = "products/kyber-squad/agents/conductor/references/intake-path.md";
+
+    private const string AutonomyPath = "products/kyber-squad/agents/conductor/references/autonomy.md";
+
+    /// <summary>Every file the conductor reads as its dispatch contract.</summary>
+    private static readonly string[] ConductorSurface =
+    [
+        ConductorPath,
+        PlanPath,
+        SpecPath,
+        IntakePath,
+        AutonomyPath,
+        DeliveryExecutionPath,
+    ];
+
+    /// <summary>The three developer tiers, in step-up order.</summary>
+    private static readonly string[] DeveloperTiers = ["dev-easy", "dev-medium", "dev-hard"];
+
+    [Fact]
+    public void ADispatchCarriesTheTaskIdAndNeverThePrompt()
+    {
+        string skill = Read(DeliveryExecutionPath);
+
+        Assert.Contains("the task id, and nothing else", skill, StringComparison.Ordinal);
+        Assert.Contains("never the prompt", skill, StringComparison.Ordinal);
+        Assert.Equal(1, CountInSurface("never the prompt"));
+    }
+
+    [Fact]
+    public void UnderTheTieredRosterTheDocsToolNamesTheDeveloper()
+    {
+        string conductor = Read(ConductorPath);
+
+        Assert.Contains("worker-roster", conductor, StringComparison.Ordinal);
+        Assert.Contains("tiered", conductor, StringComparison.Ordinal);
+        Assert.Contains("docs_build_task_prompt_for_agent_dispatch", conductor, StringComparison.Ordinal);
+        Assert.Contains("`docs_build_task_prompt_for_agent_dispatch` answers with it", conductor, StringComparison.Ordinal);
+        Assert.Contains("task file records", conductor, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TheStepUpMovesExactlyOneTierAndStopsAtTheThreeDispatchLimit()
+    {
+        string conductor = Read(ConductorPath);
+
+        Assert.Contains("tier = min(hard, rated difficulty + failed attempts)", conductor, StringComparison.Ordinal);
+        foreach (string tier in DeveloperTiers)
+        {
+            Assert.Contains(tier, conductor, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("exactly one tier up", conductor, StringComparison.Ordinal);
+        Assert.Contains("never down", conductor, StringComparison.Ordinal);
+        Assert.Contains("three rework dispatches", conductor, StringComparison.Ordinal);
+        Assert.Contains("architect", conductor, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The step-up and the tier formula have one home. A second copy is how the ladder and the limit drift apart.
+    /// </summary>
+    [Fact]
+    public void EachTieredRuleIsStatedOnce()
+    {
+        string[] once =
+        [
+            "tier = min(hard, rated difficulty + failed attempts)",
+            "exactly one tier up",
+            "never the prompt",
+        ];
+
+        string[] repeated =
+        [
+            .. once.Where(rule => CountInSurface(rule) != 1).Select(rule => $"'{rule}' appears {CountInSurface(rule)} times")
+        ];
+
+        Assert.True(
+            repeated.Length == 0,
+            $"Each tiered rule is stated once across the conductor's text; {string.Join("; ", repeated)}.");
+    }
+
+    [Fact]
+    public void TheConductorNamesTheTieredDeliveryAndPlatformAgents()
+    {
+        string conductor = Read(ConductorPath);
+
+        Assert.Contains(
+            "Under `tiered` the delivery agent is `devops` and the live-platform agent is `platform-researcher`",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.Contains("under `technology` every name reads as written", conductor, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The roster rule allows a caller only the agents its <c>delegates-to</c> lists, and run start and delivery
+    /// already tell the conductor to dispatch <c>devops</c>.
+    /// </summary>
+    [Fact]
+    public void TheConductorAndTheBugFlowListTheTieredWorkersTheyDispatch()
+    {
+        string[] callers = [ConductorPath, BugCrusherPath];
+        string[] expected = [.. DeveloperTiers, "devops"];
+
+        List<string> missing = [];
+        foreach (string caller in callers)
+        {
+            string delegatesTo = FrontmatterLine(Read(caller), "delegates-to:");
+            missing.AddRange(
+                expected
+                    .Where(agent => !delegatesTo.Contains(agent, StringComparison.Ordinal))
+                    .Select(agent => $"{caller} does not list '{agent}'"));
+        }
+
+        Assert.True(
+            missing.Count == 0,
+            $"The tiered workers must be dispatchable (KW-ARB-ROSTER-001): {string.Join("; ", missing)}.");
+    }
+
+    [Fact]
+    public void TheConductorDispatchesTheTieredDeliveryAgentForRunStart()
+    {
+        string line = LineContaining(Read(ConductorPath), "RUN-START: true");
+
+        Assert.Contains("`devops`", line, StringComparison.Ordinal);
+        Assert.Contains("tiered", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>The callers that send work to the live-platform agent list its tiered replacement too.</summary>
+    [Fact]
+    public void TheCallersThatReplacedAzureReaderListTheTieredResearcher()
+    {
+        string[] callers = [ConductorPath, ArchitectPath];
+
+        string[] missing =
+        [
+            .. callers.Where(caller => !FrontmatterLine(Read(caller), "delegates-to:")
+                    .Contains("platform-researcher", StringComparison.Ordinal))
+        ];
+
+        Assert.True(
+            missing.Length == 0,
+            $"These callers must list 'platform-researcher' so a tiered run can dispatch it (KW-ARB-ROSTER-001): " +
+            string.Join(", ", missing));
+    }
+
+    /// <summary>
+    /// The unqualified technology rules must not come back. Each former sentence now opens with its roster, and
+    /// the tiered branch states the override, so a future edit that drops the scope fails here rather than
+    /// silently letting a tiered run match a technology agent to a file type.
+    /// </summary>
+    [Fact]
+    public void TheTieredRoutingOverridesTheTechnologySelectionRules()
+    {
+        string conductor = Read(ConductorPath);
+        string skill = Read(DeliveryExecutionPath);
+        string bugCrusher = Read(BugCrusherSkillPath);
+
+        Assert.DoesNotContain(
+            "When none is named, assign it to the delegate whose description trigger matches its files",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Choose each task's agent by matching the abilities it needs",
+            skill,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "If the fix is more than a few lines or sits in a specialist's domain, hand it to that specialist",
+            bugCrusher,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Under `tiered` the line's `agent=` is the kind of worker and the dispatch tool names the tier",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.Contains("Under `tiered` the dispatch tool names the agent", skill, StringComparison.Ordinal);
+        Assert.Contains(
+            "Under `worker-roster: tiered` the specialist is a developer tier",
+            bugCrusher,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A dispatch of the delivery agent under the tiered roster must name the tiered agent. The rule is per
+    /// site, because a global "read this name as that name" does not travel with a skill another entry point
+    /// loads.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ConductorSurfaceFiles))]
+    public void EveryDeliveryDispatchSiteNamesTheTieredAgent(string relativePath)
+    {
+        string[] unscoped =
+        [
+            .. Read(relativePath).Split('\n')
+                .Where(line => line.Contains("`github-devops`", StringComparison.Ordinal)
+                               && !line.Contains("`devops`", StringComparison.Ordinal))
+        ];
+
+        Assert.True(
+            unscoped.Length == 0,
+            $"{relativePath} dispatches `github-devops` with no `devops` alternative, so a tiered run uses the " +
+            "technology delivery agent. Unscoped: " + string.Join(" | ", unscoped));
+    }
+
+    public static IEnumerable<object[]> ConductorSurfaceFiles()
+    {
+        foreach (string path in ConductorSurface)
+        {
+            yield return [path];
+        }
+    }
+
+    [Fact]
+    public void TheSelectionRulesAreScopedToTheRosterTheyBelongTo()
+    {
+        string conductor = Read(ConductorPath);
+        string skill = Read(DeliveryExecutionPath);
+
+        Assert.Contains(
+            "On the `technology` roster, when none is named, assign it to the delegate whose description trigger matches its files",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "On the `technology` roster, choose each task's agent by matching the abilities it needs against the descriptions of the agents you can dispatch",
+            skill,
+            StringComparison.Ordinal);
+        Assert.Contains("Under `tiered` the dispatch tool names the agent", skill, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheBugFlowScopesTheTechnologySpecialistsToTheirRoster()
+    {
+        string bugCrusher = Read(BugCrusherSkillPath);
+
+        Assert.Contains(
+            "Under `worker-roster: technology`, if the fix is more than a few lines or sits in a specialist's domain, hand it to that specialist",
+            bugCrusher,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The tiered fix dispatch passes the failed-attempt count, so the count must be the one the attempt budget
+    /// already keeps, and the dispatch must carry it for the hook that builds the prompt.
+    /// </summary>
+    [Fact]
+    public void TheBugFlowDefinesTheFailedAttemptCountItPasses()
+    {
+        string bugCrusher = Read(BugCrusherSkillPath);
+        string line = LineContaining(bugCrusher, "docs_build_task_prompt_for_agent_dispatch");
+
+        Assert.Contains("attempts already counted for this defect under", line, StringComparison.Ordinal);
+        Assert.Contains("0 on the first fix attempt and 1 on the second", line, StringComparison.Ordinal);
+        Assert.Contains("`FAILED_ATTEMPTS:`", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TheArchitectSendsLivePlatformStateToTheTieredResearcher()
+    {
+        string[] unscoped =
+        [
+            .. Read(ArchitectPath).Split('\n')
+                .Where(line => line.Contains("`azure-reader`", StringComparison.Ordinal)
+                               && !line.Contains("`platform-researcher`", StringComparison.Ordinal))
+        ];
+
+        Assert.True(
+            unscoped.Length == 0,
+            "The architect must name `platform-researcher` wherever it names `azure-reader`, or a tiered run keeps " +
+            "dispatching the technology agent. Unscoped: " + string.Join(" | ", unscoped));
+    }
+
+    [Fact]
+    public void TheArchitectPlansTheSchemaAndTheDataModel()
+    {
+        string architect = Read(ArchitectPath);
+
+        Assert.Contains("Schema and data-model planning", architect, StringComparison.Ordinal);
+        Assert.Contains("migration", architect, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("SQL", architect, StringComparison.Ordinal);
+        Assert.Contains("developer agent", architect, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("index", architect, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("constraint", architect, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void TheBugFlowHandsTheFixToADeveloperAgentUnderTheTieredRoster()
+    {
+        string bugCrusher = Read(BugCrusherSkillPath);
+
+        Assert.Contains("worker-roster", bugCrusher, StringComparison.Ordinal);
+        Assert.Contains("docs_build_task_prompt_for_agent_dispatch", bugCrusher, StringComparison.Ordinal);
+        Assert.Contains("dev-medium", bugCrusher, StringComparison.Ordinal);
+        Assert.Contains("dev-hard", bugCrusher, StringComparison.Ordinal);
+        Assert.Contains("TECHNOLOGY:", bugCrusher, StringComparison.Ordinal);
+        Assert.Contains("no `test-dev`", bugCrusher, StringComparison.Ordinal);
+    }
+
+    private static string Read(string relativePath) =>
+        File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+
+    private static int CountInSurface(string phrase) =>
+        ConductorSurface.Sum(path => Read(path).Split(phrase, StringSplitOptions.None).Length - 1);
+
+    /// <summary>The frontmatter line that starts with <paramref name="name"/>, or an empty string.</summary>
+    private static string FrontmatterLine(string text, string name) =>
+        text.Split('\n').FirstOrDefault(line => line.StartsWith(name, StringComparison.Ordinal)) ?? string.Empty;
+
+    /// <summary>The first line holding <paramref name="phrase"/>, or an empty string.</summary>
+    private static string LineContaining(string text, string phrase) =>
+        text.Split('\n').FirstOrDefault(line => line.Contains(phrase, StringComparison.Ordinal)) ?? string.Empty;
+}

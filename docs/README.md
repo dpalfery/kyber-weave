@@ -4,7 +4,7 @@ title: Kyber-Weave documentation
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-17
 ---
 
 # Kyber-Weave documentation
@@ -118,8 +118,8 @@ Start at the [DocGraph Overview](docgraph/README.md) for value proposition and a
 
 ## Feature 3 — Kyber-Squad
 
-Unified multi-harness deployment and lifecycle control plane for 24 canonical agents and
-28 skills, each owner projecting a validated resource closure beside its rendered principal.
+Unified multi-harness deployment and lifecycle control plane for 29 canonical agents and
+29 skills, each owner projecting a validated resource closure beside its rendered principal.
 The product declares thirteen harness targets; all thirteen are implemented and registered today
 (`copilot`, `cursor`, `claude`, `codex`, `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`).
 Start at the [Kyber-Squad Overview](kyber-squad/README.md) for value proposition and adoption rationale.

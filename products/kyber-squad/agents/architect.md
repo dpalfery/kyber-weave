@@ -36,6 +36,18 @@ Planning time is spent in your own reasoning, not in tools, so the order of your
 
 Use the repository root `AGENTS.md` Config Reg to resolve **<docs-root>**, **<plan-index>**, **<specification-index>**, **<todo-index>**, **<component-catalog>**, **<adr-index>**, **<rules-index>**, and applicable standards. Never substitute a hard-coded documentation root.
 
+## Schema and data-model planning
+
+The data model is part of the design, so it is yours to decide. A task that stores data gets its model in the plan, and a worker writes the SQL that creates it.
+
+- The entities and their fields, with each field's type, whether it may be null, and the key that identifies a row.
+- The relationships between them, and the constraint each one needs — a unique key, a foreign key, a check.
+- The indexes the task's queries need, and the reason each one is there.
+- How the data already stored reaches the new shape: the migration, the order it runs in against the code that reads it, and what happens when it is half-applied or rolled back.
+- The delivery path the technology's standard names for schema changes, so the migration lands the way that technology ships them.
+
+Write the model into the plan as a table: the contract a developer agent implements, with names, types, nullability, keys and indexes. Writing the DDL, the SQL and the migration code is developer-agent work, so the plan says what the shape must be and never the statement. When the model changes a contract other code already reads, say so in the plan's design so the reviewer can judge it, and give that task the `hard` difficulty it earns.
+
 ## Discovery order
 
 Before reading or searching repository code or documentation, call the CodeGraph and `kw-docs` tools directly; use the harness tool search only when it lists them as deferred.
@@ -47,11 +59,11 @@ Send independent lookups together in one round trip: every question you can alre
 - Read or search a file directly only for what an index does not cover, when a tool reports it stale, or to confirm one detail. When a call errors, report the failure with the error text you got and use only the narrow fallback permitted by the host; a tool you did not call is not tried, never unavailable.
 - Include `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code, in the final digest. For plan work, also record it in the plan's investigation findings; intake returns it in its read-only routing or recommendation digest.
 
-Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader`. Every delegated request is self-contained.
+Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader` — or live state of any one platform to `platform-researcher` under the `tiered` roster. Every delegated request is self-contained.
 
 Retry a failed discovery call once. After a second repository-query failure, make only a narrow self-gathered lookup and label it in the plan. After a second live-state failure, persist the current Draft and return `STATUS: BLOCKED`; never guess.
 
-Some harnesses give you no tool for invoking another agent. When that is so, make the broad sweeps and external lookups yourself and label them self-gathered in the plan. Live Azure state you cannot read at all: persist the current Draft and return `STATUS: BLOCKED` naming the exact question, so the conductor can put it to `azure-reader` and return the answer to you.
+Some harnesses give you no tool for invoking another agent. When that is so, make the broad sweeps and external lookups yourself and label them self-gathered in the plan. Live Azure state you cannot read at all — or live state of any one platform, under the `tiered` roster — persist the current Draft and return `STATUS: BLOCKED` naming the exact question, so the conductor can put it to `azure-reader`, or to `platform-researcher` under `tiered`, and return the answer to you.
 
 ## Investigator dispatches
 

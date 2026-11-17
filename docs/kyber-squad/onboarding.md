@@ -5,7 +5,7 @@ doc-type: onboarding
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0067-copilot-system-prompt-override-is-machine-wide
@@ -34,7 +34,7 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **24 canonical agents** and
+It manages the installation, update, inspection, and uninstallation of **29 canonical agents** and
 the canonical skills, plus the Kyber-Weave skills it ships beside them, with transactional
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
@@ -396,8 +396,9 @@ frontier model:
 |---|---|---|
 | `architect` | `claude-opus-5-5-high` | architect |
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
-| `general` | `swe-2-high` | github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev, typescript-dev |
-| `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, dal-dev, docs-dev, maui-dev, python-dev, react-dev, research-agent, test-dev |
+| `dev-hard` | `swe-2-high` | dev-hard |
+| `general` | `swe-2-high` | dev-medium, devops, github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev, typescript-dev |
+| `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, dal-dev, dev-easy, docs-dev, maui-dev, platform-researcher, python-dev, react-dev, research-agent, test-dev |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
 The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
@@ -481,6 +482,40 @@ every skill appears under two names.
 
 **Inspect:** `devin doctor` reports which custom profiles loaded and flags malformed
 frontmatter, and `devin skills list` lists discovered skills. Confirm names there after install.
+
+## Worker rosters
+
+The squad ships two worker rosters, and a host chooses one in `.kyber-weave/kyber-weave.yml`:
+
+```yaml
+worker-roster: tiered
+```
+
+`technology` is the default and what an absent key means. It keeps the per-technology developer
+agents (`csharp-dev`, `react-dev`, and so on), `sql-database-architect` for schema work, `test-dev`
+for a test-only task, and `github-devops` for delivery. `tiered` replaces them with three developer
+agents that name no technology — `dev-easy`, `dev-medium`, `dev-hard` — plus `devops` for delivery
+and `platform-researcher` for live platform state. `docs-dev`, `architect`, `product-owner`,
+`code-reviewer`, the two review seats, `bug-crusher`, `bug-crusher-investigator` and
+`research-agent` are the same agents on either roster.
+
+Every agent still exists after the switch, so you can install once and run a plan under each roster
+to compare them. What changes is which agent does developer work, test-only work, delivery and live
+platform inspection.
+
+**How a tier is chosen.** Under `tiered` the plan still writes `Difficulty:` and `Technology:` on
+each file-changing task, and the machine task file records the difficulty and the kind of worker —
+never a tier. Each dispatch's tier is
+`tier = min(hard, rated difficulty + failed attempts)`: an `easy` task starts on `dev-easy`,
+`medium` and an unrated task on `dev-medium`, and `hard` on `dev-hard`. A failed attempt moves the
+task exactly one tier up and never down, and the ordinary limit of three rework dispatches per
+failure cluster is unchanged. A task whose role is `docs-dev` or `devops` keeps that role.
+
+Under `tiered` a developer task must name one technology, so an existing plan may need a
+`Technology:` line on each developer task before it will validate. The full agent lists, the tier
+table and the dispatch path are in
+[architecture §12](architecture.md#12-worker-rosters-and-developer-tiers); the setting itself is in
+[configuration](../configuration.md#worker-roster).
 
 ## MCP access across harnesses
 
@@ -1353,7 +1388,9 @@ can retain its own review history between passes. Stateless harnesses receive a
 self-contained recovery brief with previous findings, decisions, and failed approaches.
 The conductor records session handles and replacement reasons on the execution artifact.
 
-Deployed `conductor`, `csharp-dev`, `test-dev`, and `github-devops` agents stop
+Deployed `conductor`, the developer agents (`csharp-dev` and its peers under the `technology`
+roster, `dev-easy`/`dev-medium`/`dev-hard` under `tiered`), `test-dev`, and `github-devops` or
+`devops` stop
 unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 3 conductor
 rework dispatches per failure cluster per run, A→B→A oscillation detection, and
 escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
@@ -1382,7 +1419,10 @@ belongs in the skill.
 **What bug-crusher delegates.** Its roster carries the agents its escalated path actually starts:
 `architect` (planning the escalated defect), `test-dev` (a failing test when no developer takes the fix), `code-reviewer` (the
 finished fix), and the twelve developer agents a task routes to, alongside the investigator,
-`docs-dev`, and the two council seats it starts when the reviewer cannot start its own. Discovery
+`docs-dev`, `github-devops` or its `tiered` replacement `devops`, and the two council seats it
+starts when the reviewer cannot start its own. The `tiered` roster's developer tiers are on the
+roster too: `dev-easy`, `dev-medium` and `dev-hard` take the fix and write its failing test, and a
+fix dispatch that belongs to no task starts on `dev-medium`. Discovery
 is the architect's own delegation and the owner is the human, so `research-agent`,
 `product-owner` and `azure-reader` stay off the roster. The roster is what scopes the
 `root-fixer` capability profile's `delegate` grant.
@@ -1673,10 +1713,10 @@ is still packed when no loaded file references it. See the
 Both archive formats recurse through each skill directory. They contain all canonical `SKILL.md`
 files plus their retained supplemental resources, together with the Kyber-Weave skills from
 `.apm/skills/` and their resource files, in each archive.
-Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 24 canonical
+Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 29 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 150 files on Copilot today — with authored relative links resolving inside
+beside its principal — 162 files on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed
