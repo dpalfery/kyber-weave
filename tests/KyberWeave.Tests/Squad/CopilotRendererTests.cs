@@ -668,8 +668,8 @@ public sealed class CopilotRendererTests
     /// like a subagent does — but stays user-invocable (asserted separately).
     /// </summary>
     [Theory]
-    [InlineData("architect", "agents: ['azure-reader', 'research-agent']")]
-    [InlineData("code-reviewer", "agents: ['azure-reader', 'review-lens', 'review-triage']")]
+    [InlineData("architect", "agents: ['azure-reader', 'platform-researcher', 'research-agent']")]
+    [InlineData("code-reviewer", "agents: ['azure-reader', 'platform-researcher', 'review-lens', 'review-triage']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
         string agentName,
         string expectedAgentsLine)
@@ -695,16 +695,17 @@ public sealed class CopilotRendererTests
     [InlineData(
         "conductor",
         "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
-        "'csharp-dev', 'dal-dev', 'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'product-owner', " +
+        "'csharp-dev', 'dal-dev', 'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
+        "'github-devops', 'go-dev', 'maui-dev', 'platform-researcher', 'product-owner', " +
         "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'review-lens', 'review-triage', " +
         "'rust-dev', 'sql-database-architect', 'tauri-dev', 'test-dev', 'typescript-dev']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
     [InlineData(
         "bug-crusher",
         "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', 'csharp-dev', 'dal-dev', " +
-        "'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'pulumi-dev', 'python-dev', 'react-dev', " +
-        "'review-lens', 'review-triage', 'rust-dev', 'sql-database-architect', 'tauri-dev', 'test-dev', " +
-        "'typescript-dev']")]
+        "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', 'github-devops', 'go-dev', " +
+        "'maui-dev', 'pulumi-dev', 'python-dev', 'react-dev', 'review-lens', 'review-triage', 'rust-dev', " +
+        "'sql-database-architect', 'tauri-dev', 'test-dev', 'typescript-dev']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
         string agentName,
         string expectedAgentsLine)

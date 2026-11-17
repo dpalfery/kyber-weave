@@ -20,6 +20,21 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>The confidence a pick needs to be written to the task file.</summary>
     public const double ConfidenceFloor = 0.8;
 
+    /// <summary>The first tier of the step-up ladder.</summary>
+    public const string EasyTier = "dev-easy";
+
+    /// <summary>
+    /// The tier that stands for the developer kind under the tiered roster: the pick records the kind, and
+    /// the task's difficulty and failed attempts then choose the tier.
+    /// </summary>
+    public const string DeveloperKind = "dev-medium";
+
+    /// <summary>The last tier of the step-up ladder, which a failed attempt never climbs past.</summary>
+    public const string HardTier = "dev-hard";
+
+    /// <summary>The three developer agents in step-up order (Requirement 3.2).</summary>
+    public static IReadOnlyList<string> DeveloperTiers { get; } = [EasyTier, DeveloperKind, HardTier];
+
     /// <summary>The question every pick asks.</summary>
     public const string Question = "Which agent should do this task, judged by the abilities it needs and the files it changes?";
 
@@ -51,14 +66,39 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     public void Dispose() => (_provider as IDisposable)?.Dispose();
 
     /// <summary>
-    /// The agents a task may go to: every agent of the installed Squad whose capability profile takes implementation or
-    /// documentation work, read from the agent files the build embeds, so a new agent file is a new candidate.
+    /// The agents a task may go to under both rosters: every agent of the installed Squad whose capability profile
+    /// takes implementation or documentation work, read from the agent files the build embeds, so a new agent file
+    /// is a new candidate.
     /// </summary>
-    public static IReadOnlyList<ArbiterSquadAgent> ImplementationAgents() =>
-        [.. ArbiterSquadCatalog.LoadEmbedded().Agents.Values
+    public static IReadOnlyList<ArbiterSquadAgent> ImplementationAgents() => ImplementationAgents(null);
+
+    /// <summary>
+    /// The agents a task may go to under <paramref name="roster"/>. An agent that declares no roster serves both,
+    /// so the agents that stay under either roster are always candidates. Under the tiered roster the three
+    /// developer agents are one candidate, <see cref="DeveloperKind"/>: the pick chooses the kind of worker and
+    /// the difficulty then chooses the tier (Requirement 3.1). A null roster offers every agent, as the
+    /// decision-model tests ask.
+    /// </summary>
+    /// <param name="roster">The active roster, <c>technology</c> or <c>tiered</c>; null for both.</param>
+    public static IReadOnlyList<ArbiterSquadAgent> ImplementationAgents(string? roster)
+    {
+        IEnumerable<ArbiterSquadAgent> agents = ArbiterSquadCatalog.LoadEmbedded().Agents.Values
             .Where(agent => string.Equals(agent.TargetClass, "implementation", StringComparison.Ordinal)
-                            && !string.IsNullOrWhiteSpace(agent.Description))
-            .OrderBy(agent => agent.Name, StringComparer.Ordinal)];
+                            && !string.IsNullOrWhiteSpace(agent.Description));
+
+        if (roster is not null)
+        {
+            agents = agents.Where(agent => agent.WorkerRoster is null
+                                           || string.Equals(agent.WorkerRoster, roster, StringComparison.Ordinal));
+        }
+
+        if (string.Equals(roster, WorkerRosters.Tiered, StringComparison.Ordinal))
+        {
+            agents = agents.Where(agent => agent.Name is not (EasyTier or HardTier));
+        }
+
+        return [.. agents.OrderBy(agent => agent.Name, StringComparer.Ordinal)];
+    }
 
     /// <inheritdoc />
     public IReadOnlyDictionary<string, PlanTaskAgentChoice> Pick(IReadOnlyList<PlanTaskFileEntry> tasks)

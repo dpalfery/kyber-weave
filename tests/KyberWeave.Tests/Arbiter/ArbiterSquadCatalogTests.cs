@@ -46,7 +46,7 @@ public sealed class ArbiterSquadCatalogTests
 
         ArbiterSquadAgent reviewer = catalog.Agents["code-reviewer"];
         Assert.Equal(
-            ["azure-reader", "review-lens", "review-triage"],
+            ["azure-reader", "platform-researcher", "review-lens", "review-triage"],
             reviewer.DelegatesTo.Order(StringComparer.Ordinal));
     }
 

@@ -345,7 +345,7 @@ public sealed class KiloRendererContractTests : IDisposable
         YamlMappingNode task = RequireMapping(RequireMapping(frontmatter, "permission", "code-reviewer"), "task", "code-reviewer");
 
         Assert.Equal(
-            ["azure-reader", "review-lens", "review-triage"],
+            ["azure-reader", "platform-researcher", "review-lens", "review-triage"],
             task.Children.Keys.Cast<YamlScalarNode>().Select(key => key.Value!).ToArray());
         Assert.All(task.Children.Values, value => Assert.Equal("allow", ((YamlScalarNode)value).Value));
 

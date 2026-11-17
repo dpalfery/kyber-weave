@@ -6,7 +6,7 @@ invocation: subagent
 model-profile: reviewer
 capability-profile: reviewer
 copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]
-delegates-to: [azure-reader, review-lens, review-triage]
+delegates-to: [azure-reader, platform-researcher, review-lens, review-triage]
 fallback: role-skill
 aliases: []
 ---

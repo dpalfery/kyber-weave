@@ -8,7 +8,7 @@ capability-profile: architect
 copilot-capability-profile: architect-copilot
 devin-capability-profile: architect-devin
 copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]
-delegates-to: [azure-reader, research-agent]
+delegates-to: [azure-reader, platform-researcher, research-agent]
 fallback: role-skill
 aliases: []
 ---

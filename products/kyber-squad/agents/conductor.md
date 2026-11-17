@@ -5,7 +5,7 @@ description: "Primary orchestrator and default entry point: accepts a plan, spec
 invocation: primary
 capability-profile: orchestrator
 copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, "kw-docs/*", agent]
-delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, review-lens, review-triage, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
+delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, dev-easy, dev-hard, dev-medium, devops, docs-dev, github-devops, go-dev, maui-dev, platform-researcher, product-owner, pulumi-dev, python-dev, react-dev, research-agent, review-lens, review-triage, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]
 fallback: role-skill
 aliases: []
 ---

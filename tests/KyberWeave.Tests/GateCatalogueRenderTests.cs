@@ -533,6 +533,13 @@ public sealed class GateCatalogueRenderTests
         Assert.Contains(devopsGates!, gate => gate.Id == "csharp-workflow-lint");
         Assert.Contains(devopsGates!, gate => gate.Id == "csharp-shellcheck");
 
+        // devops replaces github-devops and carries the same plumbing gates, so a tiered host is not left
+        // without a gate on its workflows.
+        Assert.True(config.Review.TaskGates.TryGetValue("devops", out IReadOnlyList<ReviewTaskGate>? platformDevopsGates));
+        Assert.Equal(
+            devopsGates!.Select(gate => gate.Id).Order(StringComparer.Ordinal),
+            platformDevopsGates!.Select(gate => gate.Id).Order(StringComparer.Ordinal));
+
         Assert.True(config.Review.TaskGates.TryGetValue("docs-dev", out IReadOnlyList<ReviewTaskGate>? docsGates));
         Assert.Contains(docsGates!, gate => gate.Id == "csharp-review-config");
     }

@@ -1219,17 +1219,18 @@ internal sealed record CatalogueRepository(string Path, GateCatalogueFacts Facts
 /// disagree about which agent works in which technology.
 /// </summary>
 /// <remarks>
-/// <c>github-devops</c> and <c>docs-dev</c> edit the repository's plumbing — its workflows, the shell scripts
-/// those workflows call and the review configuration both read — rather than a language. <c>github-actions</c>
-/// is the declared technology that covers those files, so a host that declares it receives their gates and a
-/// host that does not is left alone.
+/// <c>github-devops</c>, <c>devops</c> and <c>docs-dev</c> edit the repository's plumbing — its workflows, the shell
+/// scripts those workflows call and the review configuration both read — rather than a language.
+/// <c>github-actions</c> is the declared technology that covers those files, so a host that declares it receives
+/// their gates and a host that does not is left alone. <c>devops</c> replaces <c>github-devops</c> and names no
+/// platform, so it carries the same gates until the old agent leaves in phase 5 of the roster work.
 /// </remarks>
 public static class TechnologyAgentMap
 {
     /// <summary>The agents the map names, in the order the catalogue renders their blocks.</summary>
     public static IReadOnlyList<string> Agents { get; } =
     [
-        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev", "github-devops",
+        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev", "github-devops", "devops",
         "typescript-dev", "react-dev", "rust-dev", "tauri-dev",
         "go-dev", "python-dev", "test-dev", "docs-dev"
     ];
@@ -1241,6 +1242,7 @@ public static class TechnologyAgentMap
         ["maui-dev"] = "csharp",
         ["pulumi-dev"] = "csharp",
         ["github-devops"] = "github-actions",
+        ["devops"] = "github-actions",
         ["typescript-dev"] = "typescript",
         ["react-dev"] = "react",
         ["rust-dev"] = "rust",

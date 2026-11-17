@@ -112,6 +112,9 @@ public static class ArbiterTriggerCatalog
                 "plan.task.text",
                 "plan.task.files",
                 "plan.task.file-kinds",
+                // The rating the task file records, which the difficulty rule reads under the tiered roster
+                // instead of asking the model a second time.
+                "plan.task.difficulty",
                 "ledger.task.prior-attempt",
                 "model-targeting.prior-result",
                 "model-targeting.prior-profile",
