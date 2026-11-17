@@ -31,19 +31,14 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IClassFixture<SquadGuid
     [Fact]
     public async Task InstallGlobalInjectsTheEffectiveGuidanceIntoEveryEntryFile()
     {
-        using Harness h = NewHarness("install-global-guidance");
         string homeText = "Use short tool calls and be explicit about assumptions.";
-        WriteHomeGuidance(h, homeText);
+        using SquadInstalledGlobalTemplate install = SquadInstalledGlobalTemplate.WithHomeGuidance(homeText);
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
-            .InstallAsync(new SquadInstallRequest(
-                h.MakeDirectory("anchor"),
-                SquadDeploymentScope.Global,
-                [SquadTarget.Codex],
-                Version: "1.2.3"));
-
-        Assert.True(result.Success, DescribeFailure(result));
-        string[] files = InstalledEntryFiles(h, SquadTarget.Codex);
+        Assert.Equal(0, install.Record.ExitCode);
+        string[] files = InstalledEntryFilesIn(
+            install.GlobalRoot(SquadTarget.Codex),
+            SquadTarget.Codex,
+            globalCodex: true);
         Assert.NotEmpty(files);
         foreach (string path in files)
         {
@@ -241,45 +236,32 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IClassFixture<SquadGuid
     [Fact]
     public async Task DoctorParityMatchesDeployedBytesAfterInjection()
     {
-        using Harness h = NewHarness("doctor-parity");
-        string anchor = h.MakeDirectory("anchor");
-        WriteHomeGuidance(h, "Doctor parity is the operator-level default.");
+        string homeText = "Doctor parity is the operator-level default.";
+        using SquadInstalledGlobalTemplate install = SquadInstalledGlobalTemplate.WithHomeGuidance(homeText);
 
-        SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        SquadLifecycleResult install = await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex],
-            Version: "1.2.3"));
-        Assert.True(install.Success, DescribeFailure(install));
+        Assert.Equal(0, install.Record.ExitCode);
 
-        foreach (string path in InstalledEntryFiles(h, SquadTarget.Codex))
+        foreach (string path in InstalledEntryFilesIn(
+                     install.GlobalRoot(SquadTarget.Codex),
+                     SquadTarget.Codex,
+                     globalCodex: true))
         {
             string actual = await File.ReadAllTextAsync(path, Encoding.UTF8);
-            Assert.Contains("<response-preferences>Doctor parity is the operator-level default.</response-preferences>", actual, StringComparison.Ordinal);
+            Assert.Contains($"<response-preferences>{homeText}</response-preferences>", actual, StringComparison.Ordinal);
         }
     }
 
     [Fact]
     public async Task ProjectScopeInstallInjectsGuidanceIntoEveryEntryFileAcrossAllTargets()
     {
-        using Harness h = NewHarness("project-scope-guidance");
-        string projectRoot = h.MakeDirectory("project");
         string homeText = "Every target must carry the same operator guidance.";
-        WriteHomeGuidance(h, homeText);
+        using SquadInstalledProjectGuidanceTemplate install = new(homeText);
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
-            .InstallAsync(new SquadInstallRequest(
-                projectRoot,
-                SquadDeploymentScope.Project,
-                SquadTargetCatalog.All,
-                Version: "1.2.3"));
-
-        Assert.True(result.Success, DescribeFailure(result));
+        Assert.Equal(0, install.Record.ExitCode);
 
         foreach (SquadTarget target in SquadTargetCatalog.All)
         {
-            string[] files = InstalledEntryFiles(h, target, projectRoot);
+            string[] files = InstalledEntryFilesIn(install.ProjectRoot, target, globalCodex: false);
             Assert.NotEmpty(files);
             foreach (string path in files)
             {
@@ -292,24 +274,19 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IClassFixture<SquadGuid
     [Fact]
     public async Task UnreadableHomeFileFallsBackToTheShippedDefaultAndWarns()
     {
-        using Harness h = NewHarness("unreadable-home-guidance");
-        string anchor = h.MakeDirectory("anchor");
-        string path = GuidancePath(h);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        Directory.CreateDirectory(path);
+        using SquadInstalledGlobalTemplate install = SquadInstalledGlobalTemplate.WithUnreadableHomeGuidance();
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
-            .InstallAsync(new SquadInstallRequest(
-                anchor,
-                SquadDeploymentScope.Global,
-                [SquadTarget.Codex],
-                Version: "1.2.3"));
+        Assert.Equal(0, install.Record.ExitCode);
+        Assert.NotNull(install.Record.Warnings);
+        Assert.Contains(
+            "response-guidance",
+            string.Join(Environment.NewLine, install.Record.Warnings),
+            StringComparison.OrdinalIgnoreCase);
 
-        Assert.True(result.Success, DescribeFailure(result));
-        Assert.NotNull(result.Warnings);
-        Assert.Contains("response-guidance", string.Join(Environment.NewLine, result.Warnings), StringComparison.OrdinalIgnoreCase);
-
-        foreach (string entry in InstalledEntryFiles(h, SquadTarget.Codex))
+        foreach (string entry in InstalledEntryFilesIn(
+                     install.GlobalRoot(SquadTarget.Codex),
+                     SquadTarget.Codex,
+                     globalCodex: true))
         {
             string content = await File.ReadAllTextAsync(entry, Encoding.UTF8);
             Assert.Contains($"<response-preferences>{SquadResponseGuidanceSource.DefaultText}</response-preferences>", content, StringComparison.Ordinal);
@@ -319,19 +296,13 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IClassFixture<SquadGuid
     [Fact]
     public async Task GlobalInstallCreatesTheHomeGuidanceFileWithTheShippedDefault()
     {
-        using Harness h = NewHarness("install-creates-home-guidance");
-        string anchor = h.MakeDirectory("anchor");
-        string guidancePath = GuidancePath(h);
-        Assert.False(File.Exists(guidancePath), "The scenario requires the home guidance file to be absent before install.");
+        SquadInstalledGlobalTemplate install = _templates.Codex;
+        Assert.False(
+            install.HomeGuidanceExistedBeforeInstall,
+            "The scenario requires the home guidance file to be absent before install.");
+        Assert.Equal(0, install.Record.ExitCode);
 
-        SquadLifecycleResult result = await h.Lifecycle(SquadHostDefaults.ResolveRenderer())
-            .InstallAsync(new SquadInstallRequest(
-                anchor,
-                SquadDeploymentScope.Global,
-                [SquadTarget.Codex],
-                Version: "1.2.3"));
-
-        Assert.True(result.Success, DescribeFailure(result));
+        string guidancePath = Path.Combine(install.Home, ".kyber-weave", "response-guidance.md");
         Assert.True(File.Exists(guidancePath), "Global install must create ~/.kyber-weave/response-guidance.md.");
         byte[] bytes = await File.ReadAllBytesAsync(guidancePath);
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, Encoding.UTF8.GetString(bytes));
@@ -374,20 +345,23 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IClassFixture<SquadGuid
 
     private static string[] InstalledEntryFiles(Harness h, SquadTarget target, string? projectRoot = null)
     {
-        string root = projectRoot is null ? h.GlobalRoot(target) : projectRoot;
+        return InstalledEntryFilesIn(
+            projectRoot ?? h.GlobalRoot(target),
+            target,
+            globalCodex: projectRoot is null && target == SquadTarget.Codex);
+    }
 
+    private static string[] InstalledEntryFilesIn(string root, SquadTarget target, bool globalCodex)
+    {
         // The global Codex home is $CODEX_HOME itself, so the renderer's ".codex/" prefix is not part of
         // the installed path there. A project root keeps the prefix. The renderer decides both layouts.
-        bool globalCodex = projectRoot is null && target == SquadTarget.Codex;
-        string[] expected = TargetEntryFiles(target)
+        return TargetEntryFiles(target)
             .Select(relativePath => globalCodex && relativePath.StartsWith(".codex/", StringComparison.Ordinal)
                 ? relativePath[".codex/".Length..]
                 : relativePath)
             .Select(relativePath => Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)))
             .Where(File.Exists)
             .ToArray();
-
-        return expected;
     }
 
     private static IReadOnlyList<string> TargetEntryFiles(SquadTarget target)
