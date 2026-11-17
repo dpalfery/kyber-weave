@@ -3,7 +3,6 @@ schema: kyber-squad.agent/v1
 name: conductor
 description: "Primary orchestrator and default entry point: accepts a plan, specification, todo, or open request; coordinates the chosen workflow; and defaults delivery to test-first development."
 invocation: primary
-model-profile: orchestration
 capability-profile: orchestrator
 copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, "kw-docs/*", agent]
 delegates-to: [architect, azure-reader, bug-crusher-investigator, code-reviewer, csharp-dev, dal-dev, docs-dev, github-devops, go-dev, maui-dev, product-owner, pulumi-dev, python-dev, react-dev, research-agent, review-lens, review-triage, rust-dev, sql-database-architect, tauri-dev, test-dev, typescript-dev]

@@ -40,7 +40,8 @@ public static class SquadSourceValidator
         foreach (SquadAgent agent in agents)
         {
             ValidateWorkerRoster(agent);
-            if (!models.Profiles.ContainsKey(agent.ModelProfile))
+            if (!string.IsNullOrWhiteSpace(agent.ModelProfile)
+                && !models.Profiles.ContainsKey(agent.ModelProfile))
             {
                 Throw(
                     $"Agent '{agent.Name}' references unknown model profile '{agent.ModelProfile}'.",

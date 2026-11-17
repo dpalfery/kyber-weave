@@ -76,7 +76,7 @@ public sealed class SquadSourceTests
 
     /// <summary>
     /// Pins the operator-selected model assignments across planning, coding, review, and
-    /// orchestration profiles, including unchanged harness values that must remain stable.
+    /// profiles that do not change, including unchanged harness values that must remain stable.
     /// </summary>
     [Theory]
     [InlineData("architect", "claude", "opus")]
@@ -119,12 +119,12 @@ public sealed class SquadSourceTests
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
     [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
     [InlineData("reviewer", "devin", "grok-4-7-high")]
-    [InlineData("orchestration", "claude", "sonnet")]
-    [InlineData("orchestration", "copilot", "GPT-6.1 Terra (copilot)")]
-    [InlineData("orchestration", "kilo", "opencode-go/deepseek-v4.1-flash")]
-    [InlineData("orchestration", "opencode", "opencode/big-pickle")]
-    [InlineData("orchestration", "pi", "inherit")]
-    [InlineData("orchestration", "devin", "inherit")]
+    [InlineData("dev-hard", "claude", "claude-sonnet-5-5")]
+    [InlineData("dev-hard", "copilot", "GPT-6.1 Terra (copilot)")]
+    [InlineData("dev-hard", "kilo", "opencode-go/muse-spark-1.3-contributor")]
+    [InlineData("dev-hard", "opencode", "opencode-go/muse-spark-1.3-contributor")]
+    [InlineData("dev-hard", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=high]")]
+    [InlineData("dev-hard", "devin", "swe-2-high")]
     public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -190,7 +190,7 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "pro")]
     [InlineData("fast", "flash")]
     [InlineData("general", "flash")]
-    [InlineData("orchestration", "flash")]
+    [InlineData("dev-hard", "flash")]
     [InlineData("reviewer", "pro")]
     public void ModelsYmlAntigravityColumnPinsPlanningAndReviewOnProAndOtherProfilesOnFlash(
         string profileName,

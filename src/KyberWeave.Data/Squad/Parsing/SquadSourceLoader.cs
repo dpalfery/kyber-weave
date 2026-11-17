@@ -793,7 +793,7 @@ public static class SquadSourceLoader
             RequireScalar(root, "name", file.RelativePath, frontmatter.LineOffset),
             RequireScalar(root, "description", file.RelativePath, frontmatter.LineOffset),
             invocation,
-            RequireScalar(root, "model-profile", file.RelativePath, frontmatter.LineOffset),
+            TryGetScalar(root, "model-profile", file.RelativePath, frontmatter.LineOffset) ?? string.Empty,
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
             TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
             copilotTools,

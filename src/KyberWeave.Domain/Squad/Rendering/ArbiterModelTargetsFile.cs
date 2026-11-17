@@ -71,7 +71,10 @@ public static class ArbiterModelTargetsFile
             Dictionary<string, string> agentProfiles = new(StringComparer.Ordinal);
             foreach (SquadAgent agent in merged.Agents)
             {
-                agentProfiles[agent.Name] = agent.ModelProfile;
+                if (!string.IsNullOrWhiteSpace(agent.ModelProfile))
+                {
+                    agentProfiles[agent.Name] = agent.ModelProfile;
+                }
             }
 
             byte[] content = Serialize(
