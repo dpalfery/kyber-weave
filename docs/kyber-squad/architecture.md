@@ -1811,7 +1811,7 @@ minor releases.
   characters (`task-prompt-budget`); rules are never cut, and skills and standard sections go
   least relevant to the task text first.
 - **A worker that gets no inserted prompt prints its own.** The hook can be absent or untrusted,
-  and some harnesses cannot rewrite the dispatch at all: Antigravity, ZCode, CommandCode and Warp
+  and some harnesses cannot rewrite the dispatch at all: ZCode, CommandCode and Warp
   receive the prompt as `.agent_scratchpad/<task>/prompt.md`, the untracked scratch folder, and
   the dispatch names that file. A worker that starts with only the header lines runs
   `kyber-weave docs packet <task id> --agent <its name>` itself or stops; it never works from the
@@ -1868,8 +1868,7 @@ here for the Squad's own readers:
 
 | Harness | Delivery path |
 |---|---|
-| Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Factory, Devin | rewrite: the dispatch hook replaces the dispatch's header block with the full prompt |
-| Antigravity | file until its live check passes: the dispatch names `.agent_scratchpad/<task>/prompt.md`, which the worker reads first |
+| Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Antigravity, Factory, Devin | rewrite: the dispatch hook replaces the dispatch's header block with the full prompt |
 | ZCode, CommandCode | file until their live checks pass: each documents a tool-input rewrite field, but no Kyber-Weave hook or mod is rendered for it yet |
 | Warp | file: no dispatch hook exists, so the dispatch names the prompt file |
 
