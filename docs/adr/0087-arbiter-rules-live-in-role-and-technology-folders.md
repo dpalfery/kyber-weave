@@ -114,8 +114,9 @@ there too, where the person who owns the standard can see and change them.
 7. **The tests-only exemption is a machine fact.** `KW-ARB-MODE-002` loses its clause that named
    `test-dev` and gains one on `plan.task.files-all-tests`. The fact is true when every file the
    task names matches the host's `test-file-patterns`; a task that names no files leaves it absent
-   rather than vacuously true. A dispatch to `test-dev` under the old roster still answers
-   `not-required`, because its task's files are test files.
+   rather than vacuously true. A dispatch to `test-dev` under the old roster answers
+   `not-required` when its task's files are all test files; the agent's name alone no longer
+   exempts, so a task with no file list is judged on the failing-run fact like any other target.
 
 8. **A technology's allowed commands bind a read-only worker.** A technology's rule file may
    declare rules on the new `worker.command` trigger, which the worker guard raises on the command
