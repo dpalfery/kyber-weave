@@ -678,7 +678,7 @@ reference the Squad assemblies, and the bundled model matrix is not on disk at h
 | Scope | Path | Written when |
 |---|---|---|
 | Project | `artifacts/arbiter/model-targets.<harness>.json`, under the project root | The Arbiter is enabled and the scope is project |
-| Global | `~/.kyber-weave/arbiter/model-targets.<harness>.json`, under the user's home directory | The Arbiter is enabled and the scope is global |
+| Global | `.kyber-weave/arbiter/model-targets.<harness>.json`, under that harness's own global root (`~/.copilot` for Copilot, `~/.claude` for Claude, and so on) | The Arbiter is enabled and the scope is global |
 | Instance | None | Never. Targeting keeps every model. |
 
 A table is written for every hooked target, whatever the `model-targeting.mode` value. Warp and
