@@ -92,7 +92,6 @@ public static class ArbiterLedgerQueries
         ArbiterLedgerEvent? gated = excludeEventId is null
             ? null
             : events.FirstOrDefault(e => e.Id == excludeEventId);
-        bool advisory = string.Equals(gated?.Harness, ArbiterServeToken.Harness, StringComparison.Ordinal);
         string? gatedTask = gated?.Headers?.Task;
         string? gatedPlan = gated?.Headers?.PlanFile;
         DateTimeOffset? now = (gated ?? (events.Count > 0 ? events[^1] : null))?.At;
@@ -100,7 +99,7 @@ public static class ArbiterLedgerQueries
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != excludeEventId
                 && !paired.Contains(e.Id)
-                && !(advisory && SameTask(e, gatedTask, gatedPlan))
+                && !(IsServed(e) && SameTask(e, gatedTask, gatedPlan))
                 && (now is null || now.Value - e.At <= UnreturnedDispatchHorizon)
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
@@ -110,6 +109,13 @@ public static class ArbiterLedgerQueries
             .Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal)];
     }
+
+    /// <summary>
+    /// Whether <paramref name="e"/> is an advisory evaluation rather than a dispatch: a served event, whose caller
+    /// asserts the facts and then decides whether to dispatch at all.
+    /// </summary>
+    private static bool IsServed(ArbiterLedgerEvent e) =>
+        string.Equals(e.Harness, ArbiterServeToken.Harness, StringComparison.Ordinal);
 
     /// <summary>
     /// Whether <paramref name="e"/> is another attempt at the same plan task the gated dispatch names: same task id,

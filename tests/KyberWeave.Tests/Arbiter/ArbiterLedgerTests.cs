@@ -463,6 +463,48 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
     }
 
+    /// <summary>
+    /// The distinction is the earlier event's, not the retry's: a hook dispatch is a worker the harness started, so a
+    /// served retry of the same task must still see it as overlap. Keying on the retry's harness would let a serve
+    /// evaluation hide a real concurrent writer and dispatch a second one to the same files.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_AServedRetryStillSeesAHookDispatchOfTheSameTask()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        var dispatch = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        var retry = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
+        await ledger.AppendAsync(dispatch);
+        await ledger.AppendAsync(retry);
+
+        Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
+    }
+
+    /// <summary>
+    /// A served evaluation that never ran a worker does not hold a file against a hook retry of the same task either:
+    /// the exclusion follows the earlier event, so a harness whose dispatch runs through its own hook is not blocked by
+    /// a served ghost from the same task.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_AServedEvaluationDoesNotHoldAFileAgainstAHookRetryOfTheSameTask()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        var ghost = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
+        var retry = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        await ledger.AppendAsync(ghost);
+        await ledger.AppendAsync(retry);
+
+        Assert.Empty(ledger.InFlightPaths(excludeEventId: retry.Id));
+    }
+
     [Fact]
     public async Task ConcurrentWriters_ReturnsTaskFilesOfOverlappingWriterDispatches()
     {
