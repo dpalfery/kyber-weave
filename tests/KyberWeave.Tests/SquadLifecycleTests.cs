@@ -12,9 +12,12 @@ namespace KyberWeave.Tests;
 /// user-edit preservation, and isolated user paths.
 /// Covers Test Contract K8 from docs/plans/2026-08-14-kyber-squad-unified-agent-skill-deployment.md.
 /// </summary>
-public sealed class SquadLifecycleTests : IDisposable
+public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTemplate>, IDisposable
 {
+    private readonly SquadInstalledProjectTemplate _installed;
     private readonly TempDirectory _temp = new();
+
+    public SquadLifecycleTests(SquadInstalledProjectTemplate installed) => _installed = installed;
 
     public void Dispose() => _temp.Dispose();
 
@@ -242,11 +245,11 @@ public sealed class SquadLifecycleTests : IDisposable
     [Fact]
     public async Task Install_WhenAlreadyInstalledWithMatchingReceipt_IsIdempotentNoOp()
     {
-        // Arrange
+        // Arrange: a project that already holds the class template's install
         string targetRoot = Path.Combine(_temp.Path, "idempotent-project");
-        Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
+        _installed.CopyInto(userPaths, targetRoot);
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
@@ -257,10 +260,6 @@ public sealed class SquadLifecycleTests : IDisposable
             Scope: SquadDeploymentScope.Project,
             Targets: [SquadTarget.Codex],
             Version: "1.2.3");
-
-        // Initial install
-        SquadLifecycleResult firstResult = await service.InstallAsync(request);
-        Assert.True(firstResult.Success);
 
         // Act: Re-run install with identical parameters
         SquadLifecycleResult secondResult = await service.InstallAsync(request);
@@ -273,22 +272,15 @@ public sealed class SquadLifecycleTests : IDisposable
     [Fact]
     public async Task Install_WhenAlreadyInstalledWithMismatch_FailsWithoutOverwriting()
     {
-        // Arrange
+        // Arrange: a project that already holds the class template's Codex install
         string targetRoot = Path.Combine(_temp.Path, "mismatch-install-project");
-        Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
+        _installed.CopyInto(userPaths, targetRoot);
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        // Initial install with Codex
-        await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Codex],
-            Version: "1.2.3"));
 
         // Act & Assert: Attempt install with different target (Claude) without update -> fails
         SquadInstallRequest mismatchRequest = new(
@@ -347,21 +339,15 @@ public sealed class SquadLifecycleTests : IDisposable
     [Fact]
     public async Task Update_WhenInstalled_ReplacesManagedFilesAndUpdatesReceipt()
     {
-        // Arrange: Perform initial install
+        // Arrange: a project that already holds the class template's install
         string targetRoot = Path.Combine(_temp.Path, "update-project");
-        Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
+        _installed.CopyInto(userPaths, targetRoot);
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Codex],
-            Version: "1.2.3"));
 
         // User edits one managed file locally
         string architectFile = Path.Combine(targetRoot, ".codex", "agents", "architect.toml");
@@ -418,21 +404,15 @@ public sealed class SquadLifecycleTests : IDisposable
     [Fact]
     public async Task Update_DryRun_PerformsPreflightWithoutModifyingTargetOrState()
     {
-        // Arrange: Initial install
+        // Arrange: a project that already holds the class template's install
         string targetRoot = Path.Combine(_temp.Path, "update-dry-run-project");
-        Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
+        _installed.CopyInto(userPaths, targetRoot);
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Codex],
-            Version: "1.2.3"));
 
         string receiptBefore = await File.ReadAllTextAsync(Path.Combine(HomeProjectStateDirectory(userPaths, targetRoot), "squad.receipt.json"));
 
@@ -462,21 +442,15 @@ public sealed class SquadLifecycleTests : IDisposable
     [Fact]
     public async Task Uninstall_RemovesOnlyManagedFilesAndCleansReceipt()
     {
-        // Arrange: Perform initial install
+        // Arrange: a project that already holds the class template's install
         string targetRoot = Path.Combine(_temp.Path, "uninstall-project");
-        Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
+        _installed.CopyInto(userPaths, targetRoot);
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Codex],
-            Version: "1.2.3"));
 
         // Add unmanaged user file
         string unmanagedFile = Path.Combine(targetRoot, "user-config.json");
@@ -532,21 +506,15 @@ public sealed class SquadLifecycleTests : IDisposable
     [Fact]
     public async Task Uninstall_WhenLocallyEditedFileExists_PreservesEditedFileAndRetainsInReceipt()
     {
-        // Arrange: Perform initial install
+        // Arrange: a project that already holds the class template's install
         string targetRoot = Path.Combine(_temp.Path, "uninstall-modified-project");
-        Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
+        _installed.CopyInto(userPaths, targetRoot);
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Codex],
-            Version: "1.2.3"));
 
         // Locally modify one managed file
         string architectFile = Path.Combine(targetRoot, ".codex", "agents", "architect.toml");
@@ -580,21 +548,15 @@ public sealed class SquadLifecycleTests : IDisposable
     [Fact]
     public async Task Uninstall_DryRun_PerformsPreflightWithoutDeletingFiles()
     {
-        // Arrange: Initial install
+        // Arrange: a project that already holds the class template's install
         string targetRoot = Path.Combine(_temp.Path, "uninstall-dry-run-project");
-        Directory.CreateDirectory(targetRoot);
         string userData = Path.Combine(_temp.Path, "user-data");
         FakeSquadUserPaths userPaths = new(userData);
+        _installed.CopyInto(userPaths, targetRoot);
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Codex],
-            Version: "1.2.3"));
 
         // Act: Dry-run uninstall
         SquadUninstallRequest request = new(

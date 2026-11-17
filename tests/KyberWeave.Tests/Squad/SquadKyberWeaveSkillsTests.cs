@@ -20,11 +20,16 @@ namespace KyberWeave.Tests.Squad;
 /// Packs the real repository once for a test class: the APM and Agent Plugins archives that
 /// <c>squad pack</c> writes from <c>products/kyber-squad</c> plus <c>.apm/skills</c>. The archives are
 /// read-only after construction, so every case in the class shares them and the repository is never written.
+/// It also builds one copy of the repository a pack runs in, and extracts the APM archive once, so a case
+/// copies either one instead of rebuilding it.
 /// </summary>
 public sealed class SquadKyberWeavePackFixture : IDisposable
 {
     /// <summary>The release version every pack in this fixture is stamped with.</summary>
     public const string PackedVersion = "1.2.3";
+
+    private static readonly string ProductRoot =
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
 
     private readonly TempDirectory _temp = new();
 
@@ -32,6 +37,8 @@ public sealed class SquadKyberWeavePackFixture : IDisposable
     {
         ApmPack = Pack("apm");
         PluginsPack = Pack("plugins");
+        RepositoryTemplate = CreateRepositoryTemplate();
+        ExtractedApmDirectory = ExtractApm(ArchivePath(ApmPack, $"kyber-squad-{PackedVersion}.zip"));
     }
 
     /// <summary>The result of <c>squad pack --format apm</c> run from the repository root.</summary>
@@ -40,9 +47,107 @@ public sealed class SquadKyberWeavePackFixture : IDisposable
     /// <summary>The result of <c>squad pack --format plugins</c> run from the repository root.</summary>
     public SquadPackRun PluginsPack { get; }
 
+    /// <summary>
+    /// A repository shaped like this one: a solution marker and the real <c>products/kyber-squad</c>.
+    /// It is copied per case, never written into.
+    /// </summary>
+    public string RepositoryTemplate { get; }
+
+    /// <summary>The APM archive extracted once, which a case copies when it needs the loaded source.</summary>
+    public string ExtractedApmDirectory { get; }
+
     public void Dispose()
     {
         _temp.Dispose();
+    }
+
+    /// <summary>
+    /// Copies the repository template to <paramref name="root"/>, so a case starts from a repository
+    /// shaped like this one and the tree is assembled once for the class.
+    /// </summary>
+    public string CreateRepository(string root)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(root);
+
+        Directory.CreateDirectory(root);
+        CopyTree(RepositoryTemplate, root);
+        return root;
+    }
+
+    /// <summary>
+    /// <see cref="CreateRepository"/> plus one companion skill under <c>.apm/skills</c>.
+    /// </summary>
+    public string CreateRepositoryWithCompanionSkill(string root, string skillName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(skillName);
+
+        CreateRepository(root);
+
+        string skillDirectory = Path.Combine(root, ".apm", "skills", skillName);
+        Directory.CreateDirectory(skillDirectory);
+        File.WriteAllText(
+            Path.Combine(skillDirectory, "SKILL.md"),
+            $"""
+             ---
+             name: {skillName}
+             description: Fixture companion skill for the Kyber-Squad shipping contract.
+             ---
+
+             # {skillName}
+
+             Fixture body.
+
+             """);
+        return root;
+    }
+
+    /// <summary>Copies the extracted APM archive to <paramref name="destination"/>.</summary>
+    public string CopyExtractedApm(string destination)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(destination);
+
+        CopyTree(ExtractedApmDirectory, destination);
+        return destination;
+    }
+
+    private static string ArchivePath(SquadPackRun run, string fileName)
+    {
+        string path = Path.Combine(run.OutDirectory, fileName);
+        Assert.True(File.Exists(path), $"Pack wrote no archive at '{path}'.{Environment.NewLine}{run.Output}");
+        return path;
+    }
+
+    private string CreateRepositoryTemplate()
+    {
+        string template = Path.Combine(_temp.Path, "repository-template");
+        Directory.CreateDirectory(template);
+        File.WriteAllText(
+            Path.Combine(template, "KyberWeave.sln"),
+            "Microsoft Visual Studio Solution File, Format Version 12.00");
+        CopyTree(ProductRoot, Path.Combine(template, "products", "kyber-squad"));
+        return template;
+    }
+
+    private string ExtractApm(string archive)
+    {
+        string extracted = Path.Combine(_temp.Path, "apm-extracted");
+        ZipFile.ExtractToDirectory(archive, extracted);
+        return extracted;
+    }
+
+    private static void CopyTree(string source, string destination)
+    {
+        foreach (string sourceFile in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string destinationFile = Path.Combine(destination, Path.GetRelativePath(source, sourceFile));
+            string? destinationDirectory = Path.GetDirectoryName(destinationFile);
+            if (destinationDirectory is not null)
+            {
+                Directory.CreateDirectory(destinationDirectory);
+            }
+
+            File.Copy(sourceFile, destinationFile, true);
+        }
     }
 
     private SquadPackRun Pack(string format)
@@ -311,7 +416,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     [InlineData("architect", "products/kyber-squad/agents/architect.md")]
     public void PackFailsClosedWhenAnApmSkillNameClashesWithASquadName(string clashingName, string squadSource)
     {
-        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), clashingName);
+        string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), clashingName);
         string outDirectory = Path.Combine(_temp.Path, "clash-out");
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
@@ -337,7 +442,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     [InlineData("Architect", "products/kyber-squad/agents/architect.md")]
     public void PackFailsClosedWhenAnApmSkillNameDiffersOnlyInCaseFromASquadName(string clashingName, string squadSource)
     {
-        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), clashingName);
+        string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), clashingName);
         string outDirectory = Path.Combine(_temp.Path, "case-clash-out");
 
         SquadPackRun run = PackInto(repository, "all", outDirectory);
@@ -356,7 +461,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     [Fact]
     public async Task CheckoutReleaseSourceExtractsKyberWeaveSkillsBesideTheSquadSkills()
     {
-        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), ParitySkillName);
+        string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), ParitySkillName);
         string destination = Path.Combine(_temp.Path, "checkout-release");
         using LocalCheckoutSquadReleaseSource source =
             new(Path.Combine(repository, "products", "kyber-squad"));
@@ -377,7 +482,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     [Fact]
     public async Task CheckoutReleaseSourceFailsClosedWhenAKyberWeaveSkillNameClashesWithASquadName()
     {
-        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
+        string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
         string destination = Path.Combine(_temp.Path, "checkout-clash");
         using LocalCheckoutSquadReleaseSource source =
             new(Path.Combine(repository, "products", "kyber-squad"));
@@ -406,7 +511,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
-        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string repository = _pack.CreateRepository(Path.Combine(_temp.Path, "repo"));
         string outside = Path.Combine(_temp.Path, "outside");
         Directory.CreateDirectory(outside);
         string outsideSkill = Path.Combine(outside, "SKILL.md");
@@ -440,7 +545,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
-        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string repository = _pack.CreateRepository(Path.Combine(_temp.Path, "repo"));
         string link = LinkCompanionSkill(repository, ParitySkillName, linkWholeDirectory);
         string outDirectory = Path.Combine(_temp.Path, "companion-link-out");
 
@@ -464,7 +569,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
-        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string repository = _pack.CreateRepository(Path.Combine(_temp.Path, "repo"));
         string outside = Path.Combine(_temp.Path, "outside");
         string outsideSkillDirectory = Path.Combine(outside, "skills", ParitySkillName);
         Directory.CreateDirectory(outsideSkillDirectory);
@@ -508,7 +613,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
-        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), ParitySkillName);
+        string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), ParitySkillName);
         string skillDirectory = Path.Combine(repository, ".apm", "skills", ParitySkillName);
         string outside = Path.Combine(_temp.Path, "outside-nested");
         Directory.CreateDirectory(outside);
@@ -551,7 +656,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         if (!CanCreateSymbolicLinks())
             throw SkipException.ForSkip("This host cannot create symbolic links.");
 
-        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string repository = _pack.CreateRepository(Path.Combine(_temp.Path, "repo"));
         string link = LinkCompanionSkill(repository, ParitySkillName, linkWholeDirectory);
         string destination = Path.Combine(_temp.Path, "checkout-link");
         using LocalCheckoutSquadReleaseSource source =
@@ -572,7 +677,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     [Fact]
     public void CompanionTextShipsWithLfOnlyBytesWhenTheSourceUsesCrlf()
     {
-        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string repository = _pack.CreateRepository(Path.Combine(_temp.Path, "repo"));
         WriteCrlfCompanionSkill(repository, ParitySkillName);
         Assert.True(
             File.ReadAllBytes(Path.Combine(repository, ".apm", "skills", ParitySkillName, "SKILL.md"))
@@ -594,7 +699,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     [Fact]
     public void PackingTheSameCompanionSourceTwiceYieldsByteIdenticalArchivesAndChecksums()
     {
-        string repository = CreateRepository(Path.Combine(_temp.Path, "repo"));
+        string repository = _pack.CreateRepository(Path.Combine(_temp.Path, "repo"));
         WriteCrlfCompanionSkill(repository, ParitySkillName);
         SquadPackRun first = PackInto(repository, "all", Path.Combine(_temp.Path, "twice-first"));
         SquadPackRun second = PackInto(repository, "all", Path.Combine(_temp.Path, "twice-second"));
@@ -624,7 +729,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     [Fact]
     public void DirectPackApmKeepsThePreviousArchiveWhenACompanionNameClashes()
     {
-        string repository = CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
+        string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
         string outDirectory = Path.Combine(_temp.Path, "direct-out");
         Directory.CreateDirectory(outDirectory);
         string archivePath = Path.Combine(outDirectory, $"kyber-squad-{PackedVersion}.zip");
@@ -826,49 +931,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
 
     private string ExtractApmArchive()
     {
-        string extracted = Path.Combine(_temp.Path, "apm-extracted");
-        ZipFile.ExtractToDirectory(ArchivePath(_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip"), extracted);
-        return extracted;
-    }
-
-    /// <summary>
-    /// A temp repository shaped like this one: a solution marker, a copy of the real <c>products/kyber-squad</c>, and one
-    /// companion skill under <c>.apm/skills</c>. The real repository is never written.
-    /// </summary>
-    private static string CreateRepositoryWithCompanionSkill(string root, string skillName)
-    {
-        CreateRepository(root);
-
-        string skillDirectory = Path.Combine(root, ".apm", "skills", skillName);
-        Directory.CreateDirectory(skillDirectory);
-        File.WriteAllText(
-            Path.Combine(skillDirectory, "SKILL.md"),
-            $"""
-             ---
-             name: {skillName}
-             description: Fixture companion skill for the Kyber-Squad shipping contract.
-             ---
-
-             # {skillName}
-
-             Fixture body.
-
-             """);
-        return root;
-    }
-
-    /// <summary>
-    /// A temp repository shaped like this one: a solution marker and a copy of the real <c>products/kyber-squad</c>. The
-    /// real repository is never written.
-    /// </summary>
-    private static string CreateRepository(string root)
-    {
-        Directory.CreateDirectory(root);
-        File.WriteAllText(
-            Path.Combine(root, "KyberWeave.sln"),
-            "Microsoft Visual Studio Solution File, Format Version 12.00");
-        CopyDirectory(ProductRoot, Path.Combine(root, "products", "kyber-squad"));
-        return root;
+        return _pack.CopyExtractedApm(Path.Combine(_temp.Path, "apm-extracted"));
     }
 
     /// <summary>Runs <c>squad pack</c> from <paramref name="repository"/> into <paramref name="outDirectory"/>.</summary>
@@ -966,21 +1029,6 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
         {
             return false;
-        }
-    }
-
-    private static void CopyDirectory(string source, string destination)
-    {
-        foreach (string sourceFile in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-        {
-            string destinationFile = Path.Combine(destination, Path.GetRelativePath(source, sourceFile));
-            string? destinationDirectory = Path.GetDirectoryName(destinationFile);
-            if (destinationDirectory is not null)
-            {
-                Directory.CreateDirectory(destinationDirectory);
-            }
-
-            File.Copy(sourceFile, destinationFile, true);
         }
     }
 

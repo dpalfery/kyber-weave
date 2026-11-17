@@ -16,9 +16,12 @@ namespace KyberWeave.Tests;
 ///     created as part of global install while preserving local edits and the existing home-file
 ///     protection rules.
 /// </summary>
-public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
+public sealed class SquadDeployTimeGuidanceWiringTests : IClassFixture<SquadGuidanceTemplates>, IDisposable
 {
+    private readonly SquadGuidanceTemplates _templates;
     private readonly TempDirectory _temp = new();
+
+    public SquadDeployTimeGuidanceWiringTests(SquadGuidanceTemplates templates) => _templates = templates;
 
     public void Dispose()
     {
@@ -53,20 +56,15 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     public async Task UpdateGlobalRefreshesEntryFilesAndKeepsTheCurrentHomeEdit()
     {
         using Harness h = NewHarness("update-guidance");
-        string original = "Keep every answer under three sentences.";
         string updated = "Keep every answer under two sentences and ask one clarifying question.";
         string anchor = h.MakeDirectory("anchor");
-        WriteHomeGuidance(h, original);
+
+        // The template's entry files were installed with the shipped default guidance; the edit below
+        // is the current home text the update must carry into them.
+        _templates.Codex.CopyInto(h);
+        WriteHomeGuidance(h, updated);
 
         SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        SquadLifecycleResult install = await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex],
-            Version: "1.2.3"));
-        Assert.True(install.Success, DescribeFailure(install));
-
-        WriteHomeGuidance(h, updated);
         SquadLifecycleResult refresh = await lifecycle.UpdateAsync(new SquadUpdateRequest(
             anchor,
             SquadDeploymentScope.Global,
@@ -92,14 +90,10 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     {
         using Harness h = NewHarness("preserve-local-edit");
         string anchor = h.MakeDirectory("anchor");
+        _templates.Codex.CopyInto(h);
         WriteHomeGuidance(h, "Version 1 guidance.");
 
         SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex],
-            Version: "1.2.3"))).Success);
 
         string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
         string original = await File.ReadAllTextAsync(conductor, Encoding.UTF8);
@@ -125,14 +119,10 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     {
         using Harness h = NewHarness("unreadable-deployed-entry");
         string anchor = h.MakeDirectory("anchor");
+        _templates.Codex.CopyInto(h);
         WriteHomeGuidance(h, "Version 1 guidance.");
 
         SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex],
-            Version: "1.2.3"))).Success);
 
         string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
         SquadLifecycleResult update;
@@ -156,14 +146,10 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     {
         using Harness h = NewHarness("unreadable-entry-warning");
         string anchor = h.MakeDirectory("anchor");
+        _templates.Codex.CopyInto(h);
         WriteHomeGuidance(h, "Version 1 guidance.");
 
         SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex],
-            Version: "1.2.3"))).Success);
 
         string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
         SquadLifecycleResult update;
@@ -190,14 +176,10 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     {
         using Harness h = NewHarness("unreadable-entry-dry-run");
         string anchor = h.MakeDirectory("anchor");
+        _templates.Codex.CopyInto(h);
         WriteHomeGuidance(h, "Version 1 guidance.");
 
         SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex],
-            Version: "1.2.3"))).Success);
 
         string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
         SquadLifecycleResult dryRun;
@@ -228,14 +210,10 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
     {
         using Harness h = NewHarness("unreadable-entry-owner-multi");
         string anchor = h.MakeDirectory("anchor");
+        _templates.CodexAndClaude.CopyInto(h);
         WriteHomeGuidance(h, "Version 1 guidance.");
 
         SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex, SquadTarget.Claude],
-            Version: "1.2.3"))).Success);
 
         string conductor = Path.Combine(h.GlobalRoot(SquadTarget.Codex), "agents", "conductor.toml");
         SquadLifecycleResult update;
@@ -366,16 +344,9 @@ public sealed class SquadDeployTimeGuidanceWiringTests : IDisposable
         using Harness h = NewHarness("update-keeps-edited-home-guidance");
         string anchor = h.MakeDirectory("anchor");
         string guidancePath = GuidancePath(h);
-        string original = "Operator edit that update must never overwrite.";
 
-        WriteHomeGuidance(h, original);
+        _templates.Codex.CopyInto(h);
         SquadLifecycleService lifecycle = h.Lifecycle(SquadHostDefaults.ResolveRenderer());
-        Assert.True((await lifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Codex],
-            Version: "1.2.3"))).Success);
-
         string changed = "Updated operator guidance that must persist across update.";
         await File.WriteAllTextAsync(guidancePath, changed, Encoding.UTF8);
         SquadLifecycleResult result = await lifecycle.UpdateAsync(new SquadUpdateRequest(
