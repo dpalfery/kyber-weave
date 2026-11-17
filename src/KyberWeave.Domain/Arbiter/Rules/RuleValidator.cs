@@ -4,12 +4,13 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Text;
 using KyberWeave.Core.Networking;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Arbiter.Rules;
 
 /// <summary>
 /// Validates Arbiter rules and configuration against the permanent
-/// <c>KW-ARB-CONFIG-001</c> to <c>-011</c> diagnostics. Every id is permanent.
+/// <c>KW-ARB-CONFIG-001</c> to <c>-017</c> diagnostics. Every id is permanent.
 /// </summary>
 /// <remarks>
 /// Hints use the <see cref="Text.StringDistance.Nearest"/> nearest-match rule over
@@ -74,6 +75,12 @@ public static class RuleValidator
     /// <summary>The provider timeout in force cannot finish inside the hook timeout the hooks were rendered with.</summary>
     public const string ProviderTimeoutExceedsHook = "KW-ARB-CONFIG-016";
 
+    /// <summary>
+    /// A host or technology folder's rule file cannot be read, or holds a rule the Arbiter cannot use. The file is
+    /// named, and the shipped rules are used for that folder.
+    /// </summary>
+    public const string RuleFolderInvalid = "KW-ARB-CONFIG-017";
+
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 
@@ -111,7 +118,68 @@ public static class RuleValidator
         if (endpoint is not null)
             diagnostics.Add(endpoint);
 
+        diagnostics.AddRange(ValidateRuleFolders(config, filePath));
+
         return diagnostics;
+    }
+
+    /// <summary>
+    /// Validates the rules one folder file declares: a trigger or fact the Arbiter does not have, an answer with no
+    /// effect, or an effect its trigger family does not allow. Every finding names the folder file, and a caller that
+    /// sees an error uses the shipped rules for that folder.
+    /// </summary>
+    /// <param name="rules">The rules the file declares.</param>
+    /// <param name="knownRules">The rules already in force, for a <c>rules.&lt;id&gt;.answer</c> reference.</param>
+    /// <param name="filePath">The folder file the rules came from.</param>
+    /// <param name="lensNames">The known lens names; the embedded catalogue when omitted.</param>
+    internal static IReadOnlyList<Diagnostic> ValidateRuleFile(
+        IReadOnlyList<ArbiterRule> rules,
+        IReadOnlyList<ArbiterRule> knownRules,
+        string filePath,
+        IReadOnlyCollection<string>? lensNames = null)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+        ArgumentNullException.ThrowIfNull(knownRules);
+        ArgumentException.ThrowIfNullOrEmpty(filePath);
+
+        List<Diagnostic> diagnostics = [];
+        IReadOnlySet<string> lenses = new HashSet<string>(
+            lensNames ?? ArbiterSquadCatalog.LoadEmbedded().Lenses.Keys, StringComparer.Ordinal);
+        List<ArbiterRule> all = [.. knownRules, .. rules];
+
+        foreach (ArbiterRule rule in rules)
+            ValidateRule(rule, all, lenses, filePath, diagnostics);
+
+        return diagnostics;
+    }
+
+    /// <summary>
+    /// Reports the host folder files an <c>arbiter validate</c> run read. The folders hang under the repository root the
+    /// configuration file names, so the path the command already holds is enough: the file is read here rather than
+    /// carried on <see cref="ArbiterConfig"/>, which would make every reader of the config carry a machine path.
+    /// </summary>
+    private static IReadOnlyList<Diagnostic> ValidateRuleFolders(ArbiterConfig config, string? configPath)
+    {
+        if (string.IsNullOrEmpty(configPath) || !File.Exists(configPath))
+            return [];
+
+        try
+        {
+            string directory = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? string.Empty;
+            string root = string.Equals(Path.GetFileName(directory), KyberWeaveYamlParser.DefaultDirectoryName, StringComparison.Ordinal)
+                ? Path.GetDirectoryName(directory) ?? directory
+                : directory;
+            OntologyYamlSection? section = KyberWeaveYamlParser.Parse(File.ReadAllText(configPath)).Ontology;
+            OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, section);
+
+            return ArbiterConfigLoader.LoadRuleFolders(
+                config.Rules,
+                new ArbiterConfigLoader.RuleFolderRequest(root, ontology.DocsRoots, ontology.Technologies)).Findings;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException or ArgumentException)
+        {
+            return [];
+        }
     }
 
     /// <summary>

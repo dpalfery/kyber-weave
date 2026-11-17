@@ -106,7 +106,13 @@ public static class KyberWeaveConfigAssembler
                 repositoryRoot,
                 ReviewConfigParser.UnknownKeyWarnings(yaml),
                 facts),
-            Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
+            Arbiter = ArbiterConfigLoader.Merge(
+                ArbiterConfig.ProductDefaults,
+                document.Arbiter,
+                repositoryRoot is null
+                    ? null
+                    : new ArbiterConfigLoader.RuleFolderRequest(repositoryRoot, ontology.DocsRoots, ontology.Technologies),
+                out _),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
             StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
             WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook),
