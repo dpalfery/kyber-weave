@@ -137,26 +137,22 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task UpdateWithNullModelPresetsReappliesRecordedPresetToNewRelease()
     {
-        // Arrange
+        // Arrange — an install that recorded "fast" is the starting point; the update is the subject.
         string targetRoot = Path.Combine(_temp.Path, "update-reapply-preset-root");
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
+        new SquadInstalledPresetProjectTemplate(
+                "fast",
+                [SquadTarget.Copilot],
+                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
+                ("fast", FastPresetYaml))
+            .CopyInto(userPaths, targetRoot);
 
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        SquadInstallRequest installRequest = new(
-            targetRoot,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Copilot],
-            Version: "1.0.0",
-            ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" });
-
-        SquadLifecycleResult installResult = await service.InstallAsync(installRequest);
-        Assert.True(installResult.Success);
 
         // Act — update specifying ModelPresets = null must preserve and re-apply recorded preset
         SquadUpdateRequest updateRequest = new(
@@ -172,8 +168,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Assert.NotNull(updateResult.Lock);
         Assert.Equal("kyber-squad.lock/v2", updateResult.Lock.Schema);
 
-        Assert.Equal(2, renderer.RenderRequests.Count);
-        IReadOnlyDictionary<SquadTarget, SquadModelPreset>? updatePresets = renderer.RenderRequests[1].ModelPresets;
+        Assert.Single(renderer.RenderRequests);
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset>? updatePresets = renderer.RenderRequests[0].ModelPresets;
         Assert.NotNull(updatePresets);
         Assert.True(updatePresets.ContainsKey(SquadTarget.Copilot));
         Assert.Equal("fast", updatePresets[SquadTarget.Copilot].Name);
@@ -186,32 +182,29 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task UpdateChangingOnlyClaudePresetLeavesSecondTargetPresetUnchanged()
     {
-        // Arrange
+        // Arrange — an install recording one preset per target is the starting point.
         string targetRoot = Path.Combine(_temp.Path, "update-partial-override-root");
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         await WritePresetAsync(userPaths, "claude-fast", ClaudeFastPresetYaml);
         await WritePresetAsync(userPaths, "copilot-fast", FastPresetYaml);
         await WritePresetAsync(userPaths, "claude-quality", ClaudeQualityPresetYaml);
+        new SquadInstalledPresetProjectTemplate(
+                "claude-and-copilot",
+                [SquadTarget.Claude, SquadTarget.Copilot],
+                new Dictionary<SquadTarget, string>
+                {
+                    [SquadTarget.Claude] = "claude-fast",
+                    [SquadTarget.Copilot] = "copilot-fast"
+                },
+                ("claude-fast", ClaudeFastPresetYaml),
+                ("copilot-fast", FastPresetYaml))
+            .CopyInto(userPaths, targetRoot);
 
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        SquadInstallRequest installRequest = new(
-            targetRoot,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Claude, SquadTarget.Copilot],
-            Version: "1.0.0",
-            ModelPresets: new Dictionary<SquadTarget, string>
-            {
-                [SquadTarget.Claude] = "claude-fast",
-                [SquadTarget.Copilot] = "copilot-fast"
-            });
-
-        SquadLifecycleResult installResult = await service.InstallAsync(installRequest);
-        Assert.True(installResult.Success);
 
         // Act — update overriding only Claude target's preset
         SquadUpdateRequest updateRequest = new(
@@ -227,8 +220,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Assert
         Assert.True(updateResult.Success);
-        Assert.Equal(2, renderer.RenderRequests.Count);
-        IReadOnlyDictionary<SquadTarget, SquadModelPreset>? updatePresets = renderer.RenderRequests[1].ModelPresets;
+        Assert.Single(renderer.RenderRequests);
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset>? updatePresets = renderer.RenderRequests[0].ModelPresets;
         Assert.NotNull(updatePresets);
         Assert.Equal("claude-quality", updatePresets[SquadTarget.Claude].Name);
         Assert.Equal("copilot-fast", updatePresets[SquadTarget.Copilot].Name);
@@ -237,30 +230,23 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task UpdateWhenRecordedPresetMissingThrowsConflictExceptionAndAbortsBeforeDownload()
     {
-        // Arrange
+        // Arrange — an install that recorded "ephemeral" is the starting point; deleting its preset file
+        // is what the update must refuse.
         string targetRoot = Path.Combine(_temp.Path, "update-missing-preset-root");
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         string presetPath = await WritePresetAsync(userPaths, "ephemeral", FastPresetYaml);
+        new SquadInstalledPresetProjectTemplate(
+                "ephemeral",
+                [SquadTarget.Copilot],
+                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "ephemeral" },
+                ("ephemeral", FastPresetYaml))
+            .CopyInto(userPaths, targetRoot);
 
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        SquadInstallRequest installRequest = new(
-            targetRoot,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Copilot],
-            Version: "1.0.0",
-            ModelPresets: new Dictionary<SquadTarget, string>
-            {
-                [SquadTarget.Copilot] = "ephemeral"
-            });
-
-        SquadLifecycleResult installResult = await service.InstallAsync(installRequest);
-        Assert.True(installResult.Success);
-        Assert.Single(releaseSource.Requests);
 
         // Record snapshots before deleting preset and running update
         Dictionary<string, byte[]> rootSnapshotBefore = CaptureDirectorySnapshot(targetRoot);
@@ -288,7 +274,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             StringComparison.OrdinalIgnoreCase);
 
         // Must fail closed without calling release source download
-        Assert.Single(releaseSource.Requests);
+        Assert.Empty(releaseSource.Requests);
 
         // Target root and home store snapshots must remain completely untouched
         Dictionary<string, byte[]> rootSnapshotAfter = CaptureDirectorySnapshot(targetRoot);
@@ -412,7 +398,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task TwoDistinctProjectRootsMaintainIndependentPresetMaps()
     {
-        // Arrange
+        // Arrange — two installs, each recording its own preset, are the starting points.
         string projectRoot1 = Path.Combine(_temp.Path, "project-1");
         string projectRoot2 = Path.Combine(_temp.Path, "project-2");
         Directory.CreateDirectory(projectRoot1);
@@ -422,32 +408,23 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
         await WritePresetAsync(userPaths, "quality", QualityPresetYaml);
 
+        new SquadInstalledPresetProjectTemplate(
+                "fast",
+                [SquadTarget.Copilot],
+                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
+                ("fast", FastPresetYaml))
+            .CopyInto(userPaths, projectRoot1);
+        new SquadInstalledPresetProjectTemplate(
+                "quality",
+                [SquadTarget.Copilot],
+                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "quality" },
+                ("quality", QualityPresetYaml))
+            .CopyInto(userPaths, projectRoot2);
+
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        // Install Project 1 with "fast" preset
-        SquadInstallRequest request1 = new(
-            projectRoot1,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Copilot],
-            Version: "1.0.0",
-            ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" });
-
-        SquadLifecycleResult result1 = await service.InstallAsync(request1);
-        Assert.True(result1.Success);
-
-        // Install Project 2 with "quality" preset
-        SquadInstallRequest request2 = new(
-            projectRoot2,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Copilot],
-            Version: "1.0.0",
-            ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "quality" });
-
-        SquadLifecycleResult result2 = await service.InstallAsync(request2);
-        Assert.True(result2.Success);
 
         // Act — update Project 1 with ModelPresets = null
         SquadUpdateRequest update1 = new(
@@ -476,26 +453,22 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task UpdateWithEmptyModelPresetsMapClearsActivePresets()
     {
-        // Arrange
+        // Arrange — an install that recorded "fast" is the starting point.
         string targetRoot = Path.Combine(_temp.Path, "update-clear-presets-root");
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
+        new SquadInstalledPresetProjectTemplate(
+                "fast",
+                [SquadTarget.Copilot],
+                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
+                ("fast", FastPresetYaml))
+            .CopyInto(userPaths, targetRoot);
 
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        SquadInstallRequest installRequest = new(
-            targetRoot,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Copilot],
-            Version: "1.0.0",
-            ModelPresets: new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" });
-
-        SquadLifecycleResult installResult = await service.InstallAsync(installRequest);
-        Assert.True(installResult.Success);
 
         // Act — update with empty map clears presets
         SquadUpdateRequest updateRequest = new(
@@ -508,8 +481,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Assert
         Assert.True(updateResult.Success);
-        Assert.Equal(2, renderer.RenderRequests.Count);
-        IReadOnlyDictionary<SquadTarget, SquadModelPreset>? updatePresets = renderer.RenderRequests[1].ModelPresets;
+        Assert.Single(renderer.RenderRequests);
+        IReadOnlyDictionary<SquadTarget, SquadModelPreset>? updatePresets = renderer.RenderRequests[0].ModelPresets;
         Assert.True(updatePresets is null || updatePresets.Count == 0);
     }
 
@@ -620,24 +593,20 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task CommittedUpdateWritesCanonicalSnapshotKeyedByReleaseVersion()
     {
-        // Arrange
+        // Arrange — an install of 1.0.0, with the snapshot it wrote, is the starting point.
         string targetRoot = Path.Combine(_temp.Path, "update-snapshot-root");
         Directory.CreateDirectory(targetRoot);
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        new SquadInstalledPresetProjectTemplate(
+                "no-presets",
+                [SquadTarget.Copilot],
+                new Dictionary<SquadTarget, string>())
+            .CopyInto(userPaths, targetRoot);
 
         SquadStateStore stateStore = new(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        SquadInstallRequest installRequest = new(
-            targetRoot,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Copilot],
-            Version: "1.0.0");
-
-        SquadLifecycleResult installResult = await service.InstallAsync(installRequest);
-        Assert.True(installResult.Success);
 
         // Act
         SquadUpdateRequest updateRequest = new(
