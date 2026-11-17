@@ -37,8 +37,8 @@
       },
       "Markdig": {
         "type": "Transitive",
-        "resolved": "1.5.1",
-        "contentHash": "NtHwU5t5yKr6Gnylhs8/hlR0mOAftTFQURDz2ID8bkunxps1neOzKw0dYKKlwNuwiYIGLHjJTXK91f809Ko1ww=="
+        "resolved": "1.6.0",
+        "contentHash": "rJEpDfPM8wrfXUgkNejjg2bJN9bciy44uVyRwKUI+92CnSmbaLeJTLPYcCdvgM4RFsKrhs8d2H2hO78yZpMl3g=="
       },
       "Microsoft.Extensions.DependencyInjection.Abstractions": {
         "type": "Transitive",
@@ -80,9 +80,7 @@
           "KyberWeave.Contracts": "[0.1.0, )",
           "KyberWeave.Data": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
-          "KyberWeave.Kernel": "[0.1.0, )",
-          "Markdig": "[1.5.1, )",
-          "YamlDotNet": "[18.1.0, )"
+          "KyberWeave.Kernel": "[0.1.0, )"
         }
       },
       "kyberweave.core.docs": {
@@ -91,7 +89,7 @@
           "KyberWeave.Application": "[0.1.0, )",
           "KyberWeave.Core": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
-          "Markdig": "[1.5.1, )",
+          "Markdig": "[1.6.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },
@@ -102,7 +100,7 @@
           "KyberWeave.Core": "[0.1.0, )",
           "KyberWeave.Data": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
-          "Markdig": "[1.5.1, )",
+          "Markdig": "[1.6.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },
@@ -120,14 +118,14 @@
         "type": "Project",
         "dependencies": {
           "KyberWeave.Kernel": "[0.1.0, )",
-          "Markdig": "[1.5.1, )",
+          "Markdig": "[1.6.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },
       "kyberweave.kernel": {
         "type": "Project",
         "dependencies": {
-          "Markdig": "[1.5.1, )",
+          "Markdig": "[1.6.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
       }
