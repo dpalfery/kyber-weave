@@ -80,6 +80,12 @@ public static class RuleValidator
     /// </summary>
     public const string RuleFolderInvalid = "KW-ARB-CONFIG-017";
 
+    /// <summary>A technology's standard names a <c>builds-on</c> parent whose standard does not exist.</summary>
+    public const string MissingRuleFolderParent = "KW-ARB-CONFIG-018";
+
+    /// <summary>Technology standards name each other as <c>builds-on</c> parents in a cycle.</summary>
+    public const string RuleFolderCycle = "KW-ARB-CONFIG-019";
+
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 

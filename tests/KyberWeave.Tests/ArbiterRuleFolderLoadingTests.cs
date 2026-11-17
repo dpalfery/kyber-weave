@@ -26,9 +26,21 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             effects: { in-task: allow, beyond-task: escalate }
         """;
 
-    private const string ReactReadRule = """
+    private const string ParentReadRule = """
         rules:
-          - id: KW-ARB-REACT-READ-001
+          - id: typescript-read-001
+            trigger: delegate
+            question: Is this dispatch a read of a TypeScript module?
+            answers: [yes, no]
+            decide:
+              - when: { fact: delegation.prompt, matches: "*module*" }
+                answer: yes
+            effects: { yes: allow, no: allow }
+        """;
+
+    private const string ChildReadRule = """
+        rules:
+          - id: react-read-001
             trigger: delegate
             question: Is this dispatch a read of a React component?
             answers: [yes, no]
@@ -38,15 +50,21 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             effects: { yes: allow, no: allow }
         """;
 
-    private const string PythonReadRule = """
+    private const string SharedIdParentRule = """
         rules:
-          - id: KW-ARB-PYTHON-READ-001
+          - id: host-shared-001
             trigger: delegate
-            question: Is this dispatch a read of a Python module?
+            question: Does the parent's shared question hold?
             answers: [yes, no]
-            decide:
-              - when: { fact: delegation.prompt, matches: "*module*" }
-                answer: yes
+            effects: { yes: allow, no: allow }
+        """;
+
+    private const string SharedIdChildRule = """
+        rules:
+          - id: host-shared-001
+            trigger: delegate
+            question: Does the child's shared question hold?
+            answers: [yes, no]
             effects: { yes: allow, no: allow }
         """;
 
@@ -86,26 +104,72 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     }
 
     [Fact]
-    public void ATechnologysRulesLoadForThatTechnologyAndItsParentOnly()
+    public void AParentsRulesLoadBeforeItsChildsEvenWhenTheHostListsOnlyTheChild()
     {
-        WriteFolder("react", ReactReadRule);
-        WriteFolder("python", PythonReadRule);
-        WriteFolder("typescript", ReactReadRule.Replace("KW-ARB-REACT-READ-001", "KW-ARB-TYPESCRIPT-READ-001", StringComparison.Ordinal));
+        WriteStandard("typescript", buildsOn: null);
+        WriteFolder("typescript", ParentReadRule);
+        WriteStandard("react", buildsOn: "typescript");
+        WriteFolder("react", ChildReadRule);
 
-        (IReadOnlyList<ArbiterRule> reactAndParent, IReadOnlyList<Diagnostic> reactFindings) =
-            Load("arbiter:\n  enabled: true\n", technologies: ["react", "typescript"]);
-        (IReadOnlyList<ArbiterRule> pythonOnly, IReadOnlyList<Diagnostic> pythonFindings) =
-            Load("arbiter:\n  enabled: true\n", technologies: ["python"]);
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["react"]);
 
-        Assert.Empty(reactFindings);
-        Assert.Contains(reactAndParent, rule => rule.Id == "KW-ARB-REACT-READ-001");
-        Assert.Contains(reactAndParent, rule => rule.Id == "KW-ARB-TYPESCRIPT-READ-001");
-        Assert.DoesNotContain(reactAndParent, rule => rule.Id == "KW-ARB-PYTHON-READ-001");
+        Assert.Empty(findings);
+        List<string> ids = [.. rules.Select(rule => rule.Id)];
+        Assert.Contains("typescript-read-001", ids);
+        Assert.Contains("react-read-001", ids);
+        Assert.True(
+            ids.IndexOf("typescript-read-001") < ids.IndexOf("react-read-001"),
+            "The parent's rules must be loaded before the child's.");
+    }
 
-        Assert.Empty(pythonFindings);
-        Assert.Contains(pythonOnly, rule => rule.Id == "KW-ARB-PYTHON-READ-001");
-        Assert.DoesNotContain(pythonOnly, rule => rule.Id == "KW-ARB-REACT-READ-001");
-        Assert.DoesNotContain(pythonOnly, rule => rule.Id == "KW-ARB-TYPESCRIPT-READ-001");
+    [Fact]
+    public void AChildsRuleWinsOnAnIdTheParentDeclaresToo()
+    {
+        WriteStandard("typescript", buildsOn: null);
+        WriteFolder("typescript", SharedIdParentRule);
+        WriteStandard("react", buildsOn: "typescript");
+        WriteFolder("react", SharedIdChildRule);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["react"]);
+
+        Assert.Empty(findings);
+        Assert.Equal(
+            "Does the child's shared question hold?",
+            Assert.Single(rules, rule => rule.Id == "host-shared-001").Question);
+    }
+
+    [Fact]
+    public void AMissingParentIsAFindingAndTheChildsRulesStillLoad()
+    {
+        WriteStandard("react", buildsOn: "ghost");
+        WriteFolder("react", ChildReadRule);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["react"]);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.MissingRuleFolderParent);
+        Assert.Equal("ghost", finding.Subject);
+        Assert.EndsWith("react.standards.md", finding.FilePath, StringComparison.Ordinal);
+        Assert.Contains(rules, rule => rule.Id == "react-read-001");
+    }
+
+    [Fact]
+    public void ACycleInBuildsOnIsAFindingAndEachFolderLoadsOnce()
+    {
+        WriteStandard("alpha", buildsOn: "beta");
+        WriteFolder("alpha", ParentReadRule);
+        WriteStandard("beta", buildsOn: "alpha");
+        WriteFolder("beta", ChildReadRule);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["alpha"]);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.RuleFolderCycle);
+        Assert.EndsWith("beta.standards.md", finding.FilePath, StringComparison.Ordinal);
+        Assert.Single(rules, rule => rule.Id == "typescript-read-001");
+        Assert.Single(rules, rule => rule.Id == "react-read-001");
     }
 
     [Fact]
@@ -273,7 +337,8 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     [Fact]
     public void ADeclaredTechnologysFolderAppliesWhenTheRepositoryConfigurationIsLoaded()
     {
-        WriteFolder("react", ReactReadRule);
+        WriteStandard("react", buildsOn: null);
+        WriteFolder("react", ChildReadRule);
         WriteConfig("""
             ontology:
               docs-root: docs
@@ -284,7 +349,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
 
-        Assert.Contains(config.Arbiter.Rules, rule => rule.Id == "KW-ARB-REACT-READ-001");
+        Assert.Contains(config.Arbiter.Rules, rule => rule.Id == "react-read-001");
     }
 
     [Fact]
@@ -331,6 +396,17 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         Directory.CreateDirectory(directory);
         string path = Path.Combine(directory, $"{name}.arbiter-rules.yml");
         File.WriteAllText(path, body);
+        return path;
+    }
+
+    /// <summary>Writes one scope folder's standard, with an optional <c>builds-on</c> parent.</summary>
+    private string WriteStandard(string name, string? buildsOn)
+    {
+        string directory = Path.Combine(Root, "docs", "standards", name);
+        Directory.CreateDirectory(directory);
+        string parent = buildsOn is null ? string.Empty : $"builds-on: {buildsOn}\n";
+        string path = Path.Combine(directory, $"{name}.standards.md");
+        File.WriteAllText(path, $"---\nid: standards/{name}\n{parent}---\n\n# {name}\n");
         return path;
     }
 

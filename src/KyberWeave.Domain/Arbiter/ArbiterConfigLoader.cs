@@ -354,18 +354,138 @@ public static class ArbiterConfigLoader
 
         List<ArbiterRule> rules = [.. shipped];
         List<Diagnostic> findings = [];
+        HashSet<string> applied = new(StringComparer.Ordinal);
 
         foreach (string role in RoleFolders)
-            TryApplyFolder(rules, request, role, findings);
+        {
+            if (applied.Add(role))
+                TryApplyFolder(rules, request, role, findings);
+        }
 
         foreach (string technology in request.Technologies
                      .Where(name => !string.IsNullOrWhiteSpace(name))
+                     .Select(name => name.Trim())
                      .Distinct(StringComparer.Ordinal))
         {
-            TryApplyFolder(rules, request, technology.Trim(), findings);
+            foreach (string folder in FolderChain(request, technology, findings))
+            {
+                if (applied.Add(folder))
+                    TryApplyFolder(rules, request, folder, findings);
+            }
         }
 
         return (rules, findings);
+    }
+
+    /// <summary>
+    /// The folders to read for <paramref name="technology"/>, root parent first so a child's rule wins on a shared id.
+    /// </summary>
+    /// <remarks>
+    /// The parent is the one the folder's standard names in <c>builds-on</c>, whether or not the host listed it. A
+    /// missing parent or a cycle is a finding, never an exception: the chain stops there and the folders found so far
+    /// are read.
+    /// </remarks>
+    private static List<string> FolderChain(RuleFolderRequest request, string technology, List<Diagnostic> findings)
+    {
+        List<string> chain = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        string current = technology;
+        string? namedBy = null;
+
+        while (true)
+        {
+            if (!seen.Add(current))
+            {
+                findings.Add(new Diagnostic(
+                    RuleValidator.RuleFolderCycle,
+                    Severity.Error,
+                    $"The standards' builds-on chain cycles back to '{current}', so the Arbiter stops reading parents there.",
+                    current,
+                    namedBy,
+                    "Remove the cycle from the standards' builds-on keys."));
+                break;
+            }
+
+            chain.Add(current);
+
+            (string Path, string Text)? standard = FindStandardFile(request, current);
+            if (standard is null)
+                break;
+
+            string? parent = BuildsOnOf(standard.Value.Text);
+            if (parent is null)
+                break;
+
+            if (FindStandardFile(request, parent) is null)
+            {
+                findings.Add(new Diagnostic(
+                    RuleValidator.MissingRuleFolderParent,
+                    Severity.Warning,
+                    $"'{Path.GetFileName(standard.Value.Path)}' names '{parent}' as its builds-on parent, but that folder has no standard, so its Arbiter rules are not read.",
+                    parent,
+                    standard.Value.Path,
+                    "Add the parent's standard, or remove the builds-on key."));
+                break;
+            }
+
+            namedBy = standard.Value.Path;
+            current = parent;
+        }
+
+        chain.Reverse();
+        return chain;
+    }
+
+    /// <summary>The first docs root that holds a scope folder's standard, with its text, or null.</summary>
+    private static (string Path, string Text)? FindStandardFile(RuleFolderRequest request, string name)
+    {
+        if (request.ReadFile is null)
+            return null;
+
+        foreach (string docsRoot in request.DocsRoots)
+        {
+            if (string.IsNullOrWhiteSpace(docsRoot))
+                continue;
+
+            string path = Path.Combine(
+                request.RepositoryRoot,
+                docsRoot,
+                DocsLayout.Standards,
+                name,
+                $"{name}{DocsLayout.StandardsSuffix}");
+            try
+            {
+                string? text = request.ReadFile(path);
+                if (text is not null)
+                    return (path, text);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The <c>builds-on</c> parent a standard's frontmatter names, or null when it names none.</summary>
+    private static string? BuildsOnOf(string standardText)
+    {
+        FrontmatterReadResult frontmatter = MarkdownFrontmatterReader.Read(standardText);
+        if (!frontmatter.HasFrontmatter || string.IsNullOrWhiteSpace(frontmatter.Yaml))
+            return null;
+
+        try
+        {
+            StandardBuildsOnYaml? document =
+                MarkdownFrontmatterReader.Deserializer.Deserialize<StandardBuildsOnYaml>(frontmatter.Yaml);
+            string? parent = document?.BuildsOn?.Trim();
+            return string.IsNullOrEmpty(parent) ? null : parent;
+        }
+        catch (YamlException)
+        {
+            return null;
+        }
     }
 
     private static void TryApplyFolder(
@@ -1260,6 +1380,12 @@ internal sealed class ArbiterDefaultRulesYaml
     public List<string>? TestFilePatterns { get; set; }
 
     public List<ArbiterLensPathYaml>? LensPaths { get; set; }
+}
+
+/// <summary>The one key the Arbiter reads from a scope folder's standard frontmatter.</summary>
+internal sealed class StandardBuildsOnYaml
+{
+    public string? BuildsOn { get; set; }
 }
 
 /// <summary>One <c>lens-paths</c> row in the embedded rules.</summary>
