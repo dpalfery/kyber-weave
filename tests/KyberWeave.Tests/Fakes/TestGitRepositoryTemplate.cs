@@ -139,57 +139,18 @@ public static class TestGitRepositoryTemplate
         - NOT VERIFIED: the export in a real browser — no browser in the run environment.
         """;
 
-    /// <summary>
-    ///     Creates the <c>RunDeliveryTests</c> run repository at <paramref name="workPath" /> and the bare remote it
-    ///     pushes to at <paramref name="remotePath" />: a checkout on the run branch carrying the run's work, the
-    ///     active plan, the run record and the review evidence.
-    /// </summary>
-    /// <remarks>
-    ///     <para>
-    ///         The remote holds only the base commit, so a plain (non-forced) push of the run branch is accepted. Both
-    ///         come from one seed, written once per test assembly: only the copy is per test.
-    ///     </para>
-    ///     <para>
-    ///         The copy is clean and the plan is still active, so the caller makes exactly the one change it is about:
-    ///         move the plan into the archive, and commit that move or leave it staged.
-    ///     </para>
-    /// </remarks>
-    public static void CreateRunDeliveryRepositories(string workPath, string remotePath)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(workPath);
-        ArgumentException.ThrowIfNullOrWhiteSpace(remotePath);
-
-        string seed = EnsureTemplate("run-delivery-seed", InitializeRunDeliverySeedTemplate);
-        CopyDirectory(Path.Combine(seed, "remote.git"), remotePath);
-        CopyDirectory(Path.Combine(seed, "run-delivery-model"), workPath);
-        ConfigureSeedCopy(workPath, remotePath);
-    }
-
-    /// <summary>
-    ///     Gives a freshly copied repository the git state the delivery tests expect: the identity the deliver step
-    ///     commits under, a github.com fetch URL, and a push URL for the copy's own
-    ///     <paramref name="remotePath" />.
-    /// </summary>
-    /// <remarks>
-    ///     The whole <c>.git</c> folder is copied, configuration included, so the identity and the remote-tracking
-    ///     refs the seed recorded survive. Only the remote's location is local to one test, and that is what is
-    ///     rewritten here: a copy can therefore never push to another test's remote by accident.
-    /// </remarks>
-    private static void ConfigureSeedCopy(string workPath, string remotePath)
-    {
-        // The deliver step commits with plain `git commit`, which needs an identity, and the test runner's global
-        // gitconfig is not guaranteed to carry one.
-        GitIdentity(workPath);
-        // The fetch URL names the github.com repository the deliver step reads as owner/name, so it is the same in
-        // every test; only the push URL is repointed at that test's own bare remote.
-        RunGit(workPath, "remote", "set-url", "origin", SeedFetchUrl);
-        RunGit(workPath, "remote", "set-url", "--push", "origin", remotePath);
-        RunGit(workPath, "config", "branch.main.remote", "origin");
-        RunGit(workPath, "remote", "set-head", "origin", "main");
-    }
-
     /// <summary>The github.com URL the seed clone records, which every copy keeps as its fetch URL.</summary>
     private const string SeedFetchUrl = "https://github.com/acme/widgets.git";
+
+    /// <summary>
+    ///     The push URL every delivery repository records, <c>../remote.git</c>, which is the bare remote beside it.
+    /// </summary>
+    /// <remarks>
+    ///     Relative on purpose: git resolves it against the directory it runs in, which the deliver step always makes
+    ///     the run's own checkout. The copy therefore reaches the remote copied next to it and no other, and a copy
+    ///     needs no git command at all to become independent of the template.
+    /// </remarks>
+    private const string SeedPushUrl = "../remote.git";
 
     /// <summary>
     ///     Creates the <c>ReviewCycleTests</c> repository: the council baseline already on its <c>feature</c> branch,
@@ -433,7 +394,8 @@ public static class TestGitRepositoryTemplate
 
     /// <summary>
     ///     Writes the <c>RunDeliveryTests</c> history once, into a directory holding the bare <c>remote.git</c> at the
-    ///     base commit and the <c>run-delivery-model</c> checkout cloned from it on the run branch.
+    ///     base commit and the <c>run-delivery-model</c> checkout cloned from it on the run branch. The class copies
+    ///     this seed per test, and copies it again to derive the seed's archived variants.
     /// </summary>
     /// <remarks>
     ///     <para>
@@ -444,11 +406,11 @@ public static class TestGitRepositoryTemplate
     ///     </para>
     ///     <para>
     ///         The checkout is clean: the run's work, the active plan and the evidence in an ignored scratch folder are
-    ///         all committed. The archive move is the one change each test makes, so the deliver step has exactly that
+    ///         all committed. The archive move is the one change a test makes, so the deliver step has exactly that
     ///         to commit or find committed.
     ///     </para>
     /// </remarks>
-    private static void InitializeRunDeliverySeedTemplate(string seed)
+    internal static void InitializeRunDeliverySeedTemplate(string seed)
     {
         const string branch = "claude/feat/widget-export";
         const string activePlan = "docs/plans/2026-11-13-widget-export.md";
@@ -469,8 +431,10 @@ public static class TestGitRepositoryTemplate
         RunGit(model, "push", "--quiet", "origin", "HEAD:refs/heads/main");
         // The clone already put the initial branch (main) on the commit it cloned, tracking origin/main.
         RunGit(model, "remote", "set-head", "origin", "main");
-        // Record the github.com URL in the template's own configuration; each test copy repoints only the push URL.
+        // Record the github.com URL the deliver step reads as owner/name, and a push URL relative to the checkout, so a
+        // copy of the seed needs no rewrite.
         RunGit(model, "remote", "set-url", "origin", SeedFetchUrl);
+        RunGit(model, "remote", "set-url", "--push", "origin", SeedPushUrl);
         RunGit(model, "checkout", "--quiet", "-b", branch);
         WriteFile(model, ".kyber-weave/.keep", string.Empty);
         WriteFile(model, "src/Export.cs", "// export\n");
@@ -556,7 +520,7 @@ public static class TestGitRepositoryTemplate
     }
 
     /// <summary>Commits everything already staged, refusing nothing because the checkout has nothing to commit.</summary>
-    private static void Commit(string repo, string message)
+    internal static void Commit(string repo, string message)
     {
         RunGit(repo, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", message);
     }
@@ -649,7 +613,7 @@ public static class TestGitRepositoryTemplate
     ///     Runs git in <paramref name="repo" /> and throws git's own stderr when it fails. The directory need not be a
     ///     repository: seeding runs <c>git init</c> and <c>git clone</c> inside a plain template directory.
     /// </summary>
-    private static void RunGit(string repo, params string[] arguments)
+    internal static void RunGit(string repo, params string[] arguments)
     {
         _ = Output(repo, arguments);
     }

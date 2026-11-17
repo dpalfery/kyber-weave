@@ -91,6 +91,8 @@ public sealed class SquadRunCommandTests : IDisposable
     [Fact]
     public void SuccessfulRunLeavesProjectSourceTreeCompletelyUnmodified()
     {
+        // The class's one row that runs the real instance ensure end to end, so the zero-files guarantee is proven
+        // against a real deployment rather than a stand-in.
         string sourceFile = Path.Combine(_projectDir, "Program.cs");
         File.WriteAllText(sourceFile, "// Original content", Encoding.UTF8);
         string[] entriesBefore = Directory.GetFileSystemEntries(_projectDir, "*", SearchOption.AllDirectories);
@@ -122,7 +124,6 @@ public sealed class SquadRunCommandTests : IDisposable
     [Fact]
     public void ConcurrentRunsExecuteWithIsolatedInstanceRoots()
     {
-        WritePreset("fast");
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
         _selectionStore.Set(_projectDir, SquadTarget.Codex, "fast");
 
@@ -135,7 +136,8 @@ public sealed class SquadRunCommandTests : IDisposable
                 claudeRoot = startInfo.Environment["CLAUDE_CONFIG_DIR"];
                 return 0;
             },
-            name => $"/usr/bin/{name}");
+            name => $"/usr/bin/{name}",
+            ensureOverride: EnsuredInstance);
 
         SquadRunCommand codexCommand = CreateCommand(
             startInfo =>
@@ -143,7 +145,8 @@ public sealed class SquadRunCommandTests : IDisposable
                 codexRoot = startInfo.Environment["CODEX_HOME"];
                 return 0;
             },
-            name => $"/usr/bin/{name}");
+            name => $"/usr/bin/{name}",
+            ensureOverride: EnsuredInstance);
 
         CapturedConsoleExecution<int> exec1 = ProcessConsoleCapture.Run(() =>
             claudeCommand.Execute(null!, new SquadRunSettings { Harness = "claude" }));
@@ -170,7 +173,6 @@ public sealed class SquadRunCommandTests : IDisposable
     [InlineData("pi")]
     public void HarnessNeutralSyntaxSupportsAnyApprovedReadyTarget(string harnessToken)
     {
-        WritePreset("fast");
         SquadTarget target = SquadTargetCatalog.Parse([harnessToken])[0];
         _selectionStore.Set(_projectDir, target, "fast");
 
@@ -181,7 +183,8 @@ public sealed class SquadRunCommandTests : IDisposable
                 launched = true;
                 return 0;
             },
-            name => $"/bin/{name}");
+            name => $"/bin/{name}",
+            ensureOverride: EnsuredInstance);
 
         SquadRunSettings settings = new()
         {
@@ -286,9 +289,8 @@ public sealed class SquadRunCommandTests : IDisposable
     [Fact]
     public void HarnessMissingFromPathExitsWithCodeOne()
     {
-        WritePreset("fast");
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
-        SquadRunCommand command = CreateCommand(findOnPath: _ => null);
+        SquadRunCommand command = CreateCommand(findOnPath: _ => null, ensureOverride: EnsuredInstance);
         SquadRunSettings settings = new()
         {
             Harness = "claude"
@@ -320,9 +322,8 @@ public sealed class SquadRunCommandTests : IDisposable
     [Fact]
     public void ArgumentContainingShellMetacharacterExitsWithCodeTwo()
     {
-        WritePreset("fast");
         _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
-        SquadRunCommand command = CreateCommand();
+        SquadRunCommand command = CreateCommand(ensureOverride: EnsuredInstance);
         SquadRunSettings settings = new()
         {
             Harness = "claude",
@@ -338,6 +339,17 @@ public sealed class SquadRunCommandTests : IDisposable
     #endregion
 
     #region Helper Methods
+
+    /// <summary>
+    ///     A stand-in for the real <c>squad instance ensure</c>: the instance root a preset instance would live in,
+    ///     without installing one. A real ensure renders and commits a whole bundle, which takes seconds, and the rows
+    ///     that use this assert what <c>squad run</c> does with the root it is given, not that the install works.
+    ///     <see cref="SuccessfulRunLeavesProjectSourceTreeCompletelyUnmodified" /> runs the real ensure end to end.
+    /// </summary>
+    private Task<SquadInstanceEnsureResult> EnsuredInstance(SquadTarget target, string preset) =>
+        Task.FromResult(new SquadInstanceEnsureResult(
+            Path.Combine(_home, ".kyber-weave", "squad", "instances", SquadTargetCatalog.GetToken(target), preset),
+            []));
 
     private void WritePreset(string name, string? yaml = null)
     {

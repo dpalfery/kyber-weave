@@ -22,10 +22,9 @@ namespace KyberWeave.Tests;
 /// everything as it was, and the one create-or-update it makes. Git runs for real in a scratch repository whose push
 /// goes to a local bare repository; every gh call is answered by a script, so nothing reaches GitHub.
 /// </summary>
-public sealed class RunDeliveryTests : IDisposable
+public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTemplate>, IDisposable
 {
     private const string Branch = "claude/feat/widget-export";
-    private const string ActivePlan = "docs/plans/2026-11-13-widget-export.md";
     private const string ArchivedPlan = "docs/archive/plans/2026-11-13-widget-export.md";
     private const string PrUrl = "https://github.com/acme/widgets/pull/42";
 
@@ -62,12 +61,14 @@ public sealed class RunDeliveryTests : IDisposable
         """;
 
     private readonly string _root = Path.Combine(Path.GetTempPath(), "kw-deliver-" + Guid.NewGuid().ToString("N"));
+    private readonly RunDeliveryRepositoryTemplate _templates;
     private readonly string _work;
     private readonly string _remote;
     private readonly string _home;
 
-    public RunDeliveryTests()
+    public RunDeliveryTests(RunDeliveryRepositoryTemplate templates)
     {
+        _templates = templates;
         _work = Path.Combine(_root, "work");
         _remote = Path.Combine(_root, "remote.git");
         _home = Path.Combine(_root, "home");
@@ -857,16 +858,19 @@ public sealed class RunDeliveryTests : IDisposable
     /// A repository on the run branch with one commit of work, its base on <c>origin/main</c>, a run record, and the
     /// plan either archived and committed, archived and only staged (as the archive tool leaves it), or still active.
     /// </summary>
+    /// <remarks>
+    /// Each of those three states is one template the class built once, copied here, so a test starts with real git
+    /// history and its own bare remote without building either. Only the run record is written per test, because it
+    /// names this test's home and checkout.
+    /// </remarks>
     private void GitRunRepository(bool archivePending, bool archived = true)
     {
-        TestGitRepositoryTemplate.CreateRunDeliveryRepositories(_work, _remote);
-        if (archived)
-        {
-            Directory.CreateDirectory(Path.Combine(_work, "docs", "archive", "plans"));
-            Git(_work, "mv", ActivePlan, ArchivedPlan);
-            if (!archivePending)
-                Git(_work, "commit", "-q", "-m", "docs(plan): archive");
-        }
+        _templates.Copy(
+            !archived ? RunDeliveryRepositoryTemplate.PlanState.Active
+                : archivePending ? RunDeliveryRepositoryTemplate.PlanState.ArchivedStaged
+                : RunDeliveryRepositoryTemplate.PlanState.ArchivedCommitted,
+            _work,
+            _remote);
 
         string common = Path.GetFullPath(Path.Combine(_work, Git(_work, "rev-parse", "--git-common-dir").Trim()));
         RunBaseState.Write(_home, Branch, "origin/main", new RunStartPlace(common, _work, DateTimeOffset.UtcNow.AddMinutes(-5)));
