@@ -174,7 +174,7 @@ public sealed class OnboardingCommandTests : IDisposable
         ProbeResult result = _probe.RunCli("docs", "onboarding", "done", filePath);
 
         Assert.Equal(2, result.ExitCode);
-        Assert.Contains("is a file, not a directory", result.Output, StringComparison.Ordinal);
+        ConsoleOutputAssert.ContainsUnwrapped("is a file, not a directory", result.Output);
     }
 
     [Fact]

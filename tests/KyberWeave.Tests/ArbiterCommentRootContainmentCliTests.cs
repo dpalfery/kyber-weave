@@ -43,7 +43,7 @@ public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
             }));
 
         Assert.Equal(1, execution.Result);
-        Assert.Contains("was not found under the repository root.", execution.Output, StringComparison.Ordinal);
+        ConsoleOutputAssert.ContainsUnwrapped("was not found under the repository root.", execution.Output);
         Assert.DoesNotContain("decision", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 }
