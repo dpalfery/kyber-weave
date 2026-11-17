@@ -111,6 +111,36 @@ public class StandardsFolderShapeTests
         Assert.Contains("docs standards migrate", warning.Hint, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The six-heading shape arrived with the technology standard. A host that renamed its
+    /// standard but has not reshaped it is still running, so its own headings are a warning
+    /// that names the one command that repairs them, never an error that blocks its runs.
+    /// </summary>
+    [Fact]
+    public void AStandardWithItsOwnHeadingsWarnsAndNamesTheMigrationCommand()
+    {
+        const string OwnHeadings = """
+            ## Stack
+
+            ## Configuration
+
+            ## Commands
+            """;
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet", OwnHeadings))
+            .Write("6-Docs/standards/dotnet/dotnet.rules.md", Rules("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.False(report.HasErrors);
+        Diagnostic warning = Assert.Single(
+            report.Items, i => i.Code == DocSpecValidator.StandardHeadings);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Contains("docs standards migrate", warning.Hint, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AMissingRulesFileIsAnErrorNamingTheFile()
     {
@@ -137,7 +167,7 @@ public class StandardsFolderShapeTests
     }
 
     [Fact]
-    public void AStandardMissingAHeadingIsAnErrorNamingTheHeading()
+    public void AStandardMissingAHeadingWarnsAndNamesTheHeading()
     {
         const string MissingTesting = """
             ## Naming and layout
@@ -164,7 +194,7 @@ public class StandardsFolderShapeTests
     }
 
     [Fact]
-    public void AStandardWithHeadingsOutOfOrderIsAnError()
+    public void AStandardWithHeadingsOutOfOrderWarns()
     {
         const string Reversed = """
             ## Coding standards

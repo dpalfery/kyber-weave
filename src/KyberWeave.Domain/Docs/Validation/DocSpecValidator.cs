@@ -655,13 +655,14 @@ public sealed class DocSpecValidator
             if (string.Equals(actual, expected[i], StringComparison.OrdinalIgnoreCase)) continue;
 
             report.Add(new Diagnostic(
-                StandardHeadings, Severity.Error,
+                StandardHeadings, Severity.Warning,
                 actual is null
                     ? $"the '{scope}' standard is missing the heading '## {expected[i]}'."
                     : $"the '{scope}' standard has '## {actual}' where '## {expected[i]}' belongs.",
                 document.Subject,
                 document.RelativePath,
-                $"Use these six headings in order: {string.Join("; ", expected.Select(h => $"## {h}"))}.",
+                $"Run '{DocsLayout.MigrateStandardsCommand}' to reshape it, or use these six " +
+                $"headings in order: {string.Join("; ", expected.Select(h => $"## {h}"))}.",
                 i < sections.Count ? sections[i].LineNumber : null));
             return;
         }
@@ -670,12 +671,12 @@ public sealed class DocSpecValidator
         {
             DocumentSection extra = sections[expected.Count];
             report.Add(new Diagnostic(
-                StandardHeadings, Severity.Error,
+                StandardHeadings, Severity.Warning,
                 $"the '{scope}' standard has an extra heading '## {extra.Heading.Trim()}'.",
                 document.Subject,
                 document.RelativePath,
-                "A standard holds exactly these six sections: " +
-                $"{string.Join("; ", expected.Select(h => $"## {h}"))}.",
+                $"Run '{DocsLayout.MigrateStandardsCommand}' to reshape it. A standard holds exactly " +
+                $"these six sections: {string.Join("; ", expected.Select(h => $"## {h}"))}.",
                 extra.LineNumber));
         }
     }

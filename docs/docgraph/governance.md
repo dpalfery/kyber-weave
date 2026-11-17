@@ -72,7 +72,7 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-SPEC-007` | `technology` declared on a document that is not a coding standard, a rule or a skill; `role` on one that is not one of those three; or a scope that names a technology or role other than its folder |
 | `KW-DOC-SPEC-011` | A standard or skills document names neither a technology nor a role |
 | `KW-DOC-SPEC-012` | A declared technology, role or platform folder is missing one of its four files; a legacy `README.md` standard is a warning naming the migration command |
-| `KW-DOC-SPEC-013` | A standard's headings are not the six the ontology requires, in order |
+| `KW-DOC-SPEC-013` | A standard's headings are not the six the ontology requires, in order. During the warning period this is a warning naming `docs standards migrate`, not an error, so a host that renamed but has not reshaped still runs |
 | `KW-DOC-SPEC-014` | `builds-on` names an undeclared parent, the standard itself, or a parent that already names a parent; or it sits outside a coding standard |
 | `KW-DOC-TASKS-014` | A task file is in the JSON form an older release wrote (hint: `--convert`), or declares schema version 1 (hint: `--write`): either is read with a warning |
 | `KW-DOC-TASKS-015` | A task file entry names a `Difficulty:` other than `easy`, `medium` or `hard` |

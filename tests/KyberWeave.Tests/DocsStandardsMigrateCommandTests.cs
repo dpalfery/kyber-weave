@@ -6,8 +6,9 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// The standards migration renames a host's legacy <c>README.md</c> standards to their
-/// prefixed names and writes the files a complete folder holds, without changing a byte of
-/// the text the host already wrote. A second run changes nothing.
+/// prefixed names, writes the files a complete folder holds, and reshapes a standard whose
+/// own headings are not the six the ontology requires without losing authored text. A second
+/// run changes nothing.
 /// </summary>
 public class DocsStandardsMigrateCommandTests
 {
@@ -30,9 +31,45 @@ public class DocsStandardsMigrateCommandTests
 
         # C# standard
 
-        ## Types
+        ## Naming and layout
 
-        Use records for value-like data.
+        ## Coding standards
+
+        ## Testing
+
+        ## Commands
+
+        ## Security and data handling
+
+        ## Done checklist
+        """;
+
+    private const string LegacyCsharpWithOwnHeadings = """
+        ---
+        id: standards/csharp
+        title: C# standard
+        doc-type: coding-standard
+        status: current
+        technology: csharp
+        owner: dpalfery
+        last-reviewed: 2026-11-16
+        ---
+
+        # C# standard
+
+        How C# is written in this repository.
+
+        ## Stack
+
+        - .NET 10.
+
+        ## Naming
+
+        Types use PascalCase.
+
+        ## Commands
+
+        Run `dotnet build`.
         """;
 
     private static string StandardPath(string root, string scope) =>
@@ -139,4 +176,106 @@ public class DocsStandardsMigrateCommandTests
         Assert.Empty(result.Changes);
         Assert.True(File.Exists(Path.Combine(folder, "README.md")));
     }
+
+    /// <summary>
+    /// A host standard that predates the six headings keeps every authored word: its own
+    /// sections become third-level sections under the heading each fits, and each move is
+    /// reported so the operator can see where the text went.
+    /// </summary>
+    [Fact]
+    public void AStandardWithItsOwnHeadingsIsReshapedUnderTheSixAndEachMoveIsListed()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
+
+        StandardsFolderMigrationResult result =
+            new StandardsFolderMigration(repo.Path, Declared).Run();
+
+        string shaped = File.ReadAllText(StandardPath(repo.Path, "csharp"));
+
+        Assert.Equal(DocsLayout.StandardHeadings, LevelTwoHeadings(shaped));
+        Assert.Contains("### Stack", shaped, StringComparison.Ordinal);
+        Assert.Contains("### Naming", shaped, StringComparison.Ordinal);
+        Assert.Contains("How C# is written in this repository.", shaped, StringComparison.Ordinal);
+        Assert.Contains("- .NET 10.", shaped, StringComparison.Ordinal);
+        Assert.Contains("Types use PascalCase.", shaped, StringComparison.Ordinal);
+        Assert.Contains("Run `dotnet build`.", shaped, StringComparison.Ordinal);
+
+        Assert.Contains(result.Moves, move =>
+            move.Heading == "Stack" && move.Under == "Coding standards");
+        Assert.Contains(result.Moves, move =>
+            move.Heading == "Naming" && move.Under == "Naming and layout");
+        Assert.DoesNotContain(result.Moves, move => move.Heading == "Commands");
+    }
+
+    [Fact]
+    public void ReshapingChangesNothingOnASecondRun()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
+
+        new StandardsFolderMigration(repo.Path, Declared).Run();
+        string once = File.ReadAllText(StandardPath(repo.Path, "csharp"));
+
+        StandardsFolderMigrationResult second =
+            new StandardsFolderMigration(repo.Path, Declared).Run();
+
+        Assert.Empty(second.Changes);
+        Assert.Empty(second.Moves);
+        Assert.Equal(once, File.ReadAllText(StandardPath(repo.Path, "csharp")));
+    }
+
+    [Fact]
+    public void ADryRunListsTheMovesWithoutWriting()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
+
+        StandardsFolderMigrationResult result =
+            new StandardsFolderMigration(repo.Path, Declared).Run(dryRun: true);
+
+        Assert.Contains(result.Moves, move =>
+            move.Heading == "Stack" && move.Under == "Coding standards");
+        Assert.True(File.Exists(Path.Combine(folder, "README.md")));
+        Assert.False(File.Exists(StandardPath(repo.Path, "csharp")));
+    }
+
+    /// <summary>
+    /// The operator reads the reshaped headings from the command's own output, not from a
+    /// diff, so every moved section is printed with the heading it now sits under.
+    /// </summary>
+    [Fact]
+    public void TheCommandPrintsEachMoveItMade()
+    {
+        using TempDirectory repo = new();
+        string configDirectory = Path.Combine(repo.Path, ".kyber-weave");
+        Directory.CreateDirectory(configDirectory);
+        File.WriteAllText(
+            Path.Combine(configDirectory, "kyber-weave.yml"),
+            "ontology:\n  docs-root: 6-Docs\n  technologies:\n    - csharp\n");
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            CommandAppFixture.DocsStandardsMigrate().Run(
+                ["docs", "standards", "migrate", repo.Path]));
+
+        Assert.Equal(0, execution.Result);
+        Assert.Contains(
+            "moved 'Stack' under '## Coding standards'",
+            execution.Output,
+            StringComparison.Ordinal);
+    }
+
+    private static IReadOnlyList<string> LevelTwoHeadings(string text) =>
+        [.. text.Split('\n')
+            .Where(line => line.StartsWith("## ", StringComparison.Ordinal))
+            .Select(line => line[3..].Trim())];
 }
