@@ -418,7 +418,10 @@ fixed order. This is [ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-techn
    each technology's `builds-on` ancestors from its `<name>.standards.md` frontmatter, root parent
    first so a child wins on a shared id. Each rule keeps the name of the folder it came from, so the
    evaluator applies it only to an event whose task is in that technology or in a technology that
-   builds on it. The technology templates that ship rules are `azure` and
+   builds on it. An id that a role folder or another technology folder already loaded stays in force
+   for the other technologies: the scoped declaration shadows it only where its technology matches,
+   and a child's declaration shadows its parent's for the child. The technology templates that ship
+   rules are `azure` and
    `aws`, one allow-list rule each; every other shipped technology file is empty.
 4. **The host's `arbiter.rules`.** Applied last, over everything above, so it wins over a folder.
 
@@ -444,7 +447,9 @@ six guard rules enabled as they ship.
 **A technology's rules judge only that technology's tasks.** Every declared technology's rule file
 is loaded, because one configuration read has no task in hand, but each rule keeps the folder it came
 from and `ArbiterRuleScopes` applies it only when the event's task names that technology or a
-technology that builds on it. The task's own `Technology:` label is used when its plan was read, and
+technology that builds on it. A scoped rule shadows an earlier rule of the same id only while its
+technology matches, so a technology folder's override never removes a global rule for the other
+technologies. The task's own `Technology:` label is used when its plan was read, and
 the `TECHNOLOGY` header of a task-less dispatch otherwise. An event that names neither — a
 `bug-crusher` fix with no task, the conductor's own action — is judged by role folder rules and
 `arbiter.rules` alone. The worker guard applies the same scope to a read-only dispatch's command

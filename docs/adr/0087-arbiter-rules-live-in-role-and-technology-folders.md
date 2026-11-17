@@ -84,15 +84,18 @@ there too, where the person who owns the standard can see and change them.
    configuration has no repository to read folders from, so folders apply to the repository's own
    configuration only.
 
-4. **A folder declaration replaces a rule; it does not merge into it.** A folder rule with the
-   id of a rule already loaded replaces that rule whole, keeping the first rule's position in
-   the set. An id that is not loaded is added to the set; it may not carry the `KW-ARB-` prefix,
-   which is reserved for the shipped rules. So the entry restates the rule: `id` and
-   `enabled: false` alone is not a valid folder rule, because a rule without a trigger, question
-   and answers is not a rule. `arbiter.rules` is the short route for a tune-up: `id` plus
-   `enabled`, a threshold or `effects` adjusts the loaded rule in place. A folder declaration of
-   a shipped rule id is reported as `KW-ARB-CONFIG-020` at informational severity, saying whether
-   it replaces or disables the rule, so it is never silent.
+4. **A folder declaration replaces a rule; it does not merge into it.** A role folder's rule with
+   the id of a rule already loaded replaces that rule whole, keeping the first rule's position in
+   the set. A technology folder's rule of an id that is already loaded is an override for that
+   technology: it shadows the earlier rule for that technology and for the technologies that build
+   on it, while the earlier rule stays in force for every other technology. Among a technology and
+   its `builds-on` ancestors, the child's declaration wins. An id that is not loaded is added to the
+   set; it may not carry the `KW-ARB-` prefix, which is reserved for the shipped rules. So the entry
+   restates the rule: `id` and `enabled: false` alone is not a valid folder rule, because a rule
+   without a trigger, question and answers is not a rule. `arbiter.rules` is the short route for a
+   tune-up: `id` plus `enabled`, a threshold or `effects` adjusts the loaded rule in place. A folder
+   declaration of a shipped rule id is reported as `KW-ARB-CONFIG-020` at informational severity,
+   saying whether it replaces or disables the rule, so it is never silent.
 
 5. **No rule is locked.** Every rule, including the six that guard the tree and the run order
    (`READY-001`, `DIFF-001`, `PLANNER-DIFF-001`, `READONLY-001`, `CHECKOUT-001`, `ROSTER-001`),

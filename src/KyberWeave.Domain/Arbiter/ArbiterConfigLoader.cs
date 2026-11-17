@@ -596,16 +596,18 @@ public static class ArbiterConfigLoader
                 continue;
 
             bool disabled = group.All(rule => !rule.Enabled);
+            string effect = disabled ? "disables" : technology is null ? "replaces" : "overrides";
+            string scope = technology is null ? string.Empty : $" for technology '{technology}'";
             findings.Add(new Diagnostic(
                 RuleValidator.ShippedRuleOverride,
                 Severity.Info,
-                $"'{file.Path}' {(disabled ? "disables" : "replaces")} shipped rule '{group.Key}'.",
+                $"'{file.Path}' {effect} shipped rule '{group.Key}'{scope}.",
                 group.Key,
                 file.Path,
-                "No rule is locked: the folder's declaration takes effect. Remove it to use the shipped rule."));
+                "No rule is locked: the folder's declaration takes effect for its scope. Remove it to use the shipped rule."));
         }
 
-        ReplaceRules(rules, loaded);
+        ReplaceRules(rules, loaded, technology);
     }
 
     /// <summary>
@@ -875,15 +877,27 @@ public static class ArbiterConfigLoader
     /// Replaces every rule of the loaded ids with the loaded rules, keeping the position of the first replaced rule so
     /// the shipped order survives an override. An id the set does not hold is appended.
     /// </summary>
-    private static void ReplaceRules(List<ArbiterRule> rules, IReadOnlyList<ArbiterRule> loaded)
+    /// <summary>
+    /// Replaces the rules of the loaded ids, keeping their first position. A technology folder's declaration
+    /// (<paramref name="technology"/> not null) replaces only the rules for that same technology, so an earlier
+    /// role-folder or other-technology rule of that id stays in force for every other technology; the scoped
+    /// declaration shadows it only where the technology matches.
+    /// </summary>
+    private static void ReplaceRules(
+        List<ArbiterRule> rules,
+        IReadOnlyList<ArbiterRule> loaded,
+        string? technology = null)
     {
         HashSet<string> ids = new(loaded.Select(rule => rule.Id), StringComparer.Ordinal);
         int index = rules.FindIndex(rule => ids.Contains(rule.Id));
-        List<ArbiterRule> kept = [.. rules.Where(rule => !ids.Contains(rule.Id))];
+        List<ArbiterRule> kept = technology is null
+            ? [.. rules.Where(rule => !ids.Contains(rule.Id))]
+            : [.. rules.Where(rule => !ids.Contains(rule.Id)
+                || !string.Equals(rule.Technology, technology, StringComparison.Ordinal))];
         if (index < 0)
             index = kept.Count;
 
-        kept.InsertRange(index, loaded);
+        kept.InsertRange(Math.Min(index, kept.Count), loaded);
         rules.Clear();
         rules.AddRange(kept);
     }
