@@ -286,7 +286,7 @@ public sealed class SkillResourceDispositionAuditTests
 
                 if (!sectionsByTechnology.TryGetValue(technology, out Section[]? sections))
                 {
-                    string standardPath = Path.Combine(ProductRoot, "standards", technology, "README.md");
+                    string standardPath = Path.Combine(ProductRoot, "standards", technology, $"{technology}.standards.md");
                     sections = File.Exists(standardPath) ? HeadingSections(File.ReadAllText(standardPath)) : null;
                     sectionsByTechnology[technology] = sections;
                 }
@@ -305,7 +305,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: no '## {heading}' or '### {heading}' heading in " +
-                        $"standards/{technology}/README.md.");
+                        $"standards/{technology}/{technology}.standards.md.");
                     continue;
                 }
 
@@ -320,7 +320,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in " +
-                        $"standards/{technology}/README.md § {heading}.");
+                        $"standards/{technology}/{technology}.standards.md § {heading}.");
                 }
             }
         }

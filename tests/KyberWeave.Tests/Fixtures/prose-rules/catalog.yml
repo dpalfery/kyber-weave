@@ -1,6 +1,6 @@
 # The prose rule catalog: the one list of rules the shipped agent and docs prose must state.
 #
-# Every rule is checked two ways (docs/standards/test/README.md, "Prose rules"):
+# Every rule is checked two ways (docs/standards/test/test.standards.md, "Prose rules"):
 #   - offline, by ProseRuleCatalogTests: every document named here exists, every section heading is
 #     a heading in its document, every rule has a home and a negative control;
 #   - by Jev, by ProseRuleGradingTests (KW_PROSE_GRADE=1): each `stated-in` document must be judged to
@@ -70,20 +70,20 @@ rules:
   - id: A4-input-site-tests
     statement: A test of code that parses outside input has one case per input-site column and asserts that the bad input is refused.
     stated-in:
-      - path: docs/standards/test/README.md
+      - path: docs/standards/test/test.standards.md
         section: Test the decision, not the implementation
     controls:
-      - docs/standards/github-actions/README.md
+      - docs/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: parsers-fail-closed
     statement: A parser refuses input it does not recognise with a diagnostic that names it, and never silently drops, defaults or coerces that input.
     stated-in:
-      - docs/standards/csharp/README.md
-      - docs/standards/go/README.md
-      - docs/standards/rust/README.md
-      - docs/standards/typescript/README.md
+      - docs/standards/csharp/csharp.standards.md
+      - docs/standards/go/go.standards.md
+      - docs/standards/rust/rust.standards.md
+      - docs/standards/typescript/typescript.standards.md
     controls:
-      - docs/standards/github-actions/README.md
+      - docs/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: digest-extra-lines
     statement: Lines beside the digest such as Discovery or COVERAGE_GAPS are never counted or rejected as an extra digest field.
@@ -269,9 +269,9 @@ rules:
       - products/kyber-squad/skills/go-dev/references/gates-and-platforms.md
       - products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md
       - products/kyber-squad/skills/typescript-dev/references/esm-and-gates.md
-      - products/kyber-squad/standards/go/README.md
-      - products/kyber-squad/standards/rust/README.md
-      - products/kyber-squad/standards/typescript/README.md
+      - products/kyber-squad/standards/go/go.standards.md
+      - products/kyber-squad/standards/rust/rust.standards.md
+      - products/kyber-squad/standards/typescript/typescript.standards.md
       - path: AGENTS.md
         section: The inner loop
     controls:
@@ -283,7 +283,7 @@ rules:
       example: Run the full test suite locally once, at the end, to prove your change broke nothing else.
       seed-into: products/kyber-squad/skills/code-review/references/lenses/performance.md
       absent-from:
-        - docs/standards/test/README.md
+        - docs/standards/test/test.standards.md
         - products/kyber-squad/skills/kilo-review-loop/SKILL.md
         - products/kyber-squad/skills/go-dev/references/gates-and-platforms.md
         - products/kyber-squad/skills/rust-dev/references/gates-and-platforms.md
@@ -319,7 +319,7 @@ rules:
       - products/kyber-squad/agents/conductor.md
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Test-first mode
-      - docs/standards/test/README.md
+      - docs/standards/test/test.standards.md
       - path: docs/kyber-squad/onboarding.md
         section: Fast assembly runner invocation
       - path: docs/kyber-squad/requirements.md
@@ -334,7 +334,7 @@ rules:
       absent-from:
         - products/kyber-squad/agents/conductor.md
         - products/kyber-squad/skills/delivery-execution/SKILL.md
-        - docs/standards/test/README.md
+        - docs/standards/test/test.standards.md
         - path: docs/kyber-squad/onboarding.md
           section: Fast assembly runner invocation
         - path: docs/kyber-squad/requirements.md
@@ -345,7 +345,7 @@ rules:
       - products/kyber-squad/agents/conductor.md
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Test-first mode
-      - docs/standards/test/README.md
+      - docs/standards/test/test.standards.md
     controls:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/skills/task-gate/references/rework.md
@@ -360,7 +360,7 @@ rules:
   - id: shared-infra-targeted-set
     statement: A worker whose change reaches shared test infrastructure still runs a targeted set of tests, not the full suite.
     stated-in:
-      - docs/standards/test/README.md
+      - docs/standards/test/test.standards.md
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
@@ -371,13 +371,13 @@ rules:
       absent-from:
         - products/kyber-squad/agents/csharp-dev.md
         - products/kyber-squad/agents/test-dev.md
-        - docs/standards/test/README.md
+        - docs/standards/test/test.standards.md
   - id: shared-test-infra-definition
     statement: Shared test infrastructure is anything referenced by more than one test class.
     stated-in:
-      - docs/standards/test/README.md
+      - docs/standards/test/test.standards.md
     controls:
-      - docs/standards/csharp/README.md
+      - docs/standards/csharp/csharp.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: F1
     statement: A worker in a shared checkout isolates its build output per task with --artifacts-path.
@@ -409,17 +409,17 @@ rules:
     stated-in:
       - products/kyber-squad/agents/conductor.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
-      - docs/standards/test/README.md
+      - docs/standards/test/test.standards.md
     controls:
       - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: fully-qualified-test-class
     statement: A direct test-assembly run names each test class fully qualified, because a short name runs zero tests and still exits 0.
     stated-in:
-      - docs/standards/test/README.md
+      - docs/standards/test/test.standards.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
     controls:
-      - docs/standards/github-actions/README.md
+      - docs/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: runner-in-test-standard
     statement: The exact command for running tests directly lives in the host test standard's Completion section.
@@ -1332,37 +1332,37 @@ rules:
   - id: ts-no-n-plus-one
     statement: Data access avoids N+1 queries.
     stated-in:
-      - products/kyber-squad/standards/typescript/README.md
+      - products/kyber-squad/standards/typescript/typescript.standards.md
     controls:
-      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: ts-bound-every-read
     statement: Every read is bounded; nothing reads an unbounded result set.
     stated-in:
-      - products/kyber-squad/standards/typescript/README.md
+      - products/kyber-squad/standards/typescript/typescript.standards.md
     controls:
-      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: ts-select-used-columns
     statement: A query selects only the columns the code uses.
     stated-in:
-      - products/kyber-squad/standards/typescript/README.md
+      - products/kyber-squad/standards/typescript/typescript.standards.md
     controls:
-      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: ts-no-floating-promises
     statement: No promise is left floating; every promise is awaited or handled.
     stated-in:
-      - products/kyber-squad/standards/typescript/README.md
+      - products/kyber-squad/standards/typescript/typescript.standards.md
     controls:
-      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: ts-absent-is-not-zero
     statement: A value that was not measured is reported as absent, never coerced to zero.
     stated-in:
-      - products/kyber-squad/standards/typescript/README.md
+      - products/kyber-squad/standards/typescript/typescript.standards.md
     controls:
-      - products/kyber-squad/standards/github-actions/README.md
+      - products/kyber-squad/standards/github-actions/github-actions.standards.md
       - products/kyber-squad/shared/worker-baseline.md
   # ---------------------------------------------------------------- worktrees and the code index
   - id: worktree-mcp-canonical-splice
