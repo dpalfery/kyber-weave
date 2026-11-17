@@ -27,9 +27,9 @@ profiles:
     opencode: zai-coding-plan/glm-5.3
     pi: zai/glm-5.3[thinking=high]
     zcode: glm-5.3
-  # The strongest developer tier: a failed task steps up from `general` to this profile, so every
-  # row is the harness's strongest coding model — the value `architect` carries on the same harness.
-  # Keep the two profiles' rows equal; `DevHardModelUpgradeTests` fails when a row falls behind.
+  # The strongest developer tier: a failed task steps up from `general` to this profile, so each row
+  # is the model `architect` pinned on that harness when the tier became a real upgrade. These are
+  # `dev-hard`'s own rows, not an alias: a later planner rotation changes `architect` and leaves them.
   dev-hard:
     default: inherit
     antigravity: pro

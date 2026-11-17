@@ -33,6 +33,27 @@ public sealed class DevHardModelUpgradeTests
             "'default: inherit' and the harness chooses the model.",
     };
 
+    /// <summary>
+    /// The <c>dev-hard</c> rows as chosen when the tier became a real upgrade: the model
+    /// <c>architect</c> pinned on that harness at that moment. The table is a snapshot, not a live
+    /// link to <c>architect</c>: <c>dev-hard</c> owns these rows, so a later planner rotation
+    /// (Requirement 1.12) neither changes them nor fails this test.
+    /// </summary>
+    private static readonly Dictionary<string, string> DevHardModels = new(StringComparer.Ordinal)
+    {
+        ["antigravity"] = "pro",
+        ["claude"] = "opus",
+        ["codex"] = "gpt-6.1-sol",
+        ["copilot"] = "Claude Opus 5.5 (copilot)",
+        ["cursor"] = "claude-sonnet-5-5[effort=high]",
+        ["devin"] = "claude-opus-5-5-high",
+        ["factory"] = "glm-5.3[reasoningEffort=high]",
+        ["kilo"] = "zai-coding-plan/glm-5.3",
+        ["opencode"] = "zai-coding-plan/glm-5.3",
+        ["pi"] = "zai/glm-5.3[thinking=high]",
+        ["zcode"] = "glm-5.3",
+    };
+
     /// <summary>The <c>fast</c> rows <c>dev-easy</c> runs on, frozen so a change is visible.</summary>
     private static readonly Dictionary<string, string> DevEasyModels = new(StringComparer.Ordinal)
     {
@@ -99,16 +120,12 @@ public sealed class DevHardModelUpgradeTests
     }
 
     [Fact]
-    public void DevHardUsesTheArchitectProfilesModelOnEveryHarnessTheMatrixNames()
+    public void DevHardKeepsTheModelChosenForItOnEveryHarness()
     {
-        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
-        SquadModelProfile devHard = profiles["dev-hard"];
-        SquadModelProfile architect = profiles["architect"];
+        SquadModelProfile devHard = Source.Value.ModelProfiles.Profiles["dev-hard"];
 
-        Assert.Equal(architect.Default, devHard.Default);
-        Assert.Equal(
-            Sort(architect.HarnessModels),
-            Sort(devHard.HarnessModels));
+        Assert.Equal("inherit", devHard.Default);
+        Assert.Equal(Sort(DevHardModels), Sort(devHard.HarnessModels));
     }
 
     [Fact]
