@@ -4,7 +4,6 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Text;
 using KyberWeave.Core.Networking;
-using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Arbiter.Rules;
 
@@ -118,7 +117,7 @@ public static class RuleValidator
         if (endpoint is not null)
             diagnostics.Add(endpoint);
 
-        diagnostics.AddRange(ValidateRuleFolders(config, filePath));
+        diagnostics.AddRange(config.RuleFolderFindings);
 
         return diagnostics;
     }
@@ -151,35 +150,6 @@ public static class RuleValidator
             ValidateRule(rule, all, lenses, filePath, diagnostics);
 
         return diagnostics;
-    }
-
-    /// <summary>
-    /// Reports the host folder files an <c>arbiter validate</c> run read. The folders hang under the repository root the
-    /// configuration file names, so the path the command already holds is enough: the file is read here rather than
-    /// carried on <see cref="ArbiterConfig"/>, which would make every reader of the config carry a machine path.
-    /// </summary>
-    private static IReadOnlyList<Diagnostic> ValidateRuleFolders(ArbiterConfig config, string? configPath)
-    {
-        if (string.IsNullOrEmpty(configPath) || !File.Exists(configPath))
-            return [];
-
-        try
-        {
-            string directory = Path.GetDirectoryName(Path.GetFullPath(configPath)) ?? string.Empty;
-            string root = string.Equals(Path.GetFileName(directory), KyberWeaveYamlParser.DefaultDirectoryName, StringComparison.Ordinal)
-                ? Path.GetDirectoryName(directory) ?? directory
-                : directory;
-            OntologyYamlSection? section = KyberWeaveYamlParser.Parse(File.ReadAllText(configPath)).Ontology;
-            OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, section);
-
-            return ArbiterConfigLoader.LoadRuleFolders(
-                config.Rules,
-                new ArbiterConfigLoader.RuleFolderRequest(root, ontology.DocsRoots, ontology.Technologies)).Findings;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException or ArgumentException)
-        {
-            return [];
-        }
     }
 
     /// <summary>

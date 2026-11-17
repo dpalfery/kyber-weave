@@ -314,10 +314,13 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         ArbiterConfig merged = ArbiterConfigLoader.Merge(
             ArbiterConfig.ProductDefaults,
             section,
-            new ArbiterConfigLoader.RuleFolderRequest(Root, ["docs"], technologies),
-            out IReadOnlyList<Diagnostic> findings);
-        return (merged.Rules, findings);
+            new ArbiterConfigLoader.RuleFolderRequest(Root, ["docs"], technologies, ReadTestFile));
+        return (merged.Rules, merged.RuleFolderFindings);
     }
+
+    /// <summary>Reads a file for the loader; the domain layer takes this as a delegate so it touches no disk.</summary>
+    private static string? ReadTestFile(string path) =>
+        File.Exists(path) ? File.ReadAllText(path) : null;
 
     private static string RoleOf(string id) => id switch
     {

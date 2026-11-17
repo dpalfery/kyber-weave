@@ -31,10 +31,15 @@ public static class ArbiterConfigLoader
     /// <param name="RepositoryRoot">The repository root the docs roots hang under.</param>
     /// <param name="DocsRoots">Repository-relative docs roots; each root's <c>standards/</c> holds the folders.</param>
     /// <param name="Technologies">The task's technology first, then its declared parent, so a child receives both.</param>
+    /// <param name="ReadFile">
+    /// Reads a folder file's text, or returns null when it does not exist. The repository that owns the disk supplies
+    /// it: the domain layer never touches the file system (<c>DomainPurityTests</c>).
+    /// </param>
     internal sealed record RuleFolderRequest(
         string RepositoryRoot,
         IReadOnlyList<string> DocsRoots,
-        IReadOnlyList<string> Technologies);
+        IReadOnlyList<string> Technologies,
+        Func<string, string?>? ReadFile = null);
 
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
@@ -67,7 +72,7 @@ public static class ArbiterConfigLoader
     };
 
     internal static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section) =>
-        Merge(defaults, section, folders: null, out _);
+        Merge(defaults, section, folders: null);
 
     /// <summary>
     /// Merges the host configuration over the defaults, first applying the host's role folders and the task's
@@ -76,25 +81,21 @@ public static class ArbiterConfigLoader
     /// <param name="defaults">The shipped configuration the folders and the host section apply over.</param>
     /// <param name="section">The host's <c>arbiter:</c> section, or null.</param>
     /// <param name="folders">The folders to read, or null when the caller has no repository to read from.</param>
-    /// <param name="folderFindings">The findings the folder read raised; empty when nothing was read or all was valid.</param>
     internal static ArbiterConfig Merge(
         ArbiterConfig defaults,
         ArbiterYamlSection? section,
-        RuleFolderRequest? folders,
-        out IReadOnlyList<Diagnostic> folderFindings) =>
-        Merge(defaults, section, isUserConfig: false, folders, out folderFindings);
+        RuleFolderRequest? folders) =>
+        Merge(defaults, section, isUserConfig: false, folders);
 
     private static ArbiterConfig Merge(ArbiterConfig defaults, ArbiterYamlSection? section, bool isUserConfig) =>
-        Merge(defaults, section, isUserConfig, folders: null, out _);
+        Merge(defaults, section, isUserConfig, folders: null);
 
     private static ArbiterConfig Merge(
         ArbiterConfig defaults,
         ArbiterYamlSection? section,
         bool isUserConfig,
-        RuleFolderRequest? folders,
-        out IReadOnlyList<Diagnostic> folderFindings)
+        RuleFolderRequest? folders)
     {
-        folderFindings = [];
         ArgumentNullException.ThrowIfNull(defaults);
         if (section is null && folders is null)
             return defaults;
@@ -110,6 +111,7 @@ public static class ArbiterConfigLoader
         // The folders apply after the shipped templates and before arbiter.rules, and nothing is read when the
         // Arbiter is off: a run with it off needs none of this to work.
         IReadOnlyList<ArbiterRule> baseRules = defaults.Rules;
+        IReadOnlyList<Diagnostic> folderFindings = [];
         if (enabled && folders is not null && baseRules.Count > 0)
         {
             (IReadOnlyList<ArbiterRule> loaded, IReadOnlyList<Diagnostic> findings) = LoadRuleFolders(baseRules, folders);
@@ -188,6 +190,7 @@ public static class ArbiterConfigLoader
             TestFilePatterns = defaults.TestFilePatterns,
             LensPaths = defaults.LensPaths,
             ModelTargeting = modelTargeting,
+            RuleFolderFindings = folderFindings,
             Stores = MergeStores(defaults.Stores, section?.Stores),
             CommentTriage = MergeCommentTriage(defaults.CommentTriage, section?.CommentTriage),
             DispatchBudget = MergeDispatchBudget(defaults.DispatchBudget, section?.DispatchBudget, "dispatch-budget"),
@@ -220,6 +223,7 @@ public static class ArbiterConfigLoader
             TestFilePatterns = merged.TestFilePatterns,
             LensPaths = merged.LensPaths,
             ModelTargeting = merged.ModelTargeting,
+            RuleFolderFindings = merged.RuleFolderFindings,
             Stores = merged.Stores,
             CommentTriage = merged.CommentTriage,
             DispatchBudget = merged.DispatchBudget,
@@ -367,11 +371,11 @@ public static class ArbiterConfigLoader
         string name,
         List<Diagnostic> findings)
     {
-        string? path = FolderRulesPath(request, name);
-        if (path is null)
+        (string Path, string Text)? file = FolderRulesFile(request, name);
+        if (file is null)
             return;
 
-        if (!TryReadFolderRules(path, rules, out List<ArbiterRule>? loaded, out IReadOnlyList<Diagnostic> fileFindings))
+        if (!TryReadFolderRules(file.Value.Path, file.Value.Text, rules, out List<ArbiterRule>? loaded, out IReadOnlyList<Diagnostic> fileFindings))
         {
             findings.AddRange(fileFindings);
             return;
@@ -383,8 +387,15 @@ public static class ArbiterConfigLoader
         ReplaceRules(rules, loaded);
     }
 
-    private static string? FolderRulesPath(RuleFolderRequest request, string name)
+    /// <summary>
+    /// The first of the docs roots that holds the folder's rules file, with its text. Null when none does, or when
+    /// the caller supplied no reader because it has no repository.
+    /// </summary>
+    private static (string Path, string Text)? FolderRulesFile(RuleFolderRequest request, string name)
     {
+        if (request.ReadFile is null)
+            return null;
+
         foreach (string docsRoot in request.DocsRoots)
         {
             if (string.IsNullOrWhiteSpace(docsRoot))
@@ -396,19 +407,21 @@ public static class ArbiterConfigLoader
                 DocsLayout.Standards,
                 name,
                 $"{name}{DocsLayout.ArbiterRulesSuffix}");
-            if (File.Exists(path))
-                return path;
+            string? text = request.ReadFile(path);
+            if (text is not null)
+                return (path, text);
         }
 
         return null;
     }
 
     /// <summary>
-    /// Reads one folder's rules file. Returns false when the file must not be applied, with the findings that say why;
-    /// an empty file returns true with no rules.
+    /// Parses one folder's rules file text. Returns false when the file must not be applied, with the findings that say
+    /// why; an empty file returns true with no rules.
     /// </summary>
     private static bool TryReadFolderRules(
         string path,
+        string text,
         IReadOnlyList<ArbiterRule> knownRules,
         [NotNullWhen(true)] out List<ArbiterRule>? loaded,
         out IReadOnlyList<Diagnostic> findings)
@@ -420,9 +433,9 @@ public static class ArbiterConfigLoader
         ArbiterDefaultRulesYaml? document;
         try
         {
-            document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(File.ReadAllText(path));
+            document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(text);
         }
-        catch (Exception ex) when (ex is YamlException or IOException or UnauthorizedAccessException)
+        catch (YamlException ex)
         {
             collected.Add(new Diagnostic(
                 RuleValidator.RuleFolderInvalid,

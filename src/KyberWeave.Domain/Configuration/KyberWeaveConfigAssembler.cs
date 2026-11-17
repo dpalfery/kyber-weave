@@ -34,11 +34,19 @@ public static class KyberWeaveConfigAssembler
     /// <param name="yaml">The config file's text.</param>
     /// <param name="repositoryRoot">The repository root a gate's <c>working-directory</c> is resolved against.</param>
     /// <param name="facts">What the file system says about a gate's <c>working-directory</c>.</param>
-    public static KyberWeaveConfig FromRepositoryYaml(string yaml, string repositoryRoot, ReviewWorkingDirectoryFacts facts)
+    /// <param name="readText">
+    /// Reads a repository file's text, or null when it does not exist. The data layer supplies it so the Arbiter's rule
+    /// folders can be read without the domain layer touching the file system.
+    /// </param>
+    public static KyberWeaveConfig FromRepositoryYaml(
+        string yaml,
+        string repositoryRoot,
+        ReviewWorkingDirectoryFacts facts,
+        Func<string, string?>? readText = null)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(facts);
-        return FromDocument(KyberWeaveYamlParser.Parse(yaml), yaml, repositoryRoot, facts);
+        return FromDocument(KyberWeaveYamlParser.Parse(yaml), yaml, repositoryRoot, facts, readText);
     }
 
     /// <summary>
@@ -80,7 +88,7 @@ public static class KyberWeaveConfigAssembler
         };
     }
 
-    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document, string yaml, string? repositoryRoot, ReviewWorkingDirectoryFacts? facts)
+    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document, string yaml, string? repositoryRoot, ReviewWorkingDirectoryFacts? facts, Func<string, string?>? readText = null)
     {
         OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
         return new KyberWeaveConfig
@@ -111,8 +119,11 @@ public static class KyberWeaveConfigAssembler
                 document.Arbiter,
                 repositoryRoot is null
                     ? null
-                    : new ArbiterConfigLoader.RuleFolderRequest(repositoryRoot, ontology.DocsRoots, ontology.Technologies),
-                out _),
+                    : new ArbiterConfigLoader.RuleFolderRequest(
+                        repositoryRoot,
+                        ontology.DocsRoots,
+                        ontology.Technologies,
+                        readText)),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
             StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
             WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook),
