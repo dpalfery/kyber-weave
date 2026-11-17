@@ -58,6 +58,9 @@ internal sealed class KyberWeaveYamlDocument
 
     /// <summary>Raw <c>worker-roster:</c> value; absent means <c>technology</c>.</summary>
     public string? WorkerRoster { get; set; }
+
+    /// <summary>Raw <c>task-prompt-budget:</c> value; absent means the shipped 60,000 characters.</summary>
+    public string? TaskPromptBudget { get; set; }
 }
 
 /// <summary>
