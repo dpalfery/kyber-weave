@@ -435,7 +435,8 @@ public sealed class HookCommand : IArbiterHookHost
                     Agent: null,
                     query.PriorResultsPath,
                     Technology: query.Technology,
-                    query.FailedAttempts),
+                    query.FailedAttempts,
+                    RetryText: query.RetryText),
                 config);
             return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal);
         };

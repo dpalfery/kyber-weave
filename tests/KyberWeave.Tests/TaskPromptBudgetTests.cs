@@ -110,13 +110,13 @@ public sealed class TaskPromptBudgetTests
             """;
     }
 
-    private static TaskPromptResult Build(DocFixture fixture, KyberWeaveConfig config) =>
+    private static TaskPromptResult Build(DocFixture fixture, KyberWeaveConfig config, string? retryText = null) =>
         new TaskPromptService(
             DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
             DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),
             DocsTestCommands.Services().GetRequiredService<IFileSystem>(),
             Index(fixture, config).StandardsFor)
-        .Build(new TaskPromptRequest(fixture.Root, TaskId: "T1"), config);
+        .Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", RetryText: retryText), config);
 
     private static DocumentIndex Index(DocFixture fixture, KyberWeaveConfig config) =>
         DocumentIndex.Build(new DocumentLoader(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
@@ -171,6 +171,39 @@ public sealed class TaskPromptBudgetTests
         Assert.Contains("STANDARD-NAMING-MARKER", cut.Prompt, StringComparison.Ordinal);
         Assert.Contains("SHARED-RULES-MARKER", cut.Prompt, StringComparison.Ordinal);
         Assert.Contains("CSHARP-RULES-MARKER", cut.Prompt, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A prompt can still exceed the budget after every cut is used: the parts that stay whole are the ones a worker
+    /// cannot recover. The last part must say so rather than return silently.
+    /// </summary>
+    [Fact]
+    public void APromptStillOverTheBudgetAfterEveryCutSaysSoInTheLastPart()
+    {
+        using DocFixture fixture = Ready();
+        KyberWeaveConfig tiny = Config(100);
+
+        TaskPromptResult result = Build(fixture, tiny);
+
+        Assert.True(result.Built, result.Refusal);
+        string leftOut = result.Prompt[result.Prompt.IndexOf("<left-out>", StringComparison.Ordinal)..];
+        Assert.Contains("still over the 100-character prompt budget", leftOut, StringComparison.Ordinal);
+    }
+
+    /// <summary>A retry's failure report rides in the same dispatch, so the prompt leaves it room rather than overshooting.</summary>
+    [Fact]
+    public void TheRetryTextIsBudgetedWithThePrompt()
+    {
+        using DocFixture fixture = Ready();
+        KyberWeaveConfig budget = Config(Build(fixture, Config()).Prompt.Length + 50);
+
+        TaskPromptResult plain = Build(fixture, budget);
+        TaskPromptResult retry = Build(fixture, budget, retryText: new string('x', 400));
+
+        Assert.True(plain.Built, plain.Refusal);
+        Assert.Empty(plain.LeftOut);
+        Assert.True(retry.Built, retry.Refusal);
+        Assert.NotEmpty(retry.LeftOut);
     }
 
     [Fact]

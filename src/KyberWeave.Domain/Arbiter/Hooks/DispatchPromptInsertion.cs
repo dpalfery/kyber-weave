@@ -9,12 +9,14 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="Technology">The <c>TECHNOLOGY</c> header's value, for a dispatch that belongs to no task.</param>
 /// <param name="PriorResultsPath">The <c>PRIOR_RESULTS</c> header's value, the file a retry's earlier results live in.</param>
 /// <param name="FailedAttempts">The <c>FAILED_ATTEMPTS</c> header's value; zero when the header is absent or unreadable.</param>
+/// <param name="RetryText">The lines below the header block, which ride after the prompt; the budget reserves room for them.</param>
 public sealed record DispatchPromptQuery(
     string? TaskId,
     string? PlanFile,
     string? Technology,
     string? PriorResultsPath,
-    int FailedAttempts);
+    int FailedAttempts,
+    string? RetryText = null);
 
 /// <summary>One prompt the hook built, or why it could not be built.</summary>
 /// <param name="Built">Whether <paramref name="Prompt"/> holds a prompt.</param>
@@ -173,7 +175,8 @@ public static partial class DispatchPromptInsertion
                 headers.PlanFile,
                 headers.Technology,
                 headers.PriorResultsPath,
-                headers.FailedAttempts)) ?? new DispatchPromptExpansion(false, string.Empty, Why(headers));
+                headers.FailedAttempts,
+                headers.Body)) ?? new DispatchPromptExpansion(false, string.Empty, Why(headers));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {

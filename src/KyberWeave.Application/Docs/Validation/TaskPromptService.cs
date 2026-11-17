@@ -134,7 +134,11 @@ public sealed class TaskPromptService(
 
         PromptContent content = ContentOf(taskText, hostText, technology);
         int budget = config.TaskPromptBudget > 0 ? config.TaskPromptBudget : KyberWeaveConfig.DefaultTaskPromptBudget;
-        (string prompt, IReadOnlyList<string> leftOut) = Fit(content, budget);
+        // The retry's failure report is delivered in the same dispatch, after this prompt, so the budget reserves
+        // room for it: cutting the prompt to the budget alone would overshoot by the report's length.
+        string retryText = request.RetryText ?? string.Empty;
+        int reserve = retryText.Length == 0 ? 0 : retryText.Length + 2;
+        (string prompt, IReadOnlyList<string> leftOut) = Fit(content, budget, reserve);
 
         string? promptFile = null;
         string? harness = Clean(request.Harness);
@@ -247,10 +251,14 @@ public sealed class TaskPromptService(
     }
 
     /// <summary>
-    /// Cuts the least relevant skills first, then the least relevant standard sections, until the prompt fits.
-    /// Rules are never cut: they are the part a worker cannot recover from a topic lookup.
+    /// Cuts the least relevant skills first, then the least relevant standard sections, until the prompt and the
+    /// text delivered after it fit. Rules are never cut: they are the part a worker cannot recover from a topic
+    /// lookup. When every cut is used and the prompt is still over the budget, the last part says so.
     /// </summary>
-    private static (string Prompt, IReadOnlyList<string> LeftOut) Fit(PromptContent content, int budget)
+    /// <param name="content">Every part of the prompt before the budget is applied.</param>
+    /// <param name="budget">The host's prompt budget in characters.</param>
+    /// <param name="reserve">Characters delivered after the prompt, which the budget must also cover.</param>
+    private static (string Prompt, IReadOnlyList<string> LeftOut) Fit(PromptContent content, int budget, int reserve)
     {
         IReadOnlyDictionary<string, double> taskTokens = TextVectorizer.Vectorize(
             string.Concat(content.Task ?? string.Empty, " ", content.Technology ?? string.Empty));
@@ -261,11 +269,23 @@ public sealed class TaskPromptService(
 
         foreach (CutUnit unit in Units(content, taskTokens))
         {
-            if (prompt.Length <= budget)
+            if (prompt.Length + reserve <= budget)
                 break;
 
             cut.Add(unit.Id);
             leftOut.Add(unit.Label);
+            prompt = Compose(content, budget, cut, leftOut);
+        }
+
+        if (prompt.Length + reserve > budget)
+        {
+            // Every cut is used, and the parts that stay whole are the ones the worker cannot recover. The last
+            // part reports the overrun rather than returning an over-budget prompt silently.
+            leftOut.Add(
+                "the prompt is still over the "
+                + budget.ToString(CultureInfo.InvariantCulture)
+                + "-character prompt budget after every cut; the task text, host facts and rules stay whole, "
+                + "so they cannot be cut further");
             prompt = Compose(content, budget, cut, leftOut);
         }
 
