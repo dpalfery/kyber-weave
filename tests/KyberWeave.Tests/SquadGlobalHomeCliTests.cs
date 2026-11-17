@@ -25,16 +25,26 @@ namespace KyberWeave.Tests;
 /// <remarks>
 ///     Every test runs against a temp home, a temp application data directory, and temp global roots
 ///     supplied through the internal command seams. No test reads or writes the real home, the real
-///     application data directory, or a harness directory. Project state is seeded through the same
-///     lifecycle the CLI uses, so the registry is whatever the install path registers; a hand-written
-///     registry file would pin a format this contract does not yet fix.
+///     application data directory, or a harness directory. The home a test starts from is a copy of
+///     the class template (<see cref="SquadHomeStateTemplate"/>), which the fixture installed once
+///     through the lifecycle the CLI uses; the copy is re-rooted, and its registry is written by the
+///     same store call the install path makes, so it is still the install path's format rather than
+///     one a test hand-wrote. Every command a test exercises runs for real against that copy, and
+///     <c>FreshGlobalInstallAfterUninstallOfMigratedStateWritesNewHomeState</c> still runs a real
+///     install end to end.
 /// </remarks>
-public sealed class SquadGlobalHomeCliTests : IDisposable
+public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTemplate>, IDisposable
 {
     private const string InstalledVersion = "1.2.3";
     private const string UpdatedVersion = "1.2.4";
 
     private readonly TempDirectory _temp = new();
+    private readonly SquadHomeStateTemplate _templates;
+
+    public SquadGlobalHomeCliTests(SquadHomeStateTemplate templates)
+    {
+        _templates = templates;
+    }
 
     public void Dispose()
     {
@@ -48,7 +58,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string first = h.MakeDirectory("unrelated-first");
         string second = h.MakeDirectory("unrelated-second");
-        InstallGlobal(h, first, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
 
         CommandExecution fromFirst = Capture(() => command.Execute(null!, GlobalUpdate(first)));
@@ -66,7 +76,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("user-level-arbiter-global");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         WriteHomeConfig(h, """
             arbiter:
               enabled: true
@@ -89,7 +99,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("home-config-is-read");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         WriteHomeConfig(h, "arbiter: [unclosed");
 
         CommandExecution execution = Capture(() =>
@@ -141,7 +151,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
         string named = h.MakeDirectory("elsewhere");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
 
         CommandExecution execution = Capture(() =>
             UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
@@ -333,7 +343,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("dry-run-import");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("global-anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         string importable = h.MakeDirectory("importable");
         WriteInRepoLegacyState(h, importable);
         string inRepoReceipt = Path.Combine(importable, ".kyber-weave", "squad.receipt.json");
@@ -392,7 +402,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     {
         using Harness h = NewHarness("projects-without-global");
         ScriptedAgentRenderer renderer = new("architect");
-        Project alpha = InstallProject(h, "alpha", renderer);
+        Project alpha = InstallProject(h, "alpha");
         byte[]? alphaLockBefore = Snapshot(alpha.LockPath);
 
         CommandExecution execution = Capture(() =>
@@ -457,7 +467,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("replace-managed");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         string architect = FindInstalled(h, SquadTarget.Codex, "architect.md");
         byte[] canonical = File.ReadAllBytes(architect);
         File.WriteAllText(architect, "locally edited architect\n", Encoding.UTF8);
@@ -483,9 +493,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     public void UpdateGlobalTargetAllReplaceManagedWithUnmanagedNewPathFailsWholeRunWithoutWrites()
     {
         using Harness h = NewHarness("unmanaged-collision");
-        ScriptedAgentRenderer installRenderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, installRenderer, SquadTarget.Codex);
+        InstallGlobal(h);
         string architect = FindInstalled(h, SquadTarget.Codex, "architect.md");
         File.WriteAllText(architect, "locally edited architect\n", Encoding.UTF8);
         byte[] edited = File.ReadAllBytes(architect);
@@ -542,7 +551,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("status-global-corrupt-registry");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("global-anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         const string corrupt = "{ this registry is corrupt \n";
         File.WriteAllText(RegistryPath(h), corrupt, new UTF8Encoding(false));
 
@@ -564,7 +573,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Fleet fleet = ArrangeFleet("doctor-global");
         WriteLegacyGlobalRoot(fleet.Harness, "legacy-alpha", "agents/alpha.toml", "alpha\n");
         WriteLegacyGlobalRoot(fleet.Harness, "legacy-beta", "agents/beta.toml", "beta\n");
-        Project gamma = InstallProject(fleet.Harness, "gamma", fleet.Renderer);
+        Project gamma = InstallProject(fleet.Harness, "gamma");
         WriteInRepoLegacyState(fleet.Harness, gamma.Root);
         ScriptedAgentRenderer renderer = fleet.Renderer;
 
@@ -630,7 +639,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("uninstall-migrated-global");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("global-anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         MoveGlobalStateToLegacyRoot(h, anchor);
 
         AssertExit(Uninstall(h, renderer, anchor, true), 0);
@@ -657,7 +666,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     {
         using Harness h = NewHarness("uninstall-imported-project");
         ScriptedAgentRenderer renderer = new("architect");
-        Project alpha = InstallProject(h, "alpha", renderer);
+        Project alpha = InstallProject(h, "alpha");
         MoveProjectStateInRepo(h, alpha);
         new SquadStateMigration(h.Store, h.UserPaths).ImportProject(alpha.Root);
         Assert.True(File.Exists(alpha.ReceiptPath),
@@ -691,7 +700,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("fresh-install-after-uninstall");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("global-anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         MoveGlobalStateToLegacyRoot(h, anchor);
         AssertExit(Uninstall(h, renderer, anchor, true), 0);
 
@@ -750,7 +759,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-deploy");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         ClearResponseGuidanceToAbsentAndUnowned(h);
 
         // Pinned to this harness's own home rather than to the temp directory it happens to sit under:
@@ -788,7 +797,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-receipt");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         AssertExit(
             Capture(() => UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false)
                 .Execute(null!, GlobalUpdate(anchor))),
@@ -820,7 +829,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-refresh");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string path = GuidancePath(h);
@@ -855,7 +864,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-user-edit");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string path = GuidancePath(h);
@@ -885,7 +894,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-adopt");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string path = GuidancePath(h);
@@ -957,7 +966,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-write-failure");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         ClearResponseGuidanceToAbsentAndUnowned(h);
         string path = GuidancePath(h);
 
@@ -1007,9 +1016,8 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
     public void UpdateGlobalWhosePlanFailsPreflightLeavesAnAbsentResponseGuidanceAbsent()
     {
         using Harness h = NewHarness("guidance-blocked-preflight-absent");
-        ScriptedAgentRenderer installRenderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, installRenderer, SquadTarget.Codex);
+        InstallGlobal(h);
         ClearResponseGuidanceToAbsentAndUnowned(h);
 
         // An unowned hand-authored file at a path the update would claim, so plan construction throws
@@ -1050,7 +1058,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-blocked-preflight-deployed");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
 
@@ -1091,7 +1099,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("reinstall-keeps-digest");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         string shippedDigest = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(SquadResponseGuidanceSource.DefaultText)));
 
         SquadLifecycleResult reinstall = RunInstall(h, renderer, new SquadInstallRequest(
@@ -1122,7 +1130,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("reinstall-refreshes-older");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         string path = GuidancePath(h);
         byte[] shipped = File.ReadAllBytes(path);
         byte[] older = Encoding.UTF8.GetBytes("An earlier Kyber-Weave release's default.\n");
@@ -1159,7 +1167,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("doctor-unreadable-guidance");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         WriteCanonicalSource(anchor);
         string path = GuidancePath(h);
 
@@ -1342,7 +1350,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-preset-rewrite");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
 
@@ -1386,7 +1394,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-uninstall-retained");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
         string guidance = GuidancePath(h);
@@ -1423,7 +1431,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-lease-held");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadUpdateCommand command = UpdateCommand(h, renderer, new RecordingProjectPicker(NoProjects), false);
         AssertExit(Capture(() => command.Execute(null!, GlobalUpdate(anchor))), 0);
 
@@ -1478,7 +1486,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-under-lease");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         SquadDeploymentPlan plan = PlanGlobalReceiptRewrite(h);
         SquadHomeFile record = new(SquadResponseGuidanceDeployer.FileName, new string('a', 64));
         string leaseKey = h.Store.ResolveLeaseIdentity(h.Home, SquadDeploymentScope.Global);
@@ -1514,7 +1522,7 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         using Harness h = NewHarness("guidance-callback-fails");
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
+        InstallGlobal(h);
         byte[] receiptBefore = File.ReadAllBytes(RequireFile(GlobalReceiptPath(h)));
         SquadDeploymentPlan plan = PlanGlobalReceiptRewrite(h);
 
@@ -1620,10 +1628,10 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         Harness h = NewHarness(name);
         ScriptedAgentRenderer renderer = new("architect");
         string anchor = h.MakeDirectory("global-anchor");
-        InstallGlobal(h, anchor, renderer, SquadTarget.Codex);
-        Project alpha = InstallProject(h, "alpha", renderer);
-        Project beta = InstallProject(h, "beta", renderer);
-        Project stale = InstallProject(h, "stale", renderer);
+        InstallGlobal(h);
+        Project alpha = InstallProject(h, "alpha");
+        Project beta = InstallProject(h, "beta");
+        Project stale = InstallProject(h, "stale");
         Directory.Delete(stale.Root, true);
         return new Fleet(h, anchor, renderer, alpha, beta, stale);
     }
@@ -1635,33 +1643,17 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
         File.WriteAllText(path, yaml);
     }
 
-    private static void InstallGlobal(
-        Harness h,
-        string anchor,
-        ISquadRenderer renderer,
-        params SquadTarget[] targets)
+    /// <summary>Gives the harness the class template's global deployment, copied into its own home.</summary>
+    private void InstallGlobal(Harness h)
     {
-        SquadLifecycleResult result = RunInstall(h, renderer, new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            targets,
-            Version: InstalledVersion));
-        Assert.True(result.Success, DescribeFailure(result));
+        _templates.CopyGlobalInto(h);
     }
 
-    private static Project InstallProject(Harness h, string name, ISquadRenderer renderer)
+    /// <summary>Gives the harness a project holding the class template's deployment, and registers it.</summary>
+    private Project InstallProject(Harness h, string name)
     {
-        string root = h.MakeDirectory(name);
-        SquadLifecycleResult result = RunInstall(h, renderer, new SquadInstallRequest(
-            root,
-            SquadDeploymentScope.Project,
-            [SquadTarget.Codex],
-            Version: InstalledVersion));
-        Assert.True(result.Success, DescribeFailure(result));
-        string physical = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).PhysicalPath;
-        string key = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
-        string stateDirectory = Path.Combine(h.Home, ".kyber-weave", "squad", "projects", key);
-        return new Project(root, physical, stateDirectory);
+        SquadHomeStateTemplate.Project installed = _templates.CopyProjectInto(h, name);
+        return new Project(installed.Root, installed.Physical, installed.StateDirectory);
     }
 
     private static SquadLifecycleResult RunInstall(Harness h, ISquadRenderer renderer, SquadInstallRequest request)
@@ -1959,36 +1951,6 @@ public sealed class SquadGlobalHomeCliTests : IDisposable
             ISquadReleaseSource? releaseSource = null)
         {
             return UpdateCommand(Harness, Renderer, picker, isInteractive, readAnswer, releaseSource);
-        }
-    }
-
-    /// <summary>
-    ///     Renders one agent file per requested target at a path the test controls, so a receipt and a
-    ///     collision can be planned against exact bytes instead of the fake renderer's harness layout.
-    /// </summary>
-    private sealed class ScriptedAgentRenderer(params string[] agentNames) : ISquadRenderer
-    {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            List<SquadDeploymentFile> files = [];
-            foreach (SquadTarget target in request.Targets)
-                foreach (string agent in agentNames)
-                    files.Add(new SquadDeploymentFile(
-                        $"agents/{agent}.md",
-                        Encoding.UTF8.GetBytes($"canonical {agent}\n"),
-                        SquadTargetCatalog.GetToken(target)));
-
-            return Task.FromResult(new SquadRenderResult(
-                true,
-                files,
-                [],
-                [],
-                []));
         }
     }
 

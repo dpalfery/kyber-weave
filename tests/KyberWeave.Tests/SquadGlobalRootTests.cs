@@ -24,10 +24,23 @@ namespace KyberWeave.Tests;
 ///     fakeable inline; a wrapping fake would not earn its keep here and could drift from the real
 ///     resolution logic it exists to prove. No test reads the real <c>HOME</c> or
 ///     <c>Environment.GetEnvironmentVariable</c>.
+///     <para>
+///     A test that reads the corpus reads the one <see cref="SquadCorpusTemplate"/> the class declares,
+///     because loading it costs about 75 ms and several tests loaded it two or three times. Every test
+///     still extracts its own release into its own temp directory, and
+///     <see cref="InstallAsync_RealInstallGlobalScope_WritesOnlyUnderTheResolvedHomeSubtree"/> still
+///     installs for real, per target, end to end.
+///     </para>
 /// </remarks>
-public sealed class SquadGlobalRootTests : IDisposable
+public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, IDisposable
 {
     private readonly TempDirectory _temp = new();
+    private readonly SquadCorpusTemplate _corpus;
+
+    public SquadGlobalRootTests(SquadCorpusTemplate corpus)
+    {
+        _corpus = corpus;
+    }
 
     public static TheoryData<string, string> UnusableZCodeConfigs => new()
     {
@@ -695,8 +708,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         // so its total is count-neutral and only the receipt paths differ.
         if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
-            string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-            SquadSource source = SquadSourceLoader.Load(productRoot);
+            SquadSource source = _corpus.Source;
             SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
             // The conductor carries plan-path, spec-path, intake-path, and autonomy references;
@@ -722,8 +734,7 @@ public sealed class SquadGlobalRootTests : IDisposable
 
         if (target == SquadTarget.Codex)
         {
-            string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-            SquadSource source = SquadSourceLoader.Load(productRoot);
+            SquadSource source = _corpus.Source;
             SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
             string[] conductorEntryPointPaths =
@@ -1185,8 +1196,7 @@ public sealed class SquadGlobalRootTests : IDisposable
         // follows the Pi-renderer skill-only precedent (no agents/<name>.md principal).
         if (target is SquadTarget.Claude or SquadTarget.Cursor)
         {
-            string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-            SquadSource source = SquadSourceLoader.Load(productRoot);
+            SquadSource source = _corpus.Source;
             SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
 
             // The conductor carries plan-path, spec-path, intake-path, and autonomy references;
@@ -1262,7 +1272,10 @@ public sealed class SquadGlobalRootTests : IDisposable
                     productRoot,
                     [target],
                     SquadDeploymentScope.Global,
-                    GlobalRoots: globalRoots).Prepared());
+                    GlobalRoots: globalRoots)
+                {
+                    PreloadedSource = _corpus.Source
+                }.Prepared());
 
             if (legacyPrefixes.TryGetValue(target, out string? prefix))
                 foreach (SquadDeploymentFile file in result.Files)
@@ -1281,8 +1294,7 @@ public sealed class SquadGlobalRootTests : IDisposable
     [Fact]
     public void ThePrimarySetIsExactlyTheThreeDeclaredPrimaryAgents()
     {
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        SquadSource source = SquadSourceLoader.Load(productRoot);
+        SquadSource source = _corpus.Source;
 
         string[] primaries =
         [
@@ -1326,10 +1338,9 @@ public sealed class SquadGlobalRootTests : IDisposable
     ///     so only the receipt paths differ there. Codex, Claude, and Factory retain the native
     ///     principal and add a skill entry point for the conductor.
     /// </summary>
-    private static int ExpectedRenderedFileCount(SquadTarget target)
+    private int ExpectedRenderedFileCount(SquadTarget target)
     {
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        SquadSource source = SquadSourceLoader.Load(productRoot);
+        SquadSource source = _corpus.Source;
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);
