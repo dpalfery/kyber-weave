@@ -55,6 +55,18 @@ public static partial class PlanTaskFileRules
     /// </summary>
     public const string LegacyJsonTaskFile = "KW-DOC-TASKS-014";
 
+    /// <summary>Error: a task's <c>Difficulty:</c> value is not <c>easy</c>, <c>medium</c> or <c>hard</c>.</summary>
+    public const string InvalidDifficulty = "KW-DOC-TASKS-015";
+
+    /// <summary>Error: a task names a technology the host's <c>ontology.technologies</c> does not declare.</summary>
+    public const string UndeclaredTechnology = "KW-DOC-TASKS-016";
+
+    /// <summary>Error: a task names more than one technology, which no one prompt can fit.</summary>
+    public const string MultipleTechnologies = "KW-DOC-TASKS-017";
+
+    /// <summary>The three legal difficulty values, in order.</summary>
+    public static IReadOnlyList<string> Difficulties { get; } = ["easy", "medium", "hard"];
+
     /// <summary>The schema version this build reads.</summary>
     internal const int SchemaVersion = 2;
 

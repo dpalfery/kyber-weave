@@ -74,6 +74,9 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-SPEC-012` | A declared technology, role or platform folder is missing one of its four files; a legacy `README.md` standard is a warning naming the migration command |
 | `KW-DOC-SPEC-013` | A standard's headings are not the six the ontology requires, in order |
 | `KW-DOC-SPEC-014` | `builds-on` names an undeclared parent, the standard itself, or a parent that already names a parent; or it sits outside a coding standard |
+| `KW-DOC-TASKS-015` | A task file entry names a `Difficulty:` other than `easy`, `medium` or `hard` |
+| `KW-DOC-TASKS-016` | A task file entry names a technology `ontology.technologies` does not declare |
+| `KW-DOC-TASKS-017` | A task file entry names more than one technology, which must be split into one task per technology |
 | `KW-CONFIG-REG-001` | A configuration registry property names a path that does not exist |
 | `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
 | `KW-DOC-LIFECYCLE-001` | A `plan` document sits in the plans folder but the plan index does not reach it |

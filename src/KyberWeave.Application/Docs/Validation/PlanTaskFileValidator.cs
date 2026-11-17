@@ -7,6 +7,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Core.Text;
 using static KyberWeave.Core.Docs.Validation.PlanTaskFileRules;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -397,6 +398,7 @@ public sealed partial class PlanTaskFileValidator
         {
             if (entry is not null)
             {
+                CheckTaskScope(entry, taskFile, artifact.RelativePath, report);
                 CheckPrompt(entry, taskFile, artifact.RelativePath, planningDirectories, report);
             }
         }
@@ -585,6 +587,74 @@ public sealed partial class PlanTaskFileValidator
     }
 
     /// <summary>Reports a prompt with no command, no acceptance criteria, or a plan read in it.</summary>
+    /// <summary>
+    /// Checks the task's difficulty and technology: the three legal difficulty values, one declared
+    /// technology, and no task naming two. A task with neither line reports nothing.
+    /// </summary>
+    private void CheckTaskScope(
+        PlanTaskFileEntry entry,
+        string taskFile,
+        string artifactPath,
+        DiagnosticReport report)
+    {
+        if (!string.IsNullOrWhiteSpace(entry.Difficulty)
+            && !Difficulties.Contains(entry.Difficulty.Trim(), StringComparer.Ordinal))
+        {
+            report.Add(new Diagnostic(
+                InvalidDifficulty,
+                Severity.Error,
+                $"Task '{entry.Id}' names difficulty '{entry.Difficulty}'. Use one of: easy, medium, hard.",
+                artifactPath,
+                taskFile));
+        }
+
+        if (string.IsNullOrWhiteSpace(entry.Technology))
+        {
+            return;
+        }
+
+        string technology = entry.Technology.Trim();
+        if (NamesSeveralTechnologies(technology))
+        {
+            report.Add(new Diagnostic(
+                MultipleTechnologies,
+                Severity.Error,
+                $"Task '{entry.Id}' names more than one technology ('{technology}'). Split it into one task per technology, with a dependency between them.",
+                artifactPath,
+                taskFile));
+            return;
+        }
+
+        IReadOnlyList<string> declared = _config.Ontology.Technologies;
+        if (!declared.Contains(technology, StringComparer.Ordinal))
+        {
+            report.Add(new Diagnostic(
+                UndeclaredTechnology,
+                Severity.Error,
+                $"Task '{entry.Id}' names technology '{technology}', which this repository does not declare. Declared: " +
+                (declared.Count == 0 ? "(none)" : string.Join(", ", declared)) + ".",
+                artifactPath,
+                taskFile,
+                Hint: StringDistance.Nearest(technology, declared) is { } nearest
+                    ? $"Closest declared technology: '{nearest}'. Declare it in ontology.technologies, or name a declared one."
+                    : "Declare it in ontology.technologies, or name a declared one."));
+        }
+    }
+
+    /// <summary>
+    /// True when the value names more than one technology: a separator, or the word <c>and</c>. A
+    /// technology's own hyphen is not a separator (`data-access-layer` is one name).
+    /// </summary>
+    private static bool NamesSeveralTechnologies(string value) =>
+        value.Contains(',', StringComparison.Ordinal)
+        || value.Contains('/', StringComparison.Ordinal)
+        || value.Contains('&', StringComparison.Ordinal)
+        || value.Contains('+', StringComparison.Ordinal)
+        || SeveralTechnologies().IsMatch(value);
+
+    [GeneratedRegex(@"\s+and\s+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SeveralTechnologies();
+
     private static void CheckPrompt(
         PlanTaskFileEntry entry,
         string taskFile,
