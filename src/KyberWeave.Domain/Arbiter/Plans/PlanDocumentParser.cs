@@ -90,6 +90,14 @@ public static partial class PlanDocumentParser
     [GeneratedRegex(@"\b(?:required[ \t]+)?capabilit(?:y|ies)\b[ \t]*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex CapabilitiesLabelRegex();
 
+    // Difficulty and Technology are one-value labels, so they are anchored to a line start (with
+    // an optional list marker) rather than matched anywhere: prose can mention a difficulty.
+    [GeneratedRegex(@"^[ \t]*(?:[-*+][ \t]+)?difficulty[ \t]*:", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex DifficultyLabelRegex();
+
+    [GeneratedRegex(@"^[ \t]*(?:[-*+][ \t]+)?technology[ \t]*:", RegexOptions.Multiline | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex TechnologyLabelRegex();
+
     [GeneratedRegex(@"`([^`\n]+)`", RegexOptions.CultureInvariant)]
     private static partial Regex BacktickSpanRegex();
 
@@ -298,6 +306,8 @@ public static partial class PlanDocumentParser
             tasks.Add(new PlanTask(build.Id, build.Title, build.Text, build.Files, dependsOn, build.Skills, build.Checked)
             {
                 Capabilities = build.Capabilities,
+                Difficulty = build.Difficulty,
+                Technology = build.Technology,
             });
         }
 
@@ -390,13 +400,15 @@ public static partial class PlanDocumentParser
             string title = match.Groups["title"].Value.Trim();
             int end = Math.Max(Math.Min(SectionEnd(headings, heading, tasksEnd), tasksEnd), heading.BodyStart);
             string sectionText = text[heading.BodyStart..end].Trim();
-            (List<string> files, List<string> dependsTokens, List<string> labelSkills, string? capabilities) = ParseTaskBody(sectionText, isSpec: false);
+            (List<string> files, List<string> dependsTokens, List<string> labelSkills, string? capabilities, string? difficulty, string? technology) = ParseTaskBody(sectionText, isSpec: false);
 
             TaskBuild build = new(id, title, sectionText, false, heading.Start)
             {
                 Files = files,
                 DependsTokens = dependsTokens,
                 Capabilities = capabilities,
+                Difficulty = difficulty,
+                Technology = technology,
             };
             build.Skills.EnsureCapacity(build.Skills.Count + labelSkills.Count);
             foreach (string skill in HeadingSkills(heading.Text).Concat(labelSkills))
@@ -428,7 +440,7 @@ public static partial class PlanDocumentParser
                 }
 
                 string bodyText = string.Join("\n", bodyLines).Trim();
-                (List<string> files, List<string> dependsTokens, List<string> skills, string? capabilities) = ParseTaskBody(bodyText, isSpec: true);
+                (List<string> files, List<string> dependsTokens, List<string> skills, string? capabilities, string? difficulty, string? technology) = ParseTaskBody(bodyText, isSpec: true);
                 builds.Add(new TaskBuild(
                     match.Groups["id"].Value,
                     match.Groups["title"].Value.Trim(),
@@ -440,6 +452,8 @@ public static partial class PlanDocumentParser
                     DependsTokens = dependsTokens,
                     Skills = skills,
                     Capabilities = capabilities,
+                    Difficulty = difficulty,
+                    Technology = technology,
                 });
             }
 
@@ -459,7 +473,7 @@ public static partial class PlanDocumentParser
         region.StartsWith("none", StringComparison.OrdinalIgnoreCase)
         && (region.Length == 4 || !(char.IsLetterOrDigit(region[4]) || region[4] is '_' or '-'));
 
-    private static (List<string> Files, List<string> DependsTokens, List<string> Skills, string? Capabilities) ParseTaskBody(string sectionText, bool isSpec)
+    private static (List<string> Files, List<string> DependsTokens, List<string> Skills, string? Capabilities, string? Difficulty, string? Technology) ParseTaskBody(string sectionText, bool isSpec)
     {
         (string plain, List<int> boldStarts) = StripEmphasis(sectionText);
         List<LabelMatch> labels = CollectLabels(plain);
@@ -537,7 +551,30 @@ public static partial class PlanDocumentParser
             capabilities = text.Length > 0 ? text : null;
         }
 
-        return (files, dependsTokens, skills, capabilities);
+        string? difficulty = LineValue(plain, labels, LabelFamily.Difficulty);
+        string? technology = LineValue(plain, labels, LabelFamily.Technology);
+
+        return (files, dependsTokens, skills, capabilities, difficulty, technology);
+    }
+
+    /// <summary>
+    /// The rest of the line after the first label of <paramref name="family"/>, trimmed and with
+    /// backticks removed; null when the label is absent or holds nothing. A one-value label ends at
+    /// its line, so task prose after it is not part of the value.
+    /// </summary>
+    private static string? LineValue(string plain, List<LabelMatch> labels, LabelFamily family)
+    {
+        LabelMatch? label = labels.FirstOrDefault(candidate => candidate.Family == family);
+        if (label is null)
+        {
+            return null;
+        }
+
+        int lineEnd = plain.IndexOf('\n', label.ValueStart);
+        int end = RegionEnd(plain, label.ValueStart, Math.Min(
+            NextLabelStart(labels, label.Start), lineEnd < 0 ? int.MaxValue : lineEnd));
+        string text = plain[label.ValueStart..end].Replace("`", string.Empty, StringComparison.Ordinal).Trim();
+        return text.Length > 0 ? text : null;
     }
 
     /// <summary>
@@ -625,6 +662,8 @@ public static partial class PlanDocumentParser
         CollectLabelsOf(plain, DependsLabelRegex(), LabelFamily.Depends, labels);
         CollectLabelsOf(plain, SkillsLabelRegex(), LabelFamily.Skills, labels);
         CollectLabelsOf(plain, CapabilitiesLabelRegex(), LabelFamily.Capabilities, labels);
+        CollectLabelsOf(plain, DifficultyLabelRegex(), LabelFamily.Difficulty, labels);
+        CollectLabelsOf(plain, TechnologyLabelRegex(), LabelFamily.Technology, labels);
         return [.. labels.OrderBy(label => label.Start)];
     }
 
@@ -638,7 +677,8 @@ public static partial class PlanDocumentParser
 
     private static bool ContainsLabel(string line) =>
         FilesLabelRegex().IsMatch(line) || DependsLabelRegex().IsMatch(line) || SkillsLabelRegex().IsMatch(line)
-        || CapabilitiesLabelRegex().IsMatch(line);
+        || CapabilitiesLabelRegex().IsMatch(line) || DifficultyLabelRegex().IsMatch(line)
+        || TechnologyLabelRegex().IsMatch(line);
 
     /// <summary>
     /// True when a bullet line at <paramref name="indent"/> or shallower opens with a bold label:
@@ -949,7 +989,9 @@ public static partial class PlanDocumentParser
         Files,
         Depends,
         Skills,
-        Capabilities
+        Capabilities,
+        Difficulty,
+        Technology
     }
 
     private sealed record TaskBuild(string Id, string Title, string Text, bool Checked, int Position)
@@ -961,6 +1003,10 @@ public static partial class PlanDocumentParser
         public List<string> Skills { get; init; } = [];
 
         public string? Capabilities { get; init; }
+
+        public string? Difficulty { get; init; }
+
+        public string? Technology { get; init; }
     }
 }
 

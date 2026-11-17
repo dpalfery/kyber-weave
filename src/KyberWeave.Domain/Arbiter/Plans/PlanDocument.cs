@@ -62,6 +62,19 @@ public sealed record PlanTask(
     /// conductor matches this text against the descriptions of the agents it can dispatch.
     /// </summary>
     public string? Capabilities { get; init; }
+
+    /// <summary>
+    /// The task's difficulty from its <c>Difficulty:</c> label: <c>easy</c>, <c>medium</c> or
+    /// <c>hard</c>, verbatim. Null when the task names none, which a task file writes as
+    /// <c>medium</c> with source <c>default</c>.
+    /// </summary>
+    public string? Difficulty { get; init; }
+
+    /// <summary>
+    /// The one technology the task is written in, from its <c>Technology:</c> label, verbatim; null
+    /// when it names none. The value may name more than one technology, which validation rejects.
+    /// </summary>
+    public string? Technology { get; init; }
 }
 
 /// <summary>

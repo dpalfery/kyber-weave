@@ -40,8 +40,8 @@ public class ConfigRegResolutionTests
     {
         IReadOnlyList<ConfigRegEntry> entries = ConfigRegConfig.ProductDefaults.Resolve(Ontology("dotnet", "github-actions"));
 
-        Assert.Equal("docs/standards/dotnet/README.md", PathOf(entries, "dotnet-coding-standard"));
-        Assert.Equal("docs/standards/github-actions/README.md", PathOf(entries, "github-actions-coding-standard"));
+        Assert.Equal("docs/standards/dotnet/dotnet.standards.md", PathOf(entries, "dotnet-coding-standard"));
+        Assert.Equal("docs/standards/github-actions/github-actions.standards.md", PathOf(entries, "github-actions-coding-standard"));
     }
 
     /// <summary>

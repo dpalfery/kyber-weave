@@ -224,6 +224,12 @@ public sealed partial class PlanTaskFileGenerator
 
         string session = LabelValue(lines, "session", "session group") ?? task.Id;
 
+        // A task that names no difficulty is medium by default; the plan's own line is the architect's rating.
+        bool rated = !string.IsNullOrWhiteSpace(task.Difficulty);
+        string difficulty = rated ? task.Difficulty! : "medium";
+        string difficultySource = rated ? "architect" : "default";
+        string? technology = string.IsNullOrWhiteSpace(task.Technology) ? null : task.Technology;
+
         string? command = null;
         if (!PlanTaskFileRules.HasCommand(body))
         {
@@ -320,7 +326,10 @@ public sealed partial class PlanTaskFileGenerator
                 [.. task.DependsOn],
                 [.. keptFiles],
                 session,
-                prompt);
+                prompt,
+                Difficulty: difficulty,
+                DifficultySource: difficultySource,
+                Technology: technology);
     }
 
     private static string ComposePrompt(PlanTask task, string body, string inlined, string? command, string? acceptance)
@@ -753,6 +762,9 @@ public sealed partial class PlanTaskFileGenerator
                          ("session", got.Session == want.Session),
                          ("files", (got.Files ?? []).SequenceEqual(want.Files ?? [])),
                          ("depends-on", (got.DependsOn ?? []).SequenceEqual(want.DependsOn ?? [])),
+                         ("difficulty", got.Difficulty == want.Difficulty),
+                         ("difficulty-source", got.DifficultySource == want.DifficultySource),
+                         ("technology", got.Technology == want.Technology),
                          ("prompt", string.Equals(got.Prompt, want.Prompt, StringComparison.Ordinal))
                      })
             {

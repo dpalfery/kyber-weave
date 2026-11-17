@@ -65,6 +65,18 @@ public sealed record PlanTaskFile(
 /// plan assigned a <paramref name="Role"/>, when no model is configured, or when the pick fell below the confidence floor.
 /// </param>
 /// <param name="AgentConfidence">The model's confidence in <paramref name="Agent"/>; null when there is no pick.</param>
+/// <param name="Difficulty">
+/// The rating the dispatch uses: <c>easy</c>, <c>medium</c> or <c>hard</c>. A task that names no
+/// difficulty is written as <c>medium</c>.
+/// </param>
+/// <param name="DifficultySource">
+/// Who rated the task: <c>architect</c> when the plan carries a <c>Difficulty:</c> line,
+/// <c>default</c> when it carries none, and <c>decision-model</c> when the model's answer replaced it.
+/// </param>
+/// <param name="Technology">
+/// The one technology the task is written in, from its <c>Technology:</c> line; null when the task
+/// names none, which a documentation or delivery task may do.
+/// </param>
 public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("id")] string? Id = null,
     [property: JsonPropertyName("role")] string? Role = null,
@@ -74,4 +86,7 @@ public sealed record PlanTaskFileEntry(
     [property: JsonPropertyName("session")] string? Session = null,
     [property: JsonPropertyName("prompt")] string? Prompt = null,
     [property: JsonPropertyName("agent")] string? Agent = null,
-    [property: JsonPropertyName("agent-confidence")] double? AgentConfidence = null);
+    [property: JsonPropertyName("agent-confidence")] double? AgentConfidence = null,
+    [property: JsonPropertyName("difficulty")] string? Difficulty = null,
+    [property: JsonPropertyName("difficulty-source")] string? DifficultySource = null,
+    [property: JsonPropertyName("technology")] string? Technology = null);
