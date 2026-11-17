@@ -83,6 +83,23 @@ public class DocsStandardsDiffCommandTests : IDisposable
         Assert.Empty(folder.HostOnly);
     }
 
+    /// <summary>
+    /// A body line that starts like a host-owned key is authored content, not a host choice, so
+    /// editing it has to be reported as a change.
+    /// </summary>
+    [Fact]
+    public void ABodyLineThatStartsWithAHostOwnedKeyIsStillCompared()
+    {
+        KyberStandardsTemplates.TryGetPart(
+            "csharp", KyberStandardsTemplates.Part.Standard, out string? standard);
+        string host = standard! + "\nstatus: review needed\n";
+        Write("6-Docs/standards/csharp/csharp.standards.md", host);
+
+        StandardsDiffResult result = new StandardsTemplateDiff(_temp.Path, Declared).Run();
+
+        Assert.Contains("csharp.standards.md", Assert.Single(result.Folders).Changed);
+    }
+
     [Fact]
     public void ANameThatIsNotDeclaredIsRefusedWithTheNearestMatch()
     {

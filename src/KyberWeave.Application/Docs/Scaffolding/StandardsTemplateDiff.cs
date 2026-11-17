@@ -121,11 +121,45 @@ public sealed class StandardsTemplateDiff
         return new StandardsFolderDiff(scope, missing, hostOnly, changed);
     }
 
+    /// <summary>
+    /// Drops the three host-owned keys from the frontmatter block only. A body line that happens
+    /// to start with one of them is authored content: scoping the strip to the block is what
+    /// keeps an edit to that line visible as a change.
+    /// </summary>
     private static string Normalize(string text)
     {
         string[] lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-        IEnumerable<string> kept = lines.Where(line => !HostOwnedKeys.Any(
-            key => line.StartsWith(key, StringComparison.Ordinal)));
+        List<string> kept = [];
+        bool frontmatterOpen = false;
+        bool frontmatterSeen = false;
+
+        foreach (string line in lines)
+        {
+            bool delimiter = line.Trim() == "---";
+            if (!frontmatterSeen && delimiter)
+            {
+                frontmatterSeen = true;
+                frontmatterOpen = true;
+                kept.Add(line);
+                continue;
+            }
+
+            if (frontmatterOpen && delimiter)
+            {
+                frontmatterOpen = false;
+                kept.Add(line);
+                continue;
+            }
+
+            if (frontmatterOpen
+                && HostOwnedKeys.Any(key => line.StartsWith(key, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            kept.Add(line);
+        }
+
         return string.Join('\n', kept).TrimEnd();
     }
 
