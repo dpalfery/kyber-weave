@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-05
+last-reviewed: 2026-11-17
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
 lead: frontmatter
@@ -116,7 +116,7 @@ are read differently, so a statement in the wrong one costs every agent on every
 | Applies to | Every task, whatever the technology | Work in one technology (C#, React, SQL, tests) |
 | Breaking it | Never acceptable | A review finding, graded against the standard |
 | Read | Always: every agent, every dispatch | On demand, by the agent working in that technology, through `docs_get_coding_standard_for_technology` |
-| Lives in | The root `AGENTS.md` and the `rules` folder (`<rules-index>`); scoped `AGENTS.md` for a subtree | `<standards-root>/<technology>/README.md`, `doc-type: coding-standard` |
+| Lives in | The root `AGENTS.md` and the `rules` folder (`<rules-index>`); scoped `AGENTS.md` for a subtree | `<standards-root>/<technology>/<technology>.standards.md` (or a role's or platform's folder), `doc-type: coding-standard` |
 | Shape | Few and short; ideally checkable by a gate or the Arbiter, not only by reading | As long as it needs, with examples; has a lifecycle (`status`, `owner`) |
 
 Typical rules cover secrets, what may be committed or pushed, architecture boundaries, scope, and
@@ -128,6 +128,28 @@ means a rule. Anything else goes in a standard.
 **One home per statement.** A rule may point to a standard for detail, but the text lives in one
 place. The layer boundary is a one-line rule; what goes in which project or folder is in the
 language's standard.
+
+## A technology, role or platform folder
+
+A technology, role or platform is one folder under `<standards-root>/`, and the folder holds
+everything about it: four files, each named after the folder, so a file opened on its own says
+what it is and whose it is.
+
+| File | Doc type | What it is |
+|---|---|---|
+| `<name>.standards.md` | `coding-standard` | The standard: six headings, in this order — Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. |
+| `<name>.rules.md` | `rule` | Prose rules a model reads. They outrank the standard and are not evaluated by the Arbiter. |
+| `<name>.skills.md` | `skill` | How to do the work in this technology or role: commands, tool servers, query patterns, output shape. |
+| `<name>.arbiter-rules.yml` | not governed | Machine rules the Arbiter evaluates. YAML, no frontmatter, and a file that declares no rule is valid. |
+
+`shared-rules.md` beside the folders holds the rules that apply to every technology. A standard may
+name one parent it `builds-on` (React on TypeScript, Tauri on Rust), and a task in the child then
+receives the parent's rules and skills too. A folder whose standard is still `README.md` keeps
+working for at least two minor releases: every finding the rename would raise is a warning naming
+`kyber-weave docs standards migrate` and then `kyber-weave docs init`, so an un-upgraded host still
+runs. The file names, checks and migration are in
+[Coding standards](../standards/README.md) and the
+[governance gates](docgraph/governance.md).
 
 **A size budget.** Everything always loaded (the root `AGENTS.md`, the files it tells every agent
 to read, and any harness instruction file such as `CLAUDE.md`) should fit in about 3 KB. A rule

@@ -20,7 +20,9 @@ Each folder holds four files named after it: `<name>.standards.md` (the standard
 headings), `<name>.rules.md` (this repository's hard rules for the technology),
 `<name>.skills.md` (its procedures and commands) and `<name>.arbiter-rules.yml` (machine
 rules; empty when there are none). `shared-rules.md` beside the folders holds the rules that
-apply to every technology.
+apply to every technology. Nothing ships for testing alone: cross-technology testing rules live
+in `shared-rules.md` and each standard's **Testing** heading, because `test` and `sql` went with
+the per-technology agents the roster removal deleted.
 
 This repository declares [C#](csharp/csharp.standards.md),
 [test](test/test.standards.md), [TypeScript](typescript/typescript.standards.md),
@@ -40,9 +42,9 @@ Add it to `ontology.technologies` in
 `<name-coding-standard>` property in the registry, and legalizes the `technology` value in the
 standard's frontmatter — so the three cannot disagree.
 
-To bootstrap a repository with the full suite of 16 Kyber Squad technology templates
+To bootstrap a repository with the full suite of 14 Kyber Squad technology templates
 (`aws`, `azure`, `csharp`, `data-access-layer`, `github-actions`, `go`, `maui`, `pulumi`,
-`python`, `react`, `rust`, `sql`, `sql-server`, `tauri`, `test`, `typescript`) plus the four
+`python`, `react`, `rust`, `sql-server`, `tauri`, `typescript`) plus the four
 role folders and four platform folders, name them with `--standards`:
 `kyber-weave docs init . --standards csharp,reviewer,github`. `--kyber-standards` installs
 every technology template. Do not run either on this repository: it would declare the
@@ -50,10 +52,16 @@ technologies this repository does not use.
 
 A technology name is a slug: lowercase letters, digits and single hyphens.
 
+A template change reaches new hosts only: a folder already installed is never overwritten by a
+`docs init` run. An existing host sees what its copy is missing, or differs by, with
+`kyber-weave docs standards diff [name]`, which prints the difference per folder and writes
+nothing; installing the missing files is then the host's own decision.
+
 ## A standard is read through the tool, not as a file
 
-Every code-writing worker — the thirteen development agents and their skills — reaches the
-standard for its stack with the **`docs_get_coding_standard_for_technology`** MCP tool, naming
+Every code-writing worker — the three developer tiers, `docs-dev`, `devops` and
+`platform-researcher` — reaches the standard for its stack with the
+**`docs_get_coding_standard_for_technology`** MCP tool, naming
 the technology and, when it helps, the topic it is about to work on:
 
 ```
