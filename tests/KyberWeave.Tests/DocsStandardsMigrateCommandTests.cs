@@ -298,6 +298,29 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
+    /// The reshape text is derived from the legacy file, so a rename skipped because the target
+    /// appeared must take its reshape with it instead of overwriting the second actor's standard.
+    /// </summary>
+    [Fact]
+    public void AReshapeIsSkippedWhenItsRenameWasSkipped()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
+        StandardsFolderMigration migration = new(repo.Path, Declared);
+
+        IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
+        Assert.Contains(planned, change => change.Kind == StandardsFolderChangeKind.Reshape);
+        File.WriteAllText(StandardPath(repo.Path, "csharp"), "written by someone else");
+
+        List<StandardsFolderChange> applied = migration.Apply(planned, "csharp", null, null);
+
+        Assert.DoesNotContain(applied, change => change.Kind == StandardsFolderChangeKind.Reshape);
+        Assert.Equal("written by someone else", File.ReadAllText(StandardPath(repo.Path, "csharp")));
+    }
+
+    /// <summary>
     /// An add whose target appears between planning and applying is not clobbered, and is not
     /// reported as written.
     /// </summary>

@@ -178,6 +178,7 @@ public sealed partial class StandardsFolderMigration
         string? reshapedText)
     {
         List<StandardsFolderChange> applied = [];
+        HashSet<string> skippedRenames = new(StringComparer.Ordinal);
 
         foreach (StandardsFolderChange change in planned)
         {
@@ -186,7 +187,11 @@ public sealed partial class StandardsFolderMigration
                 case StandardsFolderChangeKind.Rename:
                     string renameFrom = RequireWritable(change.From);
                     string renameTo = RequireWritable(change.To);
-                    if (File.Exists(renameTo)) break;
+                    if (File.Exists(renameTo))
+                    {
+                        skippedRenames.Add(change.To);
+                        break;
+                    }
 
                     try
                     {
@@ -194,6 +199,7 @@ public sealed partial class StandardsFolderMigration
                     }
                     catch (IOException) when (File.Exists(renameTo))
                     {
+                        skippedRenames.Add(change.To);
                         break;
                     }
 
@@ -218,12 +224,13 @@ public sealed partial class StandardsFolderMigration
                     break;
 
                 case StandardsFolderChangeKind.Reshape:
-                    if (reshapedText is not null)
-                    {
-                        AtomicFile.WriteAllText(RequireWritable(change.To), reshapedText);
-                        applied.Add(change);
-                    }
+                    // The reshape's text was derived from the legacy file. When the rename was
+                    // skipped, the target now holds another actor's standard, and writing the
+                    // reshape over it would replace that standard with the legacy text.
+                    if (reshapedText is null || skippedRenames.Contains(change.To)) break;
 
+                    AtomicFile.WriteAllText(RequireWritable(change.To), reshapedText);
+                    applied.Add(change);
                     break;
             }
         }
