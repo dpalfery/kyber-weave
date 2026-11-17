@@ -55,7 +55,7 @@ public sealed class LinkFragmentTests
     [Fact]
     public void AFragmentedLinkResolvesTheTargetDocumentWithoutPassingFragmentToResolveLink()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/linker.md", """
                                        ---
                                        id: docs/source
@@ -106,7 +106,7 @@ public sealed class LinkFragmentTests
     [Fact]
     public void AnEmptyFragmentDoesNotLinkASectionToItsOwnPreamble()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/linker.md", """
                                        ---
                                        id: docs/source

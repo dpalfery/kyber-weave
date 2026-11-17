@@ -11,6 +11,10 @@
     <!-- Same two suppressions, for the same reasons, as KyberWeave.Tests.csproj: xUnit test
          method names use underscores, and the v3 cancellation token is not threaded through. -->
     <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
+
+    <!-- CA2000, for the same reason as KyberWeave.Tests.csproj: the shared `DocFixture` lives in
+         KyberWeave.Testing, and the analyzer cannot follow its fluent methods across assemblies. -->
+    <NoWarn>$(NoWarn);CA2000</NoWarn>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

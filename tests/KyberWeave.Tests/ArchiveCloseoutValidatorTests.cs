@@ -14,154 +14,6 @@ namespace KyberWeave.Tests;
 /// catalog component carried fresh by the mapped document. Each condition test mutates
 /// exactly one aspect of that shape so the failure it prevents stays identifiable.
 /// </summary>
-internal static class CloseoutCorpus
-{
-    public const string Component = "MotorcycleRAG API";
-
-    public const string HarvestLastReviewed = "2026-10-20";
-
-    public const string Catalog = """
-                                  ---
-                                  id: system/catalog
-                                  title: Component Catalog
-                                  doc-type: index
-                                  status: current
-                                  owner: Maintainers
-                                  last-reviewed: 2026-07-21
-                                  ---
-
-                                  # Catalog
-
-                                  | Component | Type | Source root | Overview | Detailed documentation | Owner | Last reviewed | Status |
-                                  | --- | --- | --- | --- | --- | --- | --- | --- |
-                                  | MotorcycleRAG API | Application | `1-Presentation/Api` | [README](x) | [docs](y) | API maintainers | 2026-07-21 | Current |
-                                  | MotorcycleRAG system | System | repository root | [README](x) | [docs](y) | Maintainers | 2026-07-21 | Current |
-                                  """;
-
-    /// <summary>A forecast Review section: it talks about a future closeout but holds no mapping.</summary>
-    public const string ReviewForecastSection = """
-                                                ## Review
-
-                                                The closeout will be recorded here during Review.
-                                                """;
-
-    /// <summary>A Design harvest section with prose but no waiver, for the no-design-change scale.</summary>
-    public const string WaiverlessDesignSection = """
-                                                  ## Design harvest
-
-                                                  No new components; the change refines the existing widget shape.
-                                                  """;
-
-    /// <summary>A governed reference document the closeout mapping can link to.</summary>
-    public static string TargetDocument(
-        string id = "reference/widget",
-        string component = Component,
-        string lastReviewed = HarvestLastReviewed)
-    {
-        return $"""
-                ---
-                id: {id}
-                title: {id}
-                doc-type: reference
-                status: current
-                component: {component}
-                owner: Maintainers
-                last-reviewed: {lastReviewed}
-                ---
-
-                # {id}
-                """;
-    }
-
-    /// <summary>A todo document inside the todo-index folder, for RESIDUAL tracking.</summary>
-    public static string TodoDocument(string id = "todo/cleanup")
-    {
-        return $"""
-                ---
-                id: {id}
-                title: {id}
-                doc-type: todo
-                status: needs-review
-                component: {Component}
-                owner: Maintainers
-                last-reviewed: {HarvestLastReviewed}
-                ---
-
-                # {id}
-                """;
-    }
-
-    /// <summary>A Decisions table with one approved row per id.</summary>
-    public static string DecisionsSection(params string[] ids)
-    {
-        return "## Decisions\n\n| ID | Question | Answer | Status |\n| --- | --- | --- | --- |\n"
-               + string.Join("\n", ids.Select(id => $"| {id} | Question {id} | Answer {id} | Approved |"))
-               + "\n";
-    }
-
-    /// <summary>A Design harvest table with one change row per id.</summary>
-    public static string DesignHarvestSection(params string[] ids)
-    {
-        return "## Design harvest\n\n| ID | Change |\n| --- | --- |\n"
-               + string.Join("\n", ids.Select(id => $"| {id} | Change {id} |"))
-               + "\n";
-    }
-
-    /// <summary>A Closeout mapping table; the destination is a link, a waiver, or RESIDUAL.</summary>
-    public static string CloseoutMappingSection(params (string Ids, string Destination)[] rows)
-    {
-        return "## Closeout mapping\n\n| ID | Destination |\n| --- | --- |\n"
-               + string.Join("\n", rows.Select(row => $"| {row.Ids} | {row.Destination} |"))
-               + "\n";
-    }
-
-    /// <summary>
-    /// An archived plan. Defaults are the fully passing shape; each condition test overrides
-    /// exactly one parameter. Empty lines for the impact keys mean the keys are absent.
-    /// </summary>
-    public static string PlanDocument(
-        string id = "plans/2026-10-20-widget",
-        string status = "superseded",
-        string bodyStatus = "Complete",
-        string impactLine = "documentation-impact: extends-component",
-        string componentsLine = "impact-components:\n  - MotorcycleRAG API",
-        string? sections = null)
-    {
-        return $"""
-                ---
-                id: {id}
-                title: {id}
-                doc-type: plan
-                status: {status}
-                component: {Component}
-                owner: API maintainers
-                last-reviewed: {HarvestLastReviewed}
-                {impactLine}
-                {componentsLine}
-                ---
-
-                # {id}
-
-                **Status:** {bodyStatus}
-
-                {sections ?? DefaultSections()}
-                """;
-    }
-
-    /// <summary>A minimal failing plan used as the control entry beside a passing variant.</summary>
-    public static string ControlPlan()
-    {
-        return PlanDocument("plans/2026-10-21-control", "draft", "Draft", string.Empty, string.Empty, string.Empty);
-    }
-
-    private static string DefaultSections()
-    {
-        return DecisionsSection("D1")
-               + CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
-               + DesignHarvestSection("H1");
-    }
-}
-
 /// <summary>
 /// The closeout gate's conditions: what archived work must carry before
 /// <c>KW-DOC-LIFECYCLE-004</c> stays silent. Every test here fails while the validator
@@ -206,7 +58,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void DraftFrontmatterStatusFailsCloseoutAsC1()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(status: "draft"));
 
         Diagnostic finding = Assert.Single(
@@ -226,7 +78,7 @@ public sealed class ArchiveCloseoutValidatorTests
     public void TheArchiveInventoryIsNotAnArchivedEntry()
     {
         const string inventory = "6-Docs/archive/plans/README.md";
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(
                 inventory,
                 "---\nid: archive/plans/index\ntitle: Archived plan inventory\ndoc-type: index\n"
@@ -243,7 +95,7 @@ public sealed class ArchiveCloseoutValidatorTests
     public void AnArchivedSpecificationFolderReadmeIsStillAnEntry()
     {
         const string specReadme = "6-Docs/archive/specs/widget/README.md";
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(specReadme, CloseoutCorpus.PlanDocument(status: "draft"));
 
         Diagnostic finding = Assert.Single(
@@ -262,7 +114,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [InlineData("6-Docs/archive/adr/README.md")]
     public void AnotherKindsTopLevelArchiveReadmeIsStillAnEntry(string readme)
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(readme, CloseoutCorpus.PlanDocument(status: "draft"));
 
         Diagnostic finding = Assert.Single(
@@ -276,7 +128,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void MissingDecisionsSectionFailsCloseoutAsC3()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
                 + CloseoutCorpus.DesignHarvestSection("H1")));
@@ -295,7 +147,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void ReviewForecastWithoutCloseoutMappingFailsCloseoutAsC4()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.ReviewForecastSection
@@ -313,7 +165,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void MissingScaleFailsCloseoutAsC5()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(impactLine: string.Empty, componentsLine: string.Empty));
 
         Diagnostic finding = Assert.Single(
@@ -328,7 +180,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void UnknownScaleFailsCloseoutAsC5()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(impactLine: "documentation-impact: quantum-entanglement"));
 
         Diagnostic finding = Assert.Single(
@@ -343,7 +195,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void ScaleWithoutComponentsFailsCloseoutAsC5()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(componentsLine: "impact-components: []"));
 
         Diagnostic finding = Assert.Single(
@@ -361,7 +213,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void NoDesignChangeWithoutAReasonFailsCloseoutAsC5()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(
                 impactLine: "documentation-impact: no-design-change",
                 componentsLine: string.Empty,
@@ -382,7 +234,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void MissingDesignHarvestFailsCloseoutAsC6()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1",
@@ -400,7 +252,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void UnmappedDecisionIdIsNamedInTheFinding()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1", "D2")
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
@@ -419,7 +271,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void UnmappedHarvestIdIsNamedInTheFinding()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
@@ -438,7 +290,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void AdrWaiverAloneMapsNothing()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "ADR waiver: refines an established pattern."))
@@ -462,7 +314,7 @@ public sealed class ArchiveCloseoutValidatorTests
     {
         const string WaiverPath = "6-Docs/archive/plans/2026-10-22-waiver.md";
         const string ControlPath = "6-Docs/archive/plans/2026-10-21-control.md";
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(ControlPath, CloseoutCorpus.ControlPlan())
             .Write(WaiverPath, CloseoutCorpus.PlanDocument(
                 "plans/2026-10-22-waiver",
@@ -485,7 +337,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void LinkToCodeDoesNotMapTheDecision()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write("src/Widget.cs", "// Implementation, not a governed document.\n")
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
@@ -505,7 +357,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void LinkToAMissingDocumentDoesNotMapTheDecision()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Ghost widget](../../reference/ghost.md)"))
@@ -524,7 +376,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void LinkToAnArchivedDocumentDoesNotMapTheDecision()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write("6-Docs/archive/reference/old.md", CloseoutCorpus.TargetDocument("reference/old"))
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
@@ -547,7 +399,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void BoldPrefixedWaiverStillMapsTheDecision()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1",
@@ -567,7 +419,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void BuriedWaiverMarkerAfterUnresolvableLinkMapsNothing()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1",
@@ -590,7 +442,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void FencedExampleTableIsNotADecisionsTable()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 "## Decisions\n\nAn example of the table shape:\n\n```\n| ID | Question |\n| --- | --- |\n| D1 | Example? |\n```\n"
                 + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
@@ -612,7 +464,7 @@ public sealed class ArchiveCloseoutValidatorTests
     public void CommaSeparatedIdsMapEachDecision()
     {
         const string ControlPath = "6-Docs/archive/plans/2026-10-21-control.md";
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(ControlPath, CloseoutCorpus.ControlPlan())
             .Write(PlanPath, CloseoutCorpus.PlanDocument());
 
@@ -630,7 +482,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void AHyphenatedRangeDoesNotExpand()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1", "D2")
                 + CloseoutCorpus.CloseoutMappingSection(
@@ -651,7 +503,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void ResidualWithoutATodoLinkMapsNothing()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(sections:
                 CloseoutCorpus.DecisionsSection("D1")
                 + CloseoutCorpus.CloseoutMappingSection(
@@ -678,7 +530,7 @@ public sealed class ArchiveCloseoutValidatorTests
     {
         const string ResidualPath = "6-Docs/archive/plans/2026-10-23-residual.md";
         const string ControlPath = "6-Docs/archive/plans/2026-10-21-control.md";
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write("6-Docs/todo/cleanup.md", CloseoutCorpus.TodoDocument())
             .Write(ControlPath, CloseoutCorpus.ControlPlan())
             .Write(ResidualPath, CloseoutCorpus.PlanDocument(
@@ -703,7 +555,7 @@ public sealed class ArchiveCloseoutValidatorTests
     [Fact]
     public void ImpactComponentOutsideTheCatalogFailsCloseoutAsC8()
     {
-        using DocFixture fixture = WithTarget(new DocFixture())
+        using DocFixture fixture = WithTarget(DocFixture.Create())
             .Write(PlanPath, CloseoutCorpus.PlanDocument(
                 componentsLine: "impact-components:\n  - MotorcycleRAG Imaginary"));
 
@@ -723,7 +575,7 @@ public sealed class ArchiveCloseoutValidatorTests
     public void MappedDocumentWithoutTheComponentFailsCloseoutAsC8()
     {
         using DocFixture fixture = WithTarget(
-                new DocFixture(),
+                DocFixture.Create(),
                 CloseoutCorpus.TargetDocument(component: "MotorcycleRAG system"))
             .Write(PlanPath, CloseoutCorpus.PlanDocument());
 
@@ -742,7 +594,7 @@ public sealed class ArchiveCloseoutValidatorTests
     public void StaleMappedDocumentFailsCloseoutAsC8()
     {
         using DocFixture fixture = WithTarget(
-                new DocFixture(),
+                DocFixture.Create(),
                 CloseoutCorpus.TargetDocument(lastReviewed: "2026-01-01"))
             .Write(PlanPath, CloseoutCorpus.PlanDocument());
 
@@ -764,7 +616,7 @@ public sealed class ArchiveCloseoutValidatorTests
         const string MixedPath = "6-Docs/archive/plans/2026-10-24-mixed.md";
         const string ControlPath = "6-Docs/archive/plans/2026-10-21-control.md";
         using DocFixture fixture = WithTarget(
-                new DocFixture(),
+                DocFixture.Create(),
                 CloseoutCorpus.TargetDocument(lastReviewed: "2026-01-01"))
             .Write("6-Docs/reference/widget-v2.md", CloseoutCorpus.TargetDocument("reference/widget-v2"))
             .Write(ControlPath, CloseoutCorpus.ControlPlan())

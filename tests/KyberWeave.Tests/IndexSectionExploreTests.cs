@@ -51,7 +51,7 @@ public sealed class IndexSectionExploreTests
                             ALPINE-HARVEST-SCOPE-MARKER-XYZZY
                             """;
 
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/plans/README.md", indexBody)
             .Write("6-Docs/plans/alpine-plan.md", targetBody);
 
@@ -104,7 +104,7 @@ public sealed class IndexSectionExploreTests
                             UNRELATED-COPPER-WIDGET-MARKER-XYZZY
                             """;
 
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/plans/README.md", indexBody)
             .Write("6-Docs/plans/unrelated.md", targetBody);
 

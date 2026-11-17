@@ -23,7 +23,6 @@ The helpers both this project and `tests/KyberWeave.Integration.Tests` use live 
 | `TempDirectory` | A disposable scratch directory. Implement `IDisposable` on the test class and dispose it. |
 | `DocFixture` | A documentation corpus on disk — `.WithCatalog()`, `.WithSourceRoot()`, `.Write()`, `.Load()` |
 | `FakeCodeGraphResolver` | `.WithSymbols(...)` for deterministic symbol and route resolution |
-| `CodeGraphFixtureDb` | A real sqlite index, for adapter parity only |
 | `KyberWeaveTestPaths` | Locates the repository root by walking up to `KyberWeave.sln` |
 
 ## Internals are in scope
