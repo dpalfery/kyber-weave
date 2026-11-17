@@ -27,19 +27,22 @@ profiles:
     opencode: zai-coding-plan/glm-5.3
     pi: zai/glm-5.3[thinking=high]
     zcode: glm-5.3
+  # The strongest developer tier: a failed task steps up from `general` to this profile, so every
+  # row is the harness's strongest coding model — the value `architect` carries on the same harness.
+  # Keep the two profiles' rows equal; `DevHardModelUpgradeTests` fails when a row falls behind.
   dev-hard:
     default: inherit
-    antigravity: flash
-    claude: claude-sonnet-5-5
-    codex: gpt-6.1-terra
-    copilot: GPT-6.1 Terra (copilot)
-    cursor: grok-4.7[]
-    devin: swe-2-high
-    factory: deepseek-v4.1-flash[reasoningEffort=high]
-    kilo: opencode-go/muse-spark-1.3-contributor
-    opencode: opencode-go/muse-spark-1.3-contributor
-    pi: opencode-go/muse-spark-1.3-contributor[thinking=high]
-    zcode: glm-5.3-flash
+    antigravity: pro
+    claude: opus
+    codex: gpt-6.1-sol
+    copilot: Claude Opus 5.5 (copilot)
+    cursor: claude-sonnet-5-5[effort=high]
+    devin: claude-opus-5-5-high
+    factory: glm-5.3[reasoningEffort=high]
+    kilo: zai-coding-plan/glm-5.3
+    opencode: zai-coding-plan/glm-5.3
+    pi: zai/glm-5.3[thinking=high]
+    zcode: glm-5.3
   fast:
     default: inherit
     antigravity: flash

@@ -34,18 +34,18 @@ public sealed class ModelProfileOptionalTests
     }
 
     [Fact]
-    public void DevHardHasARowForEveryHarnessAndSharesNoRowWithThePlanningProfiles()
+    public void DevHardHasARowForEveryHarnessAndRunsAStrongerModelThanTheTierBelowIt()
     {
         IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
         SquadModelProfile devHard = profiles["dev-hard"];
         SquadModelProfile architect = profiles["architect"];
-        SquadModelProfile deepPlanning = profiles["deep-planning"];
+        SquadModelProfile general = profiles["general"];
 
         Assert.Equal(architect.HarnessModels.Keys.Order(StringComparer.Ordinal), devHard.HarnessModels.Keys.Order(StringComparer.Ordinal));
         foreach ((string harness, string value) in devHard.HarnessModels)
         {
-            Assert.NotEqual(architect.HarnessModels[harness], value);
-            Assert.NotEqual(deepPlanning.HarnessModels[harness], value);
+            // The step up from dev-medium must change the model, so no row may match `general`'s.
+            Assert.NotEqual(general.HarnessModels[harness], value);
         }
     }
 

@@ -119,12 +119,16 @@ public sealed class SquadSourceTests
     [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
     [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
     [InlineData("reviewer", "devin", "grok-4-7-high")]
-    [InlineData("dev-hard", "claude", "claude-sonnet-5-5")]
-    [InlineData("dev-hard", "copilot", "GPT-6.1 Terra (copilot)")]
-    [InlineData("dev-hard", "kilo", "opencode-go/muse-spark-1.3-contributor")]
-    [InlineData("dev-hard", "opencode", "opencode-go/muse-spark-1.3-contributor")]
-    [InlineData("dev-hard", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=high]")]
-    [InlineData("dev-hard", "devin", "swe-2-high")]
+    [InlineData("dev-hard", "claude", "opus")]
+    [InlineData("dev-hard", "codex", "gpt-6.1-sol")]
+    [InlineData("dev-hard", "copilot", "Claude Opus 5.5 (copilot)")]
+    [InlineData("dev-hard", "cursor", "claude-sonnet-5-5[effort=high]")]
+    [InlineData("dev-hard", "factory", "glm-5.3[reasoningEffort=high]")]
+    [InlineData("dev-hard", "kilo", "zai-coding-plan/glm-5.3")]
+    [InlineData("dev-hard", "opencode", "zai-coding-plan/glm-5.3")]
+    [InlineData("dev-hard", "pi", "zai/glm-5.3[thinking=high]")]
+    [InlineData("dev-hard", "devin", "claude-opus-5-5-high")]
+    [InlineData("dev-hard", "zcode", "glm-5.3")]
     public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
@@ -182,7 +186,7 @@ public sealed class SquadSourceTests
 
 
     /// <summary>
-    /// Pins Antigravity planning and review to Pro while routine work stays on Flash.
+    /// Pins Antigravity planning, review and the hard developer tier to Pro while routine work stays on Flash.
     /// This catches unintended model changes independently of the renderer's YAML echo.
     /// </summary>
     [Theory]
@@ -190,9 +194,9 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "pro")]
     [InlineData("fast", "flash")]
     [InlineData("general", "flash")]
-    [InlineData("dev-hard", "flash")]
+    [InlineData("dev-hard", "pro")]
     [InlineData("reviewer", "pro")]
-    public void ModelsYmlAntigravityColumnPinsPlanningAndReviewOnProAndOtherProfilesOnFlash(
+    public void ModelsYmlAntigravityColumnPinsPlanningReviewAndTheHardTierOnProAndOtherProfilesOnFlash(
         string profileName,
         string expectedAntigravityModel)
     {

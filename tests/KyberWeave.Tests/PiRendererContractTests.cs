@@ -290,7 +290,7 @@ public sealed class PiRendererContractTests : IDisposable
                 "deep-planning" => "zai/glm-5.3",
                 "fast" => "opencode-go/muse-spark-1.3-contributor",
                 "general" => "opencode-go/muse-spark-1.3-contributor",
-                "dev-hard" => "opencode-go/muse-spark-1.3-contributor",
+                "dev-hard" => "zai/glm-5.3",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
                 "" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
@@ -1142,6 +1142,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// deep-planning → model <c>zai/glm-5.3</c>, thinking <c>high</c>;
     /// reviewer → <c>opencode-go/kimi-k2.7-code</c>, <c>high</c>;
     /// general → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>medium</c>;
+    /// dev-hard → <c>zai/glm-5.3</c>, <c>high</c>;
     /// fast → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>low</c>;
     /// orchestration → no model, no thinking.
     /// This contract pins the approved mapping directly from the plan.
@@ -1151,6 +1152,7 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("deep-planning", "zai/glm-5.3", "high")]
     [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
     [InlineData("general", "opencode-go/muse-spark-1.3-contributor", "medium")]
+    [InlineData("dev-hard", "zai/glm-5.3", "high")]
     [InlineData("fast", "opencode-go/muse-spark-1.3-contributor", "low")]
     public async Task RenderAsync_Pi_CanonicalProfilesEmitApprovedThinkingLevels(
         string profileName,

@@ -396,7 +396,7 @@ frontier model:
 |---|---|---|
 | `architect` | `claude-opus-5-5-high` | architect |
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
-| `dev-hard` | `swe-2-high` | dev-hard |
+| `dev-hard` | `claude-opus-5-5-high` | dev-hard |
 | `general` | `swe-2-high` | dev-medium, devops, github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev, typescript-dev |
 | `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, dal-dev, dev-easy, docs-dev, maui-dev, platform-researcher, python-dev, react-dev, research-agent, test-dev |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
