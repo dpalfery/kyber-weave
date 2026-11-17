@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-16
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -75,7 +75,7 @@ keys differ, and they differ more than you would expect:
 |---|---|---|---|
 | [Claude Code](#claude-code) | `.mcp.json` (repo root) | `mcpServers` | Committed servers need approval on first run |
 | [Factory](#factory) | `.factory/mcp.json` (repo root) or `~/.factory/mcp.json` | `mcpServers` | Same shape as Claude Code, but a Task-dispatched droid sees only the servers its own droid file whitelists |
-| [Cursor](#cursor) | `.cursor/mcp.json` | `mcpServers` | Same shape as Claude Code, and subagents inherit the session's servers rather than holding a grant of their own |
+| [Cursor](#cursor) | Desktop/local CLI: `.cursor/mcp.json`; Cloud Agents: personal or team settings | `mcpServers` | Same shape as Claude Code, and subagents inherit the session's servers rather than holding a grant of their own |
 | [VS Code / Copilot in the editor](#vs-code-and-github-copilot-in-the-editor) | `.vscode/mcp.json` | `servers` | Not `.mcp.json`, and not `mcpServers` |
 | [Copilot coding agent](#github-copilot-coding-agent) | Repository settings, not a file | `mcpServers` | `tools` is required; the binary must be installed first |
 | [Codex CLI](#codex-cli) | `~/.codex/config.toml` | `[mcp_servers.<name>]` | TOML, and the table name is snake_case; custom agents inherit the session's servers and cannot override them |
@@ -213,8 +213,8 @@ mechanical.
 
 ### Cursor
 
-`.cursor/mcp.json` in the repository, or `~/.cursor/mcp.json` to get it in every project.
-The shape matches Claude Code:
+For desktop and local CLI sessions, use `.cursor/mcp.json` in the repository, or
+`~/.cursor/mcp.json` to get it in every project. The shape matches Claude Code:
 
 ```json
 {
@@ -231,6 +231,39 @@ Cursor subagents inherit every tool from the parent session, including MCP tools
 file carries no `tools` allow-list key (cursor.com/docs/subagents.md, read 2026-10-31). That is why
 Squad renders no per-agent MCP grant here: the wiring above is the whole grant, and every Squad
 agent — `conductor` included — already reaches the server once the file exists.
+
+#### Cursor Cloud Agents
+
+Cloud Agent registration is separate. Add and enable personal servers through the MCP dropdown at
+[cursor.com/agents](https://cursor.com/agents), or have a team admin add shared servers under
+**Dashboard → Plugins & MCPs**. Create both `kw-docs` and `codegraph` as stdio servers with the
+same commands and arguments as this repository's `.cursor/mcp.json`; Cursor documents HTTP and
+stdio for Cloud Agents, but not SSE or `mcp-remote`
+([Cloud Agent capabilities](https://cursor.com/docs/cloud-agent/capabilities#mcp-tools), read
+2026-11-16). The repository file above is not the Cloud Agent registration step.
+
+The `mcpServerAllowlist` in `.cursor/environment.json` only approves those registrations; it does
+not distribute or install a server. Cursor matches a stdio entry against the **full shell-resolved
+command string**, including arguments, and supports `*` as a wildcard. The environment therefore
+uses these path-independent entries rather than a bare executable name:
+
+```json
+{ "name": "kw-docs", "command": "*kyber-weave-mcp --repo-root *" },
+{ "name": "codegraph", "command": "*codegraph serve --mcp --path *" }
+```
+
+The `name` is only a display name; the command pattern grants the permission
+([MCP allowlist rules](https://cursor.com/docs/enterprise/model-and-integration-management#mcp-allowlist),
+read 2026-11-16). Do not copy `${userHome}` or `${workspaceFolder}` into that allowlist: the
+[environment schema](https://cursor.com/schemas/environment.schema.json) documents a command pattern,
+not variable interpolation. Both variables are supported in `mcp.json` command, argument and
+environment values ([config interpolation](https://cursor.com/docs/mcp#config-interpolation), read
+2026-11-16).
+
+After adding the personal or team registrations, start a new Cloud Agent and verify the repository
+with `docs_get_source_repository_and_revision` (the current name, not the retired `docs_status`) and
+`codegraph_explore`. If only Cursor's built-in tools appear, recheck registration, enablement, the
+allowlist and the stdio launch; an allowlist alone cannot make either server appear.
 
 ### Command Code
 
@@ -1166,7 +1199,7 @@ call is answered from the server's root, as before.
 - **The index is the worktree's own.** The CodeGraph joins and the freshness refresh use the
   `.codegraph/` of the named worktree, never the server root's.
 
-All twelve but the deliver tool are declared `OpenWorld = false`, and all but the two plan lifecycle tools,
+All thirteen but the deliver tool are declared `OpenWorld = false`, and all but the two plan lifecycle tools,
 the deliver tool and the tooling-check tool are declared `ReadOnly`; the SDK maps those to the protocol's `openWorldHint` and `readOnlyHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
@@ -1189,7 +1222,7 @@ logs` puts those nouns in permanently resident text held back only by a negation
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only
 `docs_answer_question_from_repo_documentation` carries an exclusion, because it is the broadest of
-the twelve; the narrower eleven state their territory positively so no request falls between them.
+the thirteen; the narrower twelve state their territory positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — for example how
 `charBudget` caps **`docs_get_coding_standard_for_technology`** prose sits on that parameter,
@@ -1509,6 +1542,26 @@ the provenance line above — nothing else — so an empty corpus is not a failu
 still reports the root, a count of `0`, and unavailable revision markers when Git cannot be
 read. It is also the one tool that always answers: under the stop rule every other tool can
 return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
+
+### `docs_build_task_prompt_for_agent_dispatch(taskId = null, technology = null, plan = null, priorResults = null, failedAttempts = 0, projectPath = null)`
+
+The conductor's dispatch question: for this task, which agent do I dispatch, and is its prompt
+whole? It builds the same prompt `kyber-weave docs packet <task id>` prints, through the same
+service, and answers with the facts the dispatch needs and **never the prompt text**: the agent,
+the difficulty in use and who rated it (`architect`, `default` or `decision-model`), the one
+technology the task names, and what the prompt budget left out. The prompt itself reaches the
+worker through the dispatch hook, which replaces the task-id line of the dispatch before the
+worker starts, so the conductor never reads or retypes it.
+
+`taskId` is written any natural way (`T1`, `t1`, `task 1`, `1`) and is resolved in the one plan
+that is Ready or In progress, or the one `plan` names. `priorResults` is the file a retry names,
+and `failedAttempts` is how many attempts already failed, so a retry's reply describes the same
+prompt the hook builds. Name `technology` instead of a task id for a dispatch that belongs to no
+task, such as a research request: the reply then describes the parts from the shared rules on.
+
+A task file that is missing or no longer matches its plan builds no prompt: the reply is
+`prompt: none` and a `reason:` line naming `kyber-weave docs tasks <plan> --write`, so no worker
+starts with only a task id. The reply leads with the provenance line, like every other tool.
 
 ### `docs_finalize_approved_plan_and_write_task_file(projectPath, planFile, approvalMode, approval)`
 

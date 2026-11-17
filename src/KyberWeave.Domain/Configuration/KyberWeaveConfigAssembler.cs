@@ -1,3 +1,4 @@
+using System.Globalization;
 using KyberWeave.Core.Arbiter;
 using YamlDotNet.Core;
 
@@ -17,6 +18,9 @@ public static class KyberWeaveConfigAssembler
 
     /// <summary>The setting that chooses the worker roster a run dispatches from.</summary>
     private const string WorkerRosterKey = "worker-roster";
+
+    /// <summary>The setting that sets the most characters one task prompt may hold.</summary>
+    private const string TaskPromptBudgetKey = "task-prompt-budget";
 
     /// <summary>
     /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
@@ -84,7 +88,8 @@ public static class KyberWeaveConfigAssembler
             Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
             StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
-            WorkerRoster = ParseWorkerRoster(document.WorkerRoster)
+            WorkerRoster = ParseWorkerRoster(document.WorkerRoster),
+            TaskPromptBudget = ParseTaskPromptBudget(document.TaskPromptBudget)
         };
     }
 
@@ -127,7 +132,8 @@ public static class KyberWeaveConfigAssembler
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
             StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
             WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook),
-            WorkerRoster = ParseWorkerRoster(document.WorkerRoster)
+            WorkerRoster = ParseWorkerRoster(document.WorkerRoster),
+            TaskPromptBudget = ParseTaskPromptBudget(document.TaskPromptBudget)
         };
     }
 
@@ -167,6 +173,25 @@ public static class KyberWeaveConfigAssembler
         throw new YamlException(
             $"{WorkerRosterKey} '{value}' is not a roster. Use 'technology' for the per-technology workers, " +
             "or 'tiered' for the three developer agents; remove the key for 'technology'.");
+    }
+
+    /// <summary>Reads the top-level <c>task-prompt-budget</c> setting. Absent means the shipped 60,000 characters.</summary>
+    /// <exception cref="YamlException">The value is not a positive whole number of characters.</exception>
+    private static int ParseTaskPromptBudget(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return KyberWeaveConfig.DefaultTaskPromptBudget;
+
+        if (int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int budget)
+            && budget > 0)
+        {
+            return budget;
+        }
+
+        throw new YamlException(
+            $"{TaskPromptBudgetKey} '{value}' is not a positive whole number of characters. Give the most " +
+            $"characters one task prompt may hold, such as {KyberWeaveConfig.DefaultTaskPromptBudget}, or " +
+            "remove the key for the shipped budget.");
     }
 
     /// <summary>

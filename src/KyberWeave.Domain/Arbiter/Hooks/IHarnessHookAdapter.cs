@@ -92,6 +92,9 @@ public enum HookScope
 /// supplies none, which a rule reads as unsupported.</param>
 /// <param name="ConfirmModelWrite">Writes an accepted model token into the harness input and reports whether
 /// the write held. The decision asks it before recording a delivered model. Null when the adapter writes later.</param>
+/// <param name="BuildDispatchPrompt">Builds the task prompt a dispatch's identity line is replaced with, or null
+/// when the host has no prompt service. The adapters call it through <see cref="DispatchPromptInsertion"/>, after
+/// the rules judged the short dispatch and alone when the Arbiter is off.</param>
 public sealed record HookContext(
     string RepoRoot,
     Func<string> NewDecisionId,
@@ -100,7 +103,8 @@ public sealed record HookContext(
     string? HomeDirectory = null,
     HookScope Scope = HookScope.Project,
     ModelOverrideCapability? ModelOverride = null,
-    Func<string, bool>? ConfirmModelWrite = null);
+    Func<string, bool>? ConfirmModelWrite = null,
+    Func<DispatchPromptQuery, DispatchPromptExpansion>? BuildDispatchPrompt = null);
 
 /// <summary>The dispatch-gating decision behind a hook: later tasks replace the default
 /// allow-all engine with step-0/step-1 evaluation (the <c>serve</c>/<c>eval</c> entry
@@ -197,6 +201,21 @@ public interface IHarnessHookAdapter
     /// dispatch event or carries no tool use id. Must not touch configuration.
     /// </summary>
     DispatchClaimKey? ClaimKey(JsonElement payload) => null;
+
+    /// <summary>
+    /// The document that carries the prompt in place of a dispatch's identity line, or null when the
+    /// payload needs no insertion or this harness cannot rewrite a dispatch.
+    /// </summary>
+    /// <remarks>
+    /// The host calls this when the Arbiter is off, so prompt insertion is not part of the Arbiter. With the
+    /// Arbiter on the adapter calls the same insertion from the allow path, after the rules judged the short
+    /// dispatch. A prompt that cannot be built is answered with the harness's block document, which names the
+    /// repair command, so no worker starts with only a task id.
+    /// </remarks>
+    /// <param name="payload">The harness event.</param>
+    /// <param name="renderedCaller">The <c>--caller</c> the hook command was given, when it was.</param>
+    /// <param name="context">The hook context carrying the prompt service.</param>
+    string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context) => null;
 
     /// <summary>Handles a classified event. Returns the exact stdout text:
     /// empty means proceed.</summary>

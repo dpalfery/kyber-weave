@@ -121,9 +121,11 @@ public sealed class CursorRenderer : SquadHarnessRenderer
     /// <summary>Squad's owned block for the shared <c>.cursor/hooks.json</c>.</summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context)
     {
-        if (context.EnabledArbiter is { } arbiter)
+        if (context.EnabledArbiter is not null || context.DispatchHooks)
         {
-            context.Blocks.Add(BuildArbiterBlock(arbiter.HookTimeoutSeconds, context.Scope));
+            context.Blocks.Add(BuildArbiterBlock(
+                context.EnabledArbiter?.HookTimeoutSeconds ?? context.DispatchHookTimeoutSeconds,
+                context.Scope));
         }
     }
 

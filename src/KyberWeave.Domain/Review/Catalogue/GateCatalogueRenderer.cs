@@ -24,37 +24,7 @@ public static class GateCatalogueRenderer
 {
     private static readonly string[] FamilyOrder = ["csharp", "typescript", "rust", "go", "python"];
 
-    private static readonly string[] AgentOrder =
-    [
-        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev", "github-devops",
-        "typescript-dev", "react-dev", "rust-dev", "tauri-dev",
-        "go-dev", "python-dev", "test-dev", "docs-dev"
-    ];
-
-    /// <summary>
-    /// The technology whose declaration makes an agent's task gates render.
-    /// </summary>
-    /// <remarks>
-    /// <c>github-devops</c> and <c>docs-dev</c> edit the repository's plumbing — its workflows, the shell
-    /// scripts those workflows call and the review configuration both read — rather than a language.
-    /// <c>github-actions</c> is the declared technology that covers those files, so a host that declares it
-    /// receives their gates and a host that does not is left alone.
-    /// </remarks>
-    private static readonly Dictionary<string, string> AgentTechnology = new(StringComparer.Ordinal)
-    {
-        ["csharp-dev"] = "csharp",
-        ["dal-dev"] = "csharp",
-        ["maui-dev"] = "csharp",
-        ["pulumi-dev"] = "csharp",
-        ["github-devops"] = "github-actions",
-        ["typescript-dev"] = "typescript",
-        ["react-dev"] = "react",
-        ["rust-dev"] = "rust",
-        ["tauri-dev"] = "tauri",
-        ["go-dev"] = "go",
-        ["python-dev"] = "python",
-        ["docs-dev"] = "github-actions"
-    };
+    private static readonly IReadOnlyList<string> AgentOrder = TechnologyAgentMap.Agents;
 
     private static readonly string[] KnownRoles = ["format", "lint", "typecheck", "build", "test"];
 
@@ -414,7 +384,7 @@ public static class GateCatalogueRenderer
                 ? "tauri-dev"
                 : "rust-dev";
             if (entry.Agents.Contains(target, StringComparer.Ordinal) &&
-                AgentTechnology.TryGetValue(target, out string? technology) &&
+                TechnologyAgentMap.TechnologyFor(target) is { } technology &&
                 declared.Contains(technology))
             {
                 return [target];
@@ -432,7 +402,7 @@ public static class GateCatalogueRenderer
                 continue;
 
             if (entry.Agents.Contains(agent, StringComparer.Ordinal) &&
-                AgentTechnology.TryGetValue(agent, out string? technology) &&
+                TechnologyAgentMap.TechnologyFor(agent) is { } technology &&
                 declared.Contains(technology))
             {
                 agents.Add(agent);
@@ -470,7 +440,7 @@ public static class GateCatalogueRenderer
         AddNoteComment(lines, entry, "      ");
         lines.AddRange(TaskGateLines(gate, "      "));
         renderer.AgentsWithLive.Add(agent);
-        renderer.Written.Add((AgentTechnology[agent], id));
+        renderer.Written.Add((TechnologyAgentMap.TechnologyFor(agent)!, id));
 
         if (entry.Role is "format" or "lint")
             renderer.TaskRenders.Add(new LiveTaskRender(served[0], entry, gate));
@@ -1242,3 +1212,71 @@ public sealed record GateCatalogueFacts(Func<string, bool> FileExists, Func<stri
 /// <param name="Path">The repository root.</param>
 /// <param name="Facts">The reads the renderer makes.</param>
 internal sealed record CatalogueRepository(string Path, GateCatalogueFacts Facts);
+
+/// <summary>
+/// The shipped map from an agent to the one technology whose declaration puts that agent's task gates on it,
+/// and back again. The gate catalogue renders from it and task gates resolve through it, so the two cannot
+/// disagree about which agent works in which technology.
+/// </summary>
+/// <remarks>
+/// <c>github-devops</c> and <c>docs-dev</c> edit the repository's plumbing — its workflows, the shell scripts
+/// those workflows call and the review configuration both read — rather than a language. <c>github-actions</c>
+/// is the declared technology that covers those files, so a host that declares it receives their gates and a
+/// host that does not is left alone.
+/// </remarks>
+public static class TechnologyAgentMap
+{
+    /// <summary>The agents the map names, in the order the catalogue renders their blocks.</summary>
+    public static IReadOnlyList<string> Agents { get; } =
+    [
+        "csharp-dev", "dal-dev", "maui-dev", "pulumi-dev", "github-devops",
+        "typescript-dev", "react-dev", "rust-dev", "tauri-dev",
+        "go-dev", "python-dev", "test-dev", "docs-dev"
+    ];
+
+    private static readonly Dictionary<string, string> AgentToTechnology = new(StringComparer.Ordinal)
+    {
+        ["csharp-dev"] = "csharp",
+        ["dal-dev"] = "csharp",
+        ["maui-dev"] = "csharp",
+        ["pulumi-dev"] = "csharp",
+        ["github-devops"] = "github-actions",
+        ["typescript-dev"] = "typescript",
+        ["react-dev"] = "react",
+        ["rust-dev"] = "rust",
+        ["tauri-dev"] = "tauri",
+        ["go-dev"] = "go",
+        ["python-dev"] = "python",
+        ["docs-dev"] = "github-actions"
+    };
+
+    /// <summary>The technology whose declaration makes <paramref name="agent"/>'s task gates render, or null.</summary>
+    public static string? TechnologyFor(string? agent) =>
+        agent is not null && AgentToTechnology.TryGetValue(agent, out string? technology) ? technology : null;
+
+    /// <summary>
+    /// The agent the map names for <paramref name="technology"/>, or null when it names none.
+    /// </summary>
+    /// <remarks>
+    /// Several agents may share one technology — <c>csharp</c> covers four — so the first in
+    /// <see cref="Agents"/> order answers. A technology no agent declares, such as <c>sql-server</c>, has none:
+    /// a host that wants gates for it declares <c>review.technology-gates</c>.
+    /// </remarks>
+    public static string? AgentFor(string? technology)
+    {
+        if (string.IsNullOrWhiteSpace(technology))
+            return null;
+
+        string name = technology.Trim();
+        foreach (string agent in Agents)
+        {
+            if (AgentToTechnology.TryGetValue(agent, out string? mapped)
+                && string.Equals(mapped, name, StringComparison.Ordinal))
+            {
+                return agent;
+            }
+        }
+
+        return null;
+    }
+}

@@ -290,6 +290,7 @@ public sealed class PiRendererContractTests : IDisposable
                 "deep-planning" => "zai/glm-5.3",
                 "fast" => "opencode-go/muse-spark-1.3-contributor",
                 "general" => "opencode-go/muse-spark-1.3-contributor",
+                "dev-hard" => "opencode-go/muse-spark-1.3-contributor",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
                 "" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")

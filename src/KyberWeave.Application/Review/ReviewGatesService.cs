@@ -566,8 +566,17 @@ public sealed class ReviewGatesService(
         if (refusals.Count > 0)
             return RefuseInput(report, refusals);
 
-        if (!config.Review.TaskGates.TryGetValue(request.Agent!, out IReadOnlyList<ReviewTaskGate>? agentGates) ||
-            agentGates.Count == 0)
+        TaskGateResolution resolved = TaskGateResolver.Resolve(
+            config.Review,
+            request.Agent!,
+            target?.Entry.Technology,
+            TaskGateResolver.ParentTechnology(EnclosingRepositoryRoot(root), config, target?.Entry.Technology));
+
+        if (resolved.IsRefused)
+            return RefuseInput(report, [resolved.Refusal!]);
+
+        IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
+        if (agentGates.Count == 0)
         {
             // Like the repository-wide case, an agent with no gates is reported rather than read as a pass.
             report.Add(new Diagnostic(

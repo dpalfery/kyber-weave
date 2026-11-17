@@ -40,8 +40,21 @@ public static class SquadSourceValidator
         foreach (SquadAgent agent in agents)
         {
             ValidateWorkerRoster(agent);
-            if (!string.IsNullOrWhiteSpace(agent.ModelProfile)
-                && !models.Profiles.ContainsKey(agent.ModelProfile))
+            if (string.IsNullOrWhiteSpace(agent.ModelProfile))
+            {
+                // The model comes from the agent, so every agent but the conductor names a profile.
+                // The conductor runs on the model its session was started with.
+                if (!string.Equals(agent.Name, "conductor", StringComparison.Ordinal))
+                {
+                    Throw(
+                        $"Agent '{agent.Name}' declares no model-profile.",
+                        agent.Name,
+                        agent.SourcePath,
+                        "Add a model-profile declared in profiles/models.yml; only the conductor runs " +
+                        "without one, on the model its session was started with.");
+                }
+            }
+            else if (!models.Profiles.ContainsKey(agent.ModelProfile))
             {
                 Throw(
                     $"Agent '{agent.Name}' references unknown model profile '{agent.ModelProfile}'.",

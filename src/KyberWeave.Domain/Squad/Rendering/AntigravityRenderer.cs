@@ -490,6 +490,7 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
             "reviewer" => "high",
             "general" => "medium",
             "fast" => "low",
+            "dev-hard" => "high",
             "orchestration" => "minimal",
             _ => null
         };

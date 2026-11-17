@@ -59,8 +59,14 @@ public sealed partial class RunDelivery
     private const string ScratchFolder = ".agent_scratchpad";
     private const string TaskGateFile = "task-gate.json";
 
+    /// <summary>
+    /// The delivery agents a run may dispatch for the step that opens the pull request. Both hold the
+    /// <c>publishing-worker</c> capability profile, so run start and delivery treat them alike.
+    /// </summary>
+    public const string DeliveryAgents = "github-devops or devops";
+
     private const string DeliveryAgentHint =
-        "Dispatch the delivery agent (github-devops) with the create-pull-request skill to open the pull request instead.";
+        "Dispatch the delivery agent (" + DeliveryAgents + ") with the create-pull-request skill to open the pull request instead.";
 
     private static readonly IReadOnlyDictionary<string, string> TypeWords = new Dictionary<string, string>(StringComparer.Ordinal)
     {

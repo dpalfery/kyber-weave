@@ -1,0 +1,444 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using KyberWeave.Arbiter.Hooks;
+using KyberWeave.Arbiter.Hooks.Adapters;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Core.Squad.Rendering;
+
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.Fixtures;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// The dispatch hook replaces a dispatch's task-id line with the whole task prompt, so a worker starts with
+/// everything. It does so with the Arbiter on, after the rules judged the short dispatch, and with it off, where
+/// prompt insertion is the only hook action. A dispatch that cannot be expanded is stopped, never started short.
+/// </summary>
+/// <remarks>
+/// The adapters are driven with the recorded payload shapes the per-harness tests use, against a prompt service the
+/// test answers, so the assertions are about the field each harness documents and about what the hook asks for.
+/// </remarks>
+public sealed class DispatchPromptInsertionTests : IDisposable
+{
+    private const string TaskPrompt =
+        "<task>\nImplement the parser.\n</task>\n\n<left-out>\nNothing was left out.\n</left-out>";
+
+    private const string TaskDispatch =
+        "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement the plan parser.";
+
+    private readonly TempDirectory _temp = new();
+
+    public void Dispose() => _temp.Dispose();
+
+    /// <summary>The prompt service a test answers, and the requests it was asked for.</summary>
+    private sealed class ScriptedPrompts : ITaskPromptServiceFactory, ITaskPromptService
+    {
+        public List<TaskPromptRequest> Requests { get; } = [];
+
+        public string Prompt { get; init; } = TaskPrompt;
+
+        public string? Refusal { get; init; }
+
+        public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config) => this;
+
+        public TaskPromptResult Build(TaskPromptRequest request, KyberWeaveConfig config)
+        {
+            Requests.Add(request);
+            return Refusal is null
+                ? new TaskPromptResult(true, Prompt, "csharp-dev", "medium", "plan", request.Technology, [], null)
+                : TaskPromptResult.NotBuilt(Refusal);
+        }
+    }
+
+    /// <summary>The decision engine every adapter is built over; it allows and records the prompt it judged.</summary>
+    private sealed class RecordingEngine : IHookDecisionEngine
+    {
+        public string? SeenPrompt { get; private set; }
+
+        public string? SeenTarget { get; private set; }
+
+        public HookOutcome PreResult { get; init; } = new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config)
+        {
+            SeenPrompt = prompt;
+            SeenTarget = target;
+            return PreResult;
+        }
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+    }
+
+    private static KyberWeaveConfig EnabledConfig() => new() { Arbiter = new ArbiterConfig { Enabled = true } };
+
+    private static KyberWeaveConfig DisabledConfig() => new() { Arbiter = new ArbiterConfig { Enabled = false } };
+
+    private static HookContext Context(ScriptedPrompts prompts) =>
+        new(
+            "/repo",
+            () => "decision-test-1",
+            TextWriter.Null,
+            BuildDispatchPrompt: query =>
+            {
+                TaskPromptResult result = prompts.Build(
+                    new TaskPromptRequest(
+                        query.TaskId is null ? "docs/plans/plan.md" : "/repo",
+                        query.TaskId,
+                        query.PlanFile,
+                        Agent: null,
+                        query.PriorResultsPath,
+                        Technology: query.Technology,
+                        query.FailedAttempts),
+                    EnabledConfig());
+                return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal);
+            });
+
+    private static IHarnessHookAdapter Adapter(IHookDecisionEngine engine, string token)
+    {
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
+        Assert.True(registry.TryGet(token, out IHarnessHookAdapter? adapter), $"No adapter for '{token}'.");
+        return adapter!;
+    }
+
+    /// <summary>The dispatch prompt each rewrite harness received, read from the field that harness documents.</summary>
+    private static string InsertedPrompt(string harness, string stdout)
+    {
+        using JsonDocument document = JsonDocument.Parse(stdout);
+        JsonElement root = document.RootElement;
+        return harness switch
+        {
+            "claude" or "copilot-vscode" => root.GetProperty("hookSpecificOutput")
+                .GetProperty("updatedInput").GetProperty("prompt").GetString()!,
+            "copilot-cli" => root.GetProperty("modifiedArgs").GetProperty("prompt").GetString()!,
+            "codex" => root.GetProperty("hookSpecificOutput")
+                .GetProperty("updatedInput").GetProperty("message").GetString()!,
+            "cursor" => root.GetProperty("updated_input").GetProperty("prompt").GetString()!,
+            _ => root.GetProperty("args").GetProperty("prompt").GetString()!,
+        };
+    }
+
+    /// <summary>One recorded dispatch payload per harness, carrying <paramref name="prompt"/>.</summary>
+    private static string Payload(string harness, string prompt) => harness switch
+    {
+        "claude" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["cwd"] = "/repo",
+            ["agent_type"] = "conductor",
+            ["tool_name"] = "Agent",
+            ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["subagent_type"] = "csharp-dev" },
+            ["tool_use_id"] = "toolu-dispatch-1",
+        }.ToJsonString(),
+        "copilot-vscode" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["cwd"] = "/repo",
+            ["tool_name"] = "runSubagent",
+            ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["agentName"] = "csharp-dev" },
+            ["tool_use_id"] = "toolu-copilot-vs-dispatch-1",
+        }.ToJsonString(),
+        "copilot-cli" => new JsonObject
+        {
+            ["cwd"] = "/repo",
+            ["toolName"] = "task",
+            ["toolArgs"] = new JsonObject { ["prompt"] = prompt, ["agent_type"] = "csharp-dev" },
+        }.ToJsonString(),
+        "codex" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["cwd"] = "/repo",
+            ["tool_name"] = "spawn_agent",
+            ["tool_input"] = new JsonObject { ["message"] = prompt, ["agent_type"] = "csharp-dev" },
+            ["tool_use_id"] = "toolu-codex-dispatch-1",
+        }.ToJsonString(),
+        "cursor" => new JsonObject
+        {
+            ["hook_event_name"] = "preToolUse",
+            ["cwd"] = "/repo",
+            ["tool_name"] = "Task",
+            ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["subagent_type"] = "csharp-dev" },
+            ["tool_use_id"] = "toolu-cursor-dispatch-1",
+        }.ToJsonString(),
+        _ => new JsonObject
+        {
+            ["schema"] = PluginEnvelope.SchemaV1,
+            ["harness"] = harness,
+            ["phase"] = "before",
+            ["tool"] = harness == "pi" ? "Agent" : "task",
+            ["cwd"] = "/repo",
+            ["args"] = new JsonObject { ["prompt"] = prompt, ["subagent_type"] = "csharp-dev" },
+        }.ToJsonString(),
+    };
+
+    /// <summary>Every harness whose dispatch hook rewrites the call; Antigravity stays a file harness until its check passes.</summary>
+    public static TheoryData<string> RewriteHarnesses => new()
+    {
+        "claude",
+        "copilot-vscode",
+        "copilot-cli",
+        "codex",
+        "cursor",
+        "opencode",
+        "kilo",
+        "pi",
+    };
+
+    [Theory]
+    [MemberData(nameof(RewriteHarnesses))]
+    public void EachRewriteHarnessCarriesTheFullPromptInTheFieldItDocuments(string harness)
+    {
+        RecordingEngine engine = new();
+        IHarnessHookAdapter adapter = Adapter(engine, harness);
+        string payload = Payload(harness, TaskDispatch);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt(harness, stdout));
+    }
+
+    private static JsonElement json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+
+    [Fact]
+    public void ARetrysFailureReportAndCountersSurviveIntoThePromptAndTheWorker()
+    {
+        const string dispatch =
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\nFAILED_ATTEMPTS: 2\nPRIOR_RESULTS: results.md\n\n" +
+            "## Failure from attempt 2\n\nThe gate failed on `dotnet build`.";
+        ScriptedPrompts prompts = new();
+        IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
+
+        string stdout = adapter.Handle(json(Payload("claude", dispatch)), Payload("claude", dispatch), "conductor",
+            EnabledConfig(), Context(prompts));
+
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Equal("T3", request.TaskId);
+        Assert.Equal("docs/plans/plan.md", request.Plan);
+        Assert.Equal("results.md", request.PriorResultsPath);
+        Assert.Equal(2, request.FailedAttempts);
+
+        string sent = InsertedPrompt("claude", stdout);
+        Assert.StartsWith(TaskPrompt, sent, StringComparison.Ordinal);
+        Assert.Contains("## Failure from attempt 2", sent, StringComparison.Ordinal);
+        Assert.Contains("The gate failed on `dotnet build`.", sent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ADispatchWithATechnologyAndNoTaskGetsThatTechnologysParts()
+    {
+        const string dispatch = "TECHNOLOGY: csharp\n\nResearch the caching options for the new endpoint.";
+        ScriptedPrompts prompts = new();
+        IHarnessHookAdapter adapter = Adapter(new RecordingEngine(), ClaudeHookAdapter.Token);
+
+        string stdout = adapter.Handle(json(Payload("claude", dispatch)), Payload("claude", dispatch), "conductor",
+            EnabledConfig(), Context(prompts));
+
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Null(request.TaskId);
+        Assert.Equal("csharp", request.Technology);
+        Assert.Contains("Research the caching options for the new endpoint.", InsertedPrompt("claude", stdout), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnExpandedPromptIsNotExpandedASecondTime()
+    {
+        ScriptedPrompts prompts = new();
+        RecordingEngine engine = new();
+        IHarnessHookAdapter adapter = Adapter(engine, ClaudeHookAdapter.Token);
+        string payload = Payload("claude", TaskPrompt);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", DisabledConfig(), Context(prompts));
+
+        // Nothing is asked of the prompt service, and a document the adapter still writes carries the prompt as it
+        // arrived rather than a second copy of it.
+        Assert.Empty(prompts.Requests);
+        if (stdout.Length > 0)
+        {
+            Assert.Equal(TaskPrompt, InsertedPrompt("claude", stdout));
+        }
+    }
+
+    private HookCommand Host(IHookDecisionEngine engine, KyberWeaveConfig config, ScriptedPrompts prompts)
+    {
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
+        return new HookCommand(
+            registry,
+            new FixedConfig(config),
+            ArbiterTestServices.Get<IDispatchClaimStore>(),
+            ArbiterTestServices.Get<IClaudeHookCoverage>(),
+            ArbiterTestServices.Get<IProcessEnvironment>(),
+            () => "decision-test-1",
+            prompts);
+    }
+
+    private static (int Exit, string Stdout) Run(HookCommand command, string harness, string payload)
+    {
+        using StringWriter stdout = new();
+        using StringWriter log = new();
+        int exit = command.Run(harness, "conductor", payload, stdout, log);
+        return (exit, stdout.ToString());
+    }
+
+    [Fact]
+    public void WithTheArbiterOffTheHostStillInsertsThePrompt()
+    {
+        ScriptedPrompts prompts = new();
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt("claude", stdout));
+        Assert.Single(prompts.Requests);
+    }
+
+    [Fact]
+    public void WithTheArbiterOnTheRulesJudgeTheShortDispatchBeforeThePromptIsInserted()
+    {
+        RecordingEngine engine = new();
+        ScriptedPrompts prompts = new();
+
+        (int exit, string stdout) = Run(
+            Host(engine, EnabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(TaskDispatch, engine.SeenPrompt);
+        Assert.StartsWith(TaskPrompt, InsertedPrompt("claude", stdout), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void APromptThatCannotBeBuiltStopsTheDispatchAndNamesTheRepairCommand()
+    {
+        const string refusal =
+            "No prompt: the task file for docs/plans/plan.md is missing or does not match the plan. " +
+            "Run 'kyber-weave docs tasks docs/plans/plan.md --write', then build the prompt again.";
+        ScriptedPrompts prompts = new() { Refusal = refusal };
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        using JsonDocument document = JsonDocument.Parse(stdout);
+        JsonElement output = document.RootElement.GetProperty("hookSpecificOutput");
+        Assert.Equal("deny", output.GetProperty("permissionDecision").GetString());
+        Assert.Contains("kyber-weave docs tasks docs/plans/plan.md --write", output.GetProperty("permissionDecisionReason").GetString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("updatedInput", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AFreshHostWithTheArbiterOffInstallsTheDispatchHookOnTheDispatchersOnly()
+    {
+        SquadSource source = SquadSourceLoader.Load(ArbiterSquadFixturePath());
+        IReadOnlyList<SquadArbiterHook> hooks = ArbiterHookWiring.BuildHooks(
+            source, new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5), SquadDeploymentScope.Project);
+
+        Assert.NotEmpty(hooks);
+        Assert.Contains(hooks, hook => hook.Caller == ArbiterSquadFixture.Conductor);
+        Assert.DoesNotContain(hooks, hook => hook.Caller == ArbiterSquadFixture.CsharpDev);
+        Assert.All(hooks, hook => Assert.Contains("kyber-weave-arbiter hook", hook.CommandLine, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task ARenderWithTheArbiterOffWritesTheDispatchHookToTheDispatchersAgentFile()
+    {
+        string source = ArbiterSquadFixturePath();
+        SquadRenderResult result = await new ClaudeRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: source,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project,
+            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5)).Prepared());
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        string conductor = FileText(result, $".claude/agents/{ArbiterSquadFixture.Conductor}.md");
+        string worker = FileText(result, $".claude/agents/{ArbiterSquadFixture.CsharpDev}.md");
+
+        Assert.Contains("kyber-weave-arbiter hook", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("kyber-weave-arbiter", worker, StringComparison.Ordinal);
+    }
+
+    private static string FileText(SquadRenderResult result, string relativePath) =>
+        System.Text.Encoding.UTF8.GetString(
+            Assert.Single(result.Files, file => file.RelativePath == relativePath).Content.Span);
+
+    private static string ArbiterSquadFixturePath() => SharedFixture.Path;
+
+    private static readonly ArbiterSquadFixture SharedFixture = ArbiterSquadFixture.Create();
+
+    [Fact]
+    public void TheDoctorReportsAHarnessWhoseDeploymentLacksTheDispatchHook()
+    {
+        using TempDirectory home = new();
+        string repo = Path.Combine(_temp.Path, "repo");
+        Directory.CreateDirectory(Path.Combine(repo, ".kyber-weave"));
+        Directory.CreateDirectory(Path.Combine(repo, ".github", "hooks"));
+        File.WriteAllText(
+            Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
+            "arbiter:\n  enabled: false\n");
+        File.WriteAllText(
+            Path.Combine(repo, ".github", "hooks", "kyber-arbiter.json"),
+            "{ \"hooks\": {} }");
+
+        using ArbiterTestHost host = ArbiterTestHost.Create(services => services.AddSingleton<IProcessEnvironment>(
+            new FakeProcessEnvironment(() => home.Path)));
+        ISquadStateStore store = host.Get<ISquadStateStore>();
+        SquadReceipt receipt = new(
+            SquadStateStore.ReceiptSchemaV1,
+            SquadDeploymentScope.Project,
+            repo,
+            DateTimeOffset.UtcNow,
+            [],
+            [new SquadOwnedFile(".github/hooks/kyber-arbiter.json", new string('a', 64), "copilot", Adopted: false)]);
+        string receiptPath = store.ResolveReceiptPath(repo, SquadDeploymentScope.Project);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, store.SerializeReceipt(receipt));
+
+        ArbiterDoctorReport report = host.Get<IArbiterDoctorService>().Inspect(repo, null, new KyberWeave.Core.Diagnostics.DiagnosticReport());
+
+        HarnessGatingRow copilot = Assert.Single(report.Gating.Rows, row => row.Token == "copilot");
+        Assert.True(copilot.Ungated);
+        Assert.Equal("kyber-weave squad update", copilot.FixCommand);
+        Assert.Contains("dispatch hook", copilot.State, StringComparison.Ordinal);
+        Assert.Contains("Trust:", copilot.State, StringComparison.Ordinal);
+        Assert.Contains(report.Lines, line => line.Message.Contains("dispatch hook", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AnExpandedPromptIsNotJudgedAsTellingAWorkerToReadAPlan()
+    {
+        KyberWeaveConfig config = new()
+        {
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+        };
+        const string planRead =
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nRead `docs/plans/plan.md` and implement T3.";
+
+        ArbiterFactSet shortFacts = TriggerFactBuilder.Build("delegate", "csharp-dev", planRead, "conductor", "harness", config);
+        ArbiterFactSet expandedFacts = TriggerFactBuilder.Build(
+            "delegate", "csharp-dev", TaskPrompt + "\n\n" + planRead, "conductor", "harness", config);
+
+        Assert.True(shortFacts.TryGet("delegation.planning-paths", out ArbiterFact? shortPaths));
+        Assert.True(expandedFacts.TryGet("delegation.planning-paths", out ArbiterFact? expandedPaths));
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<string>>(shortPaths!.Value!));
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(expandedPaths!.Value!));
+    }
+
+    /// <summary>A host configuration loader that answers one configuration for every root.</summary>
+    private sealed class FixedConfig(KyberWeaveConfig config) : IArbiterHostConfig
+    {
+        public KyberWeaveConfig Load(string repoRoot, HookScope scope = HookScope.Project, string? homeDirectory = null) => config;
+
+        public KyberWeaveConfig? LoadProject(string repoRoot) => config;
+
+        public string ResolveHomeDirectory(string? homeDirectory) => homeDirectory ?? "/home/test";
+    }
+}

@@ -69,7 +69,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
                 sp.GetRequiredService<IDispatchClaimStore>(),
                 sp.GetRequiredService<IClaudeHookCoverage>(),
                 sp.GetRequiredService<IProcessEnvironment>(),
-                () => ArbiterRecordId.New(clock.GetUtcNow()));
+                () => ArbiterRecordId.New(clock.GetUtcNow()),
+                sp.GetRequiredService<ITaskPromptServiceFactory>());
         });
         services.TryAddSingleton<IArbiterHookHost>(sp => sp.GetRequiredService<HookCommand>());
         services.TryAddSingleton<IArbiterServeService, ArbiterServeService>();

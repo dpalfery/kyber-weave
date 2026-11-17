@@ -61,6 +61,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ISeverityOverrideSource>(),
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
+            sp.GetRequiredService<IPlanTaskService>(),
+            sp.GetRequiredService<IPacketHostFacts>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<ICodeGraphPortsFactory>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),

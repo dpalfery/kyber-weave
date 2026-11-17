@@ -203,11 +203,16 @@ public sealed class ArbiterDoctorService(
         foreach (HarnessGatingRow row in gating.Rows.Where(row => row.Ungated))
         {
             string label = TargetDisplayName(row.Token);
+            // The row's state says what is missing when the harness is installed but a hook is absent; a row that
+            // says only "ungated" has nothing to add.
+            string detail = string.Equals(row.State, "ungated", StringComparison.Ordinal)
+                ? string.Empty
+                : $" ({row.State})";
             lines.Add(new ArbiterDoctorLine(
                 ArbiterDoctorStatus.Warn,
                 null,
                 IArbiterDoctorService.ProjectUngated,
-                $"{label} is ungated; run {row.FixCommand ?? string.Empty}."));
+                $"{label} is ungated{detail}; run {row.FixCommand ?? string.Empty}."));
             report.Add(new Diagnostic(
                 IArbiterDoctorService.ProjectUngated,
                 Severity.Warning,

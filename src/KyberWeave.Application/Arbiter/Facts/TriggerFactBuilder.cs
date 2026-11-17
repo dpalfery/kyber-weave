@@ -1,3 +1,5 @@
+using KyberWeave.Application.Review;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -213,18 +215,22 @@ public static class TriggerFactBuilder
                 "delegation.paths" => paths,
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling
-                // KW-DOC-TASKS-005 accepts.
-                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
+                // KW-DOC-TASKS-005 accepts. A dispatch that already carries the hook's
+                // expanded prompt is never a plan read: its host facts name the planning
+                // indexes, and the worker is told to use that prompt, not a plan (Req 9.18).
+                "delegation.planning-paths" => DispatchPromptInsertion.IsExpanded(prompt)
+                    ? []
+                    : PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
                 "delegation.plan-file" => planFile,
                 // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
                 "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
-                // A machine fact: whether the host's review.task-gates lists any gate for the agent that returned.
+                // A machine fact: whether the host's task gates list any gate for the agent that returned, by
+                // its own review.task-gates entry, which is the one this dispatch's agent is keyed on.
                 "config.task-gates-declared" => target is not null
-                                                && config.Review.TaskGates.TryGetValue(target, out IReadOnlyList<ReviewTaskGate>? gates)
-                                                && gates.Count > 0,
+                                                && TaskGateResolver.Resolve(config.Review, target).Gates.Count > 0,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,
