@@ -555,6 +555,60 @@ public sealed class ConfigRegValidatorTests : IDisposable
     }
 
     /// <summary>
+    /// The roster is a mode property too, and the second end-to-end tiered run flipped it in the configuration
+    /// without re-running <c>docs init</c>: the generated block still published <c>technology</c>, the conductor
+    /// read the contradiction, and it stopped before its first dispatch. The finding must name the property and
+    /// the command that fixes it, because the block is generated output.
+    /// </summary>
+    [Fact]
+    public void AChangedWorkerRosterMakesTheScaffoldedBlockStaleAndNamesDocsInit()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+
+        DiagnosticReport report = Validate(Tiered());
+
+        Assert.Contains(report.Items, i =>
+            i.Code == ConfigRegValidator.StaleRendering
+            && i.Hint is not null
+            && i.Hint.Contains("docs init", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A roster the configuration actually chose is published, and the block regenerated from that configuration
+    /// validates: the finding above is about staleness, not about the roster being unpublishable.
+    /// </summary>
+    [Fact]
+    public void AChosenWorkerRosterIsPublishedAndValidates()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+        KyberWeaveConfig config = Tiered();
+        Write(
+            "AGENTS.md",
+            ConfigRegMarkdown.Splice(
+                File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+                ConfigRegMarkdown.Render(config.ConfigReg.Resolve(config.Ontology))));
+
+        DiagnosticReport report = Validate(config);
+
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+        Assert.Contains(
+            "- **<worker-roster>**: `tiered`",
+            File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>The generated block states which file wins, so a reader of any host knows before a run starts.</summary>
+    [Fact]
+    public void TheGeneratedBlockStatesThatTheConfigurationOutranksIt()
+    {
+        string block = ConfigRegMarkdown.Render(
+            ConfigRegConfig.ProductDefaults.Resolve(new OntologyConfig { DocsRoots = ["docs"] }));
+
+        Assert.Contains("The configuration is the authority", block, StringComparison.Ordinal);
+        Assert.Contains("docs init", block, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Adding a mode property is not a licence to stop checking paths: a registry that published
     /// <c>&lt;intake-assessment&gt;</c> and nothing else would pass while every path property
     /// pointed at nothing.
@@ -580,4 +634,8 @@ public sealed class ConfigRegValidatorTests : IDisposable
     /// </summary>
     private static KyberWeaveConfig IntakeEnabled() =>
         KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\n  intake: true\n");
+
+    /// <summary>A host configuration that chose the tiered worker roster.</summary>
+    private static KyberWeaveConfig Tiered() =>
+        KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\nworker-roster: tiered\n");
 }
