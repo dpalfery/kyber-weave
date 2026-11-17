@@ -438,17 +438,18 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    ///     TypeScript and Rust developers reuse the same gates their react-dev and tauri-dev siblings
-    ///     run. A copy that drifted (a different include list or command) would let the two roles
-    ///     check different things against the same dash and tray code.
+    ///     The <c>typescript</c> and <c>rust</c> technology entries reuse the same gates the
+    ///     <c>react</c> and <c>tauri</c> entries run. A copy that drifted (a different include list
+    ///     or command) would let the neighbouring technologies check different things against the
+    ///     same dash and tray code.
     /// </summary>
     [Fact]
     public void TypeScriptAndRustDevelopersReuseTheSharedDashAndTrayGates()
     {
-        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> technologyGates = RepositoryTechnologyGates();
 
-        IReadOnlyList<ReviewTaskGate> react = taskGates["react-dev"];
-        IReadOnlyList<ReviewTaskGate> typescript = taskGates["typescript-dev"];
+        IReadOnlyList<ReviewTaskGate> react = technologyGates["react"];
+        IReadOnlyList<ReviewTaskGate> typescript = technologyGates["typescript"];
         string[] dashIds =
         [
             "dash-typecheck",
@@ -464,8 +465,8 @@ public sealed class ReviewTaskGatesConfigTests
             Assert.Equal(expected.Fix, actual.Fix);
         }
 
-        IReadOnlyList<ReviewTaskGate> tauri = taskGates["tauri-dev"];
-        IReadOnlyList<ReviewTaskGate> rust = taskGates["rust-dev"];
+        IReadOnlyList<ReviewTaskGate> tauri = technologyGates["tauri"];
+        IReadOnlyList<ReviewTaskGate> rust = technologyGates["rust"];
         string[] cargoIds =
         [
             "cargo-fmt",
