@@ -374,7 +374,7 @@ no form a listed read may match and its whole text is the form: that is how `az 
 is refused. A technology folder that declares no such rule refuses nothing. A judged command whose event
 names no working directory is refused too, because the technology's list lives under that directory and
 cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
-refused: on those eleven harnesses the same forms are stated in the technology's `rules.md`, which reaches
+refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
 the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
 [runbook](runbook.md#reading-a-canonical-checkout-refusal).
 

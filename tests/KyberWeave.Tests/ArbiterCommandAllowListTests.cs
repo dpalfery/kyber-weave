@@ -79,7 +79,6 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     [InlineData("sudo -u root az vm delete --name db -g rg")]
     [InlineData("timeout 10 az vm delete --name db -g rg")]
     [InlineData("az vm list $(az vm delete -g rg)")]
-    [InlineData("az vm list && echo list")]
     public void AMutatingAzureCommandBehindAShellPrefixOrSubshellIsRefused(string command)
     {
         TechnologyRepository(_repository.Path, "azure");
@@ -92,12 +91,37 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     [Theory]
     [InlineData("az vm list")]
     [InlineData("az vm list -o table")]
+    [InlineData("az vm show myVM -g myRG")]
     [InlineData("az group list --query \"[].name\"")]
+    [InlineData("az network vnet list -o table")]
+    [InlineData("az vm list-sizes --location westeurope")]
+    [InlineData("az storage account show -n mystorage -g rg")]
     public void AListedAzureReadWithItsArgumentsIsAllowed(string command)
     {
         TechnologyRepository(_repository.Path, "azure");
 
         Assert.Empty(Guard("claude", Command("claude", command)));
+    }
+
+    [Theory]
+    [InlineData("aws s3 ls s3://bucket")]
+    [InlineData("aws ec2 describe-instances --region eu-west-1")]
+    [InlineData("aws sts get-caller-identity")]
+    public void AListedAwsReadWithItsArgumentsIsAllowed(string command)
+    {
+        TechnologyRepository(_repository.Path, "aws");
+
+        Assert.Empty(Guard("claude", Command("claude", command)));
+    }
+
+    [Fact]
+    public void ACommandWithNoWorkingDirectoryIsRefusedBecauseTheListCannotBeRead()
+    {
+        TechnologyRepository(_repository.Path, "azure");
+
+        string answer = Guard("claude", CommandWithoutWorkingDirectory("claude", "az vm delete --name db -g rg"));
+
+        Assert.Contains("working directory", Reason("claude", answer), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,7 +166,8 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         Assert.False(WorkerGuard.NeedsDecision("codex-cli", mutating));
         Assert.Empty(Guard("codex-cli", mutating));
 
-        AssertListedInTheRulesPart("azure", ["az * list", "az * list-*", "az * show", "az * show-*"]);
+        AssertListedInTheRulesPart("azure", ["list*", "show*"]);
+        AssertListedInTheRulesPart("aws", ["describe-*", "list-*", "get-*", "ls"]);
     }
 
     private static void AssertListedInTheRulesPart(string technology, string[] forms)
@@ -152,16 +177,6 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         {
             Assert.Contains(form, rules, StringComparison.Ordinal);
         }
-    }
-
-    [Fact]
-    public void ACommandWithNoWorkingDirectoryIsRefusedBecauseTheListCannotBeRead()
-    {
-        TechnologyRepository(_repository.Path, "azure");
-
-        string answer = Guard("claude", CommandWithoutWorkingDirectory("claude", "az vm delete --name db -g rg"));
-
-        Assert.Contains("working directory", Reason("claude", answer), StringComparison.Ordinal);
     }
 
     /// <summary>

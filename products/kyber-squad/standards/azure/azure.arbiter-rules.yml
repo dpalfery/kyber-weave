@@ -2,11 +2,11 @@
 #
 # AZURE-READONLY-001 is the command allow-list for a dispatch whose capability profile can run
 # commands but not write files (platform-reader, which platform-researcher uses). One `az` command
-# whose form ends in a list or show verb is allowed. Every other command that names `az` anywhere —
-# a mutating verb, an absolute path, a quoted program, a wrapper, a subshell, a redirect or a
-# compound command — is refused where the worker guard sees the call (Claude Code and Copilot CLI),
-# and is an instruction only on the other harnesses, where the same forms are stated in
-# azure.rules.md.
+# whose form ends in a list or show verb, or continues with that verb's arguments, is allowed.
+# Every other command that names `az` anywhere — a mutating verb, an absolute path, a quoted
+# program, a wrapper, a subshell, a redirect or a compound command — is refused where the worker
+# guard sees the call (Claude Code and Copilot CLI), and is an instruction only on the other
+# harnesses, where the same verbs are stated in azure.rules.md.
 #
 # A folder that declares no rule refuses nothing: an event with no matching rule leaves the
 # command alone, and an answer the Arbiter cannot reach allows (ADR 0072).
@@ -18,10 +18,12 @@ rules:
     answers: [listed-read, outside-list]
     decide:
       # A command that is not one command has no single form, so this clause can never allow a compound command.
+      # The form keeps its leading words only, so `az <group...> list`, `az <group...> show` and the same forms
+      # followed by a resource argument all reach `list**` / `show**`.
       - when:
           all:
             - { fact: command.single, equals: true }
-            - { fact: command.form, matches: ["az * list", "az * list-*", "az * show", "az * show-*"] }
+            - { fact: command.form, matches: ["az * list**", "az * show**"] }
         answer: listed-read
       # Every word is read, so the tool is still found behind a wrapper, an absolute path, a quote, a
       # subshell or a second command in the same line.
