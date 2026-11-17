@@ -182,7 +182,7 @@ public static partial class DispatchPromptInsertion
                 headers.FailedAttempts,
                 headers.Body)) ?? new DispatchPromptExpansion(false, string.Empty, Why(headers));
         }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
+        catch (Exception ex) when (ex is not OutOfMemoryException && ex is not OperationCanceledException)
         {
             expansion = new DispatchPromptExpansion(false, string.Empty,
                 $"the prompt could not be built ({ex.Message}). {Why(headers)}");

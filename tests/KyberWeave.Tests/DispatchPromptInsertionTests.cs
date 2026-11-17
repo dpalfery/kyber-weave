@@ -674,6 +674,23 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         System.Text.Encoding.UTF8.GetString(
             Assert.Single(result.Files, file => file.RelativePath == relativePath).Content.Span);
 
+    /// <summary>
+    /// A cancellation is the hook's caller stopping the work, not a prompt that could not be built. Denying the
+    /// dispatch would report a failure that never happened and swallow the cancellation the host is waiting on.
+    /// </summary>
+    [Fact]
+    public void ACancelledPromptBuildPropagatesTheCancellationRatherThanDenyingTheDispatch()
+    {
+        using TempDirectory repo = new();
+        HookContext context = new(
+            RepoRoot: repo.Path,
+            NewDecisionId: () => "decision-1",
+            Log: TextWriter.Null,
+            BuildDispatchPrompt: _ => throw new OperationCanceledException());
+
+        Assert.Throws<OperationCanceledException>(() => DispatchPromptInsertion.Expand(TaskDispatch, context));
+    }
+
     private static string ArbiterSquadFixturePath() => SharedFixture.Path;
 
     private static readonly ArbiterSquadFixture SharedFixture = ArbiterSquadFixture.Create();
