@@ -39,10 +39,11 @@ first, and the second is shipped policy.
 | Profile | Intent | Canonical agents that use it |
 |---|---|---|
 | `architect` | Deep architectural and product reasoning | `architect`, `product-owner` |
-| `deep-planning` | Investigative planning and diagnosis | `bug-crusher-investigator`, `sql-database-architect` |
-| `fast` | Bounded, checkable work | Most `*-dev` agents, `docs-dev`, `test-dev`, triage roles |
-| `general` | Standard implementation and support | `github-devops`, `pulumi-dev`, `rust-dev`, `tauri-dev`, `typescript-dev` |
-| `orchestration` | Coordination and dispatch | `conductor` |
+| `deep-planning` | Investigative planning and diagnosis | `bug-crusher-investigator` |
+| `fast` | Bounded, checkable work | `bug-crusher`, `dev-easy`, `docs-dev`, `platform-researcher`, `research-agent` |
+| `general` | Standard implementation and support | `dev-medium`, `devops` |
+| `dev-hard` | The strongest developer tier | `dev-hard` |
+| `orchestration` | Coordination and dispatch | none: the conductor names no profile and runs on its session's model |
 | `reviewer` | Adversarial code reading | `code-reviewer`, `review-lens`, `review-triage` |
 
 Bundled tokens live in `products/kyber-squad/profiles/models.yml`, one column per harness.

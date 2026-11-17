@@ -210,7 +210,7 @@ The task file records the kind of worker and the task's difficulty, and the disp
 into the attempt's tier with `tier = min(hard, rated difficulty + failed attempts)`: `easy` starts on
 `dev-easy`, `medium` and an unrated task on `dev-medium`, `hard` on `dev-hard`, and a failed attempt
 moves one tier up and never down. The roster and the tier table are documented in the
-[Squad architecture §12](../../docs/kyber-squad/architecture.md#12-worker-rosters-and-developer-tiers)
+[Squad architecture §12](../../docs/kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers)
 and the [`worker-roster` setting](../../docs/configuration.md).
 
 ---

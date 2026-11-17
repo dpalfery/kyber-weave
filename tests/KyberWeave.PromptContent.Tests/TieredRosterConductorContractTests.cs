@@ -58,12 +58,11 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
-    public void UnderTheTieredRosterTheDocsToolNamesTheDeveloper()
+    public void TheDocsToolNamesTheDeveloper()
     {
         string conductor = Read(ConductorPath);
 
-        Assert.Contains("worker-roster", conductor, StringComparison.Ordinal);
-        Assert.Contains("tiered", conductor, StringComparison.Ordinal);
+        Assert.Contains("The worker roster", conductor, StringComparison.Ordinal);
         Assert.Contains("docs_build_task_prompt_for_agent_dispatch", conductor, StringComparison.Ordinal);
         Assert.Contains("`docs_build_task_prompt_for_agent_dispatch` answers with it", conductor, StringComparison.Ordinal);
         Assert.Contains("task file records", conductor, StringComparison.OrdinalIgnoreCase);
@@ -110,15 +109,14 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
-    public void TheConductorNamesTheTieredDeliveryAndPlatformAgents()
+    public void TheConductorNamesTheDeliveryAndPlatformAgents()
     {
         string conductor = Read(ConductorPath);
 
         Assert.Contains(
-            "Under `tiered` the delivery agent is `devops` and the live-platform agent is `platform-researcher`",
+            "The delivery agent is `devops` and the live-platform agent is `platform-researcher`.",
             conductor,
             StringComparison.Ordinal);
-        Assert.Contains("under `technology` every name reads as written", conductor, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -152,7 +150,6 @@ public sealed class TieredRosterConductorContractTests
         string line = LineContaining(Read(ConductorPath), "RUN-START: true");
 
         Assert.Contains("`devops`", line, StringComparison.Ordinal);
-        Assert.Contains("tiered", line, StringComparison.Ordinal);
     }
 
     /// <summary>The callers that send work to the live-platform agent list its tiered replacement too.</summary>
@@ -198,36 +195,33 @@ public sealed class TieredRosterConductorContractTests
             bugCrusher,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Under `tiered` the line's `agent=` is the kind of worker and the dispatch tool names the tier",
+            "That name is the kind of worker — developer, `docs-dev` or `devops` — and the dispatch tool names the developer tier",
             conductor,
             StringComparison.Ordinal);
-        Assert.Contains("Under `tiered` the dispatch tool names the agent", skill, StringComparison.Ordinal);
+        Assert.Contains("The dispatch tool names the agent", skill, StringComparison.Ordinal);
         Assert.Contains(
-            "Under `worker-roster: tiered` the specialist is a developer tier",
+            "If the fix is more than a few lines or sits in a specialist's domain, hand it to a developer tier instead",
             bugCrusher,
             StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A dispatch of the delivery agent under the tiered roster must name the tiered agent. The rule is per
-    /// site, because a global "read this name as that name" does not travel with a skill another entry point
-    /// loads.
+    /// No dispatch site names the retired delivery agent. The rule is per site, because a global "read this
+    /// name as that name" does not travel with a skill another entry point loads.
     /// </summary>
     [Theory]
     [MemberData(nameof(ConductorSurfaceFiles))]
-    public void EveryDeliveryDispatchSiteNamesTheTieredAgent(string relativePath)
+    public void NoDeliveryDispatchSiteNamesTheRetiredAgent(string relativePath)
     {
-        string[] unscoped =
+        string[] stale =
         [
             .. Read(relativePath).Split('\n')
-                .Where(line => line.Contains("`github-devops`", StringComparison.Ordinal)
-                               && !line.Contains("`devops`", StringComparison.Ordinal))
+                .Where(line => line.Contains("`github-devops`", StringComparison.Ordinal))
         ];
 
         Assert.True(
-            unscoped.Length == 0,
-            $"{relativePath} dispatches `github-devops` with no `devops` alternative, so a tiered run uses the " +
-            "technology delivery agent. Unscoped: " + string.Join(" | ", unscoped));
+            stale.Length == 0,
+            $"{relativePath} still dispatches the removal's deleted delivery agent. Stale: " + string.Join(" | ", stale));
     }
 
     public static IEnumerable<object[]> ConductorSurfaceFiles()
@@ -239,31 +233,27 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
-    public void TheSelectionRulesAreScopedToTheRosterTheyBelongTo()
+    public void TheSelectionRulesNameTheOneRosterAndNoTechnologyMatching()
     {
         string conductor = Read(ConductorPath);
         string skill = Read(DeliveryExecutionPath);
 
-        Assert.Contains(
-            "On the `technology` roster, when none is named, assign it to the delegate whose description trigger matches its files",
-            conductor,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "On the `technology` roster, choose each task's agent by matching the abilities it needs against the descriptions of the agents you can dispatch",
-            skill,
-            StringComparison.Ordinal);
-        Assert.Contains("Under `tiered` the dispatch tool names the agent", skill, StringComparison.Ordinal);
+        Assert.DoesNotContain("On the `technology` roster", conductor, StringComparison.Ordinal);
+        Assert.DoesNotContain("On the `technology` roster", skill, StringComparison.Ordinal);
+        Assert.DoesNotContain("Under `tiered`", skill, StringComparison.Ordinal);
+        Assert.Contains("The dispatch tool names the agent", skill, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheBugFlowScopesTheTechnologySpecialistsToTheirRoster()
+    public void TheBugFlowHandsTheFixToADeveloperTierWithNoRosterBranch()
     {
         string bugCrusher = Read(BugCrusherSkillPath);
 
         Assert.Contains(
-            "Under `worker-roster: technology`, if the fix is more than a few lines or sits in a specialist's domain, hand it to that specialist",
+            "If the fix is more than a few lines or sits in a specialist's domain, hand it to a developer tier instead",
             bugCrusher,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("Under `worker-roster: technology`", bugCrusher, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -311,16 +301,16 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
-    public void TheBugFlowHandsTheFixToADeveloperAgentUnderTheTieredRoster()
+    public void TheBugFlowHandsTheFixToADeveloperTier()
     {
         string bugCrusher = Read(BugCrusherSkillPath);
 
-        Assert.Contains("worker-roster", bugCrusher, StringComparison.Ordinal);
         Assert.Contains("docs_build_task_prompt_for_agent_dispatch", bugCrusher, StringComparison.Ordinal);
         Assert.Contains("dev-medium", bugCrusher, StringComparison.Ordinal);
         Assert.Contains("dev-hard", bugCrusher, StringComparison.Ordinal);
         Assert.Contains("TECHNOLOGY:", bugCrusher, StringComparison.Ordinal);
-        Assert.Contains("no `test-dev`", bugCrusher, StringComparison.Ordinal);
+        Assert.Contains("There is one roster", bugCrusher, StringComparison.Ordinal);
+        Assert.DoesNotContain("test-dev", bugCrusher, StringComparison.Ordinal);
     }
 
     private static string Read(string relativePath) =>

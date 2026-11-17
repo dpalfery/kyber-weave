@@ -652,7 +652,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 5.3, 5.4
   - _Requirements: 1.6, 13.7_
 
-- [ ] 5.6 Sweep the documents after removal
+- [x] 5.6 Sweep the documents after removal
   - **Objective:** Remove or rewrite every live document that names a removed agent.
   - **Files:**
     - the live documents under `docs/` and `products/kyber-squad/` that name a removed agent

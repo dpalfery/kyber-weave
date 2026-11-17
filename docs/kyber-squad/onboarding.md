@@ -34,7 +34,7 @@ code-refs:
 # Kyber-Squad adoption and usage guide
 
 `kyber-weave squad` is the unified lifecycle and deployment control plane for agent ecosystems.
-It manages the installation, update, inspection, and uninstallation of **29 canonical agents** and
+It manages the installation, update, inspection, and uninstallation of **15 canonical agents** and
 the canonical skills, plus the Kyber-Weave skills it ships beside them, with transactional
 recovery and state governance. Thirteen harness targets are declared; all thirteen are currently
 implemented and registered.
@@ -209,7 +209,7 @@ open in the [Claude conductor live-verification todo](../todo/claude-conductor-l
 3. **`@agent-conductor`** — nested subagent, discouraged.
    - Runs the conductor as a nested subagent where the `Agent(roster)` parentheses are ignored
      (official Claude Code documentation); the conductor's real roster is `Agent(architect,
-     azure-reader, …)` from its `delegates-to` declaration. By default the Agent tool works at
+     platform-researcher, …)` from its `delegates-to` declaration. By default the Agent tool works at
      this depth, but see Cloud sessions below for an observed environment constraint that
      removes it entirely.
    - This is the failure mode to avoid; use `/conductor` or `--agent` instead.
@@ -395,10 +395,10 @@ frontier model:
 | Model profile | Devin model | Agents |
 |---|---|---|
 | `architect` | `claude-opus-5-5-high` | architect |
-| `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator, sql-database-architect |
+| `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator |
 | `dev-hard` | `claude-opus-5-5-high` | dev-hard |
-| `general` | `swe-2-high` | dev-medium, devops, github-devops, go-dev, product-owner, pulumi-dev, rust-dev, tauri-dev, typescript-dev |
-| `fast` | `deepseek-v4-1-flash-high` | azure-reader, csharp-dev, dal-dev, dev-easy, docs-dev, maui-dev, platform-researcher, python-dev, react-dev, research-agent, test-dev |
+| `general` | `swe-2-high` | dev-medium, devops, product-owner |
+| `fast` | `deepseek-v4-1-flash-high` | bug-crusher, dev-easy, docs-dev, platform-researcher, research-agent |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
 The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's
@@ -461,7 +461,7 @@ or reading the web — is instruction-only on Devin, as on Pi. Subagents cannot 
 on Devin: Devin cannot limit nested delegation to a roster, so Squad
 does not enable it. The conductor therefore loads the `review-council` skill, which starts `code-reviewer`'s lenses
 from the main session; `architect` does its own sweeps and hands a live Azure
-question back for the conductor to put to `azure-reader`; `product-owner` does its own external
+question back for the conductor to put to `platform-researcher`; `product-owner` does its own external
 research. The receipt records a `permission-not-expressible` degradation for each.
 
 **MCP servers**: subagents' `allowed-tools` name the CodeGraph, context7, and `kw-docs` MCP
@@ -491,13 +491,14 @@ The squad ships two worker rosters, and a host chooses one in `.kyber-weave/kybe
 worker-roster: tiered
 ```
 
-`technology` is the default and what an absent key means. It keeps the per-technology developer
-agents (`csharp-dev`, `react-dev`, and so on), `sql-database-architect` for schema work, `test-dev`
-for a test-only task, and `github-devops` for delivery. `tiered` replaces them with three developer
-agents that name no technology — `dev-easy`, `dev-medium`, `dev-hard` — plus `devops` for delivery
-and `platform-researcher` for live platform state. `docs-dev`, `architect`, `product-owner`,
+`tiered` is the default and what an absent key means: three developer agents that name no
+technology — `dev-easy`, `dev-medium`, `dev-hard` — plus `devops` for delivery and
+`platform-researcher` for live platform state. `docs-dev`, `architect`, `product-owner`,
 `code-reviewer`, the two review seats, `bug-crusher`, `bug-crusher-investigator` and
-`research-agent` are the same agents on either roster.
+`research-agent` complete the roster. The per-technology agents the earlier `technology` value
+selected no longer ship; naming it is the configuration error `KW-CONFIG-001`, whose message says
+so. A plan or task file that still names one resolves to its replacement and reports the
+substitution.
 
 Every agent still exists after the switch, so you can install once and run a plan under each roster
 to compare them. What changes is which agent does developer work, test-only work, delivery and live
@@ -514,7 +515,7 @@ failure cluster is unchanged. A task whose role is `docs-dev` or `devops` keeps 
 Under `tiered` a developer task must name one technology, so an existing plan may need a
 `Technology:` line on each developer task before it will validate. The full agent lists, the tier
 table and the dispatch path are in
-[architecture §12](architecture.md#12-worker-rosters-and-developer-tiers); the setting itself is in
+[architecture §12](architecture.md#12-the-worker-roster-and-developer-tiers); the setting itself is in
 [configuration](../configuration.md#worker-roster).
 
 ## MCP access across harnesses
@@ -1388,9 +1389,7 @@ can retain its own review history between passes. Stateless harnesses receive a
 self-contained recovery brief with previous findings, decisions, and failed approaches.
 The conductor records session handles and replacement reasons on the execution artifact.
 
-Deployed `conductor`, the developer agents (`csharp-dev` and its peers under the `technology`
-roster, `dev-easy`/`dev-medium`/`dev-hard` under `tiered`), `test-dev`, and `github-devops` or
-`devops` stop
+Deployed `conductor`, the developer tiers (`dev-easy`/`dev-medium`/`dev-hard`), and `devops` stop
 unbounded test-fix loops: 3 incremental fixes per implementation or rework dispatch, 3 conductor
 rework dispatches per failure cluster per run, A→B→A oscillation detection, and
 escalation through `STATUS: ESCALATION` / `ESCALATION: circuit-breaker`. Caps,
@@ -1417,14 +1416,12 @@ Neither entry point restates the rules; if you are editing one of them, the cont
 belongs in the skill.
 
 **What bug-crusher delegates.** Its roster carries the agents its escalated path actually starts:
-`architect` (planning the escalated defect), `test-dev` (a failing test when no developer takes the fix), `code-reviewer` (the
-finished fix), and the twelve developer agents a task routes to, alongside the investigator,
-`docs-dev`, `github-devops` or its `tiered` replacement `devops`, and the two council seats it
-starts when the reviewer cannot start its own. The `tiered` roster's developer tiers are on the
-roster too: `dev-easy`, `dev-medium` and `dev-hard` take the fix and write its failing test, and a
-fix dispatch that belongs to no task starts on `dev-medium`. Discovery
-is the architect's own delegation and the owner is the human, so `research-agent`,
-`product-owner` and `azure-reader` stay off the roster. The roster is what scopes the
+`architect` (planning the escalated defect), `code-reviewer` (the finished fix), and the three
+developer tiers that take the fix and write its failing test — `dev-easy`, `dev-medium`,
+`dev-hard` — alongside the investigator, `docs-dev`, `devops`, and the two council seats it starts
+when the reviewer cannot start its own. A fix dispatch that belongs to no task starts on
+`dev-medium`. Discovery is the architect's own delegation and the owner is the human, so
+`research-agent`, `product-owner` and `platform-researcher` stay off the roster. The roster is what scopes the
 `root-fixer` capability profile's `delegate` grant.
 
 **Bug-crusher does not write the plan.** `architect` owns every write to a plan artifact,
@@ -1509,7 +1506,7 @@ REMOTE_HEAD: <remote-head-sha | UNPUSHED>
 TASK_GATE: PASS | FAIL | NONE_DECLARED | NONE_APPLICABLE | UNAVAILABLE — agent=… gates=… failed=… skipped=… report=… runs=…
 ```
 
-Conductor rejects digests when any required field is missing (the required fields are all six for `csharp-dev` and `test-dev`; during the phased rollout every other developer worker owes its standard completion plus the `TASK_GATE:` line), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
+Conductor rejects digests when any required field is missing (every developer worker owes all six fields), when `STATUS: FAIL` is reported, or when `TASK_GATE:` is missing or `FAIL`. Only a valid escalation is exempt from the `FILES`, `TESTS`, `COMMIT`, `REMOTE_HEAD` and `TASK_GATE` rules: that is `STATUS: ESCALATION` with exactly one `CIRCUIT_BREAKER_TRIGGER:` token from the closed set and its required payload lines (`FAILURE_CLUSTER` and `RECOMMENDED_ACTION` always, plus `CONTRADICTORY_INVARIANTS` for `INVARIANT_CONTRADICTION` and `BLAST_RADIUS` for `BLAST_RADIUS_EXCEEDED`). A valid escalation routes the task to architect mediation but never completes it or clears its exit gate, and a `STATUS: ESCALATION` without a valid trigger is rejected like any completion digest; the full rule is in the [requirements](requirements.md#conductor-execution-and-worker-invariants).
 Standardizing this schema eliminates rejection rework caused by formatting variations.
 
 ### What every dispatched worker carries
@@ -1560,7 +1557,7 @@ The MCP servers stay bound to the canonical checkout on purpose, so a worker in 
 
 | Role | Code questions | Docs and standards | If the check fails |
 |---|---|---|---|
-| Developers, `test-dev`, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
+| Developers, `docs-dev`, investigator (shell) | `codegraph explore` from the worktree's shell, against its own index. Never the MCP `codegraph_explore` when `branch=` differs. | `kw-docs` for standards, which rarely differ by branch. Direct read of the worktree's copy for any document being edited. | `doctor --ensure` follows `stop-on-tool-failure` |
 | `code-reviewer` (shell) | Same, before any lens | CLI `docs validate` and `docs drift` in the worktree | Same |
 | `review-lens`, `review-triage` (no shell) | The packet carries the cycle's `evidence.md`, which names the diff, and, when the run uses one, the absolute worktree path. The lens passes that path as `codegraph_explore`'s `projectPath`, which answers from the worktree's own index; with no worktree named it uses the server's default project. Direct reads only when that call cannot answer for the packet's branch: an error, a not-indexed reply, or a provenance `branch=` that differs, naming the mode as `projectPath: error`, `projectPath: not-indexed` or `projectPath: wrong-branch <got> vs <wanted>` in the direct-read reason. They read the worktree the packet names, and the checkout itself only on a run that names no worktree. | `kw-docs` for standards | A lens that cannot read reports `SKIPPED` with the reason |
 | `architect` (shell) | The packet carries `RUN_BASE`, `RUN_BRANCH` and, when present, `WORKTREE: <absolute path>`. If provenance `rev=` and `branch=` match, normal discovery. If not, `codegraph explore "…"` from the worktree's shell against its own index (`kyber-weave doctor --ensure` creates it), counted as a CLI discovery call. | The server cannot see a plan written into a worktree, so the architect writes to `<WORKTREE>/docs/plans/…` and runs `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` there. Where a harness gives it no shell it returns `STATUS: BLOCKED` naming "server root differs: run the docs checks in the worktree" and is re-invoked with `DOCS_CHECKS: <results>`. | `BLOCKED` when no worktree path was given |
@@ -1713,10 +1710,10 @@ is still packed when no loaded file references it. See the
 Both archive formats recurse through each skill directory. They contain all canonical `SKILL.md`
 files plus their retained supplemental resources, together with the Kyber-Weave skills from
 `.apm/skills/` and their resource files, in each archive.
-Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 29 canonical
+Retained local skill references must resolve in the extracted package. The APM archive additionally contains the 15 canonical
 agents with their 10 owned reference files; the Agent Plugins archive never contains agents or
 agent-owned resources. A fresh deployment renders every file an owner's Markdown links reach
-beside its principal — 162 files on Copilot today — with authored relative links resolving inside
+beside its principal — one file per agent and skill, plus every linked resource, on Copilot today — with authored relative links resolving inside
 the target output; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/` self-deployment predates resource delivery and is refreshed

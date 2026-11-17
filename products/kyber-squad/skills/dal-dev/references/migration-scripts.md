@@ -48,7 +48,7 @@ public class AddIngestionJobsTable : Migration
 
 ## Idempotency Rules
 
-- Re-run safety for `Up()` follows **<sql-coding-standard>** § Migrations; FluentMigrator
+- Re-run safety for `Up()` follows **<sql-server-coding-standard>** § Migrations; FluentMigrator
   provides `IfTableDoesNotExist` / `IfIndexDoesNotExist` for the existence check.
 - `Down()` is a host decision, per **<data-access-layer-coding-standard>** § Migrations.
 - Schema changes the plan approves (DDL) must match exactly what FluentMigrator applies — column names, data types, constraints, and index declarations must align.
@@ -61,7 +61,7 @@ public class AddIngestionJobsTable : Migration
   **<data-access-layer-coding-standard>** § Migrations.
 - Use `WithDefaultValue(SystemMethods.CurrentUTCDateTime)` for audit timestamp columns, not hardcoded values.
 - The non-nullable-column-addition pattern follows **<data-access-layer-coding-standard>** § Migrations.
-- Table-reference qualification follows **<sql-coding-standard>** § T-SQL authoring.
+- Table-reference qualification follows **<sql-server-coding-standard>** § T-SQL authoring.
 - After applying, verify with the SQL database project dacpac that schema state matches expectations.
 
 ---

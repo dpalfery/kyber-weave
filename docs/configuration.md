@@ -460,14 +460,14 @@ A top-level `worker-roster:` key chooses which developer agents a run dispatches
 worker-roster: tiered
 ```
 
-- **`technology`** is the default, and what an absent key means: one developer agent per technology
-  (`csharp-dev`, `react-dev`, and so on), `sql-database-architect` for schema work, `test-dev` for a
-  test-only task, and `github-devops` for delivery.
-- **`tiered`** replaces them with three developer agents that name no technology — `dev-easy`,
-  `dev-medium`, `dev-hard` — plus `devops` for delivery and `platform-researcher` for live platform
-  state.
+`tiered` is the only value, and what an absent key means: three developer agents that name no
+technology — `dev-easy`, `dev-medium`, `dev-hard` — plus `devops` for delivery and
+`platform-researcher` for live platform state.
 
-Any other value is a configuration error (`KW-CONFIG-001`) naming both. The setting is read when a
+The value `technology`, which selected one developer agent per technology, is a configuration error
+(`KW-CONFIG-001`) whose message names the change: those agents no longer ship. Any other value is the
+same error. A plan or task file that still names one of the deleted agents resolves to its
+replacement and reports the substitution. The setting is read when a
 task file is written and recorded in that file (`worker-roster`), so every later reader takes the
 run's roster from the task file rather than from a configuration that may have changed since. A
 dispatch that belongs to no task file — a fix the bug flow hands on, a research request — reads this
@@ -487,7 +487,7 @@ The tier for each attempt comes from the task file's difficulty and the attempts
 `tier = min(hard, rated difficulty + failed attempts)`, so an `easy` task starts on `dev-easy`,
 `medium` and an unrated task on `dev-medium`, and `hard` on `dev-hard`; a failed attempt moves one
 tier up and never down. The roster, the agents of each roster and the tier table are in the
-[Kyber-Squad architecture](../kyber-squad/architecture.md#12-worker-rosters-and-developer-tiers).
+[Kyber-Squad architecture](../kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers).
 
 The value is not published in the `AGENTS.md` Config Reg block, like the settings above: the task
 file is the record a run reads, and the CLI and MCP server read the host setting for themselves.

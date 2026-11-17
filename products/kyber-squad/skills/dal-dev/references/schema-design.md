@@ -15,7 +15,7 @@ Before asserting a best practice, version-specific behavior, or syntax, verify a
 
 - **Never** build T-SQL by concatenating unvalidated input. Use parameterized commands and `sp_executesql` with typed parameters.
 - Privilege boundaries, `xp_cmdshell` avoidance, and authentication method follow
-  **<sql-coding-standard>** § Least privilege.
+  **<sql-server-coding-standard>** § Least privilege.
 - Never hardcode credentials, connection strings, or secrets — use managed identities and encrypted configuration.
 
 ---
@@ -23,23 +23,23 @@ Before asserting a best practice, version-specific behavior, or syntax, verify a
 ## T-SQL Authoring Rules
 
 - Object naming, module idempotency, and identity-retrieval conventions follow
-  **<sql-coding-standard>** § T-SQL authoring.
+  **<sql-server-coding-standard>** § T-SQL authoring.
 - Keep transactions **explicit and short** to minimize lock duration.
-- Column selection and sargable-predicate rules follow **<sql-coding-standard>** § Queries.
+- Column selection and sargable-predicate rules follow **<sql-server-coding-standard>** § Queries.
 
 ---
 
 ## Schema & Data Type Decisions
 
 Normalization, data-type width, clustered-key shape, and constraint-based integrity all
-follow **<sql-coding-standard>** § Schema and types.
+follow **<sql-server-coding-standard>** § Schema and types.
 
 ---
 
 ## Indexing Rules
 
 - Index key ordering, `INCLUDE` usage, overlap checks, and large-table rebuilds follow
-  **<sql-coding-standard>** § Indexes.
+  **<sql-server-coding-standard>** § Indexes.
 - Avoid over-indexing — every index has write and storage cost.
 
 ---
@@ -47,7 +47,7 @@ follow **<sql-coding-standard>** § Schema and types.
 ## Source Control & Deployment
 
 - Schema-as-code source of truth, build/dacpac analysis, deployment, and preview-before-
-  production conventions follow **<sql-coding-standard>** § Delivery.
+  production conventions follow **<sql-server-coding-standard>** § Delivery.
 - Never run un-reviewed DDL by hand against production.
 
 ---

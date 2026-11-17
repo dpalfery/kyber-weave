@@ -460,7 +460,7 @@ reference is **refused with exit `2`**, not resolved: no pull request is fetched
 Pass the branch the pull request already owns.
 
 **The no-shell route.** A harness that gives the conductor no shell cannot run the command, so the
-conductor dispatches `github-devops` with the exact command and a `RUN-START: true` marker. The
+conductor dispatches `devops` with the exact command and a `RUN-START: true` marker. The
 marker exists because `KW-ARB-PLAN-001` escalates a `delegate` dispatch carrying no `PLAN_FILE`,
 which would refuse the very route the marker exists for: the Arbiter's `TriggerClassifier`
 classifies `RUN-START: true` as `investigate`, never `delegate`, so the roster check and

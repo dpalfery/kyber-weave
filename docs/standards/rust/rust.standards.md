@@ -119,8 +119,8 @@ code, and a change that touches one brings it to the rule where that is reasonab
 - Code is testable by construction: collaborators (spawner, clock, fetcher, sink, opener)
   are passed in, and the tray's runtime takes them as trait objects, so a test substitutes a
   fake for every system effect.
-- Test authorship follows the [test coding standard](../test/README.md) and belongs to
-  `test-dev`.
+- Test authorship follows the [test coding standard](../test/README.md) and belongs to the
+  developer tier that owns the task.
 
 ## Commands
 
@@ -171,7 +171,7 @@ repository root with `--manifest-path dash/tray/src-tauri/Cargo.toml`. The counc
 review. `cargo-test` runs in the council only: no task gate runs `cargo test`.
 
 Developer agents run `cargo-fmt` and `cargo-clippy` as task gates for changes under
-`dash/tray/src-tauri/`: `rust-dev` and `tauri-dev` declare both, and `test-dev` declares both as well.
+`dash/tray/src-tauri/`: the `rust` and `tauri` technology entries declare both.
 
 Prerequisites: `cargo` must be on the `PATH` (installed through `rustup`). On Linux, the Tauri
 system packages listed in `TAURI_APT_PACKAGES` in [`.github/workflows/ci.yml`](../../../.github/workflows/ci.yml)

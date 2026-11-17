@@ -112,7 +112,7 @@ public sealed class SkillResourceDispositionAuditTests
         // The count is exact on purpose: a resource added without a row, or a row without a
         // resource, is already caught by the comparison above, so this catches the other
         // failure — a row added twice under different spellings of the same path.
-        Assert.Equal(95, rows.Count);
+        Assert.Equal(89, rows.Count);
     }
 
     /// <summary>

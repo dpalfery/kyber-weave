@@ -22,7 +22,7 @@ the repository's gate configuration. This standard applies when Go is introduced
 language-level rules that change must follow, and it does not describe any Go code that exists.
 
 The change that introduces the first Go file must also add the Go gates: `gofmt`, `go vet`,
-`go build` and `go test`, declared as `review.task-gates` entries for `go-dev` and `test-dev` in
+`go build` and `go test`, declared as `review.task-gates` entries for the `go` technology in
 [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml) (plus `review.gates` for
 the council run) and in the root `AGENTS.md` loop commands, and run before that change is reported done. Until then, no Go change has a
 mechanical gate behind it, and a reviewer must say so rather than report it clean.
@@ -83,8 +83,8 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
 
 ### Tests
 
-Test authorship follows the [test coding standard](../test/README.md) and belongs to `test-dev`.
-Go tests are `_test.go` files beside the code they exercise, run by `go test`.
+Test authorship follows the [test coding standard](../test/README.md) and belongs to the developer
+tier that owns the task. Go tests are `_test.go` files beside the code they exercise, run by `go test`.
 
 ## Commands
 
