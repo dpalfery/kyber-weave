@@ -103,7 +103,10 @@ public static class ReviewTaskGateMigration
         }
         else if (everyEntryMoved)
         {
-            edits.Add(new Edit(taskGates.Header, taskGates.End, RenamedRegion(block, sections, suffix)));
+            edits.Add(new Edit(
+                taskGates.Header,
+                taskGates.End,
+                RenamedRegion(block, sections, KeyComment(lines[taskGates.Header]), suffix)));
         }
         else if (technologyBlockFirst)
         {
@@ -272,7 +275,7 @@ public static class ReviewTaskGateMigration
                 continue;
 
             List<string> section = [.. block.Chunks[i].Trivia];
-            section.Add(new string(' ', entryIndent) + technology + ":" + suffix);
+            section.Add(KeyLine(entryIndent, technology, KeyComment(block.Chunks[i].KeyLine), suffix));
             section.AddRange(block.Chunks[i].Body);
             sections.Add(section);
         }
@@ -282,13 +285,18 @@ public static class ReviewTaskGateMigration
 
     /// <summary>
     /// The block's own header, renamed as the technology header, with every section under it. Renaming in place keeps
-    /// the comment above the block and the block's position in the file exactly where the operator put them.
+    /// the comment above the block, the comment the header carries, and the block's position in the file exactly
+    /// where the operator put them.
     /// </summary>
-    private static List<string> RenamedRegion(Block block, List<List<string>> sections, string suffix)
+    private static List<string> RenamedRegion(
+        Block block,
+        List<List<string>> sections,
+        string headerComment,
+        string suffix)
     {
         List<string> region =
         [
-            new string(' ', block.Mapping.Indent) + TechnologyGatesKey + ":" + suffix,
+            KeyLine(block.Mapping.Indent, TechnologyGatesKey, headerComment, suffix),
             .. block.HeaderTrivia
         ];
 
@@ -504,10 +512,29 @@ public static class ReviewTaskGateMigration
     }
 
     private static bool IsEntry(string line, int indent) =>
-        IsContent(line)
-        && IndentOf(line) == indent
-        && line.TrimEnd().EndsWith(':')
-        && !line.TrimStart().StartsWith('-');
+        IsContent(line) && IndentOf(line) == indent && IsMappingKey(line);
+
+    /// <summary>
+    /// Whether the line declares a mapping key and nothing more: a value or a sequence item means the line is not one.
+    /// </summary>
+    /// <remarks>
+    /// A key may be followed by a comment, which YAML reads as no value at all, so <c>task-gates: # per-agent</c> still
+    /// declares the key <c>task-gates</c>. Treating only a bare trailing colon as a key made the whole migration
+    /// report nothing to do on a file whose keys carried one.
+    /// </remarks>
+    private static bool IsMappingKey(string line)
+    {
+        string trimmed = line.Trim();
+        if (trimmed.StartsWith('-'))
+            return false;
+
+        int colon = KeyColon(trimmed);
+        if (colon < 0)
+            return false;
+
+        string rest = trimmed[(colon + 1)..].Trim();
+        return rest.Length == 0 || rest.StartsWith('#');
+    }
 
     private static bool IsContent(string line) => !IsBlank(line) && !IsComment(line);
 
@@ -524,8 +551,58 @@ public static class ReviewTaskGateMigration
         return indent;
     }
 
-    /// <summary>A line's key without its colon: the agent slug or technology name a mapping declares.</summary>
-    private static string KeyOf(string line) => line.Trim().TrimEnd(':');
+    /// <summary>The colon that ends a mapping key: the first one outside a quoted scalar, or -1 when there is none.</summary>
+    private static int KeyColon(string line)
+    {
+        char quote = '\0';
+        for (int i = 0; i < line.Length; i++)
+        {
+            char character = line[i];
+            if (quote != '\0')
+            {
+                if (character == quote)
+                    quote = '\0';
+
+                continue;
+            }
+
+            if (character is '"' or '\'')
+            {
+                quote = character;
+                continue;
+            }
+
+            if (character == ':')
+                return i;
+        }
+
+        return -1;
+    }
+
+    /// <summary>A line's key: the text before its key colon, with a quoted key unquoted.</summary>
+    private static string KeyOf(string line)
+    {
+        string trimmed = line.Trim();
+        int colon = KeyColon(trimmed);
+        string key = colon < 0 ? trimmed : trimmed[..colon].Trim();
+        return key.Length >= 2 && key[0] is '"' or '\'' && key[^1] == key[0] ? key[1..^1] : key;
+    }
+
+    /// <summary>The comment a mapping key carries after its colon, or an empty string when it carries none.</summary>
+    private static string KeyComment(string line)
+    {
+        string trimmed = line.Trim();
+        int colon = KeyColon(trimmed);
+        if (colon < 0)
+            return string.Empty;
+
+        string rest = trimmed[(colon + 1)..].Trim();
+        return rest.StartsWith('#') ? rest : string.Empty;
+    }
+
+    /// <summary>A line declaring <paramref name="key"/>, keeping the comment the key it replaces carried.</summary>
+    private static string KeyLine(int indent, string key, string comment, string suffix) =>
+        new string(' ', indent) + key + ":" + (comment.Length == 0 ? string.Empty : " " + comment) + suffix;
 
     private enum Decision
     {

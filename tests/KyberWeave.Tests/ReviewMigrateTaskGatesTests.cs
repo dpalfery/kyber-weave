@@ -159,6 +159,55 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.Equal(["review-config"], config.Review.TaskGates["docs-dev"].Select(gate => gate.Id));
     }
 
+    /// <summary>
+    /// A key may carry a trailing comment, which YAML ignores and a reader does not. The rewrite has to find the key
+    /// anyway — and keep the comment, because the comment is the only record of why the entry exists.
+    /// </summary>
+    [Fact]
+    public void AKeyCarryingATrailingCommentIsFoundAndItsCommentIsKept()
+    {
+        WriteConfig("""
+            review:
+              task-gates: # the per-agent gates
+                csharp-dev: # the .NET list
+                  - id: format
+                    run: [dotnet, format]
+            """);
+
+        CliRun run = Migrate("--write");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.Equal(
+            """
+            review:
+              technology-gates: # the per-agent gates
+                csharp: # the .NET list
+                  - id: format
+                    run: [dotnet, format]
+            """.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n",
+            File.ReadAllText(ConfigPath));
+    }
+
+    /// <summary>A quoted key names the same agent as a bare one, and YAML readers agree, so the migration must too.</summary>
+    [Fact]
+    public void AQuotedAgentKeyIsMigrated()
+    {
+        WriteConfig("""
+            review:
+              task-gates:
+                "csharp-dev":
+                  - id: build
+                    run: [dotnet, build]
+            """);
+
+        CliRun run = Migrate("--write");
+
+        Assert.Equal(0, run.ExitCode);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        Assert.Equal(["build"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
+        Assert.Empty(config.Review.TaskGates);
+    }
+
     // ----------------------------------------------------------------------------------------
     // The entries the command must not touch
     // ----------------------------------------------------------------------------------------
