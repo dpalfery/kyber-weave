@@ -83,7 +83,7 @@ public sealed class DevHardModelUpgradeTests
         ["devin"] = "swe-2-high",
         ["factory"] = "deepseek-v4.1-flash[reasoningEffort=high]",
         ["kilo"] = "opencode-go/muse-spark-1.3-contributor",
-        ["opencode"] = "opencode-go/muse-spark-1.3-contributor",
+        ["opencode"] = "opencode-go/kimi-k2.7-code",
         ["pi"] = "opencode-go/muse-spark-1.3-contributor[thinking=medium]",
         ["zcode"] = "glm-5.3-flash",
     };
@@ -171,6 +171,30 @@ public sealed class DevHardModelUpgradeTests
         Assert.Equal(
             SquadTargetCatalog.All.Count - NoSecondModel.Count,
             RenderedDevHardModels.Count);
+    }
+
+    /// <summary>
+    /// The reported defect: all three developer tiers resolved to one opencode pin, so a tier step could not change
+    /// the model. The three profiles and the three rendered agents must name three models, in strength order.
+    /// </summary>
+    [Fact]
+    public async Task TheThreeDeveloperTiersResolveToThreeModelsOnOpenCode()
+    {
+        IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
+        string easy = Resolve(profiles["fast"], "opencode");
+        string medium = Resolve(profiles["general"], "opencode");
+        string hard = Resolve(profiles["dev-hard"], "opencode");
+
+        Assert.Equal("opencode-go/muse-spark-1.3-contributor", easy);
+        Assert.Equal("opencode-go/kimi-k2.7-code", medium);
+        Assert.Equal("zai-coding-plan/glm-5.3", hard);
+        Assert.Equal(3, new[] { easy, medium, hard }.Distinct(StringComparer.Ordinal).Count());
+
+        SquadRenderResult render = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.OpenCode);
+        Assert.True(render.Success, string.Join("; ", render.Errors));
+        Assert.Equal(easy, RenderedModel(render, SquadTarget.OpenCode, "dev-easy"));
+        Assert.Equal(medium, RenderedModel(render, SquadTarget.OpenCode, "dev-medium"));
+        Assert.Equal(hard, RenderedModel(render, SquadTarget.OpenCode, "dev-hard"));
     }
 
     [Fact]
