@@ -1325,12 +1325,7 @@ public sealed class SquadTransaction : ISquadTransaction
                                 ArtifactIdentity(claimArea, claimRelativePath),
                                 StringComparison.Ordinal))
                         .ToArray(),
-                    ActiveTransitions = intent.ActiveTransitions.Where(transition =>
-                            !string.Equals(
-                                transition.ArtifactIdentity,
-                                claimArtifactIdentity,
-                                StringComparison.Ordinal))
-                        .ToArray()
+                    ActiveTransitions = Array.Empty<IntentTransition>()
                 };
             }
             else
