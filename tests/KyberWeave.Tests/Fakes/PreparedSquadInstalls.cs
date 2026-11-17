@@ -310,19 +310,23 @@ public static class SquadInstallCopy
     /// A global deployment can put its own physical root into a deployed file, as the Copilot harness's
     /// absolute reference links do. A plain copy would then name the template's root, so the copy must
     /// rewrite those bytes and update the receipt that names them, or doctor reads the file as a hand edit.
+    /// A multi-target deployment repeats relative paths under each target's own root, so
+    /// <paramref name="target"/> keeps one target's digests from being recomputed from another's bytes.
     /// </remarks>
     /// <param name="deployedRoot">The copied target root holding the deployed files.</param>
     /// <param name="receiptPath">The copied receipt, or a path that does not exist when there is none.</param>
     /// <param name="store">The state store that serialises and deserialises the receipt.</param>
     /// <param name="from">The template's canonical root.</param>
     /// <param name="to">The copy's canonical root.</param>
+    /// <param name="target">The receipt target whose digests to recompute, or null to recompute every entry.</param>
     /// <returns>The rewritten receipt, or null when there was none.</returns>
     public static SquadReceipt? ReRootDeployed(
         string deployedRoot,
         string receiptPath,
         SquadStateStore store,
         string from,
-        string to)
+        string to,
+        string? target = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(deployedRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(receiptPath);
@@ -352,6 +356,9 @@ public static class SquadInstallCopy
             [
                 .. receipt.Files.Select(file =>
                 {
+                    if (target is not null && !string.Equals(file.Target, target, StringComparison.Ordinal))
+                        return file;
+
                     string deployed = Path.Combine(deployedRoot, file.RelativePath);
                     return File.Exists(deployed)
                         ? file with { Sha256 = Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(deployed))) }

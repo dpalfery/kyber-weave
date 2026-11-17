@@ -14,9 +14,12 @@ namespace KyberWeave.Tests;
 ///     edited, keep an edited copy and the receipt claim on it, and leave the home response guidance alone.
 /// </summary>
 /// <remarks>
-///     The prior release is seeded here rather than installed from the product tree. The product no longer
+///     The prior release is seeded rather than installed from the product tree. The product no longer
 ///     ships the skill once it is retired, so an install from it could not produce the prior state this test
-///     starts from. The seeded release is a copy of the synthetic corpus with its own inline skill.
+///     starts from. The seeded release is a copy of the synthetic corpus with its own inline skill. The
+///     deployment it makes is built once for the run through <see cref="PreparedSquadInstalls"/> and copied
+///     into this test's own home and global roots; the test then edits a deployed copy and runs the update
+///     for real, because that edited deployment is the sequence under test.
 /// </remarks>
 public sealed class SquadResponseFormatRetirementTests : IDisposable
 {
@@ -44,31 +47,25 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
     {
         string root = Path.Combine(_temp.Path, "retire-response-format");
         string anchor = Path.Combine(root, "anchor");
-        string globalRoots = Path.Combine(root, "global-roots");
+        string globalRootsDirectory = Path.Combine(root, "global-roots");
         string home = Path.Combine(root, "home");
+        string applicationData = Path.Combine(root, "app-data");
         Directory.CreateDirectory(anchor);
-        Directory.CreateDirectory(globalRoots);
+        Directory.CreateDirectory(globalRootsDirectory);
         Directory.CreateDirectory(home);
 
-        SquadStateStore store = new(new HomeUserPaths(Path.Combine(root, "app-data"), home));
-        TempGlobalRoots roots = new(globalRoots);
+        HomeUserPaths userPaths = new(applicationData, home);
+        SquadStateStore store = new(userPaths);
+        TempGlobalRoots roots = new(globalRootsDirectory);
         string guidancePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(guidancePath)!);
-        byte[] homeGuidance = Encoding.UTF8.GetBytes(HomeGuidanceBody);
-        await File.WriteAllBytesAsync(guidancePath, homeGuidance);
 
-        using SeededPriorReleaseSource prior = new(root);
-        using SyntheticValidSquadReleaseSource synthetic = new();
-        SquadLifecycleService priorLifecycle =
-            SquadHostDefaults.CreateLifecycleService(prior, SquadHostDefaults.ResolveRenderer(), store, globalRoots: roots);
-        SquadLifecycleResult install = await priorLifecycle.InstallAsync(new SquadInstallRequest(
-            anchor,
-            SquadDeploymentScope.Global,
-            Targets,
-            Version: "1.2.3"));
-        Assert.True(install.Success, DescribeFailure(install));
+        PreparedPriorDeployment prior = PriorDeployment();
+        prior.CopyInto(userPaths, anchor, globalRootsDirectory);
+        Assert.Equal(0, prior.Record.ExitCode);
 
-        SquadReceipt priorReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(anchor, SquadDeploymentScope.Global));
+        SquadReceipt priorReceipt = Assert.IsType<SquadReceipt>(
+            store.ReadReceipt(anchor, SquadDeploymentScope.Global));
+
         string[] priorTargets = priorReceipt.Files
             .Where(file => IsResponseFormatPath(file.RelativePath))
             .Select(file => file.Target)
@@ -81,7 +78,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
             $"about retirement. Owned targets: {string.Join(", ", priorTargets)}.");
 
         string[] deployed = Directory
-            .EnumerateFiles(globalRoots, "*", SearchOption.AllDirectories)
+            .EnumerateFiles(globalRootsDirectory, "*", SearchOption.AllDirectories)
             .Where(path => IsResponseFormatPath(path))
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -89,9 +86,10 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
 
         string edited = deployed[0];
         string[] unedited = deployed.Skip(1).ToArray();
-        string editedTarget = Path.GetRelativePath(globalRoots, edited).Split(Path.DirectorySeparatorChar)[0];
+        string editedTarget = Path.GetRelativePath(globalRootsDirectory, edited).Split(Path.DirectorySeparatorChar)[0];
         await File.WriteAllTextAsync(edited, EditedSkillBody, Encoding.UTF8);
 
+        using SyntheticValidSquadReleaseSource synthetic = new();
         SquadLifecycleService updateLifecycle = SquadHostDefaults.CreateLifecycleService(
             synthetic,
             SquadHostDefaults.ResolveRenderer(),
@@ -126,7 +124,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
                        warning.Contains("response-format", StringComparison.Ordinal));
 
         byte[] homeAfterUpdate = await File.ReadAllBytesAsync(guidancePath);
-        Assert.Equal(homeGuidance, homeAfterUpdate);
+        Assert.Equal(prior.HomeGuidanceBeforeInstall, homeAfterUpdate);
     }
 
     private static bool IsResponseFormatPath(string path)
@@ -142,6 +140,129 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
             : result.Warnings is { Count: > 0 }
                 ? string.Join(Environment.NewLine, result.Warnings)
                 : "No diagnosis was reported.";
+    }
+
+    private static string RecipeKey => SquadInstallRecipe.Key(
+        "squad-response-format-retirement",
+        SquadDeploymentScope.Global,
+        Targets,
+        ("version", "1.2.3"),
+        ("home-guidance", HomeGuidanceBody));
+
+    private static PreparedPriorDeployment PriorDeployment() =>
+        PreparedSquadInstalls.Get(RecipeKey, () => BuildPriorDeployment(RecipeKey));
+
+    /// <summary>
+    /// The one real prior install the class starts from: the seeded release, the real renderer and the
+    /// operator's home guidance, made once for the run through the real lifecycle.
+    /// </summary>
+    private static PreparedPriorDeployment BuildPriorDeployment(string key)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string anchor = Path.Combine(directory.Path, "anchor");
+            string home = Path.Combine(directory.Path, "home");
+            string applicationData = Path.Combine(directory.Path, "app-data");
+            string globalRoots = Path.Combine(directory.Path, "global-roots");
+            Directory.CreateDirectory(anchor);
+            Directory.CreateDirectory(home);
+            Directory.CreateDirectory(globalRoots);
+
+            string guidancePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
+            Directory.CreateDirectory(Path.GetDirectoryName(guidancePath)!);
+            byte[] homeGuidance = Encoding.UTF8.GetBytes(HomeGuidanceBody);
+            File.WriteAllBytes(guidancePath, homeGuidance);
+
+            HomeUserPaths userPaths = new(applicationData, home);
+            SquadStateStore store = new(userPaths);
+            TempGlobalRoots roots = new(globalRoots);
+            using SeededPriorReleaseSource prior = new(directory.Path);
+            SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(
+                prior,
+                SquadHostDefaults.ResolveRenderer(),
+                store,
+                globalRoots: roots);
+
+            SquadLifecycleResult result = lifecycle.InstallAsync(new SquadInstallRequest(
+                    anchor,
+                    SquadDeploymentScope.Global,
+                    Targets,
+                    Version: "1.2.3"))
+                .GetAwaiter().GetResult();
+            if (!result.Success)
+            {
+                throw new InvalidOperationException(
+                    $"The prepared prior install failed: {string.Join("; ", result.Errors ?? [])}");
+            }
+
+            PreparedPriorDeployment prepared = new(
+                key,
+                directory,
+                home,
+                applicationData,
+                globalRoots,
+                homeGuidance,
+                SquadInstallRecord.FromLifecycle(result, exitCode: 0));
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The shared prior install, copied into a test's own home, application data and per-target global
+    /// roots. The copy rewrites the template's root in the home state, and rewrites it in the deployed
+    /// files too while recording their new digests, so the copy is a faithful install at its new root:
+    /// the update compares receipt digests with the bytes it finds.
+    /// </summary>
+    private sealed class PreparedPriorDeployment(
+        string key,
+        TempDirectory directory,
+        string home,
+        string applicationData,
+        string globalRoots,
+        byte[] homeGuidanceBeforeInstall,
+        SquadInstallRecord record) : PreparedSquadInstall(key, directory, record)
+    {
+        /// <summary>The home guidance bytes the template held before its install ran.</summary>
+        public byte[] HomeGuidanceBeforeInstall { get; } = homeGuidanceBeforeInstall;
+
+        public void CopyInto(HomeUserPaths userPaths, string destinationAnchor, string destinationGlobalRoots)
+        {
+            ArgumentNullException.ThrowIfNull(userPaths);
+            ArgumentException.ThrowIfNullOrWhiteSpace(destinationAnchor);
+            ArgumentException.ThrowIfNullOrWhiteSpace(destinationGlobalRoots);
+
+            SquadInstallCopy.Tree(home, userPaths.HomeDirectory);
+            if (Directory.Exists(applicationData))
+                SquadInstallCopy.Tree(applicationData, userPaths.ApplicationDataDirectory);
+            SquadInstallCopy.Tree(globalRoots, destinationGlobalRoots);
+
+            SquadInstallCopy.ReRoot(
+                Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad"),
+                SquadInstallCopy.Canonical(home),
+                SquadInstallCopy.Canonical(userPaths.HomeDirectory));
+
+            SquadStateStore store = new(userPaths);
+            string receiptPath = store.ResolveReceiptPath(destinationAnchor, SquadDeploymentScope.Global);
+            foreach (SquadTarget target in Targets)
+            {
+                string token = SquadTargetCatalog.GetToken(target);
+                _ = SquadInstallCopy.ReRootDeployed(
+                    Path.Combine(destinationGlobalRoots, token),
+                    receiptPath,
+                    store,
+                    ForwardSlashed(Path.Combine(globalRoots, token)),
+                    ForwardSlashed(Path.Combine(destinationGlobalRoots, token)),
+                    token);
+            }
+        }
+
+        private static string ForwardSlashed(string path) => path.Replace('\\', '/').TrimEnd('/');
     }
 
     /// <summary>

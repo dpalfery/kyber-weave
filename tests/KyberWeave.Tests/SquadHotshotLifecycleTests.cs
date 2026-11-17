@@ -8,11 +8,26 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>Pins roster-removal behavior through the normal Squad update lifecycle.</summary>
+/// <remarks>
+/// The prior deployment the update shrinks comes from <see cref="PreparedSquadInstalls"/>, built once for the
+/// run and copied into this test's own project and home. The update itself runs for real, because the
+/// subject is that sequence: an edited owned file and an unmanaged neighbor already on disk when the
+/// roster shrinks.
+/// </remarks>
 public sealed class SquadHotshotLifecycleTests : IDisposable
 {
     private const string ObsoletePath = ".github/agents/obsolete.agent.md";
     private const string EditedPath = ".github/agents/architect.agent.md";
     private const string UnmanagedPath = ".github/agents/local-only.agent.md";
+
+    private static readonly string[] RosterPaths =
+    [
+        ".github/agents/architect.agent.md",
+        ".github/agents/conductor.agent.md",
+        ".github/agents/task-reviewer.agent.md",
+        ".github/skills/code-review/SKILL.md",
+        ".github/skills/product-owner/SKILL.md"
+    ];
 
     private readonly TempDirectory _temp = new();
 
@@ -26,30 +41,16 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
     [Fact]
     public async Task UpdateToShrunkenRosterRemovesOnlyUnchangedObsoleteOwnedFileAndWritesExactReceipt()
     {
-        string[] rosterPaths =
-        [
-            ".github/agents/architect.agent.md",
-            ".github/agents/conductor.agent.md",
-            ".github/agents/task-reviewer.agent.md",
-            ".github/skills/code-review/SKILL.md",
-            ".github/skills/product-owner/SKILL.md"
-        ];
         string targetRoot = Path.Combine(_temp.Path, "hotshot-update");
         Directory.CreateDirectory(targetRoot);
-        SquadStateStore stateStore = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-data")));
-        using FakeSquadReleaseSource releaseSource = new();
-        RosterShrinkingRenderer renderer = new(rosterPaths);
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
-
-        SquadLifecycleResult install = await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Project,
-            Targets: [SquadTarget.Copilot],
-            Version: "1.0.0"));
-        Assert.True(install.Success);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        PreparedHotshotInstall prior = PriorInstall();
+        prior.CopyInto(userPaths, targetRoot);
+        Assert.Equal(0, prior.Record.ExitCode);
 
         string obsoleteFile = ResolveTargetPath(targetRoot, ObsoletePath);
         Assert.True(File.Exists(obsoleteFile));
+        SquadStateStore stateStore = new(userPaths);
         SquadReceipt priorReceipt = Assert.IsType<SquadReceipt>(
             stateStore.ReadReceipt(targetRoot, SquadDeploymentScope.Project));
         Assert.Contains(priorReceipt.Files, file =>
@@ -63,6 +64,12 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
         string unmanagedFile = ResolveTargetPath(targetRoot, UnmanagedPath);
         Directory.CreateDirectory(Path.GetDirectoryName(unmanagedFile)!);
         await File.WriteAllTextAsync(unmanagedFile, "unmanaged neighbor\n");
+
+        using FakeSquadReleaseSource releaseSource = new();
+        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
+            releaseSource,
+            new RosterShrinkingRenderer(RosterPaths, includeObsolete: false),
+            stateStore);
 
         SquadLifecycleResult update = await service.UpdateAsync(new SquadUpdateRequest(
             TargetRoot: targetRoot,
@@ -80,7 +87,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
             .Select(file => file.RelativePath)
             .Order(StringComparer.Ordinal)
             .ToArray();
-        Assert.Equal(rosterPaths, persistedPaths);
+        Assert.Equal(RosterPaths, persistedPaths);
         Assert.Equal(5, persistedPaths.Length);
         Assert.Equal(persistedPaths.Length, persistedPaths.Distinct(StringComparer.Ordinal).Count());
     }
@@ -88,10 +95,102 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
     private static string ResolveTargetPath(string root, string relativePath) =>
         Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
 
-    private sealed class RosterShrinkingRenderer(IReadOnlyList<string> rosterPaths) : ISquadRenderer
-    {
-        private int _renderCount;
+    private static string RecipeKey => SquadInstallRecipe.Key(
+        "squad-hotshot-lifecycle",
+        SquadDeploymentScope.Project,
+        [SquadTarget.Copilot],
+        ("version", "1.0.0"),
+        ("roster", string.Join(",", RosterPaths)),
+        ("obsolete", ObsoletePath));
 
+    private static PreparedHotshotInstall PriorInstall() =>
+        PreparedSquadInstalls.Get(RecipeKey, () => BuildPriorInstall(RecipeKey));
+
+    /// <summary>
+    /// The one real prior install the class starts from: the roster that still holds the obsolete file,
+    /// made with the class's renderer once for the run.
+    /// </summary>
+    private static PreparedHotshotInstall BuildPriorInstall(string key)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string projectRoot = Path.Combine(directory.Path, "project");
+            Directory.CreateDirectory(projectRoot);
+            FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user-data"));
+            SquadStateStore stateStore = new(userPaths);
+            using FakeSquadReleaseSource releaseSource = new();
+            SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
+                releaseSource,
+                new RosterShrinkingRenderer(RosterPaths, includeObsolete: true),
+                stateStore);
+
+            SquadLifecycleResult result = service.InstallAsync(new SquadInstallRequest(
+                    TargetRoot: projectRoot,
+                    Scope: SquadDeploymentScope.Project,
+                    Targets: [SquadTarget.Copilot],
+                    Version: "1.0.0"))
+                .GetAwaiter().GetResult();
+            if (!result.Success)
+            {
+                throw new InvalidOperationException(
+                    $"The prepared prior install failed: {string.Join("; ", result.Errors ?? [])}");
+            }
+
+            PreparedHotshotInstall prepared = new(
+                key,
+                directory,
+                projectRoot,
+                userPaths.HomeDirectory,
+                SquadInstallRecord.FromLifecycle(result, exitCode: 0));
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The shared prior install, copied into a test's own project and fake home as if the test had
+    /// installed it there: the project tree, then the project's home state directory keyed to the copy's
+    /// own physical root, with the receipt's recorded root rewritten.
+    /// </summary>
+    private sealed class PreparedHotshotInstall(
+        string key,
+        TempDirectory directory,
+        string projectRoot,
+        string homeDirectory,
+        SquadInstallRecord record) : PreparedSquadInstall(key, directory, record)
+    {
+        public void CopyInto(FakeSquadUserPaths userPaths, string targetRoot)
+        {
+            ArgumentNullException.ThrowIfNull(userPaths);
+            ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
+
+            SquadInstallCopy.Tree(projectRoot, targetRoot);
+
+            string templateRoot = SquadInstallCopy.Canonical(projectRoot);
+            string copyRoot = SquadInstallCopy.Canonical(targetRoot);
+            string sourceState = ProjectStateDirectory(homeDirectory, templateRoot);
+            string copyState = ProjectStateDirectory(userPaths.HomeDirectory, copyRoot);
+            SquadInstallCopy.Tree(sourceState, copyState);
+            SquadInstallCopy.ReRoot(copyState, templateRoot, copyRoot);
+        }
+
+        private static string ProjectStateDirectory(string home, string canonicalRoot) =>
+            Path.Combine(
+                home,
+                ".kyber-weave",
+                "squad",
+                "projects",
+                SquadPhysicalRootIdentity.KeyOf(canonicalRoot));
+    }
+
+    private sealed class RosterShrinkingRenderer(IReadOnlyList<string> rosterPaths, bool includeObsolete)
+        : ISquadRenderer
+    {
         public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Copilot];
 
         public Task<SquadRenderResult> RenderAsync(
@@ -100,9 +199,8 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
         {
             ArgumentNullException.ThrowIfNull(request);
             cancellationToken.ThrowIfCancellationRequested();
-            _renderCount++;
             List<string> paths = [.. rosterPaths];
-            if (_renderCount == 1)
+            if (includeObsolete)
             {
                 paths.Add(ObsoletePath);
             }
@@ -111,7 +209,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
                 .Order(StringComparer.Ordinal)
                 .Select(path => new SquadDeploymentFile(
                     path,
-                    Encoding.UTF8.GetBytes($"render {_renderCount}: {path}\n"),
+                    Encoding.UTF8.GetBytes($"render: {path}\n"),
                     "copilot"))
                 .ToArray();
             return Task.FromResult(new SquadRenderResult(
