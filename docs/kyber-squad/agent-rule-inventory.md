@@ -120,7 +120,7 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `sql-database-architect` | A primary key creates a clustered unique index by default. | `sql-server/sql-server.standards.md` | Coding standards | Moved |
 | `sql-database-architect` | Wrapping a column in a function makes the predicate non-sargable; inspect plans and existing indexes before tuning. | `sql-server/sql-server.standards.md` | Coding standards | Moved |
 | `sql-database-architect` | Never run unreviewed DDL against production; back-port a hotfix into source control immediately. | `sql-server/sql-server.rules.md` | Whole file | Moved |
-| `sql-database-architect` | Schema changes reach an environment by the standard's delivery path, not ad-hoc hand-run `ALTER` statements. | `sql-server/sql-server.standards.md` | Commands | Stated |
+| `sql-database-architect` | Schema changes reach an environment by the standard's delivery path, not ad-hoc hand-run `ALTER` statements. | `sql-server/sql-server.standards.md` | Commands | Moved |
 | `sql-database-architect` | Return the approved column names, types and constraints as the explicit contract the data-access layer consumes. | `data-access-layer/data-access-layer.rules.md` | Whole file | Moved |
 | `sql-database-architect` | Flag a migration that diverges from the approved schema and provide corrected DDL rather than accepting drift. | `data-access-layer/data-access-layer.rules.md` | Whole file | Moved |
 | `test-dev` | Test-only work follows the test standard for runners, isolation, naming, mocking and what to assert; C# tests also follow the C# standard. | `test/test.standards.md` | Testing | Stated |
