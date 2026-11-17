@@ -12,7 +12,10 @@ public enum StandardsFolderChangeKind
     Rename,
 
     /// <summary>A file the folder was missing is written as a stub.</summary>
-    Add
+    Add,
+
+    /// <summary>The standard's own sections are placed under the six required headings.</summary>
+    Reshape
 }
 
 /// <summary>One planned or written change inside a standards folder.</summary>
@@ -21,12 +24,20 @@ public enum StandardsFolderChangeKind
 /// <param name="To">The path the change produces.</param>
 public sealed record StandardsFolderChange(StandardsFolderChangeKind Kind, string From, string To);
 
+/// <summary>One authored section the migration moved under a required heading.</summary>
+/// <param name="Standard">The repository-relative standard the move happened in.</param>
+/// <param name="Heading">The authored heading, without the leading hashes.</param>
+/// <param name="Under">The required heading the section now sits under.</param>
+public sealed record StandardSectionMove(string Standard, string Heading, string Under);
+
 /// <summary>The changes a migration planned, and whether it wrote them.</summary>
 /// <param name="Changes">Repository-relative paths, in the order they are applied.</param>
 /// <param name="DryRun">True when the caller asked for the plan only.</param>
+/// <param name="Moves">The authored sections a reshape placed under a required heading.</param>
 public sealed record StandardsFolderMigrationResult(
     IReadOnlyList<StandardsFolderChange> Changes,
-    bool DryRun);
+    bool DryRun,
+    IReadOnlyList<StandardSectionMove> Moves);
 
 /// <summary>
 /// Renames a host's standards files to their prefixed names and writes the four files a
@@ -34,15 +45,17 @@ public sealed record StandardsFolderMigrationResult(
 /// </summary>
 /// <remarks>
 /// A rename never changes a byte: the standard's own text is the host's, and the only job is
-/// to give it the name the registry and the folder check expect. A missing file is written
-/// as a stub whose frontmatter states which scope it belongs to and whose frontmatter's
-/// owner is copied from the folder's standard, so the corpus stays within its catalog
-/// vocabulary. Running it twice changes nothing.
+/// to give it the name the registry and the folder check expect. A standard whose own
+/// headings predate the six the ontology requires is reshaped so those six appear in order,
+/// with every authored section kept beneath the heading it fits, and each move is reported.
+/// A missing file is written as a stub whose frontmatter states which scope it belongs to and
+/// whose frontmatter's owner is copied from the folder's standard, so the corpus stays within
+/// its catalog vocabulary. Running it twice changes nothing.
 /// </remarks>
 public sealed partial class StandardsFolderMigration
 {
     /// <summary>The command a caller runs to reach this migration.</summary>
-    public const string Command = "kyber-weave docs standards migrate";
+    public const string Command = DocsLayout.MigrateStandardsCommand;
 
     private readonly OntologyConfig _config;
     private readonly string _repoRoot;
@@ -68,6 +81,7 @@ public sealed partial class StandardsFolderMigration
     public StandardsFolderMigrationResult Run(bool dryRun = false)
     {
         List<StandardsFolderChange> changes = [];
+        List<StandardSectionMove> moves = [];
 
         foreach (string scope in Scopes())
         {
@@ -78,7 +92,7 @@ public sealed partial class StandardsFolderMigration
 
                 string standard = DocsLayout.StandardFile(docsRoot, scope);
                 string legacy = $"{folder}/README.md";
-                string? standardText = null;
+                string? standardText;
                 List<StandardsFolderChange> planned = [];
 
                 if (!File.Exists(Absolute(standard)))
@@ -96,8 +110,12 @@ public sealed partial class StandardsFolderMigration
                             StandardsFolderChangeKind.Add, string.Empty, standard));
                     }
                 }
+                else
+                {
+                    standardText = ReadOrNull(standard);
+                }
 
-                string? owner = OwnerOf(standardText ?? ReadOrNull(standard));
+                string? owner = OwnerOf(standardText);
 
                 foreach ((string path, string _) in new[]
                          {
@@ -117,12 +135,23 @@ public sealed partial class StandardsFolderMigration
                         StandardsFolderChangeKind.Add, string.Empty, arbiter));
                 }
 
+                string? reshapedText = null;
+                if (standardText is not null
+                    && StandardShape.Reshape(standardText, DocsLayout.StandardHeadings) is { } shape)
+                {
+                    reshapedText = shape.Text;
+                    planned.Add(new StandardsFolderChange(
+                        StandardsFolderChangeKind.Reshape, standard, standard));
+                    moves.AddRange(shape.Moves.Select(move =>
+                        new StandardSectionMove(standard, move.Heading, move.Under)));
+                }
+
                 changes.AddRange(planned);
-                if (!dryRun) Apply(planned, scope, owner);
+                if (!dryRun) Apply(planned, scope, owner, reshapedText);
             }
         }
 
-        return new StandardsFolderMigrationResult(changes, dryRun);
+        return new StandardsFolderMigrationResult(changes, dryRun, moves);
     }
 
     /// <summary>
@@ -133,7 +162,8 @@ public sealed partial class StandardsFolderMigration
     private void Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
-        string? owner)
+        string? owner,
+        string? reshapedText)
     {
         foreach (StandardsFolderChange change in planned)
         {
@@ -142,6 +172,12 @@ public sealed partial class StandardsFolderMigration
                 case StandardsFolderChangeKind.Rename:
                     if (!File.Exists(Absolute(change.To)))
                         File.Move(Absolute(change.From), Absolute(change.To));
+                    break;
+
+                case StandardsFolderChangeKind.Reshape:
+                    if (reshapedText is not null)
+                        File.WriteAllText(
+                            Absolute(change.To), reshapedText, new UTF8Encoding(false));
                     break;
 
                 case StandardsFolderChangeKind.Add:

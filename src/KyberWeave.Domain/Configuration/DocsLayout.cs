@@ -46,6 +46,13 @@ public static class DocsLayout
     /// <summary>The standard's file name inside a technology, role or platform folder.</summary>
     public const string StandardsSuffix = ".standards.md";
 
+    /// <summary>
+    /// The one command that renames a legacy <c>README.md</c> standard and reshapes its
+    /// sections under the six headings. Named here because validators in one layer and the
+    /// migration in another both point an operator at it.
+    /// </summary>
+    public const string MigrateStandardsCommand = "kyber-weave docs standards migrate";
+
     /// <summary>The prose rules file's name inside a technology, role or platform folder.</summary>
     public const string RulesSuffix = ".rules.md";
 

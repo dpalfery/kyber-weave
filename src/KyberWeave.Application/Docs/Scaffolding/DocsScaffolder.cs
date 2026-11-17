@@ -45,6 +45,11 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// <summary>The one file the configuration registry is rendered into.</summary>
     private const string AgentsFilePath = "AGENTS.md";
 
+    /// <summary>The note a skipped standard carries while its folder still holds README.md.</summary>
+    private const string LegacyStandardNote =
+        "the folder still holds its standard as README.md; run '" +
+        DocsLayout.MigrateStandardsCommand + "' to rename it";
+
     /// <summary>Roots checked, in order, when no docs root is supplied.</summary>
     private readonly string[] ConventionalRoots = ["docs", "6-Docs", "doc", "documentation"];
 
@@ -150,6 +155,14 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             {
                 string path =
                     $"{resolvedDocsRoot}/{DocsLayout.Standards}/{technology}/{KyberStandardsTemplates.FileName(technology, part)}";
+                if (part == KyberStandardsTemplates.Part.Standard
+                    && HasLegacyStandard(root, resolvedDocsRoot, technology, path))
+                {
+                    files.Add(new ScaffoldedFile(
+                        path, ScaffoldOutcome.Skipped, LegacyStandardNote));
+                    continue;
+                }
+
                 string content =
                     kyberStandards
                     && KyberStandardsTemplates.TryRenderPart(
@@ -167,6 +180,14 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             {
                 string path =
                     $"{resolvedDocsRoot}/{DocsLayout.Standards}/{role}/{KyberStandardsTemplates.FileName(role, part)}";
+                if (part == KyberStandardsTemplates.Part.Standard
+                    && HasLegacyStandard(root, resolvedDocsRoot, role, path))
+                {
+                    files.Add(new ScaffoldedFile(
+                        path, ScaffoldOutcome.Skipped, LegacyStandardNote));
+                    continue;
+                }
+
                 string content =
                     KyberStandardsTemplates.TryRenderPart(role, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
@@ -193,6 +214,24 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         {
             ReviewGates = BuildReviewOutcome(root, reviewPlan, hadReviewSection, loadedConfig.Config?.Review)
         };
+    }
+
+    /// <summary>
+    /// True when a scope folder still holds its standard as <c>README.md</c> and the prefixed
+    /// standard does not exist yet. Scaffolding a stub beside it would give the folder two
+    /// standards carrying the same id; the migration command is what names the standard.
+    /// </summary>
+    private bool HasLegacyStandard(
+        string repoRoot,
+        string docsRoot,
+        string scope,
+        string standardPath)
+    {
+        if (_files.FileExists(RequireContained(repoRoot, standardPath, nameof(standardPath))))
+            return false;
+
+        string legacy = $"{docsRoot}/{DocsLayout.Standards}/{scope}/README.md";
+        return _files.FileExists(RequireContained(repoRoot, legacy, nameof(scope)));
     }
 
     /// <summary>The stub written for a role part a shipped template does not supply.</summary>

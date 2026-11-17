@@ -60,6 +60,31 @@ public class DocsInitTemplateChoiceTests : IDisposable
             && file.Outcome == ScaffoldOutcome.Skipped);
     }
 
+    /// <summary>
+    /// A host whose standard is still <c>README.md</c> already has a standard with an id. A stub
+    /// beside it would carry the same id, which validation then reports as a duplicate, so
+    /// <c>docs init</c> leaves the standard name to the migration command.
+    /// </summary>
+    [Fact]
+    public void ALegacyReadmeStandardIsNotJoinedByAScaffoldedStub()
+    {
+        const string legacy = "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n";
+        string path = PathOf("docs/standards/csharp/README.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, legacy);
+
+        ScaffoldResult result = Scaffolding.Scaffold(_temp.Path, standards: ["csharp"]);
+
+        Assert.False(File.Exists(PathOf("docs/standards/csharp/csharp.standards.md")));
+        Assert.Equal(legacy, File.ReadAllText(path));
+        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.rules.md")));
+        Assert.Contains(result.Files, file =>
+            file.RelativePath == "docs/standards/csharp/csharp.standards.md"
+            && file.Outcome == ScaffoldOutcome.Skipped
+            && file.Note is not null
+            && file.Note.Contains("docs standards migrate", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void ADeclaredTechnologyWithNoTemplateGetsFourStubs()
     {

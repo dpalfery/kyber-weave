@@ -39,7 +39,9 @@ public sealed class DocsStandardsMigrateCommand : Command<DocsStandardsMigrateSe
 
         if (result.Changes.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]Nothing to migrate.[/] Every standards folder already has its four files.");
+            AnsiConsole.MarkupLine(
+                "[green]Nothing to migrate.[/] Every standards folder already has its four " +
+                "files and the six headings in order.");
             return 0;
         }
 
@@ -50,9 +52,28 @@ public sealed class DocsStandardsMigrateCommand : Command<DocsStandardsMigrateSe
         foreach (StandardsFolderChange change in result.Changes)
         {
             string target = Markup.Escape(change.To);
-            AnsiConsole.MarkupLine(change.Kind == StandardsFolderChangeKind.Rename
-                ? $"  [green]renamed[/] {Markup.Escape(change.From)} -> {target}"
-                : $"  [green]added[/]   {target}");
+            switch (change.Kind)
+            {
+                case StandardsFolderChangeKind.Rename:
+                    AnsiConsole.MarkupLine(
+                        $"  [green]renamed[/]  {Markup.Escape(change.From)} -> {target}");
+                    break;
+
+                case StandardsFolderChangeKind.Reshape:
+                    AnsiConsole.MarkupLine($"  [green]reshaped[/] {target}");
+                    break;
+
+                default:
+                    AnsiConsole.MarkupLine($"  [green]added[/]    {target}");
+                    break;
+            }
+        }
+
+        foreach (StandardSectionMove move in result.Moves)
+        {
+            AnsiConsole.MarkupLine(
+                $"  [green]moved[/] '{Markup.Escape(move.Heading)}' under " +
+                $"'## {Markup.Escape(move.Under)}' in {Markup.Escape(move.Standard)}");
         }
 
         if (settings.DryRun)

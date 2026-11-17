@@ -379,6 +379,46 @@ public sealed class ConfigRegValidatorTests : IDisposable
             i.Code == ConfigRegValidator.UnresolvedPath && i.Message.Contains("adr-index", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A host that still holds its standard as <c>README.md</c> is in the warning period: the
+    /// registry entry points at the prefixed name that does not exist yet, and that must not
+    /// fail the host's own runs. The warning names the one command that finishes the migration.
+    /// </summary>
+    [Fact]
+    public void ALegacyReadmeStandardIsAWarningNamingTheMigrationCommand()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+        KyberWeaveConfig config = Configured("dotnet");
+        string agents = Path.Combine(_temp.Path, "AGENTS.md");
+        Write("AGENTS.md", ConfigRegMarkdown.Splice(
+            File.ReadAllText(agents),
+            ConfigRegMarkdown.Render(config.ConfigReg.Resolve(config.Ontology))));
+        Write("docs/standards/dotnet/README.md", """
+            ---
+            id: standards/dotnet
+            title: dotnet standard
+            doc-type: coding-standard
+            status: current
+            technology: dotnet
+            owner: Maintainers
+            last-reviewed: 2026-07-21
+            ---
+
+            # dotnet standard
+
+            ## Stack
+            """);
+
+        DiagnosticReport report = Validate(config);
+
+        Assert.False(report.HasErrors);
+        Diagnostic warning = Assert.Single(
+            report.Items, i => i.Code == ConfigRegValidator.UnresolvedPath);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Contains("README.md", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("docs standards migrate", warning.Hint, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AFreshlyScaffoldedRepositoryHasNoRegistryFindings()
     {

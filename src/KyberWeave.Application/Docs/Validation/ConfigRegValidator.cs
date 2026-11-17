@@ -14,7 +14,10 @@ namespace KyberWeave.Core.Docs.Validation;
 /// The registry is the one artifact a portable skill is allowed to depend on, which makes a
 /// broken entry expensive in a way an ordinary broken link is not: the skill fails in a host
 /// repository, where nobody can see the configuration that caused it. Both checks are errors
-/// for that reason, and both are fixed by the same command that generated the registry.
+/// for that reason, and both are fixed by the same command that generated the registry. The
+/// one exception is a host still in the standards warning period: its entry points at the
+/// prefixed standard that a folder still holding <c>README.md</c> has not gained yet, and that
+/// is a warning naming the migration command so the host's runs are not blocked.
 /// </remarks>
 public sealed class ConfigRegValidator
 {
@@ -83,6 +86,18 @@ public sealed class ConfigRegValidator
             if (_files.DirectoryExists(absolute) || _files.FileExists(absolute))
                 continue;
 
+            if (LegacyStandardScope(entry.Path) is { } scope)
+            {
+                report.Add(new Diagnostic(
+                    UnresolvedPath, Severity.Warning,
+                    $"<{entry.Name}> points at '{entry.Path}', which does not exist: the " +
+                    $"'{scope}' folder still holds its standard as README.md.",
+                    Subject, entry.Path,
+                    $"Run '{DocsLayout.MigrateStandardsCommand}' to rename it to " +
+                    $"'{scope}{DocsLayout.StandardsSuffix}' and reshape it under the six headings."));
+                continue;
+            }
+
             report.Add(new Diagnostic(
                 UnresolvedPath, Severity.Error,
                 $"<{entry.Name}> points at '{entry.Path}', which does not exist.",
@@ -93,6 +108,38 @@ public sealed class ConfigRegValidator
 
         ValidateRendering(entries, report);
         return report;
+    }
+
+    /// <summary>
+    /// The scope whose legacy <c>README.md</c> standard still stands where this registry path
+    /// points, or null when the path is not a standard's or the legacy file is absent.
+    /// </summary>
+    private string? LegacyStandardScope(string relativePath)
+    {
+        OntologyConfig ontology = _config.Ontology;
+        IEnumerable<string> scopes = ontology.Technologies.Concat(ontology.Roles)
+            .Distinct(StringComparer.Ordinal);
+
+        foreach (string docsRoot in ontology.DocsRoots)
+        {
+            foreach (string scope in scopes)
+            {
+                if (!string.Equals(
+                        relativePath,
+                        DocsLayout.StandardFile(docsRoot, scope),
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string legacy = $"{docsRoot}/{DocsLayout.Standards}/{scope}/README.md";
+                string absolute = Path.Combine(
+                    _repoRoot, legacy.Replace('/', Path.DirectorySeparatorChar));
+                return _files.FileExists(absolute) ? scope : null;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
