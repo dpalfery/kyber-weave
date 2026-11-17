@@ -131,6 +131,6 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `test-dev` | Report coverage gaps rather than skipping them silently. | `test/test.rules.md` | Whole file | Moved |
 | `azure-reader` | Reads live Azure resource configuration, topology, health and runtime state through Azure MCP Server, Azure Resources and Microsoft Docs tools. | `azure/azure.skills.md` | Whole file | Moved |
 | `azure-reader` | Cross-check Azure observations against Microsoft documentation. | `azure/azure.skills.md` | Whole file | Moved |
-| `azure-reader` | Changes nothing: no resource modification, no deployment or provisioning, no repository edit. | `azure/azure.rules.md` | Security and data handling | Moved |
+| `azure-reader` | Changes nothing: no resource modification, no deployment or provisioning, no repository edit. | `azure/azure.rules.md` | Read-only | Moved |
 | `azure-reader` | Prints no secret. | `azure/azure.rules.md` | Security and data handling | Moved |
 | `azure-reader` | Report concisely, with uncertainties called out. | `azure/azure.skills.md` | Whole file | Moved |
