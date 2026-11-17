@@ -44,7 +44,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
     [Fact]
     public async Task GlobalCopilotInstallWritesAbsoluteReferenceLinksAndReceiptDigestMatchesWrittenBytes()
     {
-        GlobalInstall install = await InstallGlobalCopilotAsync("links-install");
+        GlobalInstall install = InstallGlobalCopilotAsync("links-install");
 
         string content = await File.ReadAllTextAsync(install.ConductorFile);
         foreach (string reference in ReferenceFiles)
@@ -76,7 +76,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
     [Fact]
     public async Task DoctorGlobalScanAfterGlobalCopilotInstallReportsNoUnmanagedCollisionForConductor()
     {
-        GlobalInstall install = await InstallGlobalCopilotAsync("links-doctor");
+        GlobalInstall install = InstallGlobalCopilotAsync("links-doctor");
 
         // Guard the precondition so a doctor pass cannot come from an install that wrote nothing.
         Assert.True(File.Exists(install.ConductorFile));
@@ -114,28 +114,17 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         Assert.Equal(0, execution.Result);
     }
 
-    private async Task<GlobalInstall> InstallGlobalCopilotAsync(string name)
+    private GlobalInstall InstallGlobalCopilotAsync(string name)
     {
+        PreparedCopilotGlobal prepared = PreparedSquadInstalls.Get(RecipeKey, () => BuildTemplate(RecipeKey));
         string home = Path.Combine(_temp.Path, name + "-home");
         Directory.CreateDirectory(home);
         FakeUserPaths userPaths = new(Path.Combine(_temp.Path, name + "-user"));
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore stateStore = new(userPaths);
-        using CorpusSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
-            releaseSource,
-            SquadHostDefaults.ResolveRenderer(),
-            stateStore,
-            globalRoots: globalRoots);
-
-        SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
-            KyberWeaveTestPaths.ToolRoot,
-            SquadDeploymentScope.Global,
-            [SquadTarget.Copilot],
-            Version: "1.2.3"));
-        Assert.True(result.Success);
-
         string root = globalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
+        prepared.CopyInto(home, root, userPaths);
+
+        SquadStateStore stateStore = new(userPaths);
         string conductorFile = Path.Combine(root, "agents", "conductor.agent.md");
         return new GlobalInstall(
             userPaths,
@@ -143,6 +132,92 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             stateStore,
             root.Replace('\\', '/').TrimEnd('/'),
             conductorFile);
+    }
+
+    private const string RecipeKey = "hotshot-copilot-global-links/install/Global/copilot/1.2.3";
+
+    /// <summary>
+    /// The one real global Copilot install the class starts from: real renderer, real corpus, so the
+    /// deployed conductor carries the absolute links under its own root.
+    /// </summary>
+    private static PreparedCopilotGlobal BuildTemplate(string key)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string home = Path.Combine(directory.Path, "home");
+            Directory.CreateDirectory(home);
+            FakeUserPaths userPaths = new(Path.Combine(directory.Path, "user"));
+            SquadGlobalRoots globalRoots = new(_ => null, home);
+            SquadStateStore stateStore = new(userPaths);
+            using CorpusSquadReleaseSource releaseSource = new();
+            SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
+                releaseSource,
+                SquadHostDefaults.ResolveRenderer(),
+                stateStore,
+                globalRoots: globalRoots);
+
+            SquadLifecycleResult result = service.InstallAsync(new SquadInstallRequest(
+                    KyberWeaveTestPaths.ToolRoot,
+                    SquadDeploymentScope.Global,
+                    [SquadTarget.Copilot],
+                    Version: "1.2.3"))
+                .GetAwaiter().GetResult();
+            if (!result.Success)
+            {
+                throw new InvalidOperationException(
+                    $"The prepared Copilot global install failed: {string.Join("; ", result.Errors ?? [])}");
+            }
+
+            PreparedCopilotGlobal prepared = new(
+                key,
+                directory,
+                home,
+                userPaths.ApplicationDataDirectory,
+                SquadInstallRecord.FromLifecycle(result));
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// The shared install, copied into a test's own home and user data. The copy re-roots the absolute
+    /// links inside the deployed conductor and records their new digests in the copied receipt, so the copy
+    /// is a faithful install at its new root rather than bytes naming the template's root.
+    /// </summary>
+    private sealed class PreparedCopilotGlobal(
+        string key,
+        TempDirectory directory,
+        string home,
+        string applicationData,
+        SquadInstallRecord record) : PreparedSquadInstall(key, directory, record)
+    {
+        public void CopyInto(string destinationHome, string destinationTargetRoot, ISquadUserPaths userPaths)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(destinationHome);
+            ArgumentNullException.ThrowIfNull(userPaths);
+
+            SquadInstallCopy.Tree(home, destinationHome);
+            SquadInstallCopy.Tree(applicationData, userPaths.ApplicationDataDirectory);
+
+            string templateRoot = SquadInstallCopy.Canonical(home);
+            string copyRoot = SquadInstallCopy.Canonical(destinationHome);
+            SquadStateStore store = new(userPaths);
+            SquadInstallCopy.ReRoot(
+                Path.Combine(userPaths.ApplicationDataDirectory, ".kyber-weave", "squad"),
+                templateRoot,
+                copyRoot);
+            _ = SquadInstallCopy.ReRootDeployed(
+                destinationTargetRoot,
+                store.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global),
+                store,
+                home,
+                destinationHome);
+        }
     }
 
     private sealed record GlobalInstall(
