@@ -31,7 +31,7 @@ Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring ses
 Written 2026-11-16 against the draft [requirements](requirements.md) and [design](design.md). The
 owner approved all three on 2026-11-16. The owner gave the final approval on 2026-11-16 ('Yes, mark Ready'), with
 the condition that no build starts yet. The machine task list `tasks.yml` beside this file is
-generated from it with `kyber-weave docs tasks docs/specs/role-based-worker-agents/tasks.md --write`;
+generated from it with `kyber-weave docs tasks docs/archive/specs/role-based-worker-agents/tasks.md --write`;
 regenerate it after any edit here.
 
 These tasks deliver five phases. Each phase was its own pull request and leaves the product working;
