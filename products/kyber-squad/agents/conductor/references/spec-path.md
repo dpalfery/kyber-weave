@@ -8,6 +8,10 @@ Use this path when the user supplies a specification or selects one from the dir
 - **Partial or Draft:** invoke `product-owner` for the earliest incomplete or reopened phase. Pass the feature identity, exact artifact paths, current approval state, selected development mode, and only the user feedback relevant to that phase.
 - **Completed, Superseded, or archived:** do not execute it. Ask the user for an active artifact or use intake.
 
+## Configuration and its generated registry
+
+The roster and every Config Reg property come from `.kyber-weave/kyber-weave.yml`; the block in `AGENTS.md` is generated from it. When the two disagree the block is stale: follow the configuration, name the stale property, and have `kyber-weave docs init` regenerate it. A stale block never stops a run, and it is never a reason to ask which value to use.
+
 ## Headless phase protocol
 
 `product-owner` never prompts the user. It writes only specification artifacts and returns a structured digest. The conductor handles each result:
