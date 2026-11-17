@@ -290,32 +290,23 @@ public sealed class PiRendererContractTests : IDisposable
                 "deep-planning" => "zai/glm-5.3",
                 "fast" => "opencode-go/muse-spark-1.3-contributor",
                 "general" => "opencode-go/muse-spark-1.3-contributor",
-                "dev-hard" => "opencode-go/muse-spark-1.3-contributor",
+                "dev-hard" => "zai/glm-5.3",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
                 "" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
             };
 
-            // Extract thinking level from the profile's pi value
-            string? expectedThinking = null;
-            if (expectedModel != "inherit" && source.ModelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
+            // The approved thinking level per profile, pinned here rather than read back from
+            // models.yml: a value derived from the file under test agrees with any suffix that file
+            // carries, so a wrong level could never fail.
+            string? expectedThinking = agent.ModelProfile switch
             {
-                if (profile.HarnessModels.TryGetValue("pi", out string? piValue))
-                {
-                    // Parse [thinking=<level>] suffix if present
-                    const string thinkingPrefix = "[thinking=";
-                    int thinkingStart = piValue.IndexOf(thinkingPrefix, 0, StringComparison.Ordinal);
-                    if (thinkingStart >= 0)
-                    {
-                        int thinkingValueStart = thinkingStart + thinkingPrefix.Length;
-                        int thinkingEnd = piValue.IndexOf(']', thinkingValueStart);
-                        if (thinkingEnd > thinkingValueStart)
-                        {
-                            expectedThinking = piValue.Substring(thinkingValueStart, thinkingEnd - thinkingValueStart);
-                        }
-                    }
-                }
-            }
+                "architect" or "deep-planning" or "dev-hard" or "reviewer" => "high",
+                "general" => "medium",
+                "fast" => "low",
+                "" => null,
+                _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
+            };
 
             if (expectedModel == "inherit")
             {
@@ -1142,6 +1133,7 @@ public sealed class PiRendererContractTests : IDisposable
     /// deep-planning → model <c>zai/glm-5.3</c>, thinking <c>high</c>;
     /// reviewer → <c>opencode-go/kimi-k2.7-code</c>, <c>high</c>;
     /// general → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>medium</c>;
+    /// dev-hard → <c>zai/glm-5.3</c>, <c>high</c>;
     /// fast → <c>opencode-go/muse-spark-1.3-contributor</c>, <c>low</c>;
     /// orchestration → no model, no thinking.
     /// This contract pins the approved mapping directly from the plan.
@@ -1151,6 +1143,7 @@ public sealed class PiRendererContractTests : IDisposable
     [InlineData("deep-planning", "zai/glm-5.3", "high")]
     [InlineData("reviewer", "opencode-go/kimi-k2.7-code", "high")]
     [InlineData("general", "opencode-go/muse-spark-1.3-contributor", "medium")]
+    [InlineData("dev-hard", "zai/glm-5.3", "high")]
     [InlineData("fast", "opencode-go/muse-spark-1.3-contributor", "low")]
     public async Task RenderAsync_Pi_CanonicalProfilesEmitApprovedThinkingLevels(
         string profileName,

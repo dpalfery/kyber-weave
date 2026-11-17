@@ -34,18 +34,23 @@ public sealed class ModelProfileOptionalTests
     }
 
     [Fact]
-    public void DevHardHasARowForEveryHarnessAndSharesNoRowWithThePlanningProfiles()
+    public void DevHardHasARowForEveryHarnessAndRunsAStrongerModelThanTheTierBelowIt()
     {
         IReadOnlyDictionary<string, SquadModelProfile> profiles = Source.Value.ModelProfiles.Profiles;
         SquadModelProfile devHard = profiles["dev-hard"];
         SquadModelProfile architect = profiles["architect"];
-        SquadModelProfile deepPlanning = profiles["deep-planning"];
+        SquadModelProfile general = profiles["general"];
 
         Assert.Equal(architect.HarnessModels.Keys.Order(StringComparer.Ordinal), devHard.HarnessModels.Keys.Order(StringComparer.Ordinal));
         foreach ((string harness, string value) in devHard.HarnessModels)
         {
-            Assert.NotEqual(architect.HarnessModels[harness], value);
-            Assert.NotEqual(deepPlanning.HarnessModels[harness], value);
+            // The step up from dev-medium must change the model, so no row may match `general`'s.
+            // A harness `general` does not name would make the step-up uncheckable there, so say
+            // that in the failure instead of letting the dictionary indexer throw.
+            Assert.True(
+                general.HarnessModels.TryGetValue(harness, out string? generalValue),
+                $"general has no '{harness}' row to compare with dev-hard's '{value}'.");
+            Assert.NotEqual(generalValue, value);
         }
     }
 

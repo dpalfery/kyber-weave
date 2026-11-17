@@ -2469,10 +2469,16 @@ rewrite the dispatch; it never returns the prompt text.
 
 Each tier's model comes from its own agent file through its model profile — `dev-easy` is `fast`,
 `dev-medium` is `general`, `dev-hard` is the `dev-hard` profile — and nothing assigns a model at
-dispatch. The `dev-hard` profile is separate from the planning profiles so that changing a planning
-model never changes it; on most harnesses it currently pins the same model as `general`, so moving
-up to `dev-hard` is not a model upgrade there unless the host points that profile at a stronger
-model. Under `tiered` the Arbiter's model-targeting rules follow the same three profiles:
+dispatch. `dev-hard` is its own profile, so changing a planning profile never changes the developer
+ladder, and it carries the model `architect` pinned on that harness when the tier became a real
+upgrade (`opus`, `gpt-6.1-sol`, `Claude Opus 5.5 (copilot)`, `zai-coding-plan/glm-5.3`, and so on).
+A failed task that moves up to `dev-hard` therefore also changes its model on every harness that
+renders one. Two harnesses have no second model to move to: Warp renders no per-agent model key at
+all, and Command Code has no bundled column, so both profiles resolve to the session's model there.
+`fast` and `general` pin the same token on six harnesses, so the first step, `dev-easy` to
+`dev-medium`, changes the tier but not the model on those; the `dev-hard` step is the one that always
+changes it. A host can point any profile at another model with a [model preset](model-profiles.md).
+Under `tiered` the Arbiter's model-targeting rules follow the same three profiles:
 `KW-ARB-DIFFICULTY-001` answers from the rating the task file records and makes no second model call,
 so the agent and the model cannot disagree, and `KW-ARB-LADDER-001`'s ladder is `fast`, `general`,
 `dev-hard`. A dispatch the conductor already put on the next tier already renders that profile, so

@@ -90,7 +90,7 @@ public sealed class DevinRendererContractTests : IDisposable
         ["deep-planning"] = "claude-opus-5-5-high",
         ["fast"] = "deepseek-v4-1-flash-high",
         ["general"] = "swe-2-high",
-        ["dev-hard"] = "swe-2-high",
+        ["dev-hard"] = "claude-opus-5-5-high",
         ["reviewer"] = "grok-4-7-high"
     };
 
@@ -492,6 +492,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [InlineData("deep-planning", "claude-opus-5-5-high")]
     [InlineData("fast", "deepseek-v4-1-flash-high")]
     [InlineData("general", "swe-2-high")]
+    [InlineData("dev-hard", "claude-opus-5-5-high")]
     [InlineData("reviewer", "grok-4-7-high")]
     public async Task RenderAsync_Devin_CanonicalProfilesEmitTheirPinnedModel(
         string profileName,

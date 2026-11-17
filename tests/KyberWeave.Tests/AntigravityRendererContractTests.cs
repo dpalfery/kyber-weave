@@ -726,11 +726,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     Pins rendered Antigravity models by agent identity so planners and reviewers use
-    ///     Pro while workers remain on Flash, independently of models.yml.
+    ///     Pins rendered Antigravity models by model profile so planners, reviewers and the hard
+    ///     developer tier use Pro while routine workers remain on Flash, independently of models.yml.
     /// </summary>
     [Fact]
-    public async Task AntigravityPlanningAndReviewAgentsRunOnProAndOtherAgentsOnFlash()
+    public async Task AntigravityPlanningReviewAndHardTierUseProAndOtherAgentsUseFlash()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
@@ -757,9 +757,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             }
 
             string model = RequireScalar(frontmatter, "model");
-            string expectedModel = agent.Name is "architect" or "product-owner" or
-                "sql-database-architect" or "bug-crusher-investigator" or "code-reviewer" or
-                "review-lens" or "review-triage"
+            string expectedModel = agent.ModelProfile is "architect" or "deep-planning" or "reviewer" or "dev-hard"
                 ? "pro"
                 : "flash";
 
