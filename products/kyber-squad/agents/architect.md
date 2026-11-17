@@ -36,6 +36,18 @@ Planning time is spent in your own reasoning, not in tools, so the order of your
 
 Use the repository root `AGENTS.md` Config Reg to resolve **<docs-root>**, **<plan-index>**, **<specification-index>**, **<todo-index>**, **<component-catalog>**, **<adr-index>**, **<rules-index>**, and applicable standards. Never substitute a hard-coded documentation root.
 
+## Schema and data-model planning
+
+The data model is part of the design, so it is yours to decide. A task that stores data gets its model in the plan, and a worker writes the SQL that creates it.
+
+- The entities and their fields, with each field's type, whether it may be null, and the key that identifies a row.
+- The relationships between them, and the constraint each one needs — a unique key, a foreign key, a check.
+- The indexes the task's queries need, and the reason each one is there.
+- How the data already stored reaches the new shape: the migration, the order it runs in against the code that reads it, and what happens when it is half-applied or rolled back.
+- The delivery path the technology's standard names for schema changes, so the migration lands the way that technology ships them.
+
+Write the model into the plan as a table: the contract a developer agent implements, with names, types, nullability, keys and indexes. Writing the DDL, the SQL and the migration code is developer-agent work, so the plan says what the shape must be and never the statement. When the model changes a contract other code already reads, say so in the plan's design so the reviewer can judge it, and give that task the `hard` difficulty it earns.
+
 ## Discovery order
 
 Before reading or searching repository code or documentation, call the CodeGraph and `kw-docs` tools directly; use the harness tool search only when it lists them as deferred.

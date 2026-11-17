@@ -44,8 +44,10 @@ public sealed class SquadDeliveryExecutionSkillTests
 
     /// <summary>
     ///     The specialists bug-crusher's escalated path starts: the architect it hands planning to,
-    ///     the reviewer that judges the finished fix, the test author that establishes RED, and every
-    ///     developer agent a task can route to.
+    ///     the reviewer that judges the finished fix, the test author that establishes RED, every
+    ///     developer agent a task can route to, and the tiered replacements for those two: the
+    ///     developer tiers, one of which writes the failing test under that roster, and the delivery
+    ///     agent its run start dispatches.
     /// </summary>
     private static readonly string[] SpecialistDelegates =
     [
@@ -53,6 +55,10 @@ public sealed class SquadDeliveryExecutionSkillTests
         "code-reviewer",
         "csharp-dev",
         "dal-dev",
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops",
         "github-devops",
         "go-dev",
         "maui-dev",
