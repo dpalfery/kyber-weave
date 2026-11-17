@@ -22,6 +22,11 @@ namespace KyberWeave.Tests;
 ///     warning it is about, so a fixture that stops triggering it cannot make a fact pass vacuously.
 ///     Environment variables are read through injectable delegates rather than process mutation,
 ///     allowing safe parallel test execution.
+///     A fact whose subject is one install reads the record of one run-wide prepared install
+///     (<see cref="PreparedSquadInstalls" />), keyed by the release, the operator channel gate, the server
+///     name and whether an <c>mcp-config.json</c> was already in the home. The two update facts still run
+///     their update: their subject is the sequence of an install followed by an update over it, so they
+///     start from a copy of a prepared install instead of installing it themselves.
 /// </remarks>
 public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 {
@@ -32,6 +37,18 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 
     /// <summary>The newline before and after the padding text that <see cref="PaddedConductorReleaseSource" /> appends.</summary>
     private const int PaddingFramingCharacters = 2;
+
+    /// <summary>
+    ///     The padding that places the body alone just under the cap and body plus overlay just over it, measured once
+    ///     for the whole run. The overlay's growth comes from two real renders at a fixed home, so the fixture follows
+    ///     the checked-in overlay rather than a copied length and both overflow facts install the same conductor.
+    /// </summary>
+    private static readonly Lazy<int> OverflowPadding =
+        new(() => OverflowPaddingAsync().GetAwaiter().GetResult());
+
+    /// <summary>The fixed home the padding is measured at. Its absolute links make the conductor's length depend on the path.</summary>
+    private static readonly Lazy<(string CopilotHome, string UserHome)> ConductorLengthFixture =
+        new(CreateConductorLengthFixture);
 
     private readonly List<Harness> _harnesses = [];
 
@@ -50,17 +67,12 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     ///     prints a warning it never printed before.
     /// </summary>
     [Fact]
-    public async Task Install_AgentBodyOverCopilotCap_IsNotCarriedOntoTheLifecycleResult()
+    public void Install_AgentBodyOverCopilotCap_IsNotCarriedOntoTheLifecycleResult()
     {
-        Harness h = NewHarness("install-body");
-        Func<string, string?> env = h.CreateEnvironmentReader(null);
+        PreparedInstall prepared = InstallCase(ReleaseKind.Oversized, gateValue: null, declareServer: false);
 
-        SquadLifecycleResult result = await InstallAsync(h, true, env);
-
-        Assert.True(
-            h.Renderer.Codes.Contains(AgentBodyTooLongCode),
-            $"Precondition: the fixture must make the renderer emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
-        IReadOnlyList<string> warnings = WarningsOf(result);
+        AssertRendererEmitted(prepared, AgentBodyTooLongCode);
+        IReadOnlyList<string> warnings = prepared.Record.Warnings;
         Assert.True(
             warnings.Count == 0,
             $"A default install must show no renderer warning, but the result carries: {string.Join("; ", warnings)}");
@@ -74,9 +86,9 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     public async Task Update_AgentBodyOverCopilotCap_IsNotCarriedOntoTheLifecycleResult()
     {
         Harness h = NewHarness("update-body");
+        InstallCase(ReleaseKind.Corpus, gateValue: null, declareServer: false).CopyInto(h);
         Func<string, string?> env = h.CreateEnvironmentReader(null);
 
-        await InstallAsync(h, false, env);
         SquadLifecycleResult result = await NewService(h, h.Oversized, env).UpdateAsync(
             new SquadUpdateRequest(
                 h.Anchor,
@@ -99,17 +111,12 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     ///     reach the install result, prefixed with its code. This is the one renderer warning the CLI shows.
     /// </summary>
     [Fact]
-    public async Task Install_GateOnServerAbsent_ShowsTheOperatorChannelWarningOnTheLifecycleResult()
+    public void Install_GateOnServerAbsent_ShowsTheOperatorChannelWarningOnTheLifecycleResult()
     {
-        Harness h = NewHarness("install-absent");
-        Func<string, string?> env = h.CreateEnvironmentReader("true");
+        PreparedInstall prepared = InstallCase(ReleaseKind.Corpus, gateValue: "true", declareServer: false);
 
-        SquadLifecycleResult result = await InstallAsync(h, false, env);
-
-        Assert.True(
-            h.Renderer.Codes.Contains(ServerAbsentCode),
-            $"Precondition: the renderer must emit '{ServerAbsentCode}', but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
-        string warning = Assert.Single(WarningsOf(result));
+        AssertRendererEmitted(prepared, ServerAbsentCode);
+        string warning = Assert.Single(prepared.Record.Warnings);
         Assert.StartsWith(ServerAbsentCode + ": ", warning, StringComparison.Ordinal);
     }
 
@@ -119,17 +126,14 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     ///     either dropping everything or passing everything.
     /// </summary>
     [Fact]
-    public async Task Install_OversizedConductorAndServerAbsentInOneRender_ShowsOnlyTheOperatorChannelWarning()
+    public void Install_OversizedConductorAndServerAbsentInOneRender_ShowsOnlyTheOperatorChannelWarning()
     {
-        Harness h = NewHarness("install-both");
-        Func<string, string?> env = h.CreateEnvironmentReader("true");
-
-        SquadLifecycleResult result = await InstallAsync(h, true, env);
+        PreparedInstall prepared = InstallCase(ReleaseKind.Oversized, gateValue: "true", declareServer: false);
 
         Assert.True(
-            h.Renderer.Codes.Contains(AgentBodyTooLongCode) && h.Renderer.Codes.Contains(ServerAbsentCode),
-            $"Precondition: one render must emit both codes, but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
-        IReadOnlyList<string> warnings = WarningsOf(result);
+            prepared.RenderCodes.Contains(AgentBodyTooLongCode) && prepared.RenderCodes.Contains(ServerAbsentCode),
+            $"Precondition: one render must emit both codes, but it emitted: {string.Join(", ", prepared.RenderCodes)}.");
+        IReadOnlyList<string> warnings = prepared.Record.Warnings;
         string warning = Assert.Single(warnings);
         Assert.StartsWith(ServerAbsentCode + ": ", warning, StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -142,17 +146,16 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     ///     operator channel warning, so it must reach the install result for the operator to see.
     /// </summary>
     [Fact]
-    public async Task Install_GateOnServerNameMissing_ShowsTheNameMissingWarningOnTheLifecycleResult()
+    public void Install_GateOnServerNameMissing_ShowsTheNameMissingWarningOnTheLifecycleResult()
     {
-        Harness h = NewHarness("install-name-missing");
-        Func<string, string?> env = h.CreateEnvironmentReader("true", null);
+        PreparedInstall prepared = InstallCase(
+            ReleaseKind.Corpus,
+            gateValue: "true",
+            declareServer: false,
+            serverName: null);
 
-        SquadLifecycleResult result = await InstallAsync(h, false, env);
-
-        Assert.True(
-            h.Renderer.Codes.Contains(SquadOperatorChannelFixture.NameMissingWarning),
-            $"Precondition: the renderer must emit '{SquadOperatorChannelFixture.NameMissingWarning}', but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
-        string warning = Assert.Single(WarningsOf(result));
+        AssertRendererEmitted(prepared, SquadOperatorChannelFixture.NameMissingWarning);
+        string warning = Assert.Single(prepared.Record.Warnings);
         Assert.StartsWith(SquadOperatorChannelFixture.NameMissingWarning + ": ", warning, StringComparison.Ordinal);
     }
 
@@ -161,17 +164,16 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     ///     and must reach the install result. The raw value stays out of the warning text.
     /// </summary>
     [Fact]
-    public async Task Install_GateOnServerNameInvalid_ShowsTheNameInvalidWarningOnTheLifecycleResult()
+    public void Install_GateOnServerNameInvalid_ShowsTheNameInvalidWarningOnTheLifecycleResult()
     {
-        Harness h = NewHarness("install-name-invalid");
-        Func<string, string?> env = h.CreateEnvironmentReader("true", "bad name zz1");
+        PreparedInstall prepared = InstallCase(
+            ReleaseKind.Corpus,
+            gateValue: "true",
+            declareServer: false,
+            serverName: "bad name zz1");
 
-        SquadLifecycleResult result = await InstallAsync(h, false, env);
-
-        Assert.True(
-            h.Renderer.Codes.Contains(SquadOperatorChannelFixture.NameInvalidWarning),
-            $"Precondition: the renderer must emit '{SquadOperatorChannelFixture.NameInvalidWarning}', but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
-        string warning = Assert.Single(WarningsOf(result));
+        AssertRendererEmitted(prepared, SquadOperatorChannelFixture.NameInvalidWarning);
+        string warning = Assert.Single(prepared.Record.Warnings);
         Assert.StartsWith(SquadOperatorChannelFixture.NameInvalidWarning + ": ", warning, StringComparison.Ordinal);
     }
 
@@ -181,18 +183,18 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     ///     operator sees a hint. Without the overlay the same body stays silent, which the body-alone precondition proves.
     /// </summary>
     [Fact]
-    public async Task Install_OverlayPushesConductorOverCap_ShowsTheAgentBodyTooLongWarningOnTheLifecycleResult()
+    public void Install_OverlayPushesConductorOverCap_ShowsTheAgentBodyTooLongWarningOnTheLifecycleResult()
     {
-        Harness h = NewHarness("install-overlay-overflow");
-        WriteServerConfig(h);
-        int padding = await OverflowPaddingForOverlayAsync(h);
-        await AssertBodyAloneFitsCapAsync(padding);
+        int padding = OverflowPadding.Value;
+        AssertBodyAloneFitsCap(padding);
 
-        using PaddedConductorReleaseSource padded = new(padding);
-        Func<string, string?> env = h.CreateEnvironmentReader("true");
-        SquadLifecycleResult result = await InstallFrom(h, padded, InstallVersion, env);
+        PreparedInstall prepared = InstallCase(
+            ReleaseKind.Padded,
+            gateValue: "true",
+            declareServer: true,
+            paddingCharacters: padding);
 
-        AssertOverflowWarningShown(h, result);
+        AssertOverflowWarningShown(prepared.RenderCodes, prepared.Record.Warnings);
     }
 
     /// <summary>
@@ -204,12 +206,12 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     {
         Harness h = NewHarness("update-overlay-overflow");
         WriteServerConfig(h);
-        int padding = await OverflowPaddingForOverlayAsync(h);
-        await AssertBodyAloneFitsCapAsync(padding);
+        int padding = OverflowPadding.Value;
+        AssertBodyAloneFitsCap(padding);
 
+        InstallCase(ReleaseKind.Corpus, gateValue: "true", declareServer: true).CopyInto(h);
         using PaddedConductorReleaseSource padded = new(padding);
         Func<string, string?> env = h.CreateEnvironmentReader("true");
-        await InstallFrom(h, h.Corpus, InstallVersion, env);
         SquadLifecycleResult result = await NewService(h, padded, env).UpdateAsync(
             new SquadUpdateRequest(
                 h.Anchor,
@@ -217,7 +219,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
                 [SquadTarget.Copilot],
                 Version: UpdateVersion));
 
-        AssertOverflowWarningShown(h, result);
+        AssertOverflowWarningShown(h.Renderer.Codes, WarningsOf(result));
     }
 
     /// <summary>
@@ -228,23 +230,23 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     /// </summary>
     [Theory]
     [MemberData(nameof(NotAppliedCases))]
-    public async Task Install_OverlayNotApplied_KeepsAgentBodyTooLongOffTheLifecycleResult(
+    public void Install_OverlayNotApplied_KeepsAgentBodyTooLongOffTheLifecycleResult(
         string variant,
         string? gateValue,
         string? serverName,
         bool declareServer)
     {
-        Harness h = NewHarness("install-not-applied-" + variant);
-        if (declareServer) WriteServerConfig(h);
-
-        Func<string, string?> env = h.CreateEnvironmentReader(gateValue, serverName);
-        SquadLifecycleResult result = await InstallFrom(h, h.Oversized, InstallVersion, env);
+        PreparedInstall prepared = InstallCase(
+            ReleaseKind.Oversized,
+            gateValue: gateValue,
+            declareServer: declareServer,
+            serverName: serverName);
 
         Assert.True(
-            h.Renderer.Codes.Contains(AgentBodyTooLongCode),
-            $"Precondition ({variant}): the renderer must emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
+            prepared.RenderCodes.Contains(AgentBodyTooLongCode),
+            $"Precondition ({variant}): the renderer must emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", prepared.RenderCodes)}.");
         Assert.DoesNotContain(
-            WarningsOf(result),
+            prepared.Record.Warnings,
             line => line.StartsWith(AgentBodyTooLongCode, StringComparison.Ordinal));
     }
 
@@ -256,24 +258,34 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         yield return ["name-invalid", "true", "bad name zz1", true];
     }
 
-    private static void AssertOverflowWarningShown(Harness h, SquadLifecycleResult result)
+    private static void AssertOverflowWarningShown(
+        IReadOnlyList<string> renderCodes,
+        IReadOnlyList<string> warnings)
     {
         Assert.True(
-            h.Renderer.Codes.Contains(AgentBodyTooLongCode),
-            $"Precondition: the overlay-applied render must emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", h.Renderer.Codes)}.");
-        string warning = Assert.Single(WarningsOf(result));
+            renderCodes.Contains(AgentBodyTooLongCode),
+            $"Precondition: the overlay-applied render must emit '{AgentBodyTooLongCode}', but it emitted: {string.Join(", ", renderCodes)}.");
+        string warning = Assert.Single(warnings);
         Assert.StartsWith(AgentBodyTooLongCode + ": ", warning, StringComparison.Ordinal);
         Assert.Contains("'conductor'", warning, StringComparison.Ordinal);
+    }
+
+    private static void AssertRendererEmitted(PreparedInstall prepared, string code)
+    {
+        Assert.True(
+            prepared.RenderCodes.Contains(code),
+            $"Precondition: the fixture must make the renderer emit '{code}', but it emitted: {string.Join(", ", prepared.RenderCodes)}.");
     }
 
     /// <summary>
     ///     The padding that places the body alone just under the cap and body plus overlay just over it. The overlay's growth
     ///     is measured from two real renders, so the fixture follows the checked-in overlay rather than a copied length.
     /// </summary>
-    private static async Task<int> OverflowPaddingForOverlayAsync(Harness h)
+    private static async Task<int> OverflowPaddingAsync()
     {
-        int offLength = await ConductorLengthAsync(h, null);
-        int onLength = await ConductorLengthAsync(h, "true");
+        (string copilotHome, string userHome) = ConductorLengthFixture.Value;
+        int offLength = await ConductorLengthAsync(copilotHome, userHome, null);
+        int onLength = await ConductorLengthAsync(copilotHome, userHome, "true");
         int growth = onLength - offLength;
         Assert.True(
             growth > 0,
@@ -284,28 +296,62 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     }
 
     /// <summary>
+    ///     An empty Copilot home declaring the operator channel's server, so the gated render applies the overlay, and a
+    ///     user home beside it. Created once for the run, because the conductor's absolute links make its length depend on
+    ///     the path.
+    /// </summary>
+    private static (string CopilotHome, string UserHome) CreateConductorLengthFixture()
+    {
+        string root = Path.Combine(
+            Path.GetTempPath(),
+            "kw-render-warning-length-" + Guid.NewGuid().ToString("N"));
+        string copilotHome = Path.Combine(root, "copilot-home");
+        string userHome = Path.Combine(root, "user-home");
+        Directory.CreateDirectory(copilotHome);
+        Directory.CreateDirectory(userHome);
+        File.WriteAllText(
+            Path.Combine(copilotHome, "mcp-config.json"),
+            SquadOperatorChannelFixture.ServerPresentConfig,
+            Encoding.UTF8);
+        AppDomain.CurrentDomain.ProcessExit += (_, _) =>
+        {
+            try
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+            catch (IOException)
+            {
+                // Best-effort cleanup on process termination.
+            }
+        };
+
+        return (copilotHome, userHome);
+    }
+
+    /// <summary>
     ///     Proves the precondition the overflow facts rest on: with the overlay off, the padded conductor does not exceed
     ///     the cap, so any overflow with the overlay on is the overlay's doing.
     /// </summary>
-    private async Task AssertBodyAloneFitsCapAsync(int padding)
+    private static void AssertBodyAloneFitsCap(int padding)
     {
-        Harness probe = NewHarness("body-alone-probe");
-        using PaddedConductorReleaseSource padded = new(padding);
-        Func<string, string?> env = probe.CreateEnvironmentReader(null);
-        await InstallFrom(probe, padded, InstallVersion, env);
+        PreparedInstall probe = InstallCase(
+            ReleaseKind.Padded,
+            gateValue: null,
+            declareServer: false,
+            paddingCharacters: padding);
 
-        Assert.DoesNotContain(AgentBodyTooLongCode, probe.Renderer.Codes);
+        Assert.DoesNotContain(AgentBodyTooLongCode, probe.RenderCodes);
     }
 
-    private static async Task<int> ConductorLengthAsync(Harness h, string? gateValue)
+    private static async Task<int> ConductorLengthAsync(string copilotHome, string userHome, string? gateValue)
     {
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
             SyntheticValidSquadReleaseSource.SyntheticCorpusRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Global,
-            GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(h.CopilotHome, h.UserHome),
-            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, h.CopilotHome)).Prepared());
+            GlobalRoots: SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome),
+            EnvironmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, copilotHome)).Prepared());
         return SquadOperatorChannelFixture.ConductorText(result).Length;
     }
 
@@ -317,32 +363,125 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             Encoding.UTF8);
     }
 
-    private static Task<SquadLifecycleResult> InstallFrom(
-        Harness h,
-        ISquadReleaseSource source,
-        string version,
-        Func<string, string?>? environmentReader = null)
+    /// <summary>
+    ///     The one real install for <paramref name="kind" />'s input: built on the first request, then handed to
+    ///     every fact that asks for the same input.
+    /// </summary>
+    private static PreparedInstall InstallCase(
+        ReleaseKind kind,
+        string? gateValue,
+        bool declareServer,
+        string? serverName = SquadOperatorChannelFixture.DefaultServerName,
+        int paddingCharacters = 0)
     {
-        return NewService(h, source, environmentReader).InstallAsync(
-            new SquadInstallRequest(
-                h.Anchor,
-                SquadDeploymentScope.Global,
-                [SquadTarget.Copilot],
-                Version: version));
+        string key = SquadInstallRecipe.Key(
+            "install",
+            SquadDeploymentScope.Global,
+            [SquadTarget.Copilot],
+            ("case", "render-warning-filter"),
+            ("release", Recipe(kind, paddingCharacters)),
+            ("version", InstallVersion),
+            ("gate", gateValue),
+            ("server", serverName),
+            ("server-declared", declareServer ? "yes" : "no"));
+        return PreparedSquadInstalls.Get(key, () => Build(
+            key,
+            kind,
+            gateValue,
+            declareServer,
+            serverName,
+            paddingCharacters));
     }
+
+    /// <summary>The recipe token for a release input: its corpus and, for the padded one, its measured padding.</summary>
+    private static string Recipe(ReleaseKind kind, int paddingCharacters) => kind switch
+    {
+        ReleaseKind.Corpus => "corpus",
+        ReleaseKind.Oversized => "oversized",
+        ReleaseKind.Padded => $"padded-{paddingCharacters.ToString(System.Globalization.CultureInfo.InvariantCulture)}",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown release kind."),
+    };
+
+    /// <summary>
+    ///     The real install behind a prepared case, into its own home, with an <c>mcp-config.json</c> written first
+    ///     when the case needs one. The renderer's warning codes are recorded beside the lifecycle result's warnings.
+    /// </summary>
+    private static PreparedInstall Build(
+        string key,
+        ReleaseKind kind,
+        string? gateValue,
+        bool declareServer,
+        string? serverName,
+        int paddingCharacters)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string anchor = Path.Combine(directory.Path, "anchor");
+            string copilotHome = Path.Combine(directory.Path, "copilot-home");
+            string userHome = Path.Combine(directory.Path, "user-home");
+            Directory.CreateDirectory(anchor);
+            Directory.CreateDirectory(copilotHome);
+            Directory.CreateDirectory(userHome);
+            if (declareServer)
+            {
+                File.WriteAllText(
+                    Path.Combine(copilotHome, "mcp-config.json"),
+                    SquadOperatorChannelFixture.ServerPresentConfig,
+                    Encoding.UTF8);
+            }
+
+            RecordingRenderer renderer = new(SquadTestRegistry.Create([new CopilotRenderer()]));
+            FakeSquadUserPaths userPaths = new(userHome);
+            SquadStateStore store = new(userPaths);
+            using ISquadReleaseSource releaseSource = ReleaseSource(kind, paddingCharacters);
+            SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
+                releaseSource,
+                renderer,
+                store,
+                globalRoots: SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome),
+                environmentReader: SquadOperatorChannelFixture.CreateEnvironmentReader(gateValue, copilotHome, serverName));
+
+            SquadLifecycleResult result = service.InstallAsync(new SquadInstallRequest(
+                    anchor,
+                    SquadDeploymentScope.Global,
+                    [SquadTarget.Copilot],
+                    Version: InstallVersion))
+                .GetAwaiter().GetResult();
+            if (!result.Success)
+                throw new InvalidOperationException(
+                    $"The prepared install for '{key}' failed: {string.Join("; ", result.Errors ?? [])}.");
+
+            _ = result.Warnings ?? throw new InvalidOperationException("The lifecycle result carries no warnings list.");
+
+            PreparedInstall prepared = new(
+                key,
+                directory,
+                anchor,
+                copilotHome,
+                userHome,
+                renderer.Codes,
+                SquadInstallRecord.FromLifecycle(result));
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    private static ISquadReleaseSource ReleaseSource(ReleaseKind kind, int paddingCharacters) => kind switch
+    {
+        ReleaseKind.Corpus => new SyntheticValidSquadReleaseSource(),
+        ReleaseKind.Oversized => new OversizedConductorReleaseSource(),
+        ReleaseKind.Padded => new PaddedConductorReleaseSource(paddingCharacters),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown release kind."),
+    };
 
     private static IReadOnlyList<string> WarningsOf(SquadLifecycleResult result)
     {
         return result.Warnings ?? throw new InvalidOperationException("The lifecycle result carries no warnings list.");
-    }
-
-    private static Task<SquadLifecycleResult> InstallAsync(
-        Harness h,
-        bool oversizedConductor,
-        Func<string, string?>? environmentReader = null)
-    {
-        ISquadReleaseSource releaseSource = oversizedConductor ? h.Oversized : h.Corpus;
-        return InstallFrom(h, releaseSource, InstallVersion, environmentReader);
     }
 
     private static SquadLifecycleService NewService(
@@ -370,6 +509,14 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         Harness harness = new(anchor, copilotHome, userHome);
         _harnesses.Add(harness);
         return harness;
+    }
+
+    /// <summary>The corpus a prepared case installs: the synthetic one, oversized, or padded by a measured number of characters.</summary>
+    private enum ReleaseKind
+    {
+        Corpus,
+        Oversized,
+        Padded,
     }
 
     /// <summary>
@@ -452,7 +599,57 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         }
     }
 
-    /// <summary>One isolated install context: anchor, COPILOT_HOME, user paths, state store, renderer, and release sources.</summary>
+    /// <summary>
+    ///     One prepared install, with the renderer warnings its own render emitted and a copy of the installed
+    ///     home and user data for the facts that must update over it.
+    /// </summary>
+    private sealed class PreparedInstall(
+        string key,
+        TempDirectory directory,
+        string anchor,
+        string copilotHome,
+        string userHome,
+        IReadOnlyList<string> renderCodes,
+        SquadInstallRecord record) : PreparedSquadInstall(key, directory, record)
+    {
+        public string Anchor { get; } = anchor;
+
+        public string CopilotHome { get; } = copilotHome;
+
+        public string UserHome { get; } = userHome;
+
+        public IReadOnlyList<string> RenderCodes { get; } = renderCodes;
+
+        /// <summary>
+        ///     Copies the prepared home and user data into <paramref name="harness" />'s own directories and re-roots
+        ///     the recorded root in state and in the deployed files the Copilot harness links to, so the copy is a
+        ///     faithful install at its new root for the update that follows.
+        /// </summary>
+        public void CopyInto(Harness harness)
+        {
+            SquadInstallCopy.Tree(CopilotHome, harness.CopilotHome);
+            SquadInstallCopy.Tree(UserHome, harness.UserHome);
+
+            string templateCopilotHome = SquadInstallCopy.Canonical(CopilotHome);
+            string copyCopilotHome = SquadInstallCopy.Canonical(harness.CopilotHome);
+            string stateDirectory = Path.Combine(harness.UserHome, ".kyber-weave", "squad");
+            SquadInstallCopy.ReRoot(
+                stateDirectory,
+                SquadInstallCopy.Canonical(UserHome),
+                SquadInstallCopy.Canonical(harness.UserHome));
+            SquadInstallCopy.ReRoot(stateDirectory, templateCopilotHome, copyCopilotHome);
+
+            SquadStateStore store = new(new FakeSquadUserPaths(harness.UserHome));
+            _ = SquadInstallCopy.ReRootDeployed(
+                harness.CopilotHome,
+                store.ResolveReceiptPath(harness.Anchor, SquadDeploymentScope.Global),
+                store,
+                templateCopilotHome,
+                copyCopilotHome);
+        }
+    }
+
+    /// <summary>One isolated install context: anchor, COPILOT_HOME, user paths, state store, renderer, and release source.</summary>
     private sealed class Harness : IDisposable
     {
         public Harness(string anchor, string copilotHome, string userHome)
@@ -463,7 +660,6 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             Store = new SquadStateStore(new FakeSquadUserPaths(userHome));
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
             Renderer = new RecordingRenderer(SquadTestRegistry.Create([new CopilotRenderer()]));
-            Corpus = new SyntheticValidSquadReleaseSource();
             Oversized = new OversizedConductorReleaseSource();
         }
 
@@ -479,13 +675,10 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 
         public RecordingRenderer Renderer { get; }
 
-        public SyntheticValidSquadReleaseSource Corpus { get; }
-
         public OversizedConductorReleaseSource Oversized { get; }
 
         public void Dispose()
         {
-            Corpus.Dispose();
             Oversized.Dispose();
         }
 
