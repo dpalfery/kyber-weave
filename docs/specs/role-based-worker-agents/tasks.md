@@ -613,7 +613,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 5.1
   - _Requirements: 13.1_
 
-- [ ] 5.3 Migrate agent-keyed task gates
+- [x] 5.3 Migrate agent-keyed task gates
   - **Objective:** Add `kyber-weave review migrate-task-gates`, which rewrites a host's agent-keyed task gates as technology-keyed gates, and warn about entries for removed agents.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Review/ReviewMigrateTaskGatesCommand.cs` (new), `src/KyberWeave.Cli/CliApplication.cs`

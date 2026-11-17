@@ -763,6 +763,11 @@ no gate is added. A task that names a technology and resolves nothing is refused
 exit and a message naming both `technology-gates.<technology>` and the technology's agent entry.
 A task with no technology keeps the old behaviour: no entry is a warning and an empty report.
 
+An agent-keyed entry whose agent the removal phase deletes keeps resolving this way for two minor
+releases, and `docs validate` warns about it — under `worker-roster: tiered`, where that agent is a
+thing of the past — naming `kyber-weave review migrate-task-gates`, which rewrites the entry as a
+`technology-gates` one and shows the change before writing it.
+
 ```yaml
 review:
   technology-gates:
