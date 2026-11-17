@@ -378,6 +378,12 @@ internal static class CliApplication
                     .WithExample("review", "suppressions", ".")
                     .WithExample("review", "suppressions", ".", "--base", "origin/main");
 
+                review.AddCommand<ReviewMigrateTaskGatesCommand>("migrate-task-gates")
+                    .WithDescription("Rewrite the host's agent-keyed task gates as technology-keyed gates, showing the " +
+                                     "change before writing it.")
+                    .WithExample("review", "migrate-task-gates", ".")
+                    .WithExample("review", "migrate-task-gates", ".", "--write");
+
                 review.AddCommand<ReviewDuplicatesCommand>("duplicates")
                     .WithDescription("Find symbols whose bodies are duplicated across the tree, from the CodeGraph index.")
                     .WithExample("review", "duplicates", ".")

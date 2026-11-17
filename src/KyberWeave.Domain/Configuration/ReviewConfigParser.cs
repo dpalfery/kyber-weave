@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.Review.Catalogue;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -571,7 +572,10 @@ public static class ReviewConfigParser
         return normalized;
     }
 
-    /// <summary>Keys a gate mapping carries that the typed reader does not map. Each is reported, not dropped.</summary>
+    /// <summary>
+    /// Reports the non-fatal findings in a host's <c>review:</c> section: a key the typed reader does not map, and an
+    /// agent-keyed task gate that belongs to an agent the removal phase deletes. Each is reported, not dropped.
+    /// </summary>
     /// <remarks>
     /// A second pass over the raw YAML, because the typed reader ignores unknown keys by design, so that no host
     /// breaks on them. The load still succeeds; the operator is told the key does nothing.
@@ -609,12 +613,41 @@ public static class ReviewConfigParser
         }
 
         if (ChildOf(review, "task-gates") is YamlMappingNode taskGates)
+        {
             AddGateKeyWarnings(taskGates, "review.task-gates", warnings);
+            AddRemovalWarnings(root, taskGates, warnings);
+        }
 
         if (ChildOf(review, "technology-gates") is YamlMappingNode technologyGates)
             AddGateKeyWarnings(technologyGates, "review.technology-gates", warnings);
 
         return warnings;
+    }
+
+    /// <summary>
+    /// Reports each agent-keyed task gate whose agent the removal phase deletes, under the roster where that agent
+    /// is a thing of the past.
+    /// </summary>
+    /// <remarks>
+    /// The technology roster is today's default and one a host keeps on purpose, so its agent keys are the normal
+    /// shape there and are not reported. A host that has chosen the tiered roster is the one holding a migration it
+    /// has not run yet, and its warning names the command that runs it.
+    /// </remarks>
+    private static void AddRemovalWarnings(YamlMappingNode root, YamlMappingNode taskGates, List<string> warnings)
+    {
+        if (!string.Equals(ScalarOf(ChildOf(root, "worker-roster")), WorkerRosters.Tiered, StringComparison.Ordinal))
+            return;
+
+        foreach (KeyValuePair<YamlNode, YamlNode> entry in taskGates.Children)
+        {
+            string agent = ScalarOf(entry.Key);
+            if (!RemovedAgentMap.IsRemoved(agent))
+                continue;
+
+            warnings.Add(
+                $"review.task-gates '{agent}' is keyed by an agent the removal phase deletes. Run " +
+                $"'{RemovedAgentMap.MigrationCommand}' to rewrite it as review.technology-gates.");
+        }
     }
 
     /// <summary>Reports a key each <c>{section}.&lt;key&gt;</c> gate carries that the typed reader does not map.</summary>
