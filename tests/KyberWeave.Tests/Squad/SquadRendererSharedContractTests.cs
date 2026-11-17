@@ -175,8 +175,34 @@ public sealed class SquadRendererSharedContractTests
         Assert.Contains("dev-easy", unchanged);
     }
 
-    private static IReadOnlyList<string> ConductorDelegatesTo(SquadRenderResult result)
+    /// <summary>
+    /// The conductor's reference links must resolve from the directory its harness reads them from. A run read
+    /// <c>conductor/references/plan-path.markdown</c> under the repository root, where no such file exists; the
+    /// deployed file sits beside the agent at <c>.opencode/agents/conductor/references/</c>.
+    /// </summary>
+    [Fact]
+    public async Task AnOpenCodeConductorLinkNamesTheDeployedReferencePath()
     {
+        SquadRenderRequest request = new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project).Prepared();
+
+        SquadRenderResult result = await new OpenCodeRenderer().RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile conductor = Assert.Single(
+            result.Files,
+            file => string.Equals(file.RelativePath, ".opencode/agents/conductor.md", StringComparison.Ordinal));
+        string text = Encoding.UTF8.GetString(conductor.Content.Span);
+        Assert.Contains("](.opencode/agents/conductor/references/plan-path.markdown)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("](conductor/references/", text, StringComparison.Ordinal);
+        Assert.Contains(
+            result.Files,
+            file => string.Equals(file.RelativePath, ".opencode/agents/conductor/references/plan-path.markdown", StringComparison.Ordinal));
+    }
+
+    private static IReadOnlyList<string> ConductorDelegatesTo(SquadRenderResult result)    {
         SquadDeploymentFile conductor = Assert.Single(
             result.Files,
             file => string.Equals(file.RelativePath, ".opencode/agents/conductor.md", StringComparison.Ordinal));

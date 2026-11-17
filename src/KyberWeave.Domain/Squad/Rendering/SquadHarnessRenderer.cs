@@ -670,9 +670,12 @@ public sealed class SquadHarnessRenderContext
         SquadYamlEmitter emitter,
         string discoveryGlob)
     {
+        string principalPath = $"{AgentsDirectory}/{agent.Name}.md";
+        int separator = principalPath.LastIndexOf('/');
+        string principalDirectory = separator < 0 ? string.Empty : principalPath[..separator];
         SquadDeploymentFile principal = CreateFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
-            emitter.Compose(frontmatter, SquadAgentResourceDiscoveryGuard.RewriteBody(agent)));
+            principalPath,
+            emitter.Compose(frontmatter, SquadAgentResourceDiscoveryGuard.RewriteBody(agent, principalDirectory)));
         Files.Add(principal);
         SquadAgentResourceDiscoveryGuard.Append(
             Files,
