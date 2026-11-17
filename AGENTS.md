@@ -87,14 +87,14 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 
 #### The .NET unit suite completes in 120 seconds or less — a hard limit
 
-The full run — `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`, the `test` gate's command
-over every class in `tests/KyberWeave.Tests` — must complete within 120 seconds of wall-clock time. That is a hard
-limit, not a target. Time every local full run: the `duration:` line of the runner's closing summary is the number,
-and whoever ran it, person or agent, states it in their report. A run on a machine busy with other builds or test
-runs is re-measured alone before it is judged. Over 120 seconds the work is not done: escalate at once to the
-owner with the time, the commit and the slowest test classes, then loop — per-class timings, fix or split the
-slowest classes, re-measure — until it is at or under 120 seconds. Never raise the budget, skip or disable tests,
-or report the task complete while it is over; a change that makes the suite slower than the budget is not mergeable.
+The full run — `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`, the `test` gate's command over
+`tests/KyberWeave.Tests` — must complete within 120 seconds of wall-clock time. That is a hard limit, not a target.
+Time every local full run: the runner's closing summary `duration:` line is the number, and whoever ran it, person
+or agent, states it in their report. Any local full run over 120 seconds is escalated at once, whatever else the
+machine was doing — no second run to confirm. The work is not done: escalate with the measured time, the commit,
+the slowest test classes and what else was running on the machine, if known. Then loop: per-class timings, fix or
+split the slowest classes, re-measure, until it is at or under 120 seconds. Never raise the budget, skip or disable
+tests, or report the task complete while it is over; a change that makes the suite slower than the budget is not mergeable.
 
 `review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
 so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
