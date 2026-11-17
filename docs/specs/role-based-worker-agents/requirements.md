@@ -273,12 +273,15 @@ standard that lacks one of the six headings, naming the folder and what is missi
 `shared-rules.md` and in each standard's Testing section.
 
 5.11. A host folder that still holds the standard as `README.md` SHALL keep working for at least two
-minor releases: it SHALL be read, and `docs validate` SHALL report a warning that names the
-migration command instead of an error.
+minor releases, and the warning period SHALL NOT block a run: `docs validate` SHALL report
+`KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`, `KW-DOC-SPEC-012` and `KW-DOC-SPEC-013` as warnings that
+name `kyber-weave docs standards migrate` and then `kyber-weave docs init`, not as errors.
 
 5.12. THE system SHALL provide a command that renames a host's existing standards files to the
-prefixed names and adds any of the four files that is missing, prints the change before writing,
-and changes no file content.
+prefixed names, adds any of the four files that is missing, and reshapes a standard whose own
+headings are not the six: each authored section SHALL become a subsection under the heading it best
+fits, and no authored text SHALL be dropped. It SHALL print every rename, addition and move before
+writing, and SHALL leave a standard already under the six headings byte for byte unchanged.
 
 5.13. THE documentation types SHALL include a skill type for `<name>.skills.md`, and a rules or
 skills document SHALL be allowed to name a technology or a role only when it sits in that

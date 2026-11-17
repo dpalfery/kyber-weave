@@ -420,9 +420,19 @@ The standard's headings, in order:
 6. **Done checklist**: what a reviewer checks.
 
 **Existing hosts.** Every host today, this repository included, holds each standard as
-`README.md`. That name is read for two minor releases with a warning, not an error, and
-`kyber-weave docs standards migrate` renames the files and adds the missing ones without changing
-their content.
+`README.md`. That name is read for two minor releases with a warning, not an error. During that
+warning period an un-upgraded project is not blocked: every finding the upgrade would raise is a
+warning, each naming the two commands — `kyber-weave docs standards migrate` and then
+`kyber-weave docs init` — and a run still works. They are `KW-CONFIG-REG-001` for a registry entry
+that points at the prefixed name a folder has not gained, `KW-CONFIG-REG-002` for a generated block
+whose only differences are those legacy names, `KW-DOC-SPEC-012` for the folder that still holds
+`README.md`, and `KW-DOC-SPEC-013` for a standard whose headings are not the six.
+
+`kyber-weave docs standards migrate` renames the files, adds the ones the folder lacks, and
+reshapes a standard whose own headings are not the six: each authored section becomes a `###`
+under the heading it best fits, its inner headings are demoted with it, every move is printed, and
+no authored text is dropped. A standard already under the six headings is left byte for byte
+alone, and a second run changes nothing.
 
 Role folders are declared in a new `ontology.roles` list, so validation tells a role from a
 technology. A platform folder is a technology folder; the `devops` agent's task names it the way a
@@ -706,7 +716,7 @@ Each phase ships on its own and leaves a working product.
 | Task file missing or stale | No prompt; the reply names the repair command. |
 | Developer agent, no gate resolves | Gate run error, non-zero exit. |
 | `<name>.arbiter-rules.yml` unreadable or naming an unknown trigger or fact | `arbiter validate` error; shipped rules used for that folder. |
-| Technology folder missing a file, or a standard missing a heading | `docs validate` error naming the folder and what is missing. |
+| Technology folder missing a file, or a standard missing a heading | `docs validate` error naming the folder and what is missing; during the warning period an unshaped standard is a warning that names the migrate command. |
 | Command outside a technology's allow-list | Refused where the worker guard runs; an instruction elsewhere. |
 | JSON task file | Read, with a warning, for two minor releases. |
 | Removed agent named in a plan or task file | Resolved to a developer agent by difficulty, or to `architect`, `platform-researcher` or `devops`; substitution reported. |
