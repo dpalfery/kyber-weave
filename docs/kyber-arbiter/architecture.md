@@ -240,7 +240,9 @@ Thirty-six rules ship with permanent `KW-ARB-*` ids, in three role files — the
 holds 21, `architect` 2 and `reviewer` 13 — and a host may replace any of them from a role or
 technology folder. A rule is tuned by id through `enabled`, thresholds, `shadow` where the rule
 supports it, and per-answer `effects`. Host rules use the same shape under non-`KW-ARB-` ids and
-may not use an effect that only a shipped rule may use. Where the files are and in what order
+may not use an effect that only a shipped rule may use. A rule that came from a technology folder
+judges only an event whose task is in that technology or in a technology that builds on it; role
+folder rules and `arbiter.rules` judge every event. Where the files are and in what order
 they load is [Where the rules come from](#where-the-rules-come-from), and the decision is
 [ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md).
 
@@ -382,7 +384,11 @@ find the tool however it was reached: a quoted program, an absolute path such as
 such as `timeout 10 az …`, a subshell, or a second command on the same line all still name it, so the
 technology's list refuses them. A redirect, a pipeline or a compound command is not one command, so it has
 no form a listed read may match and its whole text is the form: that is how `az vm list > resources.txt`
-is refused. A technology folder that declares no such rule refuses nothing. A judged command whose event
+is refused. A technology folder that declares no such rule refuses nothing. The tool-call event names no
+dispatch technology, so the guard evaluates every declared technology's `worker.command` rules: the
+technology the dispatch names is always in that union, and a dispatch that names none is still bound
+by every list the host declares, which is the fail-closed reading for a read-only agent. A judged
+command whose event
 names no working directory is refused too, because the technology's list lives under that directory and
 cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
 refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
@@ -404,7 +410,9 @@ fixed order. This is [ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-techn
    declaration must restate the rule in full.
 3. **The technology folders.** The file of every technology in `ontology.technologies`, and of
    each technology's `builds-on` ancestors from its `<name>.standards.md` frontmatter, root parent
-   first so a child wins on a shared id. The technology templates that ship rules are `azure` and
+   first so a child wins on a shared id. Each rule keeps the name of the folder it came from, so the
+   evaluator applies it only to an event whose task is in that technology or in a technology that
+   builds on it. The technology templates that ship rules are `azure` and
    `aws`, one allow-list rule each; every other shipped technology file is empty.
 4. **The host's `arbiter.rules`.** Applied last, over everything above, so it wins over a folder.
 
@@ -427,15 +435,22 @@ down to log only — the six that guard the tree and the run order included. A r
 widens nothing: an answer the Arbiter cannot reach allows and is logged. The templates keep the
 six guard rules enabled as they ship.
 
-Two limits hold today and are recorded rather than claimed away. First, the configuration loader
-receives `ontology.technologies` and no task, so **every declared technology's rule file applies
-for the whole run**, not only to a task in that technology; the shipped allow-lists narrow
-themselves by tool word, so they are unaffected, but a host rule that does not narrow itself
-applies to every technology's tasks. Second, **only the `conductor`, `architect` and `reviewer`
-role folders are read**: `ArbiterConfigLoader` holds that list and `ontology.roles` does not feed
-it, so a `devops` role file has no effect. A host that installs a role folder verbatim also sees
-one informational `KW-ARB-CONFIG-020` per rule in it, because the copied template declares every
-shipped id.
+**A technology's rules judge only that technology's tasks.** Every declared technology's rule file
+is loaded, because one configuration read has no task in hand, but each rule keeps the folder it came
+from and `ArbiterRuleScopes` applies it only when the event's task names that technology or a
+technology that builds on it. The task's own `Technology:` label is used when its plan was read, and
+the `TECHNOLOGY` header of a task-less dispatch otherwise. An event that names neither — a
+`bug-crusher` fix with no task, the conductor's own action — is judged by role folder rules and
+`arbiter.rules` alone. The worker guard is the one exception: its tool-call event names no dispatch
+technology, so **every declared technology's allow-list still binds a read-only dispatch**, which is
+the fail-closed reading for `platform-researcher`; the named technology's list is always part of that
+union.
+
+One limit holds today and is recorded rather than claimed away: **only the `conductor`, `architect`
+and `reviewer` role folders are read** — `ArbiterConfigLoader` holds that list and `ontology.roles`
+does not feed it, so a `devops` role file has no effect. A host that installs a role folder verbatim
+also sees one informational `KW-ARB-CONFIG-020` per rule in it, because the copied template declares
+every shipped id.
 
 ## Secondary triggers, families and effects
 
