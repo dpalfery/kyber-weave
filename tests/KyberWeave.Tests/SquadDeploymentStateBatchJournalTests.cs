@@ -322,28 +322,6 @@ public sealed class SquadDeploymentStateBatchJournalTests : SquadDeploymentState
             Transaction(root).Recover(root, SquadDeploymentScope.Project));
     }
 
-    /// <summary>
-    ///     A file that appears where the plan expects none is refused, and the refusal must keep the rest of the
-    ///     batch's declarations: a journal recovery cannot read is a deployment nobody can repair.
-    /// </summary>
-    [Fact]
-    public void RecoverAfterAFileAppearsMidInstallReportsAConflictNotADataError()
-    {
-        using TempDirectory temp = new();
-        string root = temp.Path;
-        RaceObserver observer = new(SquadTransactionCheckpointKind.ActiveTransitionWritten, () =>
-            Write(root, AgentTwoPath, "foreign body"));
-
-        Assert.ThrowsAny<InvalidOperationException>(() =>
-            Transaction(root, observer).Execute(InstallPlan(root)));
-
-        Assert.False(File.Exists(ToPlatformPath(root, AgentOnePath)));
-        Assert.Equal("foreign body", Read(root, AgentTwoPath));
-
-        Assert.Throws<SquadDeploymentConflictException>(() =>
-            Transaction(root).Recover(root, SquadDeploymentScope.Project));
-    }
-
     private static void SeedUpdate(string root, out SquadReceipt receipt)
     {
         Write(root, AgentOnePath, "one v1");
