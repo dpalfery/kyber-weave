@@ -30,5 +30,5 @@ It absorbs the standards plan first drafted on
 | Document | Covers |
 |---|---|
 | [Requirements](requirements.md) | 13 requirements in EARS form. Approved. |
-| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, the developer agent's instructions, difficulty and the step-up, technology, role and platform folders, the task prompt tool and its budget, one technology per task, technology-resolved task gates, Arbiter rules by folder, five phases, 27 decisions and no open question. Approved. |
-| [Tasks](tasks.md) | 48 tasks in five shippable phases plus closeout, test-first. Approved; the machine task list is `tasks.json`. |
+| [Design](design.md) | Evidence from the code, where the evidence is against the idea, the roster, the developer agent's instructions, difficulty and the step-up, technology, role and platform folders, the task prompt tool and its budget, one technology per task, technology-resolved task gates, Arbiter rules by folder, five phases, 28 decisions and no open question. Approved. |
+| [Tasks](tasks.md) | 48 tasks in five shippable phases plus closeout, test-first. Approved; the machine task list is `tasks.yml`. |

@@ -30,8 +30,9 @@ Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring ses
 
 Written 2026-11-16 against the draft [requirements](requirements.md) and [design](design.md). The
 owner approved all three on 2026-11-16. The owner gave the final approval on 2026-11-16 ('Yes, mark Ready'), with
-the condition that no build starts yet. The machine task list `tasks.json` beside this file was
-generated from it; regenerate it after any edit here.
+the condition that no build starts yet. The machine task list `tasks.yml` beside this file is
+generated from it with `kyber-weave docs tasks docs/specs/role-based-worker-agents/tasks.md --write`;
+regenerate it after any edit here.
 
 These tasks deliver five phases. Each phase was its own pull request and leaves the product working;
 phases 1 to 5 are merged on this branch, so what ships now is the one roster.
@@ -83,6 +84,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/StandardsFolderShapeTests.cs` (new): `KyberWeave.Tests.StandardsFolderShapeTests`
   - **Acceptance criteria:** A folder that still holds its standard as `README.md` is read and raises a warning that names the migrate command, not an error; otherwise a folder missing one of the four files is an error naming the folder and the file; a standard missing one of the six headings, or holding them out of order, is an error naming the heading; an Arbiter rules file that declares no rule is valid; a role declared in `ontology.roles` is checked the same way.
   - **Capabilities:** C# validation rules and configuration parsing in the documentation engine, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~StandardsFolderShapeTests"`
   - **Depends on:** 1.11
   - _Requirements: 5.1, 5.2, 5.8, 5.9, 5.11_
@@ -95,6 +97,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/KyberStandardsTemplateShapeTests.cs` (new): `KyberWeave.Tests.KyberStandardsTemplateShapeTests`
   - **Acceptance criteria:** Every shipped template passes the checks of task 1.1; every standard's headings are Naming and layout, Coding standards, Testing, Commands, Security and data handling, Done checklist, in that order; no content a technology agent reads today is deleted.
   - **Capabilities:** Technical writing of coding standards in Markdown for many languages, with C# template registration and xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~KyberStandardsTemplateShapeTests"`
   - **Depends on:** 1.1
   - _Requirements: 5.1, 5.2, 5.3, 6.1_
@@ -143,6 +146,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/StandardsBuildsOnTests.cs` (new): `KyberWeave.Tests.StandardsBuildsOnTests`
   - **Acceptance criteria:** A declared parent is accepted; an undeclared parent, a self reference and a parent that itself names a parent are each an error naming the folder.
   - **Capabilities:** C# validation rules in the documentation engine, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~StandardsBuildsOnTests"`
   - **Depends on:** 1.1
   - _Requirements: 4.6_
@@ -155,6 +159,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/DocsInitTemplateChoiceTests.cs` (new): `KyberWeave.Tests.DocsInitTemplateChoiceTests`
   - **Acceptance criteria:** Naming two technologies installs exactly those two folders plus the shared rules file; a file that exists is left byte-for-byte unchanged and listed in the report; a declared technology with no template gets the four files as stubs, and the shared rules file is written once; `--kyber-standards` still installs every template.
   - **Capabilities:** C# command-line and file scaffolding work, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DocsInitTemplateChoiceTests|FullyQualifiedName~DocsScaffolderTests"`
   - **Depends on:** 1.2, 1.5
   - _Requirements: 5.17, 6.2, 6.3_
@@ -168,6 +173,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `docs/cli-command-surface.md`: the command
   - **Acceptance criteria:** The command lists files the host lacks, files only the host has, and changed files per folder; with no name it covers every installed folder; it exits 0 and changes no file.
   - **Capabilities:** C# command-line work with text comparison, xUnit tests, and one governed Markdown table edit
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DocsStandardsDiffCommandTests"`
   - **Depends on:** 1.2
   - _Requirements: 6.4_
@@ -195,6 +201,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `docs/cli-command-surface.md`
   - **Acceptance criteria:** The command prints each rename and each added file before writing; file content is unchanged byte for byte; a second run changes nothing; the registry property for a technology's standard points at the new name; this repository's folders pass the checks of task 1.1 with no warning.
   - **Capabilities:** C# command-line and file migration work, with xUnit tests, and governed Markdown moves
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DocsStandardsMigrateCommandTests"`
   - **Depends on:** 1.1
   - _Requirements: 5.12_
@@ -220,6 +227,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/DocumentIndexTests.cs`, `tests/KyberWeave.Tests/RetrievalRegressionTests.cs`: new and changed cases
   - **Acceptance criteria:** The lookup returns every part for a technology, and the parent's rules and skills when the standard names a parent; a standard, a skills document and a rules document that names a technology score 0.55; the shared rules file and a rule with no technology score 1.0; an exact-id match still wins.
   - **Capabilities:** C# work on documentation search and ranking, with xUnit tests, and one governed Markdown reference edit
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~CodingStandardsLookupTests|FullyQualifiedName~DocumentAuthorityTests|FullyQualifiedName~RetrievalRegressionTests"`
   - **Depends on:** 1.11, 1.6
   - _Requirements: 5.15, 5.16_
@@ -250,7 +258,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 
 ### Phase 2: Task fields and the task prompt
 
-- [ ] 2.1 Confirm which harnesses let a hook rewrite the dispatch
+- [x] 2.1 Confirm which harnesses let a hook rewrite the dispatch
   - **Objective:** For each of the thirteen harnesses, establish from its current documentation and one live check whether a hook on the dispatch call can replace the dispatch text and whether the replaced text stays out of the dispatching agent's own context, and record the result.
   - **Files:**
     - `docs/kyber-arbiter/architecture.md`: the per-harness table, including the correction that Antigravity documents an `overwrite` field
@@ -261,7 +269,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** none
   - _Requirements: 9.6_
 
-- [ ] 2.2 Read a task's difficulty and technology
+- [x] 2.2 Read a task's difficulty and technology
   - **Objective:** Read `Difficulty:` and `Technology:` lines from a plan or specification task and carry them on the parsed task.
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Plans/PlanDocumentParser.cs`: both lines
@@ -270,11 +278,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/PlanTaskDifficultyAndTechnologyTests.cs` (new): `KyberWeave.Tests.PlanTaskDifficultyAndTechnologyTests`
   - **Acceptance criteria:** `Difficulty: hard` and `Technology: csharp` reach the entry; a task with neither line gets `medium`, source `default`, and no technology; an older-version file still loads.
   - **Capabilities:** C# parsing and serialization in the documentation engine, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlanTaskDifficultyAndTechnologyTests"`
   - **Depends on:** none
   - _Requirements: 2.1, 2.3, 2.4, 4.1, 4.2, 4.9_
 
-- [ ] 2.3 Write the machine task list as YAML
+- [x] 2.3 Write the machine task list as YAML
   - **Objective:** Write the generated task list beside a plan or specification as YAML, and keep reading the JSON form with a warning.
   - **Files:**
     - `src/KyberWeave.Domain/Docs/Validation/PlanTaskFileRules.cs`: the `.yml` names beside the `.json` names
@@ -286,11 +295,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/PlanTaskFileYamlTests.cs` (new): `KyberWeave.Tests.PlanTaskFileYamlTests`
   - **Acceptance criteria:** A write produces YAML; a JSON file from an older release loads and raises one warning that names the convert command; converting produces a YAML file with the same entries and digest inputs; no JSON file is written.
   - **Capabilities:** C# serialization and command-line work in the documentation engine, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlanTaskFileYamlTests|FullyQualifiedName~PlanTaskFileGeneratorReadTests"`
   - **Depends on:** 2.2
   - _Requirements: 11.1, 11.2, 11.3, 11.4, 11.5_
 
-- [ ] 2.4 Validate difficulty and technology
+- [x] 2.4 Validate difficulty and technology
   - **Objective:** Report a wrong difficulty value, an undeclared technology and a task that names two technologies.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: three checks, each with a new `KW-DOC-TASKS-*` id
@@ -298,22 +308,24 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `docs/docgraph/governance.md`: the new ids
   - **Acceptance criteria:** `Difficulty: tricky` is an error naming the three legal values; an undeclared technology is an error naming the declared list; two technologies on one line is an error telling the author to split the task; a task with neither line reports nothing.
   - **Capabilities:** C# validation rules in the documentation engine, with xUnit tests, and one governed Markdown table edit
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlanTaskFileValidatorTests"`
   - **Depends on:** 2.2
   - _Requirements: 2.5, 2.8, 4.3, 4.5_
 
-- [ ] 2.5 Let the decision model rate difficulty
+- [x] 2.5 Let the decision model rate difficulty
   - **Objective:** When a decision model is configured, ask it for the task's difficulty in the call that already picks the agent, and record whose rating is in use.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs`: the question and criteria of `KW-ARB-DIFFICULTY-001`; `standard` maps to `medium`
     - `tests/KyberWeave.Tests/PlanTaskDifficultyRatingTests.cs` (new): `KyberWeave.Tests.PlanTaskDifficultyRatingTests`
   - **Acceptance criteria:** An answer at 0.8 confidence or more replaces the architect's rating with source `decision-model`; a lower answer, an error or no model keeps the architect's rating with source `architect`; one model call is made per task, not two.
   - **Capabilities:** C# work on decision-model calls in the documentation engine, with xUnit tests using a stub model
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlanTaskDifficultyRatingTests|FullyQualifiedName~PlanTaskAgentPickTests"`
   - **Depends on:** 2.2
   - _Requirements: 2.6, 2.7, 2.9_
 
-- [ ] 2.6 Resolve task gates by technology
+- [x] 2.6 Resolve task gates by technology
   - **Objective:** Replace the four lookups by agent name with one resolver that uses the task's technology, its parent, and a fallback to the old agent-keyed entries.
   - **Files:**
     - `src/KyberWeave.Domain/Configuration/ReviewConfigParser.cs`: `review.technology-gates`
@@ -323,11 +335,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/TaskGateResolverTests.cs` (new): `KyberWeave.Tests.TaskGateResolverTests`
   - **Acceptance criteria:** An agent with its own entry resolves as today; a task technology with a technology-keyed entry uses it; without one, the mapped agent's entry is used; with neither, the parent's gates are used; with nothing at all and a technology named, the gate run is an error with a non-zero exit; the council's gates are untouched.
   - **Capabilities:** C# configuration parsing and review-gate resolution, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~TaskGateResolverTests|FullyQualifiedName~ReviewTaskGatesConfigTests|FullyQualifiedName~PacketHostFactsTests|FullyQualifiedName~GateCatalogueRenderTests"`
   - **Depends on:** 2.2, 1.6
   - _Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8_
 
-- [ ] 2.7 Build the task prompt in one service
+- [x] 2.7 Build the task prompt in one service
   - **Objective:** Add one service that builds a task's prompt: the task's own text, host facts, shared rules, the parent's rules and skills, then the technology's rules, skills and standard, each inside a named tag, within a budget.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Validation/TaskPromptService.cs` (new), with its contract in `src/KyberWeave.Contracts/Services/`
@@ -336,11 +349,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/TaskPromptBudgetTests.cs` (new): `KyberWeave.Tests.TaskPromptBudgetTests`
   - **Acceptance criteria:** The parts appear in the stated order, each in its tag; over the budget, rules are whole, skills are cut before standard sections, and every cut is listed in the last part; a technology with no folder says so in its part and the rest is built; a technology with no task id yields the parts from the shared rules on; for every shipped template with its parent, nothing is cut at the default budget; nothing is written to a tracked file.
   - **Capabilities:** C# text assembly and budgeting in the documentation engine, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~TaskPromptServiceTests|FullyQualifiedName~TaskPromptBudgetTests"`
   - **Depends on:** 2.2, 2.6, 1.2, 1.13
   - _Requirements: 5.15, 9.1, 9.2, 9.10, 9.11, 9.12, 9.13, 9.16, 9.17_
 
-- [ ] 2.8 Use the service from the packet command and a docs tool
+- [x] 2.8 Use the service from the packet command and a docs tool
   - **Objective:** Make `docs packet` print the service's prompt, and add a docs tool that tells the conductor which agent to dispatch without returning the prompt text.
   - **Files:**
     - `src/KyberWeave.Cli/Commands/Docs/DocsPacketCommand.cs`: call the service
@@ -349,11 +363,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `docs/docgraph/mcp-runbook.md`: the tool
   - **Acceptance criteria:** The command and the service give identical text for one task; the tool's reply names the agent, the difficulty and its source, the technology and anything left out, and holds no prompt text; a missing or out-of-date task list yields no prompt and names the repair command.
   - **Capabilities:** C# command-line and MCP tool work, with xUnit tests, and one governed Markdown runbook edit
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DocsTaskPromptToolTests|FullyQualifiedName~DocsPacketCommandTests"`
   - **Depends on:** 2.7
   - _Requirements: 9.1, 9.9, 9.15_
 
-- [ ] 2.9 Insert the prompt through the dispatch hook
+- [x] 2.9 Insert the prompt through the dispatch hook
   - **Objective:** On every harness whose hook can rewrite the dispatch, expand the task-id line of a dispatch into the full prompt before the worker starts and keep its other lines, with the Arbiter on or off.
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Hooks/Adapters/`: the Claude, Copilot, Codex, Cursor, plug-in and Antigravity adapters
@@ -363,11 +378,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/DispatchPromptInsertionTests.cs` (new): `KyberWeave.Tests.DispatchPromptInsertionTests`
   - **Acceptance criteria:** For each rewrite harness, the hook's output carries the full prompt in the field that harness documents; a retry's failure section and every other line of the dispatch survive; the failed-attempt count and prior-results file named on the dispatch reach the prompt; a dispatch that names a technology and no task gets the shared rules and that technology's parts; a fresh host with the Arbiter off has the hook installed, and the doctor command reports a harness where it is not; with the Arbiter off the insertion still happens; with it on, the rules judge the short dispatch first; when the prompt cannot be built the dispatch is stopped with the repair command and no worker starts; an expanded prompt is not judged as telling a worker to read a plan.
   - **Capabilities:** C# work on coding-agent harness hook adapters, with xUnit tests over recorded hook payloads
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DispatchPromptInsertionTests"`
   - **Depends on:** 2.1, 2.7
   - _Requirements: 9.3, 9.4, 9.7, 9.8, 9.17, 9.18, 9.20_
 
-- [ ] 2.10 Fall back to a prompt file
+- [x] 2.10 Fall back to a prompt file
   - **Objective:** Where a harness's hook cannot rewrite the dispatch, write the prompt to one untracked file in the run's scratch folder and have the dispatch name it.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Validation/TaskPromptService.cs`: write the prompt file under the run's scratch folder, one per task
@@ -375,11 +391,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/TaskPromptFileFallbackTests.cs` (new): `KyberWeave.Tests.TaskPromptFileFallbackTests`
   - **Acceptance criteria:** On a fallback harness the file holds the same text the service builds and the tool's reply gives its path; on a rewrite harness no file is written; the file is under an ignored folder.
   - **Capabilities:** C# file and MCP tool work, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~TaskPromptFileFallbackTests"`
   - **Depends on:** 2.8, 2.9
   - _Requirements: 9.5_
 
-- [ ] 2.11 Planners write difficulty and one technology
+- [x] 2.11 Planners write difficulty and one technology
   - **Objective:** Tell the architect and the product-owner to write a `Difficulty:` and a `Technology:` line on every file-changing task, to split work that spans two unrelated technologies, and to fetch a standard through the docs tool only for a technology a task names.
   - **Files:**
     - `products/kyber-squad/agents/architect.md`, `products/kyber-squad/agents/architect/references/plan-authoring.md`
@@ -387,6 +404,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.PromptContent.Tests/PlannerDifficultyAndTechnologyContractTests.cs` (new): `KyberWeave.PromptContent.Tests.PlannerDifficultyAndTechnologyContractTests`
   - **Acceptance criteria:** Each file requires both lines, gives the three difficulty values with one line of guidance each, states the split rule with the endpoint-and-migration example, and forbids reading a standards file unless the docs tool is missing or fails.
   - **Capabilities:** Agent and skill instruction writing in Markdown, with xUnit prompt-content tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj -c Release --filter "FullyQualifiedName~PlannerDifficultyAndTechnologyContractTests"`
   - **Depends on:** 2.4
   - _Requirements: 2.2, 4.7, 4.8_
@@ -435,18 +453,19 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** none
   - _Requirements: 1.11, 1.12, 1.13_
 
-- [ ] 3.3 Add the `platform-reader` capability profile
+- [x] 3.3 Add the `platform-reader` capability profile
   - **Objective:** Add a capability profile that reads and runs commands and can neither write files, publish nor delegate.
   - **Files:**
     - `products/kyber-squad/profiles/capabilities.yml`: `platform-reader`
     - `tests/KyberWeave.Tests/PlatformReaderProfileTests.cs` (new): `KyberWeave.Tests.PlatformReaderProfileTests`
   - **Acceptance criteria:** The profile allows file read, search, network read and command execution, and denies file write, publishing and delegation; every harness renders it.
   - **Capabilities:** YAML capability profile editing, with C# xUnit tests over rendered permissions
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~PlatformReaderProfileTests"`
   - **Depends on:** none
   - _Requirements: 8.4_
 
-- [ ] 3.4 Add the three developer agents
+- [x] 3.4 Add the three developer agents
   - **Objective:** Add `dev-easy`, `dev-medium` and `dev-hard` with the instructions in the [design](design.md#developer-agent-instructions).
   - **Files:**
     - `products/kyber-squad/agents/dev-easy.md`, `dev-medium.md`, `dev-hard.md` (new)
@@ -454,11 +473,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/DeveloperAgentContentTests.cs` (new): `KyberWeave.Tests.DeveloperAgentContentTests`
   - **Acceptance criteria:** The three files differ only in name, description and model profile (`fast`, `general`, `dev-hard`); each uses the `worker` profile and today's worker tool list and carries `worker-roster: tiered`; no body names a technology, a library, a command of one language or a skill; no body tells the agent to fetch its standards at start; each body tells the agent what to do when its prompt holds only a task id; every agent that exists today is still present.
   - **Capabilities:** Agent instruction writing in Markdown, with C# xUnit content tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DeveloperAgentContentTests|FullyQualifiedName~SquadCanonicalContentTests|FullyQualifiedName~SquadPackAndReleaseTests"`
   - **Depends on:** 3.1, 3.2
   - _Requirements: 1.1, 1.2, 1.3, 9.14, 9.19_
 
-- [ ] 3.5 Add `platform-researcher` and `devops`
+- [x] 3.5 Add `platform-researcher` and `devops`
   - **Objective:** Add a read-only research agent that takes its technology from the request, and a delivery agent that names no platform.
   - **Files:**
     - `products/kyber-squad/agents/platform-researcher.md`, `products/kyber-squad/agents/devops.md` (new)
@@ -480,6 +500,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/DeveloperTierSelectionTests.cs` (new): `KyberWeave.Tests.DeveloperTierSelectionTests`
   - **Acceptance criteria:** Easy with no failures gives `dev-easy`; easy with one failure gives `dev-medium`; hard with any failures gives `dev-hard`; no input gives a lower tier after a failure; a dispatch with no task gives `dev-medium`, then `dev-hard`; a dispatch from each listed caller to its new agent is allowed by `KW-ARB-ROSTER-001`; under the `technology` roster the pick is unchanged.
   - **Capabilities:** C# work on agent selection in the documentation engine, agent frontmatter edits, and xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~DeveloperTierSelectionTests|FullyQualifiedName~PlanTaskAgentPickTests|FullyQualifiedName~ArbiterClassificationTests"`
   - **Depends on:** 3.4, 3.5, 2.8
   - _Requirements: 1.9, 3.1, 3.2, 3.3, 3.5, 3.6_
@@ -497,12 +518,13 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 3.6
   - _Requirements: 1.7, 3.4, 9.4_
 
-- [ ] 3.8 Check every harness renders the new agents
+- [x] 3.8 Check every harness renders the new agents
   - **Objective:** Prove the thirteen renderers produce the five new agents and remove none, with no renderer code that names an agent.
   - **Files:**
     - `tests/KyberWeave.Tests/TieredAgentRenderTests.cs` (new): `KyberWeave.Tests.TieredAgentRenderTests`
   - **Acceptance criteria:** For each harness the rendered set contains the five new agents and every agent rendered before; no file under the rendering source names a developer agent.
   - **Capabilities:** C# xUnit tests over rendered agent output for many coding-agent harnesses
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~TieredAgentRenderTests"`
   - **Depends on:** 3.4, 3.5
   - _Requirements: 1.8_
@@ -519,7 +541,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 
 ### Phase 4: Arbiter rules from folders
 
-- [ ] 4.1 Split the shipped rules into three role files
+- [x] 4.1 Split the shipped rules into three role files
   - **Objective:** Move each of the 36 shipped rules into the Arbiter rules file of the `conductor`, `architect` or `reviewer` template, unchanged, and load the shipped set from those files.
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Rules/default-rules.yml`: split into three files
@@ -528,11 +550,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/ArbiterRuleFolderSplitTests.cs` (new): `KyberWeave.Tests.ArbiterRuleFolderSplitTests`
   - **Acceptance criteria:** The loaded rule set equals the set before the split, rule for rule: same ids, questions, answers, effects and shadow flags; each rule is in exactly one file; the counts are 21, 2 and 13.
   - **Capabilities:** C# work on rule loading in the Arbiter, YAML editing, and xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterRuleFolderSplitTests|FullyQualifiedName~RuleValidatorTests"`
   - **Depends on:** 1.5
   - _Requirements: 7.1, 7.5_
 
-- [ ] 4.2 Load host and technology rule files
+- [x] 4.2 Load host and technology rule files
   - **Objective:** Apply a host's role folder over the shipped one, add the rules of a task's technology and its parent, then apply the host's existing rule settings, and fall back to the shipped rules when a file is bad.
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/ArbiterConfigLoader.cs`, `src/KyberWeave.Domain/Arbiter/Rules/RuleValidator.cs`
@@ -540,11 +563,12 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/ArbiterRuleFolderLoadingTests.cs` (new): `KyberWeave.Tests.ArbiterRuleFolderLoadingTests`
   - **Acceptance criteria:** A host declaration of a shipped id replaces it; a technology's rules apply only to events for a task in that technology or its child; the host's `arbiter.rules` settings still apply, last; a file that does not parse or names an unknown trigger or fact is an `arbiter validate` error naming the file and rule, and the shipped rules are used for that folder; every rule can still be turned down to log only through the switch it has today; with the Arbiter off nothing is loaded and a run works.
   - **Capabilities:** C# work on rule loading and validation in the Arbiter, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterRuleFolderLoadingTests"`
   - **Depends on:** 4.1, 2.2
   - _Requirements: 7.2, 7.3, 7.4, 7.6, 7.7, 7.9_
 
-- [ ] 4.3 Exempt tests-only tasks by fact
+- [x] 4.3 Exempt tests-only tasks by fact
   - **Objective:** Replace the `test-dev` clause of the test-first rule with a machine fact that is true when every file of the task is a test file.
   - **Files:**
     - `src/KyberWeave.Application/Arbiter/Facts/TriggerFactBuilder.cs`: `plan.task.files-all-tests`
@@ -552,6 +576,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/ArbiterTestsOnlyTaskTests.cs` (new): `KyberWeave.Tests.ArbiterTestsOnlyTaskTests`
   - **Acceptance criteria:** A task whose files all match the host's test paths answers `not-required`; a task with one non-test file does not; a dispatch to `test-dev` under the old roster still answers `not-required`.
   - **Capabilities:** C# work on Arbiter facts and YAML rule editing, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterTestsOnlyTaskTests"`
   - **Depends on:** 4.1
   - _Requirements: 7.8_
@@ -566,6 +591,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `docs/kyber-arbiter/architecture.md`: where it is enforced and where it is an instruction
   - **Acceptance criteria:** With Azure's list, `az vm list` is allowed and `az vm delete` is refused on Claude and Copilot CLI; a technology with no list refuses nothing; on a harness with no worker guard nothing is refused and the list appears in the prompt's rules part.
   - **Capabilities:** C# work on Arbiter hooks and rule validation, YAML rule writing for cloud command-line tools, and xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ArbiterCommandAllowListTests"`
   - **Depends on:** 4.2, 3.5
   - _Requirements: 8.5, 8.6_
@@ -577,6 +603,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/ModelTargetingTieredTests.cs` (new): `KyberWeave.Tests.ModelTargetingTieredTests`
   - **Acceptance criteria:** Under the tiered roster no second difficulty call is made for a task that has a recorded rating; a dispatch already on the next tier is left as it is; under the `technology` roster the two model rules behave as today.
   - **Capabilities:** C# work on Arbiter model-targeting rules, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ModelTargetingTieredTests"`
   - **Depends on:** 4.1, 3.6
   - _Requirements: 2.10, 3.4_
@@ -623,6 +650,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `docs/cli-command-surface.md`
   - **Acceptance criteria:** The command prints the change before writing and changes nothing else in the file; entries that are equal collapse into one technology; an entry for a removed agent still resolves and raises a warning that names the command.
   - **Capabilities:** C# command-line work with YAML rewriting, and xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ReviewMigrateTaskGatesTests"`
   - **Depends on:** 5.2
   - _Requirements: 13.2, 13.3, 13.4_
@@ -635,6 +663,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `tests/KyberWeave.Tests/RemovedAgentResolutionTests.cs` (new): `KyberWeave.Tests.RemovedAgentResolutionTests`
   - **Acceptance criteria:** A task that names `csharp-dev` and is rated hard resolves to `dev-hard` and reports the substitution; a rendered file the host edited is kept and reported; an unedited one the lock records is removed.
   - **Capabilities:** C# work on agent selection and squad update, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~RemovedAgentResolutionTests"`
   - **Depends on:** 5.2
   - _Requirements: 13.5, 13.6_
@@ -649,6 +678,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - the tests that name a removed agent where the name must be a shipped agent
   - **Acceptance criteria:** The Squad source holds fifteen agents; no shipped file names a removed agent except the migration map and its tests; `worker-roster: technology` is an error naming the change; the targeted classes pass.
   - **Capabilities:** Squad source maintenance across agents, skills and standards, C# configuration work, and xUnit test updates
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~SquadCanonicalContentTests|FullyQualifiedName~SquadSourceTests|FullyQualifiedName~SquadPackAndReleaseTests|FullyQualifiedName~WorkerRosterTests"`
   - **Depends on:** 5.3, 5.4
   - _Requirements: 1.6, 13.7_
