@@ -10,7 +10,11 @@ The conductor supplies `DEVELOPMENT_MODE`. If omitted, record `test-first`. Reco
 
 ## Work
 
-Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, a `Capabilities:` line naming in plain words the abilities the work needs (never an agent or skill name), and requirement ids. Tasks must be executable by a cold worker without design decisions.
+Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, a `Capabilities:` line naming in plain words the abilities the work needs (never an agent or skill name), and requirement ids.
+
+Every task that changes files also carries two lines. `Difficulty:` is `easy` (a small, local change with one obvious path), `medium` (several files or a non-obvious path, no cross-cutting risk) or `hard` (spans layers, alters contracts, or needs careful design); a task with no line is `medium`. `Technology:` names exactly one technology from `ontology.technologies`. Work that spans two unrelated technologies is two tasks with a dependency — an endpoint and its database migration are separate tasks, the migration first — because one prompt carries one technology's rules and gates. A technology built on another (React on TypeScript) stays one task, and the parent's rules arrive with it.
+
+Read a technology's standard through `docs_get_coding_standard_for_technology`, for the one technology a task names. Read a standards file directly only when that tool is missing or reports a failure, and say so. Tasks must be executable by a cold worker without design decisions.
 
 Persist:
 

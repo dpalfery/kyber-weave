@@ -86,6 +86,8 @@ impact-components:
 
 - **Objective:** <one sentence>
 - **Capabilities:** <abilities in plain words>
+- **Difficulty:** easy | medium | hard
+- **Technology:** <one declared technology>
 - **Session:** `<group>`
 - **Depends on:** none | T<n> (<the output it consumes>)
 - **Files:**
@@ -105,13 +107,23 @@ impact-components:
 
 Where the host declares task gates, a task's **Commands** are the task-gate runs only, exactly as the worker's packet prints them (test-first: the failing run with `--red`, then the passing run; standard mode: the one passing run): the gate runs the Test contract's runner command, so listing that command as a step of its own makes the worker run every test twice.
 
+Every task that changes files carries a `Difficulty:` line and a `Technology:` line.
+
+`Difficulty:` is the architect's rating, one of three values:
+
+- `easy`: a small, local change with one obvious path.
+- `medium`: several files or a non-obvious path, with no cross-cutting risk. This is the default when the line is missing.
+- `hard`: a change that spans layers, alters contracts, or needs careful design.
+
+`Technology:` names exactly one technology the task is written in, chosen from `ontology.technologies`. A change that spans two unrelated technologies is two tasks with a dependency between them, never one task with two technologies: an endpoint and its database migration are separate tasks, the migration first, because one prompt carries one technology's rules and one set of gates. A technology built on another (React on TypeScript) is still one task in the child; the parent's rules arrive with the child's.
+
 Each task carries a `Capabilities:` line: the abilities its work needs, in plain words (for example "React and TypeScript UI with Playwright tests" or "documentation"). Never name an agent or a skill for it: the conductor picks the agent whose description fits. Declare a dependency only when a task consumes another task's concrete output or their file scopes cannot safely overlap. Component labels and table order do not create scheduling barriers. Maximize parallel execution and err on the side of risk: prefer optimistic file scopes and add a dependency only for a real consumed output or a certain file overlap. Size each task for efficient execution by a single worker; do not split work further just to add parallelism. A chain of small tasks in one technology, each consuming the one before (a repository method, then the service and endpoint that call it), is one task: every extra worker pays again to load context, and a dependent task cannot start until the first finishes. Four small file edits belong to one worker; changes of substantial size across independent projects belong to separate workers. Tasks needing different abilities can run at the same time. Split changes across several projects into separate tasks only if each project's change is large enough and decoupled enough to justify it. Respect `review.max-concurrent-workers` (default 4, host-configurable in `.kyber-weave/kyber-weave.yml`); the harness runs ready tasks up to that cap. (Q4 reversal, issue #386: this supersedes the 2026-10-14 "no max concurrency" directive.) Each developer task ends with the worker's own `task-gate` run, and a failing gate goes straight back to the same worker; no agent reviews a single task.
 
 A plan never carries the review command. The end-of-run council derives it from the `code-review` skill — measured against the change with `--base`, and admitted to the full-suite gates with `--council` — so a command copied into a plan, an index row or a task packet goes stale the moment the gate list or one of its flags moves, and the reviewer then runs something nobody validated. Say who reviews and which skill governs it; leave the argv to the reviewer.
 
 ## Documented rules over existing code
 
-Before writing a task, fetch the standard for every technology its files fall under with one `docs_get_coding_standard_for_technology` call each, using the Config Reg's standards list: a repository or query file falls under the data-access and SQL standards as well as the language standard. Ask about the pattern the task will copy. When the standard forbids that pattern, the task follows the standard. When the standard names a target the code does not have yet (one a todo tracks), decide it now: record a Decisions row and write the sanctioned exception into the task text, so the worker is never the first to find the conflict.
+Before writing a task, fetch the standard for the one technology it names with `docs_get_coding_standard_for_technology`, using the Config Reg's standards list. Never read a standards file directly unless that tool is missing or reports a failure; say which in the plan's findings. The tool returns the technology's rules, skills and standard together, and a file read can miss the rules and the skills: a repository or query file falls under the data-access and SQL standards as well as the language standard. Ask about the pattern the task will copy. When the standard forbids that pattern, the task follows the standard. When the standard names a target the code does not have yet (one a todo tracks), decide it now: record a Decisions row and write the sanctioned exception into the task text, so the worker is never the first to find the conflict.
 
 When existing code contradicts a documented rule or standard (where a kind of file goes, a layering or naming rule), new work follows the documented rule, not the surrounding code: never copy the divergent pattern forward, and name the documented location in the task. This holds for every new file's location even when all of its existing siblings sit elsewhere and following them looks cheaper: the end-of-run review reports a new file placed against the standard as a major finding, which costs a fix round, so the documented location is also the fast choice. It is never a low-confidence decision. Existing code that carries a comment marking it as a deliberate exception is respected. Record each other divergence you find, with the rule and the existing offending paths, in the investigation findings, then decide by the size of the debt: when fixing it is small and touches the same files, add it to a task in this plan; otherwise write a todo under the directory named by **<todo-index>**, add it to that index's inventory, and link it from the plan's out-of-scope boundaries (and from a `RESIDUAL` row of the Closeout mapping when closeout leaves it open). The deliver tool commits the todo with the run.
 
