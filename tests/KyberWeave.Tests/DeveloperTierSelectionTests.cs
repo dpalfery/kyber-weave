@@ -300,9 +300,37 @@ public sealed class DeveloperTierSelectionTests
         Assert.Equal("dev-medium", Prompt(fixture, Tiered, failedAttempts: 1).Agent);
     }
 
+    /// <summary>
+    /// A host that switches roster rewrites the task file rather than deleting it first. The file must follow the
+    /// roster now configured: keeping the previous roster's pick would name <c>csharp-dev</c> beside
+    /// <c>worker-roster: tiered</c>.
+    /// </summary>
+    [Fact]
+    public void ARewriteAfterARosterSwitchPicksEveryAgentForTheRosterNowConfigured()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
+        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using PlanTaskAgentPick technologyPicker = new(
+            new StubProvider("csharp-dev"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Technology));
+        PlanTaskFileOutcome first = new PlanTaskFileGenerator(fixture.Root, Technology, DocsPorts.Files, technologyPicker)
+            .Run(Plan, PlanTaskFileMode.Write);
+        Assert.False(first.Report.HasErrors, string.Join("; ", first.Report.Items.Select(item => item.Message)));
+        Assert.Equal("csharp-dev", first.File!.Tasks![0].Agent);
+
+        using PlanTaskAgentPick tieredPicker = new(
+            new StubProvider("dev-medium"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+        PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, tieredPicker)
+            .Run(Plan, PlanTaskFileMode.Write);
+
+        Assert.False(second.Report.HasErrors, string.Join("; ", second.Report.Items.Select(item => item.Message)));
+        Assert.Equal(WorkerRosters.Tiered, second.File!.WorkerRoster);
+        Assert.Equal("dev-medium", second.File.Tasks![0].Agent);
+    }
+
     /// <summary>Every caller of a replaced agent lists its replacement, so the roster rule allows the dispatch.</summary>
-    [Theory]
-    [InlineData("conductor", "dev-easy")]
+    [Theory]    [InlineData("conductor", "dev-easy")]
     [InlineData("conductor", "dev-medium")]
     [InlineData("conductor", "dev-hard")]
     [InlineData("conductor", "platform-researcher")]
