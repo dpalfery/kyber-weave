@@ -97,7 +97,10 @@ there too, where the person who owns the standard can see and change them.
    The shipped templates keep the six guard rules as they ship.
 
 6. **A bad folder file narrows nothing.** `kyber-weave arbiter validate` reports, naming the file
-   and the rule, and the shipped rules for that folder stay in force:
+   and the rule, and the shipped rules for that folder stay in force. A rule that reads a fact its
+   trigger does not supply is `KW-ARB-CONFIG-002`, and a folder entry with a reserved id, a
+   rule-level `for-each` or an effect only a shipped rule may use is `-005` or `-015`; those errors
+   skip the file as `-017` does.
 
    | Finding | Severity | Meaning |
    |---|---|---|

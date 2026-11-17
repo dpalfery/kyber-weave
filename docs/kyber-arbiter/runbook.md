@@ -542,9 +542,12 @@ saying which file replaces or disables which rule; `--no-info` hides it. A host 
 role folder verbatim gets one such finding per rule, because the copied template declares every
 shipped id — that is expected, not a fault.
 
-A file that cannot be read or parsed, or that names a trigger or fact the Arbiter does not have,
+A file that cannot be read or parsed, or that names a trigger the Arbiter does not have,
 is `KW-ARB-CONFIG-017` naming the file and the rule, and the shipped rules for that folder stay
-in force. `KW-ARB-CONFIG-018` reports a `builds-on` parent with no standard, `-019` a
+in force. A rule that reads a fact its trigger does not supply is `KW-ARB-CONFIG-002`, and a
+folder entry with a reserved id, a rule-level `for-each` or an effect only a shipped rule may use
+is `-005` or `-015`; those are errors too, and skip the file the same way. `KW-ARB-CONFIG-018`
+reports a `builds-on` parent with no standard, `-019` a
 `builds-on` cycle, `-021` one file declaring an id twice (the last wins), and `-022` a key the
 file shape does not have (the key is ignored). `arbiter validate` exits non-zero on an error; a
 run itself still loads, with the shipped rules for that folder.

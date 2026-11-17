@@ -410,13 +410,16 @@ fixed order. This is [ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-techn
 
 A folder file is YAML with no frontmatter and may hold `rules`, `test-file-patterns` and
 `lens-paths`; a rule keeps the shape it had in the shipped file. A file that cannot be read,
-does not parse, or names a trigger or fact the Arbiter lacks is reported by
+does not parse, or names a trigger the Arbiter does not know is reported by
 `kyber-weave arbiter validate` as `KW-ARB-CONFIG-017` naming the file and the rule, and the
-shipped rules for that folder stay in force. `-018` reports a `builds-on` parent with no standard,
-`-019` a `builds-on` cycle, `-020` (informational) a folder declaring one of the 36 shipped ids,
-`-021` one file declaring an id twice, and `-022` a key the file shape does not have. The shipped
-rules for the technology folders are not embedded, so a broken technology file adds nothing
-rather than restoring a shipped set.
+shipped rules for that folder stay in force. A rule that reads a fact its trigger does not
+supply is `KW-ARB-CONFIG-002`, and a folder entry with a reserved id, a rule-level `for-each` or
+an effect only a shipped rule may use is `-005` or `-015`; each is an error and skips the file
+too, so the shipped rules for that folder still stay in force. `-018` reports a `builds-on`
+parent with no standard, `-019` a `builds-on` cycle, `-020` (informational) a folder declaring
+one of the 36 shipped ids, `-021` one file declaring an id twice, and `-022` a key the file shape
+does not have. The shipped rules for the technology folders are not embedded, so a broken
+technology file adds nothing rather than restoring a shipped set.
 
 **No rule is locked.** A folder declaration, `arbiter.rules`, `shadow` on a rule that supports it,
 and `model-targeting.mode` for the two model rules are each honoured, so a host can turn any rule
