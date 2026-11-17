@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
@@ -90,6 +91,12 @@ public sealed class TieredAgentRenderTests
     /// The renderer chooses a projection from the agent's frontmatter and the harness's shape, never
     /// from the agent's name, so no file under the rendering source may name a developer agent.
     /// </summary>
+    /// <remarks>
+    /// <c>dev-hard</c> is also the name of the model profile that agent uses, so a switch arm that
+    /// maps the profile to a harness value — <c>"dev-hard" =&gt; "high"</c> — is a profile fact, not
+    /// a renderer naming the agent. Any other mention of any developer name is a per-agent
+    /// special case and fails.
+    /// </remarks>
     [Fact]
     public void NoRenderingSourceNamesADeveloperAgent()
     {
@@ -98,16 +105,28 @@ public sealed class TieredAgentRenderTests
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Squad", "Rendering"),
             Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Application", "Squad", "Rendering")
         ];
-        string[] developers = ["dev-easy", "dev-medium", "dev-hard"];
 
         string[] offenders = renderingRoots
             .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
-            .Where(file => developers.Any(agent =>
-                File.ReadAllText(file).Contains(agent, StringComparison.Ordinal)))
+            .SelectMany(file => File.ReadLines(file).Select(line => (File: file, Line: line)))
+            .Where(entry => NamesADeveloperAgent(entry.Line))
+            .Select(entry => $"{Path.GetFileName(entry.File)}: {entry.Line.Trim()}")
             .ToArray();
 
         Assert.Empty(offenders);
     }
+
+    private static bool NamesADeveloperAgent(string line) =>
+        line.Contains("dev-easy", StringComparison.Ordinal) ||
+        line.Contains("dev-medium", StringComparison.Ordinal) ||
+        (DevHardToken.IsMatch(line) && !ProfileMappingArm.IsMatch(line));
+
+    private static readonly Regex DevHardToken = new(
+        @"(?<![\w-])dev-hard(?![\w-])", RegexOptions.CultureInvariant);
+
+    /// <summary>A model-profile switch arm: <c>"dev-hard" =&gt; "high",</c>.</summary>
+    private static readonly Regex ProfileMappingArm = new(
+        @"^\s*(case\s+)?""dev-hard""\s*=>", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// A native agent file carries the agent's name as its own file stem — <c>&lt;name&gt;.md</c>,
