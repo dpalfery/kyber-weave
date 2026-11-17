@@ -275,6 +275,29 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
+    /// A standards folder kept as a symbolic link out of the repository is refused: a migration
+    /// writes stubs beside the host's standard and must not put them outside the tree it was given.
+    /// </summary>
+    [Fact]
+    public void AFolderThatIsASymlinkOutsideTheRepositoryIsRefused()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
+
+        using TempDirectory repo = new();
+        using TempDirectory outside = new();
+        Directory.CreateDirectory(Path.Combine(repo.Path, "6-Docs", "standards"));
+        Directory.CreateSymbolicLink(
+            Path.Combine(repo.Path, "6-Docs", "standards", "csharp"), outside.Path);
+
+        IOException error = Assert.Throws<IOException>(() =>
+            new StandardsFolderMigration(repo.Path, Declared).Run());
+
+        Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
+    }
+
+    /// <summary>
     /// A standard the folder holds but the process may not read is an error that names it, not a
     /// folder treated as having no standard and answered with a stub.
     /// </summary>
