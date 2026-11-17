@@ -371,6 +371,19 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     private static JsonElement json(string text) => JsonDocument.Parse(text).RootElement.Clone();
 
     /// <summary>
+    /// A return event carries the prompt the harness executed, so an expanded prompt there is proof the hook
+    /// inserted it. A pre event's prompt is the conductor's text: typing the tags must never claim an insertion.
+    /// </summary>
+    [Fact]
+    public void OnlyAReturnEventCarriesAProvenPromptInsertion()
+    {
+        Assert.False(new ArbiterEvent { Phase = "pre", Prompt = TaskPrompt }.PromptInserted);
+        Assert.True(new ArbiterEvent { Phase = "post", Prompt = TaskPrompt }.PromptInserted);
+        Assert.True(new ArbiterEvent { Phase = "return", Prompt = TaskPrompt }.PromptInserted);
+        Assert.False(new ArbiterEvent { Phase = "post", Prompt = TaskDispatch }.PromptInserted);
+    }
+
+    /// <summary>
     /// A rule that also writes the model returns the allow path that writes the model; the prompt inserted for
     /// the allowed dispatch must still reach the worker.
     /// </summary>
