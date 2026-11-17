@@ -15,6 +15,9 @@ measures behaviour.
 
 ## Fixtures
 
+The helpers both this project and `tests/KyberWeave.Integration.Tests` use live in
+`tests/KyberWeave.Testing`; this table names the ones a test in this project reaches for.
+
 | Helper | For |
 |---|---|
 | `TempDirectory` | A disposable scratch directory. Implement `IDisposable` on the test class and dispose it. |

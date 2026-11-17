@@ -3,8 +3,8 @@
   <!--
     Tests that assert the wording of governed content: skill, agent and instruction markdown and
     the yaml they ship with. They read product files as text and check tokens, phrases and
-    markers. They reference no product assembly, so they build without the hosts and feature
-    assemblies. The checks are scheduled to become eval-style. See AGENTS.md in this directory.
+    markers. The shared test library supplies the temp root and repository-root helpers. The
+    checks are scheduled to become eval-style. See AGENTS.md in this directory.
   -->
   <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -28,8 +28,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Shared with KyberWeave.Tests rather than copied: the repository-root locator. -->
-    <Compile Include="..\KyberWeave.Tests\KyberWeaveTestPaths.cs" Link="Shared\KyberWeaveTestPaths.cs" />
+    <!-- The repository-root locator lives in the shared test library, so this project
+         references the one copy rather than compiling a source file from another test project. -->
+    <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
   </ItemGroup>
 
 </Project>

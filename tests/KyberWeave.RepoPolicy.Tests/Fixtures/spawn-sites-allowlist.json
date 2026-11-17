@@ -1,5 +1,5 @@
 {
-  "note": "Spawn-site allow-list read by ProcessSpawnSitesTests. file is the path relative to the repository root, prefixed by its scan root: tests/KyberWeave.Tests/... or src/.... Each entry keys one or more identical source lines by file and normalized text. count is how many such lines the file may contain. bound must say what stops the process: a timeout, a kill in finally, a self-exiting command, or a fake that starts nothing.",
+  "note": "Spawn-site allow-list read by ProcessSpawnSitesTests. file is the path relative to the repository root, prefixed by its scan root: tests/KyberWeave.Tests/..., tests/KyberWeave.Integration.Tests/..., tests/KyberWeave.Testing/..., tests/KyberWeave.RepoPolicy.Tests/... or src/.... Each entry keys one or more identical source lines by file and normalized text. count is how many such lines the file may contain. bound must say what stops the process: a timeout, a kill in finally, a self-exiting command, or a fake that starts nothing.",
   "entries": [
     {
       "file": "tests/KyberWeave.Tests/AnalysisPersistenceTests.cs",
@@ -554,13 +554,13 @@
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; mkfifo of one path the test creates."
     },
     {
-      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTestBase.cs",
+      "file": "tests/KyberWeave.Integration.Tests/SquadDeploymentStateTestBase.cs",
       "text": "ProcessStartInfo startInfo = new(\"fsutil.exe\")",
       "count": 1,
       "bound": "Windows only (guarded by OperatingSystem.IsWindows in TryEnableWindowsDirectoryCaseSensitivity). Started by the Run in that helper: ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
     },
     {
-      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTestBase.cs",
+      "file": "tests/KyberWeave.Integration.Tests/SquadDeploymentStateTestBase.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "Windows only (guarded by OperatingSystem.IsWindows in TryEnableWindowsDirectoryCaseSensitivity). ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
@@ -578,13 +578,13 @@
       "bound": "Builds only: SquadHarnessLauncher.BuildStartInfo returns a ProcessStartInfo, and this file never starts it (no Process.Start, RunInteractive or ProcessRunner call)."
     },
     {
-      "file": "tests/KyberWeave.Tests/SquadPresetCliTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/SquadPresetCliTests.cs",
       "text": "ProcessStartInfo startInfo = new(host)",
       "count": 1,
       "bound": "Started by the Run at line 1040: ProcessRunner timeout 30 s kills the child tree on expiry; the built CLI host in an isolated home."
     },
     {
-      "file": "tests/KyberWeave.Tests/SquadPresetCliTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/SquadPresetCliTests.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
       "count": 1,
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; the built CLI host in an isolated home."

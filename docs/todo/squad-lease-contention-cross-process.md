@@ -46,6 +46,14 @@ The local inner loop (`scripts/fast-loop.sh`) excludes this class from the fast 
 which keeps the noise out of the edit-check loop without touching what CI gates on. That is
 a mitigation for the loop, not a fix, and CI can still go red for this reason.
 
+Since the deployment classes moved to `tests/KyberWeave.Integration.Tests`, a full integration
+run reproduced it consistently: with xUnit's default one thread per CPU thread (18 on this
+machine), the three lease cases above failed at the 5-second wait on every run, because
+every thread runs a heavy deployment at once. No test logic changed in the move. The
+integration project now runs with `maxParallelThreads: 8` in its `xunit.runner.json`, where
+all 1,256 integration tests pass and the class list still has spare time; that is a bounded
+execution setting, not a condition-based fix, so this todo stays open.
+
 ## Options
 
 1. **Make the wait condition, not the clock, the assertion (recommended).** Poll for
@@ -61,6 +69,6 @@ a mitigation for the loop, not a fix, and CI can still go red for this reason.
 
 ## Related
 
-- `.github/workflows/ci.yml`, job `squad-filesystem-contract` — runs these classes on three
-  operating systems.
-- `scripts/fast-loop.sh` — excludes the class from the fast tier, with the reason.
+- `.github/workflows/ci.yml`, job `squad-filesystem-contract` — runs these classes from
+  `tests/KyberWeave.Integration.Tests` on three operating systems.
+- `scripts/fast-loop.sh` — does not put the deployment classes in the fast tier, with the reason.

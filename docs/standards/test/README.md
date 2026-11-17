@@ -22,9 +22,21 @@ would otherwise have to re-argue in review.
 
 ## Stack
 
-**xUnit**, one project covering all three artifact classes. The full run must finish in 120
-seconds or less ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)),
-and the speed rules below are how a test keeps it there.
+**xUnit**, split into three projects:
+
+- `tests/KyberWeave.Tests` — the unit suite. The full run must finish in 120 seconds or less
+  ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)), and
+  the speed rules below are how a test keeps it there.
+- `tests/KyberWeave.Integration.Tests` — the safety net: a test that performs a real Squad
+  deployment, starts a real program, or needs a file system beyond its own scratch folder.
+  It runs in CI and the review council, not in the unit time budget.
+- `tests/KyberWeave.Testing` — the helpers both test assemblies use (the temp root, the
+  durability switch, prepared installs, release fakes, console capture, path helpers and
+  shared fixtures). It holds no tests.
+
+The class lists `tests/KyberWeave.Tests` and `tests/KyberWeave.Integration.Tests` both keep the
+namespace root they use for routing (`KyberWeave.Tests` and `KyberWeave.Integration.Tests`), so a
+fully-qualified class name names one test in one project.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
 
@@ -198,6 +210,8 @@ another catalog. A full run is about 1,100 questions, 3 million input tokens, $0
 test stops at 12 million tokens or $2.
 
 ## Fixtures
+
+The shared helpers live in `tests/KyberWeave.Testing` and are referenced by both test projects.
 
 | Helper | For |
 |---|---|
@@ -374,8 +388,8 @@ leaving the root out of it takes that listing off every install. Linux and the r
 which Defender scans.
 
 Measured on the same 651 tests (`ArbiterInstallCommandTests`, the eight `SquadDeploymentState`
-classes and `SquadGlobalRootTests`), Defender real-time protection off, load average 6.5–8.6,
-runs back to back:
+classes and `SquadGlobalRootTests`, now in the integration project), Defender real-time
+protection off, load average 6.5–8.6, runs back to back:
 
 | Base | Run 1 | Run 2 |
 |---|---|---|

@@ -414,7 +414,7 @@ jobs:
 
       - name: Run Squad filesystem contract
         run: >
-          dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+          dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
           -c ${{ env.CONFIGURATION }}
           --no-restore
           --filter FullyQualifiedName~SquadDeploymentState
