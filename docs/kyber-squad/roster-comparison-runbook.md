@@ -2,7 +2,7 @@
 id: kyber-squad/roster-comparison-runbook
 title: Roster comparison runbook
 doc-type: runbook
-status: current
+status: superseded
 component: KyberSquad
 owner: dpalfery
 last-reviewed: 2026-11-16
@@ -15,6 +15,13 @@ keywords:
 ---
 
 # Roster comparison runbook
+
+> [!NOTE]
+> **Retired on 2026-11-17.** The owner removed the fourteen per-technology agents without this comparison
+> ([ADR 0088](../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), so nothing here
+> needs running and the two-roster comparison it describes can no longer be set up. Kept for history; not
+> current guidance. The one roster and the developer tiers it ships are in
+> [Kyber-Squad architecture](architecture.md#12-the-worker-roster-and-developer-tiers).
 
 How to run the same approved plan once per worker roster and record enough evidence to choose
 between them. The comparison answers one question: with everything else fixed, does the tiered

@@ -2375,9 +2375,11 @@ are shipped in shadow until enforced (see the [Arbiter architecture](../kyber-ar
 
 Kyber-Squad ships one worker roster: three developer agents that differ only in model strength and
 name no technology, beside `docs-dev`, `devops` and `platform-researcher` for documentation,
-delivery and live-platform work. The per-technology roster ran beside it until the removal phase
-deleted it. The procedure that informed the owner's decision is [the roster comparison
-runbook](roster-comparison-runbook.md).
+delivery and live-platform work. The per-technology roster ran beside it until the removal deleted
+it. The comparison that would have decided the removal was never completed; the owner removed the
+old agents without it ([ADR 0088](../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)),
+and the procedure is retired ([the roster comparison runbook](roster-comparison-runbook.md), kept
+for history).
 
 ### The agents of the roster
 

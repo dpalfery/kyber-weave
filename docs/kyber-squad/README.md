@@ -98,4 +98,4 @@ Explore the full Kyber-Squad documentation suite:
 
 * **[Technology Agent Rule Inventory](agent-rule-inventory.md)** — Every technology-specific rule in the thirteen technology agent bodies, mapped to the template file and heading that states it now.
 
-* **[Roster Comparison Runbook](roster-comparison-runbook.md)** — How to run the same three approved plans once per worker roster from one base commit, and where each recorded number is read from.
+* **[Roster Comparison Runbook](roster-comparison-runbook.md)** — Superseded on 2026-11-17, kept for history: the comparison it describes was never completed, and the old agents were removed without it ([ADR 0088](../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
