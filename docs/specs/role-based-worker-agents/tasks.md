@@ -420,7 +420,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** none
   - _Requirements: 4.4, 12.1, 12.2, 12.3, 12.6_
 
-- [ ] 3.2 Add the `dev-hard` profile and drop the conductor's
+- [x] 3.2 Add the `dev-hard` profile and drop the conductor's
   - **Objective:** Add a `dev-hard` model profile separate from the planning profiles, make an agent's model profile optional, and render the conductor with no model on every harness.
   - **Files:**
     - `products/kyber-squad/profiles/models.yml`: `dev-hard` added, `orchestration` removed
@@ -428,8 +428,9 @@ Phase 1 has no outside dependency. The standards plan first drafted on
     - `src/KyberWeave.Domain/Squad/Validation/SquadSourceValidator.cs`: the key is optional
     - `src/KyberWeave.Domain/Squad/Rendering/`: an agent with no profile renders no model
     - `tests/KyberWeave.Tests/ModelProfileOptionalTests.cs` (new): `KyberWeave.Tests.ModelProfileOptionalTests`
-  - **Acceptance criteria:** `dev-hard` has a row for every harness and shares no row with `architect` or `deep-planning`; the conductor's rendered file names no model on any of the thirteen harnesses; every other agent renders the model it renders today; no profile is renamed.
+  - **Acceptance criteria:** `dev-hard` has its own row for every harness, each the model the `architect` profile pins there, so a step-up is a real upgrade and a later change to `architect` leaves `dev-hard` alone; on GitHub Copilot the rows are Claude Haiku 5.5 for `fast`, GPT-6.1 Terra for `general` and Gemini 4 Hydrogen for `dev-hard`, and `docs-dev` uses `general`; the conductor's rendered file names no model on any of the thirteen harnesses; every other agent renders the model it renders today; no profile is renamed.
   - **Capabilities:** C# squad rendering and YAML profile editing, with xUnit tests over rendered agent files
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~ModelProfileOptionalTests|FullyQualifiedName~SquadSourceTests"`
   - **Depends on:** none
   - _Requirements: 1.11, 1.12, 1.13_

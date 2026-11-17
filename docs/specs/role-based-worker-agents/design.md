@@ -333,8 +333,16 @@ The model comes from the agent. Each agent names a model profile in its own defi
 renderer writes that profile's model for the harness, as today. Nothing in this work assigns a model
 at dispatch.
 
-- One profile is added: `dev-hard`. It is separate from `deep-planning` and `architect`, so changing
-  a planning model never changes it.
+- One profile is added: `dev-hard`. Each of its rows is the model the `architect` profile pins on
+  that harness — the harness's stronger coding model — so stepping up to `dev-hard` is a real step
+  up on every harness. It stays a profile of its own rather than an alias: the values are the
+  same today, and a later rotation of a planning model changes `architect` and leaves `dev-hard`
+  alone.
+- On GitHub Copilot the owner chose a different model for each tier, so the three values are
+  visible where they differ most: `fast` is Claude Haiku 5.5, `general` is GPT-6.1 Terra and
+  `dev-hard` is Gemini 4 Hydrogen. `devops` uses `general` too.
+- `docs-dev` uses `general`, so documentation work runs on the same model as a medium developer
+  task, not on a planning model.
 - The conductor has no model profile. `orchestration` is removed and the conductor is rendered with
   no model on every harness; it runs on the model its session was started with.
 - No existing profile is renamed, so user presets keep working.
@@ -665,7 +673,7 @@ Each phase ships on its own and leaves a working product.
 | Model | Change |
 |---|---|
 | Agent frontmatter | `model-profile` becomes optional (the conductor has none); optional `worker-roster`, whose only value is `tiered`. |
-| Model profiles | New `dev-hard`; `orchestration` removed. |
+| Model profiles | New `dev-hard`, with the `architect` profile's rows; `orchestration` removed. |
 | Capability profiles | New `platform-reader`. |
 | Host configuration | `worker-roster`, whose only value is `tiered`; `review.technology-gates`; `ontology.roles`; a task prompt budget. |
 | Plan and specification task text | Optional `Difficulty:` and `Technology:` lines. |
@@ -738,7 +746,7 @@ Estimates, for planning only.
 | D4 | Which agents are removed? | The ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`, `github-devops`. | `docs-dev` stays: it follows the documentation settings a host already customises. | user: explicit decision 2026-11-16 |
 | D5 | Are the old agents deleted at once? | Yes, on the owner's decision of 2026-11-17: the fourteen agents are removed now, without a completed comparison. | The owner decided that keeping both cost too much; anyone who wants them installs an older version. D28 records why the comparison did not decide it. | user: explicit decision 2026-11-17, replacing the 2026-11-16 answer |
 | D6 | How is the model assigned? | By the agent: each agent names a model profile, as today. Nothing assigns a model at dispatch. The conductor has no profile. | Run-time assignment was drafted and removed by the owner. Choosing an agent works on all thirteen harnesses. | user: explicit decision 2026-11-16 |
-| D7 | Which model profiles change? | `dev-hard` is added, separate from the planning profiles. `orchestration` is removed. Nothing is renamed. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. | user: explicit approval 2026-11-16 |
+| D7 | Which model profiles change? | `dev-hard` is added, and `orchestration` is removed. Nothing is renamed. `dev-hard` is its own profile whose rows are the `architect` profile's stronger coding model on each harness, so the values coincide today and a planning rotation leaves it alone. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. On GitHub Copilot the three tiers are Claude Haiku 5.5, GPT-6.1 Terra and Gemini 4 Hydrogen; `docs-dev` uses `general`. | user: explicit approval 2026-11-16; model values set 2026-11-17 |
 | D8 | What does a technology or role folder hold? | `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`. | The plan on pull request 625 named the first three `README.md`, `rules.md` and `skills.md`; the owner renamed them with the folder prefix. | user: explicit decision 2026-11-16 |
 | D9 | What are the standard's headings? | Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. | | user: explicit decision 2026-11-16 |
 | D10 | Where do the 36 Arbiter rules go? | Into `conductor`, `architect` and `reviewer` role folders, split by trigger. | The owner named conductor and architect. `reviewer` is added because 13 rules are review rules. | user: explicit approval 2026-11-16 |
