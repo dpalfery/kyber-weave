@@ -225,6 +225,7 @@ public static class ArbiterTriggerCatalog
                 "command.text",
                 "command.form",
                 "command.single",
+                "command.head",
                 "command.program",
                 "command.words",
             },
