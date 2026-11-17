@@ -29,6 +29,9 @@ internal static class WorkerGuardRules
     /// <summary>The fact that is true when the command is one command, with no join, redirect, subshell or substitution.</summary>
     internal const string CommandSingleFact = "command.single";
 
+    /// <summary>The fact holding the form's words before its first option, where a mutating verb appears.</summary>
+    internal const string CommandHeadFact = "command.head";
+
     /// <summary>The fact holding every word of the command, so a rule sees the tool however it was reached.</summary>
     internal const string CommandWordsFact = "command.words";
 
@@ -140,7 +143,7 @@ internal static class WorkerGuardRules
         string refusing = string.Join(", ", outcome.RuleAnswers
             .Where(answer => !answer.Shadow
                 && string.Equals(answer.Effect, RuleEffects.Escalate, StringComparison.Ordinal))
-            .Select(answer => answer.RuleId)
+            .Select(answer => $"{answer.RuleId} ({answer.Answer})")
             .Distinct(StringComparer.Ordinal));
         return $"{refusing}: this command is outside the forms this technology allows a read-only agent to run " +
             $"('{ShapeOf(command).Form}'). Nothing ran. Use a listed read form, or report what you could not inspect.";
@@ -157,28 +160,31 @@ internal static class WorkerGuardRules
             .With(CommandTextFact, shape.Text, ArbiterFactLabel.Asserted)
             .With(CommandFormFact, shape.Form, ArbiterFactLabel.Asserted)
             .With(CommandSingleFact, shape.Single, ArbiterFactLabel.Derived)
+            .With(CommandHeadFact, shape.Head, ArbiterFactLabel.Asserted)
             .With(CommandProgramFact, shape.Program, ArbiterFactLabel.Asserted)
             .With(CommandWordsFact, shape.Words, ArbiterFactLabel.Asserted);
     }
 
-    /// <summary>A command's form, whether it is one command, its program, and every word it names, so a rule can judge it.</summary>
+    /// <summary>A command's form, whether it is one command, its head words, its program, and every word it names.</summary>
     /// <param name="Text">The command as reported, whitespace collapsed.</param>
     /// <param name="Form">The single form's program and leading words, or the whole text when there is no single form.</param>
     /// <param name="Single">Whether the command is one command, with no join, redirect, subshell or substitution.</param>
+    /// <param name="Head">The form's words before its first option, where a mutating verb appears; empty when not one command.</param>
     /// <param name="Program">The form's first word, or null when the command has no single form.</param>
     /// <param name="Words">Every word the command names, with quotes and wrapping punctuation removed and a path's directory stripped.</param>
     private sealed record CommandShape(
         string Text,
         string Form,
         bool Single,
+        IReadOnlyList<string> Head,
         string? Program,
         IReadOnlyList<string> Words);
 
     /// <summary>
-    /// Reads one command into the shape a rule judges. A single command yields its form; a compound command, a
-    /// redirect, a subshell, a grouping or a substitution yields its whole text and no program, because it is not
-    /// one form and no listed form may allow it. Its words still name every tool it reaches, which is how a
-    /// technology's rule refuses it.
+    /// Reads one command into the shape a rule judges. A single command yields its form and its head; a compound
+    /// command, a redirect, a subshell, a grouping or a substitution yields its whole text, no head and no program,
+    /// because it is not one form and no listed form may allow it. Its words still name every tool it reaches, which
+    /// is how a technology's rule refuses it.
     /// </summary>
     private static CommandShape ShapeOf(string command)
     {
@@ -186,7 +192,7 @@ internal static class WorkerGuardRules
         IReadOnlyList<string> words = WordsOf(text);
         if (!IsSingleCommand(command))
         {
-            return new CommandShape(text, text, Single: false, Program: null, words);
+            return new CommandShape(text, text, Single: false, Head: [], Program: null, words);
         }
 
         string[] tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -213,6 +219,7 @@ internal static class WorkerGuardRules
             text,
             form,
             Single: true,
+            Head: leading,
             Program: leading.Count > 0 ? Normalise(leading[0]) : null,
             words);
     }

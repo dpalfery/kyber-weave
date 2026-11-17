@@ -1,12 +1,13 @@
 # Machine rules the Arbiter evaluates for the 'aws' folder.
 #
 # AWS-READONLY-001 is the command allow-list for a dispatch whose capability profile can run
-# commands but not write files (platform-reader, which platform-researcher uses). One `aws` command
-# whose form ends in a describe, list or get verb, or `s3 ls`, or continues with that verb's
-# arguments, is allowed. Every other command that names `aws` anywhere — a mutating verb, an
-# absolute path, a quoted program, a wrapper, a subshell, a redirect or a compound command — is
-# refused where the worker guard sees the call (Claude Code and Copilot CLI), and is an instruction
-# only on the other harnesses, where the same verbs are stated in aws.rules.md.
+# commands but not write files (platform-reader, which platform-researcher uses). A command with a
+# mutating verb in its head is refused even when a read pattern also matches it. One `aws` command
+# whose form ends in a describe, list or get verb, or `s3 ls`, is allowed. Every other command that
+# names `aws` anywhere — a mutating verb, an absolute path, a quoted program, a wrapper, a subshell,
+# a redirect or a compound command — is refused where the worker guard sees the call (Claude Code
+# and Copilot CLI), and is an instruction only on the other harnesses, where the same forms are
+# stated in aws.rules.md.
 #
 # A folder that declares no rule refuses nothing: an event with no matching rule leaves the
 # command alone, and an answer the Arbiter cannot reach allows (ADR 0072).
@@ -15,8 +16,53 @@ rules:
   - id: AWS-READONLY-001
     trigger: worker.command
     question: Is this command one of the read-only AWS CLI forms this folder allows?
-    answers: [listed-read, outside-list]
+    answers: [listed-read, mutating, outside-list]
     decide:
+      # Refusal wins. A mutating verb anywhere before the first option is refused even when a read pattern
+      # also matches, which closes `aws s3 rm s3://b/list`: the word list is a key, not a verb.
+      - when:
+          all:
+            - { fact: worker.capability-profile, equals: platform-reader }
+            - fact: command.head
+              intersects:
+                - delete*
+                - create*
+                - update*
+                - set*
+                - start*
+                - stop*
+                - restart*
+                - deallocate*
+                - purge*
+                - remove*
+                - rm*
+                - mv*
+                - cp*
+                - sync*
+                - put*
+                - attach*
+                - detach*
+                - assign*
+                - grant*
+                - revoke*
+                - run*
+                - invoke*
+                - deploy*
+                - import*
+                - export*
+                - terminate*
+                - modify*
+                - reboot*
+                - replace*
+                - register*
+                - deregister*
+                - enable*
+                - disable*
+                - cancel*
+                - abort*
+                - kill*
+                - launch*
+        answer: mutating
       # A command that is not one command has no single form, so this clause can never allow a compound command.
       # The form keeps its leading words only, so `aws <service> describe-*`, `list-*`, `get-*` and `s3 ls`
       # followed by a resource argument all reach their pattern.
@@ -29,4 +75,4 @@ rules:
       # subshell or a second command in the same line.
       - when: { all: [{ fact: worker.capability-profile, equals: platform-reader }, { fact: command.words, intersects: [aws] }] }
         answer: outside-list
-    effects: { listed-read: allow, outside-list: escalate }
+    effects: { listed-read: allow, mutating: escalate, outside-list: escalate }

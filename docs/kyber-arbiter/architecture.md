@@ -365,8 +365,11 @@ a file is not seen by it; the return rule catches that.
 A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
 `worker.command` with the command's text, its *form* — the program and leading words, with a leading
 `sudo` or `env` and every option and its value removed, so `az vm list -o table` and `az vm list` are one
-form — a fact saying whether it is one command at all, and every word the command names, and evaluates
-step 0 over the `worker.command` rules the technology folders declare. The words are what a rule reads to
+form — a fact saying whether it is one command at all, the form's *head* (its words before the first
+option), and every word the command names, and evaluates step 0 over the `worker.command` rules the
+technology folders declare. The head is where a technology's rule refuses a mutating verb, and that
+refusal wins over a read pattern that also matches: `az group delete list` ends in `list` but its head
+holds `delete`, so it is refused. The words are what a rule reads to
 find the tool however it was reached: a quoted program, an absolute path such as `/usr/bin/az`, a wrapper
 such as `timeout 10 az …`, a subshell, or a second command on the same line all still name it, so the
 technology's list refuses them. A redirect, a pipeline or a compound command is not one command, so it has

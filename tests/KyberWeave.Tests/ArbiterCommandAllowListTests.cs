@@ -89,6 +89,20 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     }
 
     [Theory]
+    [InlineData("azure", "az group delete list")]
+    [InlineData("azure", "az vm delete --name list")]
+    [InlineData("aws", "aws s3 rm s3://b/list")]
+    [InlineData("aws", "aws ec2 terminate-instances")]
+    public void AMutatingVerbBeforeTheFirstFlagIsRefusedEvenWhenAReadFormAlsoMatches(string technology, string command)
+    {
+        TechnologyRepository(_repository.Path, technology);
+
+        string answer = Guard("claude", Command("claude", command));
+
+        Assert.Contains("mutating", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("az vm list")]
     [InlineData("az vm list -o table")]
     [InlineData("az vm show myVM -g myRG")]
