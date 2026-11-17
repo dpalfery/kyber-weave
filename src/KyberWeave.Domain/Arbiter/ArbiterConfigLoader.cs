@@ -13,7 +13,12 @@ namespace KyberWeave.Core.Arbiter;
 /// <summary>Loads, merges, and validates the <c>arbiter:</c> host configuration section.</summary>
 public static class ArbiterConfigLoader
 {
-    private const string EmbeddedRulesResource = "Arbiter.default-rules.yml";
+    private static readonly string[] EmbeddedRulesResources =
+    [
+        "Standards.conductor.arbiter-rules.yml",
+        "Standards.architect.arbiter-rules.yml",
+        "Standards.reviewer.arbiter-rules.yml"
+    ];
 
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
@@ -193,56 +198,79 @@ public static class ArbiterConfigLoader
             userProvider.TimeoutMs ?? repository.TimeoutMs);
     }
 
-    /// <summary>Loads the product defaults from the embedded <c>default-rules.yml</c>.</summary>
+    /// <summary>
+    /// Loads the product defaults from the embedded role rules files, one per role folder.
+    /// </summary>
+    /// <remarks>
+    /// The rules are split by role so a role folder can be overridden where its rules are
+    /// read. The reader merges the three into the one set the evaluator sees; a file that
+    /// fails to parse or an empty set is a build error, because a partial shipped catalogue
+    /// would silently stop enforcing rules.
+    /// </remarks>
     internal static ArbiterConfig LoadEmbeddedDefaults()
     {
         Assembly assembly = typeof(ArbiterConfigLoader).Assembly;
-        using Stream? stream = assembly.GetManifestResourceStream(EmbeddedRulesResource);
-        if (stream is null)
-        {
-            throw new InvalidOperationException(
-                $"Embedded resource '{EmbeddedRulesResource}' is missing. " +
-                "The project must embed Arbiter/Rules/default-rules.yml.");
-        }
+        List<ArbiterRule> rules = [];
+        List<string> testFilePatterns = [];
+        List<ArbiterLensPathEntry> lensPaths = [];
 
-        string yaml;
-        using (StreamReader reader = new(stream, Encoding.UTF8))
-            yaml = reader.ReadToEnd();
-
-        ArbiterDefaultRulesYaml? document;
-        try
+        foreach (string resource in EmbeddedRulesResources)
         {
-            document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(yaml);
-        }
-        catch (YamlException exception)
-        {
-            throw new InvalidOperationException(
-                $"Embedded resource '{EmbeddedRulesResource}' is not valid YAML: {exception.Message}",
-                exception);
-        }
-
-        if (document?.Rules is null || document.Rules.Count == 0)
-        {
-            throw new InvalidOperationException(
-                $"Embedded resource '{EmbeddedRulesResource}' declares no rules.");
-        }
-
-        List<ArbiterRule> rules = new(document.Rules.Count);
-        foreach (ArbiterRuleYaml entry in document.Rules)
-        {
-            if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? converted, out string? error))
+            using Stream? stream = assembly.GetManifestResourceStream(resource);
+            if (stream is null)
             {
                 throw new InvalidOperationException(
-                    $"Embedded resource '{EmbeddedRulesResource}' is invalid: {error}");
+                    $"Embedded resource '{resource}' is missing. " +
+                    "The project must embed the three role arbiter-rules files.");
             }
 
-            rules.AddRange(converted);
+            string yaml;
+            using (StreamReader reader = new(stream, Encoding.UTF8))
+                yaml = reader.ReadToEnd();
+
+            ArbiterDefaultRulesYaml? document;
+            try
+            {
+                document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(yaml);
+            }
+            catch (YamlException exception)
+            {
+                throw new InvalidOperationException(
+                    $"Embedded resource '{resource}' is not valid YAML: {exception.Message}",
+                    exception);
+            }
+
+            if (document?.Rules is not null)
+            {
+                foreach (ArbiterRuleYaml entry in document.Rules)
+                {
+                    if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? converted, out string? error))
+                    {
+                        throw new InvalidOperationException(
+                            $"Embedded resource '{resource}' is invalid: {error}");
+                    }
+
+                    rules.AddRange(converted);
+                }
+            }
+
+            if (document?.TestFilePatterns is not null)
+                testFilePatterns.AddRange(document.TestFilePatterns);
+
+            if (document?.LensPaths is not null)
+                lensPaths.AddRange(ParseLensPaths(document.LensPaths));
+        }
+
+        if (rules.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "The embedded role arbiter-rules files declare no rules.");
         }
 
         return new ArbiterConfig
         {
-            TestFilePatterns = document.TestFilePatterns is null ? [] : [.. document.TestFilePatterns],
-            LensPaths = ParseLensPaths(document.LensPaths),
+            TestFilePatterns = testFilePatterns,
+            LensPaths = lensPaths,
             Rules = rules,
         };
     }
@@ -959,7 +987,7 @@ public static class ArbiterConfigLoader
     }
 }
 
-/// <summary>The top-level shape of the embedded <c>default-rules.yml</c>.</summary>
+/// <summary>The top-level shape of one embedded role <c>arbiter-rules.yml</c>.</summary>
 internal sealed class ArbiterDefaultRulesYaml
 {
     public List<ArbiterRuleYaml>? Rules { get; set; }

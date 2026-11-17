@@ -97,3 +97,5 @@ Explore the full Kyber-Squad documentation suite:
 * **[Worker Rule Map](worker-rule-map.md)** — One row per duplicated worker rule: where it lives now, its single home after the text trim, and the check that still enforces it.
 
 * **[Technology Agent Rule Inventory](agent-rule-inventory.md)** — Every technology-specific rule in the thirteen technology agent bodies, mapped to the template file and heading that states it now.
+
+* **[Roster Comparison Runbook](roster-comparison-runbook.md)** — How to run the same three approved plans once per worker roster from one base commit, and where each recorded number is read from.

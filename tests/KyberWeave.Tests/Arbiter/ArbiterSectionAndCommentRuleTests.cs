@@ -21,8 +21,15 @@ public sealed class ArbiterSectionAndCommentRuleTests
     private const string TrimRule = "KW-ARB-TRIM-001";
     private const string CommentRule = "KW-ARB-COMMENT-001";
 
-    private static readonly string ShippedRulesPath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
+    private static readonly string[] RoleRulesPaths =
+    [
+        RoleRules("conductor"),
+        RoleRules("architect"),
+        RoleRules("reviewer")
+    ];
+
+    private static string RoleRules(string role) => Path.Combine(
+        KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", role, $"{role}.arbiter-rules.yml");
 
     private static ArbiterRule Shipped(string id) =>
         Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
@@ -44,9 +51,9 @@ public sealed class ArbiterSectionAndCommentRuleTests
     [Fact]
     public void TheSectionTrimRuleIsDeclaredForEachSectionCandidate()
     {
-        string[] lines = File.ReadAllLines(ShippedRulesPath);
+        string[] lines = File.ReadAllLines(RoleRulesPaths[0]);
         int start = Array.FindIndex(lines, line => line.Trim() == $"- id: {TrimRule}");
-        Assert.True(start >= 0, $"{TrimRule} is not declared in default-rules.yml.");
+        Assert.True(start >= 0, $"{TrimRule} is not declared in conductor.arbiter-rules.yml.");
         int end = Array.FindIndex(lines, start + 1, line => line.TrimStart().StartsWith("- id: ", StringComparison.Ordinal));
         string block = string.Join("\n", lines[start..(end < 0 ? lines.Length : end)]);
 
@@ -80,16 +87,18 @@ public sealed class ArbiterSectionAndCommentRuleTests
 
     /// <summary>The two rules are appended after the existing ids, so no shipped id is renumbered or moved.</summary>
     [Fact]
-    public void TheNewRulesAreAppendedAfterTheShortcutAndSameFailureRules()
+    public void TheNewRulesJoinTheShippedSetWithoutRenumberingAny()
     {
         string[] ids = ArbiterConfig.ProductDefaults.Rules.Select(rule => rule.Id).Distinct().ToArray();
 
-        Assert.Equal("KW-ARB-FAILURE-001", ids[^7]);
-        Assert.Equal(TrimRule, ids[^6]);
-        Assert.Equal(CommentRule, ids[^5]);
-        Assert.Equal("KW-ARB-CHECKOUT-001", ids[^4]);
-        Assert.Equal("KW-ARB-MODE-002", ids[^3]);
-        Assert.Equal("KW-ARB-SEVERITY-001", ids[^2]);
-        Assert.Equal("KW-ARB-OVERRIDE-001", ids[^1]);
+        Assert.Equal(36, ids.Length);
+        foreach (string id in new[]
+                 {
+                     "KW-ARB-FAILURE-001", TrimRule, CommentRule, "KW-ARB-CHECKOUT-001",
+                     "KW-ARB-MODE-002", "KW-ARB-SEVERITY-001", "KW-ARB-OVERRIDE-001"
+                 })
+        {
+            Assert.Contains(id, ids);
+        }
     }
 }

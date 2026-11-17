@@ -136,12 +136,25 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     /// <summary>Each exemption the plan or the dispatch states allows before the fact is read, even when the fact is false.</summary>
     [Theory]
     [InlineData("plan.development-mode", "standard")]
-    [InlineData("delegation.target", "test-dev")]
     [InlineData("delegation.target-profile", "documentation")]
     [InlineData("plan.test-contract.row", "Not applicable")]
     public void ATaskWithNoFailingRunOwedIsNotRequiredToShowOne(string fact, string value)
     {
         ArbiterFactSet facts = TestFirstReturn(false).With(fact, value, ArbiterFactLabel.Derived);
+
+        Assert.Equal("not-required", RuleEngine.Decide(Rule(), facts));
+        Assert.Equal(RuleEffects.Allow, Rule().Effects["not-required"]);
+    }
+
+    /// <summary>
+    /// A test-only task owes no failing run: writing the tests is the task. The exemption is a
+    /// machine fact about the task's files, not the retired roster's clause on the agent name.
+    /// </summary>
+    [Fact]
+    public void ATaskWhoseFilesAreAllTestsIsNotRequiredToShowAFailingRun()
+    {
+        ArbiterFactSet facts = TestFirstReturn(false)
+            .With(TriggerFactBuilder.FilesAllTestsFact, true, ArbiterFactLabel.Derived);
 
         Assert.Equal("not-required", RuleEngine.Decide(Rule(), facts));
         Assert.Equal(RuleEffects.Allow, Rule().Effects["not-required"]);

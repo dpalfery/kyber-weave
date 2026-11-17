@@ -139,7 +139,7 @@ public class KyberStandardsTemplateShapeTests
     [Fact]
     public void AnEmptyArbiterRulesFileIsShippedForEveryTechnology()
     {
-        foreach (string technology in KyberStandardsTemplates.AllFolders)
+        foreach (string technology in KyberStandardsTemplates.All)
         {
             KyberStandardsTemplates.TryGetPart(
                 technology, KyberStandardsTemplates.Part.ArbiterRules, out string? rules);

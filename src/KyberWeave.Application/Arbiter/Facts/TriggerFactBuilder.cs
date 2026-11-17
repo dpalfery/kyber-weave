@@ -1,5 +1,6 @@
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -19,6 +20,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// </remarks>
 public static class TriggerFactBuilder
 {
+    /// <summary>
+    /// True when every file the task names is a test file, read from <c>plan.task.files</c> and the
+    /// host's test-file patterns.
+    /// </summary>
+    public const string FilesAllTestsFact = "plan.task.files-all-tests";
+
     /// <summary>How many lines either side of a refuted finding's line an earlier finding may sit and still be a candidate.</summary>
     private const int PriorFindingWindowLines = 20;
 
@@ -237,6 +244,37 @@ public static class TriggerFactBuilder
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// Adds <see cref="FilesAllTestsFact"/> when the task names files: true when every one matches
+    /// the host's test-file patterns, false when one does not.
+    /// </summary>
+    /// <remarks>
+    /// A task that names no files leaves the fact absent rather than vacuously true: a task with no
+    /// files is a task the plan described without a scope, and exempting it from the test-first check
+    /// would be a claim about files nobody listed. The rule then decides on its other clauses.
+    /// </remarks>
+    public static ArbiterFactSet WithTestsOnlyTaskFact(
+        ArbiterFactSet facts,
+        IReadOnlyList<string> testFilePatterns)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(testFilePatterns);
+
+        if (!facts.Contains(FilesAllTestsFact)
+            || !facts.TryGet("plan.task.files", out ArbiterFact? files)
+            || files.Value is not IEnumerable<string> paths)
+        {
+            return facts;
+        }
+
+        List<string> declared = [.. paths];
+        if (declared.Count == 0)
+            return facts;
+
+        bool allTests = declared.All(path => testFilePatterns.Any(pattern => PathGlob.IsMatch(pattern, path)));
+        return facts.With(FilesAllTestsFact, allTests, ArbiterFactLabel.Derived);
     }
 
     /// <summary>

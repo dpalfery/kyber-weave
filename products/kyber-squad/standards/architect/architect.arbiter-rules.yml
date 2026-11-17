@@ -1,3 +1,53 @@
-# Machine rules the Arbiter evaluates for the 'architect' folder.
-# An empty list is valid: most folders declare none.
-rules: []
+# The architect role folder's shipped Arbiter rules: the planner gates. Ids are
+# permanent: suppressions, baselines and code-scanning alerts key on them, so a rule is
+# never renumbered or reused.
+#
+# A rule keeps the id, question, answers and effects it had in default-rules.yml. The
+# step-0 predicate set is closed (all, any, not, exists, equals, in, matches, subset-of,
+# intersects, count); an operand naming a fact the trigger supplies is a reference, and any
+# other string is a literal. An answer the Arbiter cannot reach allows and is logged
+# (ADR 0072).
+
+rules:
+  - id: KW-ARB-PLANNER-001
+    trigger: delegate.planner
+    question: Does this dispatch ask the planner for planning work?
+    answers: [recognised, malformed]
+    # Markers and the PLAN_FILE header are agent-written lines, so step 0 only recognises the
+    # exact forms. Anything else is asked. Where the planner writes is a machine fact checked on
+    # its return by KW-ARB-PLANNER-DIFF-001, so a path here is never blocked on its spelling.
+    decide:
+      - when: { all: [{ fact: delegation.markers, exists: true }, { fact: delegation.plan-file-rejected, exists: false }, { fact: delegation.plan-file, exists: false }] }
+        answer: recognised
+      - when: { all: [{ fact: delegation.markers, exists: true }, { fact: delegation.plan-file, matches: config.planning-dirs }] }
+        answer: recognised
+    ask:
+      type: choice
+      state: { dispatch: delegation.head, plan-file: delegation.plan-file-raw, planning-dirs: config.planning-dirs }
+      criteria:
+        recognised: The dispatch asks the planner to assess, write, revise or finalise a plan, specification or todo.
+        malformed: The dispatch asks the planner for work that is not planning, such as writing or changing code.
+      confidence-at-least: 0.8
+      tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
+    effects: { recognised: allow, malformed: escalate }
+
+  - id: KW-ARB-PLANNER-DIFF-001
+    trigger: delegate.planner.returned
+    question: Did the planner write only inside the plan, spec and todo directories?
+    answers: [unattributed, inside, outside]
+    # The changed paths are git's, less those that belong to writer dispatches in flight in the same working tree
+    # during this one (parallel workers share a run worktree). When a sibling declared no files, what is left
+    # outside the planning directories cannot be attributed and the answer is unattributed.
+    decide:
+      - when: { fact: git.changed-paths.since-dispatch, count: 0 }
+        answer: inside
+      - when:
+          all:
+            - { fact: git.changed-paths.since-dispatch, exists: true }
+            - { fact: git.changed-paths.attributed, exists: false }
+        answer: unattributed
+      - when: { fact: git.changed-paths.attributed, subset-of: config.planning-dirs }
+        answer: inside
+      - when: { fact: git.changed-paths.attributed, exists: true }
+        answer: outside
+    effects: { unattributed: allow, inside: allow, outside: escalate }

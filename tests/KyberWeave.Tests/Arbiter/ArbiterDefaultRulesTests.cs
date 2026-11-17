@@ -66,7 +66,14 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void ShippedRules_EqualTheCatalogue()
     {
-        Assert.Equal(ExpectedRuleIds, ArbiterConfig.ProductDefaults.Rules.Select(rule => rule.Id).Distinct());
+        // The split groups rules by role, so position is no longer a global order. The set is
+        // what matters: every id ships once, and no id was added or removed.
+        Assert.Equal(
+            ExpectedRuleIds.OrderBy(id => id, StringComparer.Ordinal),
+            ArbiterConfig.ProductDefaults.Rules
+                .Select(rule => rule.Id)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(id => id, StringComparer.Ordinal));
     }
 
     /// <summary>
