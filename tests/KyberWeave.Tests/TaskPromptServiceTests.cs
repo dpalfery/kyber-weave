@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -323,6 +324,51 @@ public sealed class TaskPromptServiceTests
 
         Assert.True(result.Built, result.Refusal);
         Assert.Contains("FAILED_ATTEMPTS: 2", Between(result.Prompt, "task"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A symlink inside the scratch area must not become a window onto any readable file: the path the worker's
+    /// prompt reads is the resolved one, and it must still sit under the scratch area.
+    /// </summary>
+    [Theory]
+    [InlineData("file")]
+    [InlineData("directory")]
+    public void APriorResultsSymlinkOutOfTheScratchAreaIsRefused(string linked)
+    {
+        if (OperatingSystem.IsWindows())
+            throw SkipException.ForSkip("Symbolic-link creation requires platform-specific privileges on Windows.");
+
+        using DocFixture fixture = Ready();
+        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
+        if (linked == "file")
+        {
+            string secret = Path.Combine(fixture.Root, "results.txt");
+            File.WriteAllText(secret, "a tracked file the worker must not receive.");
+            Directory.CreateDirectory(Path.Combine(scratch, "t1"));
+            File.CreateSymbolicLink(Path.Combine(scratch, "t1", "link.md"), secret);
+        }
+        else
+        {
+            string outside = Path.Combine(fixture.Root, "elsewhere");
+            Directory.CreateDirectory(outside);
+            File.WriteAllText(
+                Path.Combine(outside, "link.md"),
+                "a tracked file the worker must not receive.");
+            Directory.CreateDirectory(scratch);
+            Directory.CreateSymbolicLink(Path.Combine(scratch, "t1"), outside);
+        }
+
+        KyberWeaveConfig config = Config();
+
+        TaskPromptResult result = Service(fixture, config).Build(
+            new TaskPromptRequest(
+                fixture.Root,
+                TaskId: "T1",
+                PriorResultsPath: $"{TaskPromptService.ScratchFolder}/t1/link.md"),
+            config);
+
+        Assert.False(result.Built);
+        Assert.Contains(TaskPromptService.ScratchFolder, result.Refusal, StringComparison.Ordinal);
     }
 
     /// <summary>
