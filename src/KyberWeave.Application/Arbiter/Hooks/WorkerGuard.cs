@@ -198,7 +198,12 @@ public sealed class WorkerGuard(
         }
 
         IReadOnlyCollection<string>? scope = technology is null ? null : [technology];
-        return WorkerGuardRules.CommandRefusal(loaded.Config.Arbiter.Rules, call, call.Command!, scope);
+        return WorkerGuardRules.CommandRefusal(
+            loaded.Config.Arbiter.Rules,
+            call,
+            call.Command!,
+            scope,
+            loaded.Config.Arbiter.RuleFolderParents);
     }
 
     /// <summary>

@@ -389,7 +389,8 @@ no form a listed read may match and its whole text is the form: that is how `az 
 is refused. A technology folder that declares no such rule refuses nothing. The tool-call event names no
 dispatch technology, so the guard reads the ledger for the unreturned dispatch of the calling agent in
 the same session and takes the `technology` header that dispatch recorded. It then applies only that
-technology's `worker.command` rules. A dispatch that names no technology, names one the host does not
+technology's `worker.command` rules and those of every technology it builds on. A dispatch that names
+no technology, names one the host does not
 declare, has already returned, or cannot be told apart from a parallel dispatch of the same agent
 falls back to every declared technology's list, so a refusal is never lost; that is the fail-closed
 reading for a read-only agent.

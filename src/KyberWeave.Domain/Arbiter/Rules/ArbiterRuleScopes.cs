@@ -38,18 +38,21 @@ public static class ArbiterRuleScopes
     /// </remarks>
     /// <param name="rules">Every rule the configuration loaded.</param>
     /// <param name="technologies">The technologies whose rules apply, or null for every rule.</param>
+    /// <param name="parents">Each technology folder's <c>builds-on</c> parent, named by <see cref="KyberWeave.Core.Arbiter.ArbiterConfig.RuleFolderParents"/>.</param>
     public static IReadOnlyList<ArbiterRule> Applicable(
         IReadOnlyList<ArbiterRule> rules,
-        IReadOnlyCollection<string>? technologies)
+        IReadOnlyCollection<string>? technologies,
+        IReadOnlyDictionary<string, string>? parents = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
 
         if (technologies is null)
             return rules;
 
-        HashSet<string> scope = new(
-            technologies.Where(name => !string.IsNullOrWhiteSpace(name)).Select(name => name.Trim()),
-            StringComparer.Ordinal);
+        HashSet<string> scope = new(StringComparer.Ordinal);
+        foreach (string technology in technologies.Where(name => !string.IsNullOrWhiteSpace(name)))
+            scope.UnionWith(ScopeOf(technology, parents));
+
         return [.. rules.Where(rule => rule.Technology is null || scope.Contains(rule.Technology))];
     }
 

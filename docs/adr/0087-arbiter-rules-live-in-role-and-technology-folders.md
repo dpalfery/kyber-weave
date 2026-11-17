@@ -141,7 +141,8 @@ there too, where the person who owns the standard can see and change them.
    on the harnesses that have no worker guard. A read-only dispatch's tool call names no dispatch
    technology, so the guard reads it from the ledger's pre event for the calling agent in the same
    session: the pre event's `headers` now record the dispatch's `technology`. The guard applies only
-   that technology's `worker.command` rules. A dispatch that names none, names one the host does not
+   that technology's `worker.command` rules and those of the technologies it builds on. A dispatch that
+   names none, names one the host does not
    declare, has returned, or cannot be told apart from a parallel dispatch of the same agent falls
    back to every declared technology's list, which is the fail-closed reading for `platform-researcher`.
 
@@ -160,9 +161,9 @@ Stated so nobody reads a guarantee the code does not give.
 - **A read-only worker's dispatch technology is read from the ledger, not from the tool call.** The
   trigger is one tool call, and neither guarded harness puts the dispatch header on it, so the guard
   looks up the unreturned pre event for the calling agent in the same session and reads the
-  `technology` header recorded there. When the dispatch names none, has returned, the ledger cannot be
-  read, or two parallel dispatches of the same agent are open, the guard falls back to every declared
-  technology's allow-list. That is the fail-closed reading: a technology-specific refusal is never
+  `technology` header recorded there. When the dispatch names none, names a technology the host does not
+  declare, has returned, the ledger cannot be read, or two parallel dispatches of the same agent are
+  open, the guard falls back to every declared technology's allow-list. That is the fail-closed reading: a technology-specific refusal is never
   lost, but another technology's broad rule can bind the agent in those cases.
 - **Only the `conductor`, `architect` and `reviewer` role folders are read.**
   `ArbiterConfigLoader` holds that list, and `ontology.roles` does not feed it. A host's

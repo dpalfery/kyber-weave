@@ -137,15 +137,17 @@ internal static class WorkerGuardRules
     /// <param name="call">The sub-agent's tool call.</param>
     /// <param name="command">The command the call declares.</param>
     /// <param name="technologyScope">The technology whose rules apply, or null for every rule.</param>
+    /// <param name="parents">Each technology folder's <c>builds-on</c> parent, so a parent's list reaches its child.</param>
     internal static string? CommandRefusal(
         IReadOnlyList<ArbiterRule> rules,
         ToolCall call,
         string command,
-        IReadOnlyCollection<string>? technologyScope = null)
+        IReadOnlyCollection<string>? technologyScope = null,
+        IReadOnlyDictionary<string, string>? parents = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
 
-        IReadOnlyList<ArbiterRule> scoped = ArbiterRuleScopes.Applicable(rules, technologyScope);
+        IReadOnlyList<ArbiterRule> scoped = ArbiterRuleScopes.Applicable(rules, technologyScope, parents);
         ArbiterOutcome outcome = RuleEngine.EvaluateStep0(scoped, CommandFacts(call, command), CommandTrigger);
         if (!string.Equals(outcome.CombinedEffect, RuleEffects.Escalate, StringComparison.Ordinal))
         {

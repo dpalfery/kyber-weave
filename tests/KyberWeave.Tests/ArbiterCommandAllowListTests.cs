@@ -202,6 +202,20 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     }
 
     /// <summary>
+    /// A child technology's dispatch is bound by its parent's allow-list too, as every technology folder rule is.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherBoundToAChildTechnologyIsRefusedByItsParentsList()
+    {
+        ChildOfAzureRepository(_repository.Path);
+        WriteDispatchTechnology("child");
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// An undeclared technology is a typo or a folder the host does not have, so it cannot name an allow-list:
     /// every declared list still binds the read-only agent.
     /// </summary>
@@ -319,6 +333,24 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
                 File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
             }
         }
+    }
+
+    /// <summary>
+    /// A repository that declares <c>child</c>, whose standard builds on the shipped <c>azure</c> folder, so the
+    /// parent's allow-list is loaded for a task in the child.
+    /// </summary>
+    private static void ChildOfAzureRepository(string root)
+    {
+        TechnologyRepository(root, "azure");
+        File.WriteAllText(
+            Path.Combine(root, ".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n  docs-root: docs\n  technologies: [child]\n\narbiter:\n  enabled: true\n");
+
+        string directory = Path.Combine(root, "docs", "standards", "child");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "child.standards.md"),
+            "---\nid: standards/child\nbuilds-on: azure\n---\n\n# child\n");
     }
 
     /// <summary>
