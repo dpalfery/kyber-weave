@@ -101,6 +101,29 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
             $"Malformed Cursor hook event: unknown hook_event_name '{eventName ?? "<missing>"}'.");
     }
 
+    /// <inheritdoc/>
+    public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = renderedCaller;
+
+        if (!IsPreEvent(GetString(payload, "hook_event_name"))
+            || !IsDispatchTool(GetString(payload, "tool_name")))
+        {
+            return null;
+        }
+
+        JsonElement toolInput = RequireToolInput(payload);
+        string prompt = GetString(toolInput, "prompt") ?? string.Empty;
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        return insertion.Kind switch
+        {
+            DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
+            DispatchInsertionKind.Stopped => RenderPreDenyFor(insertion.Reason),
+            _ => null,
+        };
+    }
+
     private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (!IsDispatchTool(tool))
@@ -114,12 +137,28 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
             ?? throw new InvalidOperationException(
                 "Malformed Cursor hook event: Task input carries no prompt.");
         HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+
+        // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        if (outcome.Kind == HookOutcomeKind.Deny)
+        {
+            return RenderPreDenyFor(outcome.Reason);
+        }
+
+        if (insertion.Kind == DispatchInsertionKind.Stopped)
+        {
+            return RenderPreDenyFor(insertion.Reason);
+        }
+
+        bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => RenderPreAllow(),
-            HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
-                ? RenderPreAllowStrip(toolInput, prompt)
-                : RenderPreAllow(),
+            HookOutcomeKind.Allow => inserted
+                ? RenderPreAllowPrompt(toolInput, insertion.Text)
+                : ReadGuard.IsImplementationSpecialist(target)
+                    ? RenderPreAllowStrip(toolInput, prompt)
+                    : RenderPreAllow(),
             HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
                     "Hook engine returned allow-with-rewrite without rewritten input.")),
@@ -306,6 +345,13 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
             ?? throw new InvalidOperationException(
                 "Malformed Cursor hook event: tool_input is not a JSON object."),
             node => node["prompt"] = HeaderBlock.Strip(prompt));
+
+    /// <summary>The allow that writes the prompt in place of the dispatch's identity line, every other field kept.</summary>
+    private static string RenderPreAllowPrompt(JsonElement toolInput, string prompt) =>
+        RenderPreAllowWithInput(JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Cursor hook event: tool_input is not a JSON object."),
+            node => node["prompt"] = prompt);
 
     private static string RenderPreAllowRaw(string rewrittenInputJson)
     {

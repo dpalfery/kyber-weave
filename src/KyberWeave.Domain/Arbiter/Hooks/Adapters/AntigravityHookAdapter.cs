@@ -14,9 +14,11 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// </summary>
 /// <remarks>
 /// A call is denied when any of its dispatches escalates, and every dispatch is
-/// evaluated so each one is recorded. The harness has no rewrite field in
-/// <c>hooks.json</c>, so header stripping does not apply and an allowed call writes
-/// the empty document. <c>allow</c> is never written: it would auto-approve the call
+/// evaluated so each one is recorded. The harness's <c>overwrite</c> field is documented, but the live check that
+/// proves a rewrite reaches the worker and stays out of the dispatcher's transcript has not run
+/// (<c>docs/kyber-arbiter/architecture.md</c> records the harness as <c>file</c>), so prompt insertion does not
+/// apply here: the dispatch names the prompt file instead. Denying and header stripping therefore still write the
+/// empty document. <c>allow</c> is never written: it would auto-approve the call
 /// and bypass the user's approval prompts. The call id is
 /// <c>&lt;conversationId&gt;:&lt;stepIdx&gt;</c> and the repository root is
 /// <c>workspacePaths[0]</c>. The hook is project-wide with no caller identity, so the

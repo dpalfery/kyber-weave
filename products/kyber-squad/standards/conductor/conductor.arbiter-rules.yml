@@ -283,6 +283,9 @@ rules:
         mentions-only: >-
           The dispatch mentions a planning-paths file only to say which plan or task the work serves, or names the
           task file only as a fallback beside the <packet command> marker, which is how the worker gets its task.
+          A dispatch that already holds the expanded task prompt — the text between a <task> tag and its closing
+          tag — is the worker's whole brief, so the plan, specification or todo paths its host facts mention are
+          not an instruction to read one.
       confidence-at-least: 0.8
       tuned-for: [jev-1.13.0, jev-1.13-free, jev-1.14.0, typesafe/jev-1.13, typesafe/jev-1.14]
     effects: { names-plan: escalate, mentions-only: allow, no-plan: allow, closeout: allow, not-a-task: allow }

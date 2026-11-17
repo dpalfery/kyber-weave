@@ -1,4 +1,5 @@
 using KyberWeave.Application.Review;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -214,8 +215,12 @@ public static class TriggerFactBuilder
                 "delegation.paths" => paths,
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling
-                // KW-DOC-TASKS-005 accepts.
-                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
+                // KW-DOC-TASKS-005 accepts. A dispatch that already carries the hook's
+                // expanded prompt is never a plan read: its host facts name the planning
+                // indexes, and the worker is told to use that prompt, not a plan (Req 9.18).
+                "delegation.planning-paths" => DispatchPromptInsertion.IsExpanded(prompt)
+                    ? []
+                    : PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
                 "delegation.plan-file" => planFile,
                 // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
                 "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,

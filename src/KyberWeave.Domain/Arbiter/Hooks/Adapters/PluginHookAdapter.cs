@@ -131,6 +131,39 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             : HandleAfter(envelope, caller, target, config, context);
     }
 
+    /// <inheritdoc/>
+    public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = renderedCaller;
+
+        PluginEnvelope envelope;
+        try
+        {
+            envelope = PluginEnvelope.Parse(payload);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        if (!IsDispatchTool(envelope.Tool)
+            || envelope.Phase != PluginPhase.Before
+            || string.IsNullOrWhiteSpace(TargetOf(envelope)))
+        {
+            return null;
+        }
+
+        string prompt = ArgString(envelope.Args, _promptArgument) ?? string.Empty;
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        return insertion.Kind switch
+        {
+            DispatchInsertionKind.Inserted => RenderAllowWithArgs(envelope.Args, _promptArgument, insertion.Text),
+            DispatchInsertionKind.Stopped => RenderBlock(insertion.Reason!),
+            _ => null,
+        };
+    }
+
     private string HandleBefore(PluginEnvelope envelope, string caller, string target, KyberWeaveConfig config, HookContext context)
     {
         string? prompt = ArgString(envelope.Args, _promptArgument);
@@ -141,13 +174,31 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         }
 
         HookOutcome outcome = DecidePre(envelope, caller, target, prompt, config, context);
+
+        // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        if (outcome.Kind == HookOutcomeKind.Deny)
+        {
+            return RenderBlock(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine denied without a reason."));
+        }
+
+        if (insertion.Kind == DispatchInsertionKind.Stopped)
+        {
+            return RenderBlock(insertion.Reason!);
+        }
+
+        bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
             HookOutcomeKind.PassThrough => string.Empty,
-            HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
-                && !string.Equals(HeaderBlock.Strip(prompt), prompt, StringComparison.Ordinal)
-                ? RenderAllowWithArgs(envelope.Args, _promptArgument, HeaderBlock.Strip(prompt))
-                : RenderAllow(),
+            HookOutcomeKind.Allow => inserted
+                ? RenderAllowWithArgs(envelope.Args, _promptArgument, insertion.Text)
+                : ReadGuard.IsImplementationSpecialist(target)
+                    && !string.Equals(HeaderBlock.Strip(prompt), prompt, StringComparison.Ordinal)
+                        ? RenderAllowWithArgs(envelope.Args, _promptArgument, HeaderBlock.Strip(prompt))
+                        : RenderAllow(),
             HookOutcomeKind.AllowWithRewrite => RenderAllowWithRewritten(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
                     "Hook engine returned allow-with-rewrite without rewritten input.")),

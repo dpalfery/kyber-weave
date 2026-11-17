@@ -302,8 +302,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     {
         Dictionary<string, object?>? hooks = BuildArbiterHooks(
             agent,
-            context.EnabledArbiter,
-            context.Scope,
+            context,
             arbiter.Dispatchers,
             arbiter.Guarded,
             arbiter.DispatchTargets,
@@ -338,8 +337,7 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
 
         Dictionary<string, object?>? hooks = BuildArbiterHooks(
             agent,
-            context.EnabledArbiter,
-            context.Scope,
+            context,
             arbiter.Dispatchers,
             arbiter.Guarded,
             arbiter.DispatchTargets,
@@ -365,24 +363,26 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     /// A dispatcher that is also guarded keeps both the dispatch hooks and the read
     /// guard: the guard applies whenever a guarded agent runs, so the dispatch gate
     /// observing delegations does not cover planning-path reads. The hand-back entry sits alongside whichever dispatch or guard entry
-    /// the target already has. Returns null when the wiring is null or disabled so the
-    /// render stays byte-identical to before the field existed. At Global scope the shell guard is
-    /// the only hook rendered: a shell-guarded agent gets that one entry and every other agent gets none.
+    /// the target already has. Returns null when no wiring is configured. With the Arbiter off only the dispatch
+    /// hook is written, for dispatchers, because prompt insertion runs with or without the Arbiter. At Global scope
+    /// the shell guard is the only hook rendered: a shell-guarded agent gets that one entry and every other agent gets none.
     /// </summary>
     private static Dictionary<string, object?>? BuildArbiterHooks(
         SquadAgent agent,
-        SquadArbiterWiring? arbiter,
-        SquadDeploymentScope scope,
+        SquadHarnessRenderContext context,
         IReadOnlySet<string> dispatcherAgents,
         IReadOnlySet<string> guardedAgents,
         IReadOnlySet<string> dispatchTargets,
         IReadOnlySet<string> shellGuardedAgents)
     {
-        if (arbiter is null || !arbiter.Enabled)
+        SquadArbiterWiring? arbiter = context.EnabledArbiter;
+        SquadDeploymentScope scope = context.Scope;
+        if (arbiter is null && !context.DispatchHooks)
         {
             return null;
         }
 
+        int timeoutSeconds = arbiter?.HookTimeoutSeconds ?? context.DispatchHookTimeoutSeconds;
         bool isShellGuarded = shellGuardedAgents.Contains(agent.Name);
 
         // The command is built only for an entry that will be written. HookCommandLine rejects a name that is not a
@@ -396,10 +396,23 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
                 {
                     ["type"] = "command",
                     ["command"] = ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, agent.Name, scope),
-                    ["timeout"] = arbiter.HookTimeoutSeconds
+                    ["timeout"] = timeoutSeconds
                 }
             }
         };
+
+        // With the Arbiter off the one hook action left is prompt insertion, which only a dispatcher needs: it runs
+        // on the dispatch call, not on the worker's own reads or shell.
+        if (arbiter is null)
+        {
+            return scope == SquadDeploymentScope.Project && dispatcherAgents.Contains(agent.Name)
+                ? new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["PreToolUse"] = new List<object?> { HookEntry(DispatchMatcher) },
+                    ["PostToolUse"] = new List<object?> { HookEntry(DispatchMatcher) }
+                }
+                : null;
+        }
 
         if (scope == SquadDeploymentScope.Global)
         {
@@ -775,8 +788,10 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
     }
 
     /// <summary>
-    /// The agents each Arbiter hook attaches to, empty unless Arbiter is enabled. The dispatch, read-guard and
+    /// The agents each Arbiter hook attaches to. The dispatch, read-guard and
     /// hand-back sets take effect at Project scope only; the shell-guarded set also takes effect at Global scope.
+    /// With the Arbiter off, only the dispatcher set is filled, because the dispatch hook still installs to insert
+    /// each worker's prompt.
     /// </summary>
     private sealed record ArbiterPlan(
         IReadOnlySet<string> Dispatchers,
@@ -787,7 +802,9 @@ public sealed class ClaudeRenderer : SquadHarnessRenderer
         public static ArbiterPlan Create(SquadHarnessRenderContext context) =>
             context.EnabledArbiter is null
                 ? new ArbiterPlan(
-                    new HashSet<string>(StringComparer.Ordinal),
+                    context.DispatchHooks
+                        ? ArbiterHookWiring.Dispatchers(context.Source)
+                        : new HashSet<string>(StringComparer.Ordinal),
                     new HashSet<string>(StringComparer.Ordinal),
                     new HashSet<string>(StringComparer.Ordinal),
                     new HashSet<string>(StringComparer.Ordinal))

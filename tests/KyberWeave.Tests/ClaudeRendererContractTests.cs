@@ -1119,22 +1119,39 @@ public sealed class ClaudeRendererContractTests : IDisposable
     }
 
     [Theory]
-    [InlineData(SquadDeploymentScope.Project)]
-    [InlineData(SquadDeploymentScope.Global)]
-    public async Task RenderAsync_ArbiterDisabled_NoAgentFileCarriesHooks(SquadDeploymentScope scope)
+    [InlineData(SquadDeploymentScope.Project, true)]
+    [InlineData(SquadDeploymentScope.Global, false)]
+    public async Task RenderAsync_ArbiterDisabled_CarriesTheDispatchHookOnlyAtProjectScope(
+        SquadDeploymentScope scope,
+        bool dispatchHooks)
     {
+        // Prompt insertion is not an Arbiter action, so a project render installs the dispatch hook for the
+        // dispatchers even with the Arbiter off. A global install reads no project configuration, so it installs none.
         SquadRenderResult result = await RenderClaudeArbiterAsync(
             ProductRoot,
             scope,
             new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: ShellHookTimeoutSeconds));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
+        int carriers = 0;
         foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
         {
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
-            Assert.False(
-                frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
-                $"Agent file '{file.RelativePath}' must not carry hooks when Arbiter is disabled at {scope} scope.");
+            bool carriesHooks = frontmatter.Children.ContainsKey(new YamlScalarNode("hooks"));
+            if (carriesHooks)
+            {
+                carriers++;
+                Assert.Contains("kyber-weave-arbiter hook", Encoding.UTF8.GetString(file.Content.Span), StringComparison.Ordinal);
+            }
+        }
+
+        if (dispatchHooks)
+        {
+            Assert.True(carriers > 0, "A project render with the Arbiter off must install the dispatch hook.");
+        }
+        else
+        {
+            Assert.Equal(0, carriers);
         }
     }
 
