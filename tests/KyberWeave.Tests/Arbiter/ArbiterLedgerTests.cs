@@ -413,6 +413,35 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Equal(excludingA, ledger.InFlightPaths(excludeEventId: a.Id));
     }
 
+    /// <summary>
+    /// A second attempt at the same task is not a concurrent writer of its own files. The second end-to-end tiered
+    /// run asked the Arbiter about task 1.2, was allowed, then spent the turn on another task's escalation and never
+    /// dispatched it; every later attempt at 1.2 saw that unpaired earlier evaluation as work in flight and answered
+    /// <c>overlaps-in-flight</c> (KW-ARB-READY-001), so the task was refused three times and never delivered.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_DoesNotCountAnEarlierAttemptAtTheSameTask()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        ArbiterLedgerHeaders task13 = new(plan, "1.3");
+        var firstAttempt = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12);
+        var otherTask = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/Truncate.cs"], headers: task13);
+        var retry = NewEvent(At(2), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12);
+        await ledger.AppendAsync(firstAttempt);
+        await ledger.AppendAsync(otherTask);
+        await ledger.AppendAsync(retry);
+
+        // Only the other task's files are in flight for the retry; the earlier attempt at the same task is not.
+        Assert.Equal(["src/Truncate.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
+        // The other task still sees this task's unpaired attempts: they are a different task's work.
+        Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: otherTask.Id));
+    }
+
     [Fact]
     public async Task ConcurrentWriters_ReturnsTaskFilesOfOverlappingWriterDispatches()
     {
