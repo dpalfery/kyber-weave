@@ -172,6 +172,18 @@ public sealed class SquadResponsePreferencesInjectorTests
     }
 
     [Fact]
+    public void Inject_RefusesAnEntryFileUnderANestedStandardsFolder()
+    {
+        // Only the leading standards/ folder holds standards. A file like agents/standards/conductor.md is still an
+        // agent entry: skipping it would ship it with no preferences and no diagnostic.
+        SquadRenderResult render = RenderResult(
+            ("agents/conductor.md", "<response-preferences>old</response-preferences>"),
+            ("agents/standards/conductor.md", "# nested"));
+
+        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(render, "new"));
+    }
+
+    [Fact]
     public void Inject_UsesDefaultTextForEmptyEffectiveText()
     {
         SquadRenderResult render = RenderResult(("skills/bug-crusher/SKILL.md", "<response-preferences>old</response-preferences>"));
