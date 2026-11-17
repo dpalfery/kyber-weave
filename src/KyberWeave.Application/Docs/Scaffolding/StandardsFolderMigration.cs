@@ -177,8 +177,7 @@ public sealed partial class StandardsFolderMigration
 
                 case StandardsFolderChangeKind.Reshape:
                     if (reshapedText is not null)
-                        File.WriteAllText(
-                            Absolute(change.To), reshapedText, new UTF8Encoding(false));
+                        AtomicFile.WriteAllText(RequireWritable(change.To), reshapedText);
                     break;
 
                 case StandardsFolderChangeKind.Add:

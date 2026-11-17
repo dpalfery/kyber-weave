@@ -298,6 +298,31 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
+    /// Reshaping writes the standard in place, so a standard kept as a symbolic link out of the
+    /// repository is refused rather than rewritten at its target.
+    /// </summary>
+    [Fact]
+    public void AStandardThatIsASymlinkOutsideTheRepositoryIsNotReshaped()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
+
+        using TempDirectory repo = new();
+        using TempDirectory outside = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string hostStandard = Path.Combine(outside.Path, "csharp.standards.md");
+        File.WriteAllText(hostStandard, LegacyCsharpWithOwnHeadings);
+        File.CreateSymbolicLink(StandardPath(repo.Path, "csharp"), hostStandard);
+
+        IOException error = Assert.Throws<IOException>(() =>
+            new StandardsFolderMigration(repo.Path, Declared).Run());
+
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.Equal(LegacyCsharpWithOwnHeadings, File.ReadAllText(hostStandard));
+    }
+
+    /// <summary>
     /// A standard the folder holds but the process may not read is an error that names it, not a
     /// folder treated as having no standard and answered with a stub.
     /// </summary>
