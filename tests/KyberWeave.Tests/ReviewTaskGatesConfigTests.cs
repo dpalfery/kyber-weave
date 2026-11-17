@@ -548,8 +548,8 @@ public sealed class ReviewTaskGatesConfigTests
             test.Run);
 
         // The council gate and the per-task gate run the same argv, so a task that passes
-        // its gate passes the council's.
-        IReadOnlyList<ReviewTaskGate> rustTaskGates = RepositoryTaskGates()["rust-dev"];
+        // its gate passes the council's. The rust technology entry is the per-task one.
+        IReadOnlyList<ReviewTaskGate> rustTaskGates = RepositoryTechnologyGates()["rust"];
         Assert.Equal(Assert.Single(rustTaskGates, gate => gate.Id == "cargo-fmt").Run, fmt.Run);
         Assert.Equal(Assert.Single(rustTaskGates, gate => gate.Id == "cargo-clippy").Run, clippy.Run);
     }
