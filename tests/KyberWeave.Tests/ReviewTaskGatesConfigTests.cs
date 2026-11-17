@@ -493,7 +493,9 @@ public sealed class ReviewTaskGatesConfigTests
     {
         IReadOnlyList<ReviewTaskGate> gates = RepositoryTaskGates()["test-dev"];
 
-        IReadOnlyList<ReviewTaskGate> rust = RepositoryTaskGates()["rust-dev"];
+        // test-dev keeps an agent-keyed entry because its work spans technologies, and aliases the
+        // gates the rust technology declares.
+        IReadOnlyList<ReviewTaskGate> rust = RepositoryTechnologyGates()["rust"];
         foreach (string id in new[] { "cargo-fmt", "cargo-clippy" })
         {
             ReviewTaskGate expected = Assert.Single(rust, gate => gate.Id == id);
