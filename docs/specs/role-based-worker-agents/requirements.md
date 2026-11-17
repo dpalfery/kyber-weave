@@ -4,7 +4,7 @@ title: Role-based worker agents requirements
 doc-type: requirements
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 component: KyberSquad
 documentation-impact: extends-component
 impact-components: [KyberSquad, ReviewCouncil, DocGraph, KyberArbiter]
@@ -24,7 +24,7 @@ keywords:
 
 **Phase status:** Approved
 
-Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed.
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed. Amended 2026-11-17 per the owner's decisions: the fourteen old agents are removed without a completed comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), the roster switch is gone, and `docs standards migrate` reshapes an existing standard instead of leaving its content unchanged.
 
 ## Introduction
 
@@ -58,7 +58,9 @@ Owner decisions made on 2026-11-16 that shape these requirements:
    `<name>.skills.md`, plus a machine rules file for the Arbiter. Role folders have the same four
    files. The plumbing for this was first planned on pull request 625; that plan is absorbed into
    this specification and the pull request is closed.
-11. **The old agents stay for now.** They remain selectable until the owner decides to remove them.
+11. **The old agents are removed (2026-11-17).** The comparison was not used to decide: the owner
+    removed the fourteen agents so that one roster ships, and anyone who wants the old ones
+    installs an older version ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
 8. **Standards are templates.** Kyber-Weave ships one template folder per technology, the community
    can submit more, and onboarding installs the ones the user picks.
 9. **One stored-file format.** Data files this work adds or changes are YAML, the task file
@@ -82,8 +84,9 @@ Terms used below:
 - **Task prompt**: the single text a worker receives for one task.
 - **Decision model**: the small model the Arbiter asks for judgement calls (JEV).
 - **Task gate**: a command a worker runs on its own change before it reports done.
-- **Worker roster**: the set of worker agents a run may dispatch. `technology` is today's set;
-  `tiered` is the new set.
+- **Worker roster**: the set of worker agents a run may dispatch. One ships: `tiered`, the three
+  developer agents by difficulty. `technology` named the per-technology set the removal deleted
+  (Requirement 12).
 
 The evidence behind each requirement is in the [design](design.md#evidence).
 
@@ -110,9 +113,8 @@ Copilot tool list; they SHALL differ only in name, description and model profile
 `review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent` and `docs-dev` SHALL
 stay, with unchanged names.
 
-1.6. WHEN the removal phase (Requirement 13) completes THEN the ten technology agents,
-`sql-database-architect`, `test-dev`, `azure-reader` and `github-devops` SHALL no longer be in the
-Squad source.
+1.6. THE ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader` and
+`github-devops` SHALL NOT be in the Squad source; they were removed on 2026-11-17 (Requirement 13).
 
 1.7. THE `architect` agent SHALL take over the schema and data-model planning
 `sql-database-architect` does today; writing SQL SHALL be developer-agent work.
@@ -271,12 +273,15 @@ standard that lacks one of the six headings, naming the folder and what is missi
 `shared-rules.md` and in each standard's Testing section.
 
 5.11. A host folder that still holds the standard as `README.md` SHALL keep working for at least two
-minor releases: it SHALL be read, and `docs validate` SHALL report a warning that names the
-migration command instead of an error.
+minor releases, and the warning period SHALL NOT block a run: `docs validate` SHALL report
+`KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`, `KW-DOC-SPEC-012` and `KW-DOC-SPEC-013` as warnings that
+name `kyber-weave docs standards migrate` and then `kyber-weave docs init`, not as errors.
 
 5.12. THE system SHALL provide a command that renames a host's existing standards files to the
-prefixed names and adds any of the four files that is missing, prints the change before writing,
-and changes no file content.
+prefixed names, adds any of the four files that is missing, and reshapes a standard whose own
+headings are not the six: each authored section SHALL become a subsection under the heading it best
+fits, and no authored text SHALL be dropped. It SHALL print every rename, addition and move before
+writing, and SHALL leave a standard already under the six headings byte for byte unchanged.
 
 5.13. THE documentation types SHALL include a skill type for `<name>.skills.md`, and a rules or
 skills document SHALL be allowed to name a technology or a role only when it sits in that
@@ -507,31 +512,34 @@ releases and SHALL report it as a warning that names the conversion command.
 
 11.5. THE task file SHALL be written as YAML.
 
-### Requirement 12: The old and new rosters can run side by side until removal
+### Requirement 12: One worker roster
 
-**User Story:** As the owner, I want to switch a run between today's agents and the new ones, so
-that I can compare them before the old ones are deleted.
+**User Story:** As the owner, I want one roster and no switch between rosters, so that the agents, the
+task gates and the documents describe one set of workers.
 
 #### Acceptance Criteria
 
-12.1. THE host configuration SHALL accept a `worker-roster` value of `technology` or `tiered`,
-defaulting to `technology` until the removal phase.
+12.1. THE host configuration SHALL accept `worker-roster: tiered` only; the value `technology` SHALL
+be a configuration error whose message names the removal, and an absent key SHALL mean `tiered`.
 
 12.2. THE task file SHALL record the roster it was written under, and every later reader SHALL take
-the run's roster from the task file.
+the run's roster from the task file; a file that records `technology` SHALL be read as the one roster
+with a warning (`KW-DOC-TASKS-019`).
 
-12.3. WHEN the roster is `technology` THEN a run SHALL behave as it does today, apart from the task
-prompt of Requirement 9, and no file that roster reads SHALL be removed before the removal phase.
+12.3. THE agent files of the per-technology roster SHALL NOT be in the Squad source, so no run SHALL
+dispatch a per-technology worker.
 
-12.4. THE delivery SHALL define a comparison procedure: the same approved plan run once per roster
-from the same base commit on the same harness.
+12.4. THE comparison procedure the two-roster design planned SHALL NOT be run; the runbook that
+describes it SHALL be marked superseded and kept for history.
 
-12.5. THE procedure SHALL record, per run: tasks completed, attempts per task and tier of each
-attempt, task-gate failures, review findings by severity, tokens and wall time.
+12.5. THE removal SHALL NOT wait for the measures that procedure would have recorded — tasks
+completed, attempts per task and the tier of each, task-gate failures, review findings by severity,
+tokens and wall time — because the owner's decision of 2026-11-17 did not rest on them
+([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
 
 12.6. AN agent SHALL be able to declare the roster it belongs to; an agent that declares none SHALL
-serve both. The fourteen agents to be removed SHALL declare `technology`, and the five new agents
-SHALL declare `tiered`.
+serve the one roster. The five new agents SHALL declare `tiered`, and an agent that declares
+`technology` SHALL be refused by name.
 
 ### Requirement 13: Removal has a migration path
 
@@ -540,8 +548,9 @@ period, so that my configuration does not silently stop gating.
 
 #### Acceptance Criteria
 
-13.1. THE removal phase SHALL start only after the comparison of Requirement 12 has been run and the
-owner has recorded the decision.
+13.1. THE removal SHALL rest on the owner's recorded decision: the owner removed the fourteen agents
+on 2026-11-17 without a completed comparison of Requirement 12
+([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
 
 13.2. A host's agent-keyed task-gate entries SHALL keep resolving for at least two minor releases
 after removal, through the shipped map of Requirement 10.3.
@@ -558,5 +567,6 @@ task's difficulty and SHALL report the substitution.
 13.6. A Squad update SHALL remove a removed agent's rendered files only when the lock records that
 the Squad wrote them and the host has not edited them.
 
-13.7. WHEN removal completes THEN `worker-roster` SHALL default to `tiered`, and the value
-`technology` SHALL be reported as an error that names this change.
+13.7. `worker-roster` SHALL be `tiered` and the default; the value `technology` SHALL be a
+configuration error that names this change, and a task file that records it SHALL be read as the one
+roster with a warning.
