@@ -489,6 +489,30 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     }
 
     [Fact]
+    public void AFolderRestatementOfAModelRuleIsRefusedAndTheModeKeepsShadow()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: KW-ARB-DIFFICULTY-001
+                trigger: delegate.model
+                question: "How hard is this task: easy, standard or hard?"
+                answers: [easy, standard, hard]
+                effects: { easy: retarget, standard: retarget, hard: retarget }
+                shadow: false
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic refusal = Assert.Single(findings, item => item.Subject == "KW-ARB-DIFFICULTY-001");
+        Assert.Equal(RuleValidator.SavingsValueInvalid, refusal.Code);
+        Assert.Equal(path, refusal.FilePath);
+        Assert.DoesNotContain(findings, item => item.Code == RuleValidator.ShadowOwnedByMode);
+        Assert.True(Assert.Single(rules, rule => rule.Id == "KW-ARB-DIFFICULTY-001").Shadow);
+        AssertShippedRules(rules);
+    }
+
+    [Fact]
     public void AFileNamingAnUnknownFactIsReportedAndTheShippedRulesAreUsed()
     {
         string path = WriteFolder("conductor", """

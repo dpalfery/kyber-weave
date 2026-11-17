@@ -528,7 +528,9 @@ arbiter:
 
 `arbiter.rules` is applied after every folder, so it wins over a folder declaration of the same
 rule. The two model rules are the exception: their shadow state belongs to
-`arbiter.model-targeting.mode`, and `shadow` on them is refused as `KW-ARB-CONFIG-014`.
+`arbiter.model-targeting.mode`. In `arbiter.rules`, `shadow` on either is refused as
+`KW-ARB-CONFIG-014`; in a folder file the mode overwrites it, and a folder restatement of a model
+rule is refused anyway because its `retarget` effects are reserved to shipped rules (`-015`).
 
 **Check the result.** Either route is reported and takes effect; no rule is locked, including the
 six that guard the tree and the run order. Run:
@@ -621,7 +623,8 @@ To move from shadow to enforce:
 2. Confirm the table exists for the harness: `kyber-weave arbiter doctor` must not raise
    `KW-ARB-MODEL-001`.
 3. Set `arbiter.model-targeting.mode: enforce` in the configuration. This is the only switch for the
-   two model rules; a per-rule `shadow` override on either fails `KW-ARB-CONFIG-014`.
+   two model rules: a per-rule `shadow` override on either in `arbiter.rules` fails
+   `KW-ARB-CONFIG-014`, and a folder file cannot set it either.
 4. Run `kyber-weave arbiter doctor` and `kyber-weave arbiter validate` to check the configuration.
 
 ### Reading the `tune` profile column

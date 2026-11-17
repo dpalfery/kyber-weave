@@ -620,9 +620,11 @@ Phase 1 shipped no rule in shadow. Phase 3 ships nine rules in shadow, listed un
 
 **Model-targeting switch.** `arbiter.model-targeting.mode` is `off`, `shadow` (the default) or
 `enforce`. It owns the shadow state of `KW-ARB-DIFFICULTY-001` and `KW-ARB-LADDER-001`. A `shadow`
-override on either one fails `KW-ARB-CONFIG-014`, so there is one switch to read. `off` disables both
-rules. `shadow` evaluates and logs them and delivers nothing. `enforce` lets a retarget reach the
-dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
+override on either one under `arbiter.rules` fails `KW-ARB-CONFIG-014`, and a folder file cannot
+set it either — its `retarget` effects are reserved to shipped rules (`-015`) — so there is one
+switch to read. `off`
+disables both rules. `shadow` evaluates and logs them and delivers nothing. `enforce` lets a
+retarget reach the dispatch. The mode also controls the `KW-ARB-MODEL-001` doctor check.
 
 ## Fail-safe points
 
