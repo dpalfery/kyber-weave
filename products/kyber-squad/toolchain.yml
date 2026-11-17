@@ -27,6 +27,7 @@ required-mcp-tools:
   kw-docs:
     - docs_answer_question_from_repo_documentation
     - docs_archive_plan_after_closeout_is_complete
+    - docs_build_task_prompt_for_agent_dispatch
     - docs_detect_drift_between_documents_and_code
     - docs_find_documents_citing_code_symbol
     - docs_finalize_approved_plan_and_write_task_file
