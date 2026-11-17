@@ -937,12 +937,13 @@ internal sealed class ReportedFindings
 internal static class PlanTaskFileProbe
 {
     /// <summary>The schema version this build reads.</summary>
-    internal const int SchemaVersion = 1;
+    internal const int SchemaVersion = 2;
 
     internal const string PlansFolder = "6-Docs/plans";
     internal const string PlanName = "2026-11-07-ready-tasks";
     internal const string PlanPath = PlansFolder + "/" + PlanName + ".md";
-    internal const string TaskFilePath = PlansFolder + "/" + PlanName + ".tasks.json";
+    internal const string TaskFilePath = PlansFolder + "/" + PlanName + ".tasks.yml";
+    internal const string LegacyTaskFilePath = PlansFolder + "/" + PlanName + ".tasks.json";
     internal const string PlanIndexPath = PlansFolder + "/README.md";
 
     /// <summary>This fixture's two tasks, the second depending on the first.</summary>
@@ -961,6 +962,13 @@ internal static class PlanTaskFileProbe
         ["tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs"];
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    private static readonly YamlDotNet.Serialization.ISerializer Yaml =
+        new YamlDotNet.Serialization.SerializerBuilder()
+            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.HyphenatedNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(YamlDotNet.Serialization.DefaultValuesHandling.OmitNull)
+            .WithIndentedSequences()
+            .Build();
 
     /// <summary>The test class every fixture prompt names, read from the type it names.</summary>
     internal static string TestClass => typeof(PlanTaskFileValidatorTests).FullName!;
@@ -1128,6 +1136,48 @@ internal static class PlanTaskFileProbe
             ["tasks"] = tasks
         };
 
+        return Yaml.Serialize(file);
+    }
+
+    /// <summary>The same task file in the JSON form an older release wrote, for the conversion tests.</summary>
+    internal static string LegacyJsonTaskFile(
+        string? planMarkdown = null,
+        int schemaVersion = 1,
+        string? edit = null,
+        string? missingPromptPart = null,
+        string? promptPrefix = null,
+        string? digest = null)
+    {
+        string plan = planMarkdown ?? PlanMarkdown();
+        List<Dictionary<string, object?>> tasks =
+        [
+            Row(
+                FirstTask,
+                "csharp-dev",
+                edit == "files" ? [FirstTaskFiles[0]] : FirstTaskFiles,
+                [],
+                Prompt(FirstTask, missingPromptPart, promptPrefix)),
+            Row(
+                SecondTask,
+                "test-dev",
+                SecondTaskFiles,
+                edit == "depends-on" ? [] : [FirstTask],
+                Prompt(SecondTask, missingPromptPart, promptPrefix))
+        ];
+
+        if (edit == "task")
+        {
+            tasks.RemoveAt(1);
+        }
+
+        Dictionary<string, object?> file = new(StringComparer.Ordinal)
+        {
+            ["schema-version"] = schemaVersion,
+            ["plan"] = PlanPath,
+            ["execution-digest"] = digest ?? ExecutionDigest(plan),
+            ["tasks"] = tasks
+        };
+
         return JsonSerializer.Serialize(file, JsonOptions);
     }
 
@@ -1229,7 +1279,8 @@ internal static class SpecTaskFileProbe
     internal const string SpecFolder = "6-Docs/specs/ready-feature";
     internal const string SpecIndexPath = "6-Docs/specs/README.md";
     internal const string TasksPath = SpecFolder + "/tasks.md";
-    internal const string TaskFilePath = SpecFolder + "/tasks.json";
+    internal const string TaskFilePath = SpecFolder + "/tasks.yml";
+    internal const string LegacyTaskFilePath = SpecFolder + "/tasks.json";
     internal const string DesignPath = SpecFolder + "/design.md";
 
     /// <summary>This fixture's two spec tasks, the second depending on the first.</summary>
@@ -1240,7 +1291,12 @@ internal static class SpecTaskFileProbe
     internal const string FirstTaskFile = "tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs";
     internal const string SecondTaskFile = "src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs";
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly YamlDotNet.Serialization.ISerializer Yaml =
+        new YamlDotNet.Serialization.SerializerBuilder()
+            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.HyphenatedNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(YamlDotNet.Serialization.DefaultValuesHandling.OmitNull)
+            .WithIndentedSequences()
+            .Build();
 
     /// <summary>A corpus holding the specification index, the spec folder and its four files.</summary>
     internal static DocFixture Corpus(string? tasksMarkdown = null)
@@ -1383,7 +1439,7 @@ internal static class SpecTaskFileProbe
             ["tasks"] = tasks
         };
 
-        return JsonSerializer.Serialize(file, JsonOptions);
+        return Yaml.Serialize(file);
     }
 
     /// <summary>

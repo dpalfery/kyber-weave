@@ -212,14 +212,14 @@ On a `FINALIZE` invocation carrying explicit approval, record that approval in t
 ```text
 STATUS: PLAN_FINALIZED
 PLAN_FILE: <saved path>
-TASK_FILE: <saved tasks.json path>
+TASK_FILE: <saved tasks.yml path>
 DOCS_VALIDATE: pass
 DOCS_DRIFT: pass
 ```
 
 ### Task file
 
-At finalization the architect saves the task file beside the plan, `<plan>.tasks.json` in the
+At finalization the architect saves the task file beside the plan, `<plan>.tasks.yml` in the
 directory named by **<plan-index>**, returns its path, and the finalize tool commits it with the plan.
 
 It carries a schema version, the plan's path, the execution digest, and one entry per task: id,

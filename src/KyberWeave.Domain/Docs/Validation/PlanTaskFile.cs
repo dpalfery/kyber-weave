@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>
-/// The task file beside a plan — <c>&lt;plan&gt;.tasks.json</c> — or beside a specification's
-/// <c>tasks.md</c> as <c>tasks.json</c>, as the architect writes it and <c>docs validate</c> reads it.
+/// The task file beside a plan — <c>&lt;plan&gt;.tasks.yml</c> — or beside a specification's
+/// <c>tasks.md</c> as <c>tasks.yml</c>, as the architect writes it and <c>docs validate</c> reads it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,7 +26,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// silently valid, because the version decides which fields exist.
 /// </param>
 /// <param name="Plan">
-/// The plan this file was written from, repository-relative. For a specification's <c>tasks.json</c>,
+/// The plan this file was written from, repository-relative. For a specification's <c>tasks.yml</c>,
 /// the specification's <c>tasks.md</c> path.
 /// </param>
 /// <param name="ExecutionDigest">

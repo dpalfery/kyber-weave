@@ -47,7 +47,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
 | `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
-| `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.json` beside a plan, `tasks.json` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.yml` beside a plan, `tasks.yml` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-006` | Error | The plan index claims an open plan that does not exist: a table row with a Draft, Ready, In progress or Blocked status whose plan file is gone, or a sentence outside the table that restates a plan's status, such as `` `Plan` (Draft) `` |
 
 ### Plan closeout — `docs closeout`
@@ -94,11 +94,11 @@ A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
 A plan's task file is the tracked file `kyber-weave docs tasks <plan> --write` derives at finalization so the conductor can
-dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. The command writes the schema version, plan path, execution digest and every task entry (kebab-case `id`, `capabilities`, `depends-on`, `files`, `session`, `prompt`, and `role` only when the plan task carries an explicit `Role:`, `Agent:` or `Specialist:` line); `capabilities` is the task's `Capabilities:` line, or an older plan's `Skills` names; `--check` exits `1` and names each difference. Nobody writes the file by hand, and every finding below names the command that fixes it, or the plan line to add first. (The merge-time rule
-`KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
+dispatch without reading the plan: `docs/plans/<plan>.tasks.yml` beside the plan. The command writes the schema version, plan path, execution digest and every task entry (kebab-case `id`, `capabilities`, `depends-on`, `files`, `session`, `prompt`, and `role` only when the plan task carries an explicit `Role:`, `Agent:` or `Specialist:` line); `capabilities` is the task's `Capabilities:` line, or an older plan's `Skills` names; `--check` exits `1` and names each difference. Nobody writes the file by hand, and every finding below names the command that fixes it, or the plan line to add first. (The merge-time rule
+`KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.yml` inside a specification.) The plan stays the
 authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
 that cannot be acted on, or a leftover copy of the file. All seven run in `docs validate` and in `docs_validate_governed_document_schema`, not
-behind a flag, because the orchestrator has the docs tools and no shell. Rules `-001` to `-006` also check a specification's `<spec-folder>/tasks.json` against its `tasks.md`; its `plan` field holds that path, and a specification is Ready for `-006` when `tasks.md` carries the spec Ready line.
+behind a flag, because the orchestrator has the docs tools and no shell. Rules `-001` to `-006` also check a specification's `<spec-folder>/tasks.yml` against its `tasks.md`; its `plan` field holds that path, and a specification is Ready for `-006` when `tasks.md` carries the spec Ready line.
 
 | Id | Severity | Meaning |
 |---|---|---|
@@ -108,13 +108,14 @@ behind a flag, because the orchestrator has the docs tools and no shell. Rules `
 | `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria. `docs tasks` also reports it, for the plan task, naming the line to add (`Command: ` backticked program and argument, `Acceptance criteria: ...`, or `Capabilities: ...` when the task says neither what abilities it needs nor which agent runs it) |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
 | `KW-DOC-TASKS-006` | Warning | A Ready plan or specification task list has no task file beside it. Advisory: it never fails a merge, because every plan or specification task list sits in that state until its architect or product-owner writes one |
-| `KW-DOC-TASKS-007` | Error / Warning | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.json.new` or `.tmp`, with or without its plan beside it. The name selects the file and its content decides: its top-level JSON keys must include the task file's `execution-digest`, or `schema-version` beside `plan` or `tasks` (a file that cannot be read is reported). Error for a copy. Names ending in `.tasks.json` are `KW-DOC-LIFECYCLE-005`'s. Warning, same code, when `plan-index` names no plans folder (a root-level file), because nothing was checked, and when a plans subfolder cannot be read |
+| `KW-DOC-TASKS-007` | Error / Warning | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.yml.new` or `.tmp`, with or without its plan beside it. The name selects the file and its content decides: its top-level YAML keys must include the task file's `execution-digest`, or `schema-version` beside `plan` or `tasks` (a file that cannot be read is reported). Error for a copy. Names ending in `.tasks.yml` are `KW-DOC-LIFECYCLE-005`'s. Warning, same code, when `plan-index` names no plans folder (a root-level file), because nothing was checked, and when a plans subfolder cannot be read |
 | `KW-DOC-TASKS-008` | Warning | A task's packet cannot carry content it depends on: it cites a decision with no row in the plan's Decisions table, refers to the test contract with no row for the task, or cites more plan content than the 6,000-character packet budget (the finding names what was left out). The hint gives an example row to add |
 | `KW-DOC-TASKS-009` | Warning | A task says "see above", "as described in the plan" or the like without naming a decision, contract row or section the packet carries. A worker cannot open the plan, so the detail must be stated in the task or cited by id or heading |
 | `KW-DOC-TASKS-010` | Retired | Formerly: a test-authoring task ordered before the task that creates the production file its tests name. Retired 2026-11-13: one worker writes a test-first task's tests and code ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)) |
 | `KW-DOC-TASKS-011` | Warning | `docs tasks --check` only, when a model key is configured (skipped with an info line otherwise): the Arbiter model, asked once per packet, answers with at least 0.8 confidence that a developer reading only the packet lacks the files, behaviour, tests or command. The finding names the missing element |
 | `KW-DOC-TASKS-012` | Info | `docs tasks` (write and check): an entry in a task's files that is not a repository path (a URL, a call such as `page.goto('/')`, a route like `/api/drivers`, or a pattern with no folder name before its wildcard) was left out of the task's file scope. The message lists what was dropped. The overlap check and diff attribution use the kept entries only. The entry's text alone decides: whether the path or its folder exists yet makes no difference, so the same plan always gives the same file list |
 | `KW-DOC-TASKS-013` | Error | `docs tasks` (write, check and preview) and the finalize step: a task's files name a path under the scratch folder `.agent_scratchpad/`. That folder is git-ignored and every worker may write there, so it is never a task's file scope, and no task file is written. The message lists the entries to take out of the task's Files list |
+| `KW-DOC-TASKS-014` | Warning | The task file is in the JSON form an older release wrote. It is read for two minor releases; the hint names `kyber-weave docs tasks <plan> --convert`, which rewrites it as YAML. |
 | `KW-DOC-TASKS-CLI-002` | Error | `docs packet` with no `--plan`: several plans are Ready or In progress (the finding lists each; pass `--plan <one of them>`), or none is in this checkout and no other git worktree of the repository has an active plan with the task (the finding names the directory searched), or several worktrees do (the finding lists each `cd <worktree> && kyber-weave docs packet <id>`). A worker with none reports the finding and stops |
 | `KW-DOC-TASKS-CLI-003` | Error | `docs packet`: the task id matches no task, or several. The finding lists the plan's task ids. Ids are accepted as `T1`, `t1`, `task 1`, `Task-1` or `1` |
 | `KW-DOC-TASKS-CLI-004` | Error | `docs packet`: the task file is missing or no longer matches its plan (the stale-digest and difference findings are printed with it). No packet is printed; run `kyber-weave docs tasks <plan> --write` and again |
@@ -124,7 +125,7 @@ behind a flag, because the orchestrator has the docs tools and no shell. Rules `
 
 `KW-DOC-LIFECYCLE-005` in the table above is the merge-time half: the commit that archives a plan
 removes the file, and the walk looks under the archive too, so a specification folder that carried
-its `tasks.json` into the archive is caught rather than kept as dead weight.
+its `tasks.yml` into the archive is caught rather than kept as dead weight.
 
 ### Drift — `docs drift`
 

@@ -41,11 +41,14 @@ public sealed class OpenWorkValidator
 
     private const string FolderIndexName = "README.md";
 
-    // The task file a specification folder carries is `tasks.json`; a plan's is
-    // `<plan>.tasks.json` beside the plan. Both names are left behind the same way.
-    private const string FolderTaskFileName = "tasks.json";
-    private const string PlanTaskFileSuffix = ".tasks.json";
-    private const string JsonSearchPattern = "*.json";
+    // The task file a specification folder carries is `tasks.yml`; a plan's is
+    // `<plan>.tasks.yml` beside the plan. The JSON names an older release wrote are left behind
+    // the same way and are still recognised while they are read.
+    private const string FolderTaskFileName = "tasks.yml";
+    private const string LegacyFolderTaskFileName = "tasks.json";
+    private const string PlanTaskFileSuffix = ".tasks.yml";
+    private const string LegacyPlanTaskFileSuffix = ".tasks.json";
+    private static readonly string[] TaskFileSearchPatterns = ["*.json", "*.yml"];
 
     private static readonly (string Property, string Kind, string ArchiveFolder, DocType[] WorkTypes)[] Inventories =
     [
@@ -142,11 +145,14 @@ public sealed class OpenWorkValidator
             if (!_files.DirectoryExists(docsRoot))
                 continue;
 
-            foreach (string file in _files.EnumerateContainedFiles(docsRoot, JsonSearchPattern))
+            foreach (string pattern in TaskFileSearchPatterns)
+            foreach (string file in _files.EnumerateContainedFiles(docsRoot, pattern))
             {
                 string name = Path.GetFileName(file);
                 if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)
-                    && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+                    && !name.Equals(LegacyFolderTaskFileName, StringComparison.OrdinalIgnoreCase)
+                    && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+                    && !name.EndsWith(LegacyPlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }

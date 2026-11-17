@@ -45,26 +45,27 @@ public sealed class DocsTasksCommand(
     public override int Execute(CommandContext context, DocsTasksSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (settings.List && (settings.Write || settings.Check))
+        if (settings.List && (settings.Write || settings.Check || settings.Convert))
         {
             report.Add(new Diagnostic(
                 ConflictingModes,
                 Severity.Error,
-                "--list cannot be used with --write or --check.",
+                "--list cannot be used with --write, --check or --convert.",
                 "docs tasks",
-                Hint: "Run --list alone to see the tasks, or --check or --write alone."));
+                Hint: "Run --list alone to see the tasks, or --check, --write or --convert alone."));
             CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
             return 1;
         }
 
-        if (settings.Write && settings.Check)
+        if ((settings.Write && settings.Check)
+            || (settings.Convert && (settings.Write || settings.Check)))
         {
             report.Add(new Diagnostic(
                 ConflictingModes,
                 Severity.Error,
-                "--write and --check cannot be used together.",
+                "--write, --check and --convert ask for different things and cannot be combined.",
                 "docs tasks",
-                Hint: "Run --check to see what differs, then --write to fix it."));
+                Hint: "Run --check to see what differs, --write to fix it, or --convert to replace a JSON file."));
             CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
             return 1;
         }
@@ -92,10 +93,13 @@ public sealed class DocsTasksCommand(
 
         PlanTaskFileMode mode = settings.Write ? PlanTaskFileMode.Write
             : settings.Check ? PlanTaskFileMode.Check
+            : settings.Convert ? PlanTaskFileMode.Convert
             : PlanTaskFileMode.Preview;
 
         // Only a write may ask the decision model to pick each task's agent; check and preview keep the picks on disk.
-        using IPlanTaskAgentPicker? picker = mode == PlanTaskFileMode.Write ? pickers.ForConfig(effective) : null;
+        using IPlanTaskAgentPicker? picker = mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert
+            ? pickers.ForConfig(effective)
+            : null;
         PlanTaskFileOutcome outcome = tasks.Run(root, effective, relative, mode, picker);
         report.AddRange(outcome.Report.Items);
 
@@ -130,7 +134,7 @@ public sealed class DocsTasksCommand(
             {
                 Console.Out.Write(outcome.Json);
             }
-            else if (mode == PlanTaskFileMode.Write)
+            else if (mode is PlanTaskFileMode.Write or PlanTaskFileMode.Convert)
             {
                 AnsiConsole.MarkupLine(
                     outcome.Wrote

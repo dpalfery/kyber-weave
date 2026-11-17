@@ -34,7 +34,7 @@ Closeout explicitly distinguishes between two waiver categories:
 - **ADR Waiver**: Permitted when decisions refine existing architecture, adhere to established patterns, or represent implementation details that do not warrant a lasting architectural record. The inventory and plan must state `no ADR — ADR waiver: <reason>`.
 - **Documentation Waiver**: Permitted ONLY when an item is purely transient, historical, or test-fixture scoped with zero surviving architectural, operational, or behavioral invariants that future engineers or agents need to consult. "No ADR" is NOT a documentation waiver. "No existing doc describes it" is explicitly rejected as an invalid documentation waiver: canonical documentation must be created or updated.
 
-A plan delivered by a conductor may carry a tracked task file, `docs/plans/<plan>.tasks.json`,
+A plan delivered by a conductor may carry a tracked task file, `docs/plans/<plan>.tasks.yml`,
 written at finalization (by the conductor's `docs_finalize_approved_plan_and_write_task_file` tool, or
 `kyber-weave docs finalize`) and committed with the plan at once. Each task carries its
 id, the capabilities it needs, dependencies, file scope, a `session` group and the full prompt (plus a
@@ -53,14 +53,14 @@ flip or a Decisions edit does not mark it stale while any task edit does. A file
 with its plan, a stale digest, a prompt without a command or acceptance criteria, and a prompt
 that tells a worker to open a plan each fail validation (`KW-DOC-TASKS-002` to `-005`). A malformed
 or wrong-schema file fails `-001`, and a Ready plan with no file warns `-006`. The architect runs
-`kyber-weave docs tasks <plan> --write` after its last plan edit, which derives the file and its digest from the plan, in place, and never writes either by hand (`--check` reports what differs); a copy left beside it under another name, such as `<plan>.tasks.json.new`, fails `-007`.
+`kyber-weave docs tasks <plan> --write` after its last plan edit, which derives the file and its digest from the plan, in place, and never writes either by hand (`--check` reports what differs); a copy left beside it under another name, such as `<plan>.tasks.yml.new`, fails `-007`.
 
 The task file is transient. Closeout removes it with `git rm` in the same commit that archives the
 plan, so it never reaches `main` — this repository squash merges, and nothing durable is lost
 because the archived plan keeps the decisions, tasks and test contract while the pull request's
 commits stay reachable. A task file left behind fails `docs validate --merge-ready` with
 `KW-DOC-LIFECYCLE-005`, which looks under `docs/archive/` too, so a specification folder moved with
-its `tasks.json` is caught rather than carried as dead weight.
+its `tasks.yml` is caught rather than carried as dead weight.
 
 ## Active Plans
 

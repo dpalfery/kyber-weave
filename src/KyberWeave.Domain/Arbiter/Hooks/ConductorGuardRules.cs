@@ -59,7 +59,7 @@ internal static partial class ConductorGuardRules
 
     // A plans/specs/todo segment can also name project code (web/specs/login.spec.ts), so outside the
     // configured planning directories only plan documents and their task files are readable.
-    internal static readonly string[] ContractExtensions = [".md", ".json"];
+    internal static readonly string[] ContractExtensions = [".md", ".json", ".yml", ".yaml"];
 
     /// <summary>Whether the call is permitted by its name alone: the conductor's own tools, the docs and Arbiter servers, and the allowed server.</summary>
     internal static bool IsPermittedByName(ToolCall call, string? allowedMcpServer) =>

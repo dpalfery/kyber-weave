@@ -150,7 +150,7 @@ internal static class CliApplication
 
                 docs.AddCommand<DocsTasksCommand>("tasks")
                     .WithDescription(
-                        "Derive a plan's task file (<plan>.tasks.json) and its execution digest from the plan; write or check it (KW-DOC-TASKS-*).")
+                        "Derive a plan's task file (<plan>.tasks.yml) and its execution digest from the plan; write or check it (KW-DOC-TASKS-*).")
                     .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--write")
                     .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--check");
 

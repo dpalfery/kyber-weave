@@ -88,7 +88,7 @@ public sealed partial class PlanTaskFileValidator
 
     /// <summary>
     /// Reports each file in the plans folder whose name is a copy of the task file, such as
-    /// <c>&lt;plan&gt;.tasks.json.new</c>.
+    /// <c>&lt;plan&gt;.tasks.yml.new</c>.
     /// </summary>
     /// <remarks>
     /// The walk runs over the folder rather than per plan. A sidecar is picked by its name and confirmed
@@ -179,8 +179,9 @@ public sealed partial class PlanTaskFileValidator
         // A name that ends in the task file's suffix is the task file itself, or a file
         // KW-DOC-LIFECYCLE-005 already reports; this rule takes only what that one leaves.
         string name = Path.GetFileName(file);
-        if (!name.Contains(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+        if (!name.Contains(".tasks.", StringComparison.OrdinalIgnoreCase)
             || name.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith(LegacyTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
             || !LooksLikeTaskFile(file))
         {
             return;
@@ -190,11 +191,11 @@ public sealed partial class PlanTaskFileValidator
             SidecarTaskFile,
             Severity.Error,
             $"'{relative}' is a copy of a task file left beside it: the conductor reads only " +
-            "'<plan>.tasks.json', so this file is dead weight that the merge would carry.",
+            "'<plan>.tasks.yml', so this file is dead weight that the merge would carry.",
             relative,
             relative,
             Hint: "Delete it. If a live plan still needs its task file, run " +
-            "'kyber-weave docs tasks <plan> --write', which writes it in place at '<plan>.tasks.json'."));
+            "'kyber-weave docs tasks <plan> --write', which writes it in place at '<plan>.tasks.yml'."));
     }
 
     /// <summary>
@@ -234,6 +235,20 @@ public sealed partial class PlanTaskFileValidator
     /// </summary>
     private static bool HasSchemaKey(ReadOnlySpan<byte> head)
     {
+        string text = System.Text.Encoding.UTF8.GetString(head);
+        int first = 0;
+        while (first < text.Length && char.IsWhiteSpace(text[first])) first++;
+        if (first >= text.Length || text[first] != '{')
+        {
+            // YAML: a top-level schema key is enough to prove the shape, because a copy of a task
+            // file opens with the keys it was written with.
+            bool schema = head.IndexOf("schema-version:"u8) >= 0;
+            bool digest = head.IndexOf("execution-digest:"u8) >= 0;
+            bool yamlPlanOrTasks = head.IndexOf("\nplan:"u8) >= 0 || head.IndexOf("\n  tasks:"u8) >= 0
+                || head.IndexOf("\ntasks:"u8) >= 0;
+            return digest || (schema && yamlPlanOrTasks);
+        }
+
         Utf8JsonReader reader = new(head, isFinalBlock: false, state: default);
         bool schemaVersion = false;
         bool planOrTasks = false;
@@ -275,6 +290,17 @@ public sealed partial class PlanTaskFileValidator
     {
         PlanDocument parsed = PlanDocumentParser.Parse(artifact.RawMarkdown);
         string taskFile = TaskFilePath(artifact);
+        string? legacyTaskFile = LegacyTaskFilePathFor(
+            artifact.RelativePath, IsSpecTaskList(artifact));
+        bool legacy = false;
+
+        if (!_files.IsContainedFile(_repoRoot, taskFile, _config.Ontology.DocsRoots)
+            && legacyTaskFile is not null
+            && _files.IsContainedFile(_repoRoot, legacyTaskFile, _config.Ontology.DocsRoots))
+        {
+            taskFile = legacyTaskFile;
+            legacy = true;
+        }
 
         if (!_files.IsContainedFile(_repoRoot, taskFile, _config.Ontology.DocsRoots))
         {
@@ -299,7 +325,35 @@ public sealed partial class PlanTaskFileValidator
             return;
         }
 
-        if (file!.SchemaVersion != SchemaVersion)
+        if (legacy)
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.LegacyJsonTaskFile,
+                Severity.Warning,
+                $"The task file '{taskFile}' is in the JSON form an older release wrote.",
+                artifact.RelativePath,
+                taskFile,
+                Hint: $"Run {TaskFileCommand.Convert(artifact.RelativePath)} to rewrite it as " +
+                $"'{TaskFilePath(artifact)}'."));
+        }
+
+        if (file!.SchemaVersion == PlanTaskFileRules.LegacySchemaVersion)
+        {
+            // Version 1 is the older release's schema. It loads; the conversion warning above (or
+            // this one for a version-1 YAML file) is the only finding it raises.
+            if (!legacy)
+            {
+                report.Add(new Diagnostic(
+                    PlanTaskFileRules.LegacyJsonTaskFile,
+                    Severity.Warning,
+                    $"The task file '{taskFile}' declares schema version {file.SchemaVersion}; this build writes " +
+                    $"version {SchemaVersion}.",
+                    artifact.RelativePath,
+                    taskFile,
+                    Hint: $"Run {TaskFileCommand.Write(artifact.RelativePath)} to rewrite it at the current version."));
+            }
+        }
+        else if (file.SchemaVersion != SchemaVersion)
         {
             report.Add(new Diagnostic(
                 Malformed,
@@ -354,15 +408,16 @@ public sealed partial class PlanTaskFileValidator
         file = null;
         try
         {
-            string json = _files.ReadAllTextBounded(FullPath(taskFile));
-            file = JsonSerializer.Deserialize<PlanTaskFile>(json, PlanTaskFileJson.ReadOptions);
+            string text = _files.ReadAllTextBounded(FullPath(taskFile));
+            file = PlanTaskFileFormat.Deserialize(taskFile, text);
         }
-        catch (JsonException exception)
+        catch (Exception exception) when (exception is JsonException
+            || exception is YamlDotNet.Core.YamlException)
         {
             report.Add(new Diagnostic(
                 Malformed,
                 Severity.Error,
-                $"Task file '{taskFile}' is not the JSON this rule reads: {exception.Message}",
+                $"Task file '{taskFile}' is not a JSON or YAML task file this rule reads: {exception.Message}",
                 taskFile,
                 taskFile,
                 Hint: $"Do not repair the file by hand. Run {TaskFileCommand.Write(artifactPath)}: it rewrites the whole file from the plan."));

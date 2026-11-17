@@ -146,8 +146,9 @@ public sealed class PlanFinalizeTests
 
     [Theory]
     [InlineData("""{"schema-version":1,"tasks":[]}""", "(no tasks)")]
+    [InlineData("{ schema-version: 2, tasks: [] }", "(no tasks)")]
     [InlineData("""{"tasks":[]}""", null)]
-    [InlineData("""{"schema-version":2,"tasks":[]}""", null)]
+    [InlineData("""{"schema-version":2,"tasks":[]}""", "(no tasks)")]
     [InlineData("""{"version":1}""", null)]
     [InlineData("""{"schema-version":1}""", null)]
     [InlineData("""{"schema-version":1,"tasks":null}""", null)]

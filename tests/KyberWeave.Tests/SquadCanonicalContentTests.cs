@@ -1047,7 +1047,7 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// A specification's task file lives in the specification folder
-    /// (<c>&lt;spec-folder&gt;/tasks.json</c>), removed before the folder is moved to the archive,
+    /// (<c>&lt;spec-folder&gt;/tasks.yml</c>), removed before the folder is moved to the archive,
     /// so the closeout the owner text describes and the rule that catches a leftover file agree.
     /// </summary>
     [Fact]
@@ -1066,11 +1066,11 @@ public sealed class SquadCanonicalContentTests
         ];
 
         string? carrier = surfaces.FirstOrDefault(
-            surface => File.ReadAllText(surface).Contains("<spec-folder>/tasks.json", StringComparison.Ordinal));
+            surface => File.ReadAllText(surface).Contains("<spec-folder>/tasks.yml", StringComparison.Ordinal));
 
         Assert.True(
             carrier is not null,
-            "the product-owner text must name `<spec-folder>/tasks.json` as the specification form of the " +
+            "the product-owner text must name `<spec-folder>/tasks.yml` as the specification form of the " +
             "tracked task file. Searched: " + string.Join(", ", surfaces));
     }
 
