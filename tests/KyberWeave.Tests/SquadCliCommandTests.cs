@@ -22,7 +22,18 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadCliCommandTests : IDisposable
 {
+    /// <summary>
+    /// This class's prepared installs, built on the first constructor call so no test body runs one.
+    /// </summary>
+    private static readonly Lazy<PreparedCases> Prepared = new(BuildPreparedCases);
+
     private readonly TempDirectory _temp = new();
+
+    /// <summary>Builds every prepared install before the first test body, so a test only reads a record or a copy.</summary>
+    public SquadCliCommandTests()
+    {
+        _ = Prepared.Value;
+    }
 
     public void Dispose() => _temp.Dispose();
 
@@ -668,26 +679,17 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public async Task Doctor_GlobalScope_CleanInstall_ReportsNoUnmanagedCollisions()
     {
+        PreparedGlobalInstall prepared = Prepared.Value.GlobalCursorInstall;
+        Assert.Equal(0, prepared.Record.ExitCode);
+
+        // The install itself is not this test's subject: it needs a clean global deployment of Cursor to
+        // edit, so it copies the run-wide prepared install into its own home and re-roots it there.
         string tempHome = Path.Combine(_temp.Path, "doctor-clean-install-home");
-        Directory.CreateDirectory(tempHome);
         string userHome = Path.Combine(_temp.Path, "doctor-clean-install-user");
         FakeUserPaths userPaths = new(userHome);
+        prepared.CopyInto(tempHome, userPaths);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         SquadStateStore stateStore = new(userPaths);
-        using CorpusSquadReleaseSource releaseSource = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
-            releaseSource,
-            SquadHostDefaults.ResolveRenderer(),
-            stateStore,
-            globalRoots: globalRoots);
-
-        SquadLifecycleResult installResult = await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: KyberWeaveTestPaths.ToolRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [SquadTarget.Cursor],
-            Version: "1.2.3"));
-
-        Assert.True(installResult.Success);
 
         // Simulate a file recorded in the receipt whose bytes differ from the local source render
         // (the authoritative repro in issue #283: receipt-managed file flagged as unmanaged by doctor)
@@ -1263,60 +1265,22 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Install_WhenToolchainUnreleased_FailsClosedWithExitOne()
     {
-        string targetDir = Path.Combine(_temp.Path, "install-target");
-        Directory.CreateDirectory(targetDir);
+        PreparedCommandRun prepared = Prepared.Value.ProjectInstallUnreleasedToolchain;
 
-        FakeUserPaths userPaths = new FakeUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadInstallCommand command = SquadTestCommands.Install(userPaths);
-
-        CommandExecution execution = Capture(() => command.Execute(
-            null!,
-            new SquadInstallSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = false,
-                DryRun = false,
-                Adopt = false
-            }));
-
-        Assert.Equal(1, execution.ExitCode);
-        Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, prepared.Record.ExitCode);
+        Assert.Contains("error", prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
         // Ensure no target files or state were written
-        Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        Assert.False(Directory.Exists(Path.Combine(prepared.TargetRoot, ".kyber-weave")));
     }
 
     [Fact]
     public void Install_WhenCollaboratorsInjected_SucceedsWithExitZero()
     {
-        string targetDir = Path.Combine(_temp.Path, "install-success-target");
-        Directory.CreateDirectory(targetDir);
+        PreparedCommandRun prepared = Prepared.Value.ProjectInstallWithCollaborators;
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
-
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
-
-        CommandExecution execution = Capture(() => command.Execute(
-            null!,
-            new SquadInstallSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = false,
-                DryRun = false,
-                Adopt = false
-            }));
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("Successfully installed", execution.Output, StringComparison.OrdinalIgnoreCase);
-        string homeState = HomeProjectStateDirectory(userPaths, targetDir);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains("Successfully installed", prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        string homeState = prepared.HomeStateDirectory;
         Assert.True(Directory.Exists(homeState));
         Assert.True(File.Exists(Path.Combine(homeState, "squad.lock.yml")));
         Assert.True(File.Exists(Path.Combine(homeState, "squad.receipt.json")));
@@ -1325,34 +1289,11 @@ public sealed class SquadCliCommandTests : IDisposable
     [Fact]
     public void Install_DryRun_ReportsPlannedFilesWithoutModifyingFilesystem()
     {
-        string targetDir = Path.Combine(_temp.Path, "install-dryrun-target");
-        Directory.CreateDirectory(targetDir);
+        PreparedCommandRun prepared = Prepared.Value.ProjectDryRun;
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
-
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
-
-        CommandExecution execution = Capture(() => command.Execute(
-            null!,
-            new SquadInstallSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = false,
-                DryRun = true,
-                Adopt = false
-            }));
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("Dry-run", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains("Dry-run", prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.False(Directory.Exists(Path.Combine(prepared.TargetRoot, ".kyber-weave")));
     }
 
     [Theory]
@@ -1953,6 +1894,149 @@ public sealed class SquadCliCommandTests : IDisposable
         return new CommandExecution(execution.Result, execution.Output);
     }
 
+    /// <summary>
+    /// Builds every prepared install this class reads, before the first test body. Each runs the same
+    /// command or lifecycle the test that reads it used to run itself, and is never written again.
+    /// </summary>
+    private static PreparedCases BuildPreparedCases()
+    {
+        const string Case = "squad-cli-command";
+        string globalKey = SquadInstallRecipe.Key(
+            "install",
+            SquadDeploymentScope.Global,
+            [SquadTarget.Cursor],
+            ("case", Case),
+            ("release", "corpus"),
+            ("version", "1.2.3"));
+        string collaboratorsKey = SquadInstallRecipe.Key(
+            "install",
+            SquadDeploymentScope.Project,
+            [SquadTarget.Codex],
+            ("case", Case),
+            ("release", "fake"),
+            ("renderer", "fake"),
+            ("dry-run", null));
+        string dryRunKey = SquadInstallRecipe.Key(
+            "install",
+            SquadDeploymentScope.Project,
+            [SquadTarget.Codex],
+            ("case", Case),
+            ("release", "fake"),
+            ("renderer", "fake"),
+            ("dry-run", "true"));
+        string unreleasedKey = SquadInstallRecipe.Key(
+            "install",
+            SquadDeploymentScope.Project,
+            [SquadTarget.Codex],
+            ("case", Case),
+            ("release", "unreleased-toolchain"),
+            ("dry-run", null));
+
+        return new PreparedCases(
+            PreparedSquadInstalls.Get(globalKey, () => BuildGlobalCursorInstall(globalKey)),
+            PreparedSquadInstalls.Get(
+                collaboratorsKey,
+                () => BuildProjectInstall(collaboratorsKey, dryRun: false, unreleasedToolchain: false)),
+            PreparedSquadInstalls.Get(
+                dryRunKey,
+                () => BuildProjectInstall(dryRunKey, dryRun: true, unreleasedToolchain: false)),
+            PreparedSquadInstalls.Get(
+                unreleasedKey,
+                () => BuildProjectInstall(unreleasedKey, dryRun: false, unreleasedToolchain: true)));
+    }
+
+    /// <summary>The real global Cursor install the doctor collision test edits, in a home of its own.</summary>
+    private static PreparedGlobalInstall BuildGlobalCursorInstall(string key)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string anchor = Path.Combine(directory.Path, "anchor");
+            string globalHome = Path.Combine(directory.Path, "global-home");
+            FakeUserPaths userPaths = new(Path.Combine(directory.Path, "user-paths"));
+            Directory.CreateDirectory(anchor);
+            Directory.CreateDirectory(globalHome);
+            Directory.CreateDirectory(userPaths.ApplicationDataDirectory);
+
+            SquadStateStore stateStore = new(userPaths);
+            SquadGlobalRoots globalRoots = new(_ => null, globalHome);
+            using CorpusSquadReleaseSource releaseSource = new();
+            SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
+                releaseSource,
+                SquadHostDefaults.ResolveRenderer(),
+                stateStore,
+                globalRoots: globalRoots);
+
+            SquadLifecycleResult result = service.InstallAsync(new SquadInstallRequest(
+                TargetRoot: anchor,
+                Scope: SquadDeploymentScope.Global,
+                Targets: [SquadTarget.Cursor],
+                Version: "1.2.3")).GetAwaiter().GetResult();
+
+            PreparedGlobalInstall prepared = new(
+                key,
+                directory,
+                globalHome,
+                userPaths.ApplicationDataDirectory,
+                userPaths.HomeDirectory,
+                SquadInstallRecord.FromLifecycle(result, exitCode: result.Success ? 0 : 1));
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// One real project install through <see cref="SquadInstallCommand"/>: the collaborators-injected
+    /// install, its dry run, or the install that refuses before writing because the toolchain is unreleased.
+    /// </summary>
+    private static PreparedCommandRun BuildProjectInstall(string key, bool dryRun, bool unreleasedToolchain)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string targetDir = Path.Combine(directory.Path, "target");
+            Directory.CreateDirectory(targetDir);
+            FakeUserPaths userPaths = new(Path.Combine(directory.Path, "user-home"));
+            SquadStateStore stateStore = new(userPaths);
+            using FakeSquadReleaseSource? releaseSource = unreleasedToolchain ? null : new FakeSquadReleaseSource();
+            FakeSquadRenderer? renderer = unreleasedToolchain ? null : new FakeSquadRenderer();
+
+            SquadInstallCommand command = SquadTestCommands.Install(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                releaseSource: releaseSource,
+                renderer: renderer);
+
+            CommandExecution execution = Capture(() => command.Execute(
+                null!,
+                new SquadInstallSettings
+                {
+                    Path = targetDir,
+                    Targets = ["codex"],
+                    Global = false,
+                    DryRun = dryRun,
+                    Adopt = false
+                }));
+
+            PreparedCommandRun prepared = new(
+                key,
+                directory,
+                execution,
+                targetDir,
+                HomeProjectStateDirectory(userPaths, targetDir));
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
     private static string RepositoryRoot([CallerFilePath] string sourcePath = "") =>
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
 
@@ -2104,6 +2188,83 @@ public sealed class SquadCliCommandTests : IDisposable
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);
+
+    /// <summary>Every prepared install this class reads, built once for the run before the first test body.</summary>
+    private sealed record PreparedCases(
+        PreparedGlobalInstall GlobalCursorInstall,
+        PreparedCommandRun ProjectInstallWithCollaborators,
+        PreparedCommandRun ProjectDryRun,
+        PreparedCommandRun ProjectInstallUnreleasedToolchain);
+
+    /// <summary>One real global install, built at most once for the run, that a test copies into its own home.</summary>
+    private sealed class PreparedGlobalInstall(
+        string key,
+        TempDirectory directory,
+        string globalHome,
+        string userPathsDirectory,
+        string homeDirectory,
+        SquadInstallRecord record) : PreparedSquadInstall(key, directory, record)
+    {
+        /// <summary>The home the install resolved every target's global root beneath.</summary>
+        public string GlobalHome { get; } = globalHome;
+
+        /// <summary>The application data directory the install recorded its state beneath.</summary>
+        public string UserPathsDirectory { get; } = userPathsDirectory;
+
+        /// <summary>The home directory the install recorded as the owner of its global state.</summary>
+        public string HomeDirectory { get; } = homeDirectory;
+
+        /// <summary>
+        /// Copies the deployment and its state into a test's own home and re-roots both recorded roots, so
+        /// the copy is a faithful install at its new root for the doctor scan that follows.
+        /// </summary>
+        /// <param name="home">The test's home the global roots resolve beneath.</param>
+        /// <param name="userPaths">The test's fake user paths, which place the state.</param>
+        public void CopyInto(string home, FakeUserPaths userPaths)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(home);
+            ArgumentNullException.ThrowIfNull(userPaths);
+
+            SquadInstallCopy.Tree(GlobalHome, home);
+            SquadInstallCopy.Tree(UserPathsDirectory, userPaths.ApplicationDataDirectory);
+
+            SquadStateStore store = new(userPaths);
+            string stateDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad");
+            SquadInstallCopy.ReRoot(
+                stateDirectory,
+                SquadInstallCopy.Canonical(HomeDirectory),
+                SquadInstallCopy.Canonical(userPaths.HomeDirectory));
+            SquadInstallCopy.ReRoot(
+                stateDirectory,
+                SquadInstallCopy.Canonical(GlobalHome),
+                SquadInstallCopy.Canonical(home));
+            _ = SquadInstallCopy.ReRootDeployed(
+                home,
+                store.ResolveReceiptPath(home, SquadDeploymentScope.Global),
+                store,
+                SquadInstallCopy.Canonical(GlobalHome),
+                SquadInstallCopy.Canonical(home));
+        }
+    }
+
+    /// <summary>One real command run, built at most once for the run, that a test reads as a record.</summary>
+    private sealed class PreparedCommandRun(
+        string key,
+        TempDirectory directory,
+        CommandExecution execution,
+        string targetRoot,
+        string homeStateDirectory) : PreparedSquadInstall(key, directory, new SquadInstallRecord
+        {
+            ExitCode = execution.ExitCode,
+            StandardOutput = execution.Output
+        })
+    {
+        /// <summary>The project root the command ran against.</summary>
+        public string TargetRoot { get; } = targetRoot;
+
+        /// <summary>The home state directory the install wrote, or would write, for that root.</summary>
+        public string HomeStateDirectory { get; } = homeStateDirectory;
+    }
 
     private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
     {
