@@ -390,6 +390,15 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     [InlineData("opencode", HookOutcomeKind.AllowWithNote)]
     [InlineData("opencode", HookOutcomeKind.AllowWithRewrite)]
     [InlineData("opencode", HookOutcomeKind.PassThrough)]
+    [InlineData("antigravity", HookOutcomeKind.AllowWithNote)]
+    [InlineData("antigravity", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("antigravity", HookOutcomeKind.PassThrough)]
+    [InlineData("factory", HookOutcomeKind.AllowWithNote)]
+    [InlineData("factory", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("factory", HookOutcomeKind.PassThrough)]
+    [InlineData("devin", HookOutcomeKind.AllowWithNote)]
+    [InlineData("devin", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("devin", HookOutcomeKind.PassThrough)]
     public void EveryAllowPathDeliversTheInsertedPrompt(string harness, HookOutcomeKind kind)
     {
         RecordingEngine engine = new()
