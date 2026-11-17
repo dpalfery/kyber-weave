@@ -25,13 +25,22 @@ public sealed class TieredRosterConductorContractTests
 
     private const string DeliveryExecutionPath = "products/kyber-squad/skills/delivery-execution/SKILL.md";
 
+    private const string PlanPath = "products/kyber-squad/agents/conductor/references/plan-path.md";
+
+    private const string SpecPath = "products/kyber-squad/agents/conductor/references/spec-path.md";
+
+    private const string IntakePath = "products/kyber-squad/agents/conductor/references/intake-path.md";
+
+    private const string AutonomyPath = "products/kyber-squad/agents/conductor/references/autonomy.md";
+
     /// <summary>Every file the conductor reads as its dispatch contract.</summary>
     private static readonly string[] ConductorSurface =
     [
         ConductorPath,
-        "products/kyber-squad/agents/conductor/references/plan-path.md",
-        "products/kyber-squad/agents/conductor/references/spec-path.md",
-        "products/kyber-squad/agents/conductor/references/intake-path.md",
+        PlanPath,
+        SpecPath,
+        IntakePath,
+        AutonomyPath,
         DeliveryExecutionPath,
     ];
 
@@ -143,6 +152,36 @@ public sealed class TieredRosterConductorContractTests
 
         Assert.Contains("`devops`", line, StringComparison.Ordinal);
         Assert.Contains("tiered", line, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A dispatch of the delivery agent under the tiered roster must name the tiered agent. The rule is per
+    /// site, because a global "read this name as that name" does not travel with a skill another entry point
+    /// loads.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ConductorSurfaceFiles))]
+    public void EveryDeliveryDispatchSiteNamesTheTieredAgent(string relativePath)
+    {
+        string[] unscoped =
+        [
+            .. Read(relativePath).Split('\n')
+                .Where(line => line.Contains("`github-devops`", StringComparison.Ordinal)
+                               && !line.Contains("`devops`", StringComparison.Ordinal))
+        ];
+
+        Assert.True(
+            unscoped.Length == 0,
+            $"{relativePath} dispatches `github-devops` with no `devops` alternative, so a tiered run uses the " +
+            "technology delivery agent. Unscoped: " + string.Join(" | ", unscoped));
+    }
+
+    public static IEnumerable<object[]> ConductorSurfaceFiles()
+    {
+        foreach (string path in ConductorSurface)
+        {
+            yield return [path];
+        }
     }
 
     [Fact]

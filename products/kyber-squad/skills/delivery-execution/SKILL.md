@@ -191,7 +191,7 @@ Only a successful closeout completes the objective. Record Q2 CLOSEOUT_COMPLETE 
 
 Once the archive and the merge-ready checks pass, and while no worker is dispatched, call `docs_push_run_branch_and_open_draft_pull_request` once. Pass the run's worktree as `projectPath`, a `summary` of one to three plain sentences for a human reviewer (the problem and the outcome), and docs-dev's documentation-impact outcome as `documentationImpact`. The tool commits the archived plan if it is still staged, pushes the run branch, creates or updates the draft pull request from the run's records, and reads it back. Report the link and the checks it returns, and dispatch nothing to re-check the pull request.
 
-On a refusal carrying `KW-DELIVER-005` (the host is not GitHub, or the GitHub CLI is missing or signed out), and only then, dispatch `github-devops` with the `create-pull-request` skill. Any other refusal names what to fix: send it to the role that owns it, then call the tool again.
+On a refusal carrying `KW-DELIVER-005` (the host is not GitHub, or the GitHub CLI is missing or signed out), and only then, dispatch `github-devops` — or `devops` under the `tiered` roster — with the `create-pull-request` skill. Any other refusal names what to fix: send it to the role that owns it, then call the tool again.
 
 ## Arbiter routing headers
 
