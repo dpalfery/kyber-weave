@@ -125,6 +125,19 @@ public class DocsInitTemplateChoiceTests : IDisposable
         Assert.Empty(config.Ontology.Technologies);
     }
 
+    [Fact]
+    public void NamingATechnologyThatShipsATemplateInstallsTheTemplateNotAStub()
+    {
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+
+        Scaffolding.Scaffold(_temp.Path, standards: ["csharp"]);
+
+        Assert.Equal(
+            KyberStandardsTemplates.RenderPart(
+                "csharp", KyberStandardsTemplates.Part.Standard, "unassigned", today),
+            File.ReadAllText(PathOf("docs/standards/csharp/csharp.standards.md")));
+    }
+
     /// <summary>
     /// Asking for every shipped technology and for one role folder in the same run has to do
     /// both: the second choice is not a replacement for the first.

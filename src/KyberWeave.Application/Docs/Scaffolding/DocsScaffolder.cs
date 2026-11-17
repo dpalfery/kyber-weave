@@ -117,9 +117,11 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             ontology = ontology.Clone(technologies: mergedTechnologies);
         }
 
+        bool writesShippedTemplates = kyberStandards;
         if (standards is { Count: > 0 })
         {
             ontology = WithChosenStandards(ontology, standards);
+            writesShippedTemplates = true;
         }
 
         // Planned before the first host-config write so a newly created file carries the
@@ -167,7 +169,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 }
 
                 string content =
-                    kyberStandards
+                    writesShippedTemplates
                     && KyberStandardsTemplates.TryRenderPart(
                         technology, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
