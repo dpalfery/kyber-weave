@@ -605,13 +605,16 @@ judgement would have said.
 
 `kyber-weave arbiter doctor` raises `KW-ARB-MODEL-001` (warning) when model targeting is not `off`,
 a hooked global target is installed, and its `model-targets.<harness>.json` file is missing,
-unreadable, or older than the Squad lock. The remedy is the one the message names:
+unreadable, or not the table the last Squad update wrote. The doctor compares the table's bytes with
+the digest the deployment recorded for it, so a table an update left untouched because its content
+did not change is current. The remedy is the one the message names:
 
 ```bash
 kyber-weave squad update
 ```
 
-The update rewrites the table from the current presets. A stale table changes what a retarget is
+The update rewrites the table only when the render changes it, which is why the check reads the
+recorded digest rather than the file's write time. A stale table changes what a retarget is
 pointed at, so refresh it after changing a preset. A project-scope target is not checked by this
 diagnostic.
 
