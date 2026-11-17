@@ -525,14 +525,14 @@ public sealed class DocSpecValidator
                 if (!checkedFolders.Add(relativeFolder)) continue;
 
                 string absoluteFolder = Combine(relativeFolder);
-                if (!Directory.Exists(absoluteFolder)) continue;
+                if (!Directory.Exists(absoluteFolder) || LinksIt(relativeFolder)) continue;
 
                 string standard = RepositoryRelative(DocsLayout.StandardFile(docsRoot, scope));
                 string legacy = $"{relativeFolder}/README.md";
 
-                if (!File.Exists(Combine(standard)))
+                if (!ExistsWithoutLink(standard))
                 {
-                    if (File.Exists(Combine(legacy)))
+                    if (ExistsWithoutLink(legacy))
                     {
                         report.Add(new Diagnostic(
                             MissingFolderFile, Severity.Warning,
@@ -565,7 +565,7 @@ public sealed class DocSpecValidator
                              DocsLayout.ArbiterRulesFile(docsRoot, scope)
                          })
                 {
-                    if (File.Exists(Combine(RepositoryRelative(file)))) continue;
+                    if (ExistsWithoutLink(RepositoryRelative(file))) continue;
 
                     report.Add(new Diagnostic(
                         MissingFolderFile, Severity.Error,
@@ -588,6 +588,31 @@ public sealed class DocSpecValidator
             relativePath
                 .Split('/', StringSplitOptions.RemoveEmptyEntries)
                 .Where(segment => segment != "."));
+
+    /// <summary>
+    /// True when <paramref name="relativePath"/> names an existing file reachable without crossing
+    /// a symbolic link or junction. The corpus loader skips links, so a file this returns false
+    /// for is not a document the validators ever see: counting it would suppress the missing-file
+    /// finding for a file no worker can reach.
+    /// </summary>
+    private bool ExistsWithoutLink(string relativePath) =>
+        !LinksIt(relativePath) && File.Exists(Combine(relativePath));
+
+    /// <summary>True when any segment of <paramref name="relativePath"/> is a symbolic link or junction.</summary>
+    private bool LinksIt(string relativePath)
+    {
+        string current = _repoRoot;
+        foreach (string segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            FileSystemInfo entry = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+            if (entry.LinkTarget is not null) return true;
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Checks each standard's <c>builds-on</c> key: the parent must be declared, must not be

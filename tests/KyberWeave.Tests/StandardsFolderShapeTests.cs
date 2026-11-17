@@ -247,6 +247,29 @@ public class StandardsFolderShapeTests
             && i.Message.Contains("## Stack", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The loader never follows a symbolic link, so a linked file is not in the corpus. Counting
+    /// it as present would suppress the missing-file finding for a file no worker can read.
+    /// </summary>
+    [Fact]
+    public void AFileBehindASymlinkIsNotCountedAsPresent()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n")
+            .Write("outside/dotnet.rules.md", Rules("dotnet"));
+        File.CreateSymbolicLink(
+            Path.Combine(fixture.Root, "6-Docs", "standards", "dotnet", "dotnet.rules.md"),
+            Path.Combine(fixture.Root, "outside", "dotnet.rules.md"));
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.MissingFolderFile
+            && i.Message.Contains("dotnet.rules.md", StringComparison.Ordinal));
+    }
+
     private static string RoleRules(string scope) => Rules(scope).Replace(
         "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
 
