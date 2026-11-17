@@ -128,14 +128,15 @@ internal static class WorkerGuardRules
 
     /// <summary>
     /// The refusal a technology's command allow-list makes, or null when no rule refuses this command. A rule
-    /// loaded from a technology folder judges only a task of that technology; the guard's tool-call event names no
-    /// dispatch technology, so it passes no scope and every loaded technology's list applies, which is the
-    /// fail-closed reading. Each rule still narrows itself to its own tool's commands.
+    /// loaded from a technology folder judges only a task of that technology, so the caller passes the technology
+    /// the read-only dispatch named. A dispatch that names none, or one the caller cannot identify, passes null,
+    /// which applies every loaded technology's list: the fail-closed reading. Each rule still narrows itself to
+    /// its own tool's commands.
     /// </summary>
     /// <param name="rules">Every rule the configuration loaded.</param>
     /// <param name="call">The sub-agent's tool call.</param>
     /// <param name="command">The command the call declares.</param>
-    /// <param name="technologyScope">The technologies whose rules apply, or null for every rule.</param>
+    /// <param name="technologyScope">The technology whose rules apply, or null for every rule.</param>
     internal static string? CommandRefusal(
         IReadOnlyList<ArbiterRule> rules,
         ToolCall call,
@@ -407,7 +408,7 @@ internal static class WorkerGuardRules
             JsonObject? args = ArgumentsOf(root, "toolArgs");
             string? path = tool is "edit" or "create" && args is not null ? NodeText(args, "path") : null;
             string? command = tool is "bash" && args is not null ? NodeText(args, "command") : null;
-            return new ToolCall(harness, agentId, agent, cwd, path, command);
+            return new ToolCall(harness, agentId, agent, cwd, path, command, Text(root, "sessionId"));
         }
 
         if (string.Equals(harness, ClaudeHarness, StringComparison.Ordinal))
@@ -430,7 +431,7 @@ internal static class WorkerGuardRules
                     _ => null,
                 };
             string? command = tool is "Bash" && input is not null ? NodeText(input, "command") : null;
-            return new ToolCall(harness, agentId, agent, cwd, path, command);
+            return new ToolCall(harness, agentId, agent, cwd, path, command, Text(root, "session_id"));
         }
 
         return null;
@@ -574,5 +575,6 @@ internal static class WorkerGuardRules
         ArbiterSquadAgent Agent,
         string? Cwd,
         string? WritePath,
-        string? Command);
+        string? Command,
+        string? SessionId = null);
 }

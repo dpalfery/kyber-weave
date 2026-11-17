@@ -765,7 +765,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         return Path.Combine(repoRoot, "artifacts", "arbiter");
     }
 
-    private static string ProjectRootKey(string projectRoot)
+    internal static string ProjectRootKey(string projectRoot)
     {
         string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
         byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));

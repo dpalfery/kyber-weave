@@ -483,7 +483,10 @@ A host's own copy of a role or technology folder sits under
 `<docs-root>/standards/<name>/<name>.arbiter-rules.yml`, and its declarations apply over the
 shipped ones before `arbiter.rules`. A technology folder's rule judges only an event whose task names
 that technology or a technology that builds on it; an event that names no task technology, such as a
-task-less dispatch, is judged by the role folders and `arbiter.rules` alone. To get the folder to edit, install it:
+task-less dispatch, is judged by the role folders and `arbiter.rules` alone. A read-only dispatch's
+command allow-list follows the technology named on its dispatch: the worker guard reads the
+dispatch's `technology` header from its ledger pre event, and falls back to every declared list when
+the dispatch names none or cannot be identified. To get the folder to edit, install it:
 
 ```bash
 kyber-weave docs init . --standards conductor

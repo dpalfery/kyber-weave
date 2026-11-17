@@ -125,7 +125,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             Target = "csharp-dev",
             Trigger = "delegate",
             Marker = "delegate",
-            Headers = new ArbiterLedgerHeaders("docs/plans/plan.md", "T3", "infra-workflow", "finding-1"),
+            Headers = new ArbiterLedgerHeaders("docs/plans/plan.md", "T3", "infra-workflow", "finding-1", "csharp"),
             TaskFiles = ["docs/plans/plan.md"],
             Snapshot = new ArbiterSnapshot(
                 "head-sha", new Dictionary<string, string> { ["src/a.cs"] = "blob-1" }),
@@ -158,7 +158,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             "caller", "caller-source", "target", "trigger", "marker",
             "headers", "task-files", "snapshot", "changed-paths", "returns",
             "body-names-planning-path", "decision-id");
-        AssertKeys(doc.RootElement.GetProperty("headers"), "plan-file", "task", "lens", "refute");
+        AssertKeys(doc.RootElement.GetProperty("headers"), "plan-file", "task", "lens", "refute", "technology");
         AssertKeys(
             doc.RootElement.GetProperty("returns"),
             "task-review", "planner-status", "attested");

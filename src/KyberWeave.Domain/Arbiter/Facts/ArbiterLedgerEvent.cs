@@ -108,11 +108,16 @@ internal sealed class ArbiterUtcTimestampConverter : JsonConverter<DateTimeOffse
 /// <param name="Task">The <c>task</c> header, when present.</param>
 /// <param name="Lens">The <c>lens</c> header, when present.</param>
 /// <param name="Refute">The <c>refute</c> header, when present.</param>
+/// <param name="Technology">
+/// The <c>technology</c> header, when present. The worker guard reads it to bind a read-only dispatch's command
+/// allow-list to the technology the dispatch names.
+/// </param>
 public sealed record ArbiterLedgerHeaders(
     [property: JsonPropertyName("plan-file")] string? PlanFile = null,
     [property: JsonPropertyName("task")] string? Task = null,
     [property: JsonPropertyName("lens")] string? Lens = null,
-    [property: JsonPropertyName("refute")] string? Refute = null);
+    [property: JsonPropertyName("refute")] string? Refute = null,
+    [property: JsonPropertyName("technology")] string? Technology = null);
 
 /// <summary>The repository state a pre event captured.</summary>
 /// <param name="Head">The <c>HEAD</c> commit id at dispatch time.</param>
@@ -217,7 +222,7 @@ public sealed record ArbiterLedgerEvent(
     [JsonPropertyName("marker")]
     public string? Marker { get; init; }
 
-    /// <summary>The <c>plan-file</c>, <c>task</c>, <c>lens</c> and <c>refute</c> headers.</summary>
+    /// <summary>The <c>plan-file</c>, <c>task</c>, <c>lens</c>, <c>refute</c> and <c>technology</c> headers.</summary>
     [JsonPropertyName("headers")]
     public ArbiterLedgerHeaders? Headers { get; init; }
 

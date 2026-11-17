@@ -25,8 +25,11 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
+    private const string DispatchSession = "sess-1";
+
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repository = new();
+    private int _dispatchSequence;
 
     public void Dispose()
     {
@@ -156,22 +159,31 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     }
 
     /// <summary>
-    /// A read-only dispatch whose header names a technology is bound by that technology's list: the same
-    /// mutating command is refused under <c>azure</c> and not judged by another technology's list.
+    /// A read-only dispatch that names its technology is bound by that technology's list: the mutating command
+    /// is refused under <c>azure</c>.
     /// </summary>
     [Fact]
     public void APlatformResearcherBoundToTheDispatchedTechnologyIsRefusedByThatTechnologysList()
     {
-        TechnologyRepository(_repository.Path, "azure");
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_repository.Path);
-        const string command = "az vm delete --name db -g rg";
-        WorkerGuardRules.ToolCall call = WorkerGuardRules.Read("claude", Command("claude", command))!;
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("azure");
 
-        string? refusal = WorkerGuardRules.CommandRefusal(config.Arbiter.Rules, call, command, ["azure"]);
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
 
-        Assert.NotNull(refusal);
-        Assert.StartsWith("AZURE-READONLY-001", refusal, StringComparison.Ordinal);
-        Assert.Null(WorkerGuardRules.CommandRefusal(config.Arbiter.Rules, call, command, ["aws"]));
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A technology folder's allow-list binds only a task of that technology: an <c>aws</c> researcher is not
+    /// judged by the <c>azure</c> list, even though the host declares both.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherBoundToAnotherTechnologyIsNotJudgedByTheAzureList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("aws");
+
+        Assert.Empty(Guard("claude", Command("claude", "az login")));
     }
 
     /// <summary>
@@ -182,8 +194,26 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     public void APlatformResearcherWhoseDispatchNamesNoTechnologyIsRefusedByEveryDeclaredList()
     {
         TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology(technology: null);
 
         string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Two dispatches of the same agent in one session cannot be told apart from the tool call, so the guard
+    /// falls back to every declared list rather than guess which technology the call belongs to.
+    /// </summary>
+    [Fact]
+    public void TwoConcurrentDispatchesWithDifferentTechnologiesFallBackToEveryDeclaredList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("azure");
+        WriteDispatchTechnology("aws");
+
+        // `az login` is outside azure's list and names no aws tool: only the fail-closed union refuses it.
+        string answer = Guard("claude", Command("claude", "az login"));
 
         Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
     }
@@ -276,6 +306,45 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// Writes the dispatch pre event a worker's tool call belongs to: the platform researcher, in the same
+    /// session as the call, naming <paramref name="technology"/> or no technology.
+    /// </summary>
+    private void WriteDispatchTechnology(string? technology)
+    {
+        string directory = Path.Combine(_repository.Path, "artifacts", "arbiter");
+        Directory.CreateDirectory(directory);
+        object dispatch = technology is null
+            ? new
+            {
+                schema = "kyber-arbiter.ledger/v1",
+                id = $"pre-{_dispatchSequence++}",
+                at = "2026-11-17T09:00:00.0000000Z",
+                source = "hook",
+                harness = "claude",
+                session = DispatchSession,
+                phase = "pre",
+                target = "platform-researcher",
+                trigger = "delegate",
+            }
+            : new
+            {
+                schema = "kyber-arbiter.ledger/v1",
+                id = $"pre-{_dispatchSequence++}",
+                at = "2026-11-17T09:00:00.0000000Z",
+                source = "hook",
+                harness = "claude",
+                session = DispatchSession,
+                phase = "pre",
+                target = "platform-researcher",
+                trigger = "delegate",
+                headers = new { technology },
+            };
+        File.AppendAllText(
+            Path.Combine(directory, "ledger.jsonl"),
+            JsonSerializer.Serialize(dispatch) + Environment.NewLine);
+    }
+
     private string Guard(string harness, string json)
     {
         using StringWriter stdout = new();
@@ -298,6 +367,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             ? JsonSerializer.Serialize(new
             {
                 cwd = _repository.Path,
+                session_id = DispatchSession,
                 hook_event_name = "PreToolUse",
                 agent_id = "agent-1",
                 agent_type = agent,
@@ -307,6 +377,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             : JsonSerializer.Serialize(new
             {
                 cwd = _repository.Path,
+                sessionId = DispatchSession,
                 agentId = "agent-1",
                 parentAgentId = "root",
                 agentType = agent,

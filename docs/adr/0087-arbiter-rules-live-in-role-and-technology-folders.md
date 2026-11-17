@@ -27,7 +27,8 @@ it decides: the three steps and the blocking contract of
 [ADR 0053](0053-kyber-arbiter-three-step-decision-gates.md) and
 [ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md) are
 unchanged. Amended 2026-11-17: a technology folder's rules now judge only an event whose task is in
-that technology or in a technology that builds on it. The loading order below is unchanged.
+that technology or in a technology that builds on it, and a read-only worker's command allow-list
+follows the technology its dispatch names. The loading order below is unchanged.
 
 ## Context
 
@@ -138,9 +139,11 @@ there too, where the person who owns the standard can see and change them.
    `AWS-READONLY-001`); a technology that declares no such rule refuses nothing. The list is
    enforced where a worker guard runs (Claude Code and Copilot CLI) and is an instruction only
    on the harnesses that have no worker guard. A read-only dispatch's tool call names no dispatch
-   technology, so the guard evaluates every declared technology's `worker.command` rules: the
-   technology the dispatch names is always in that union, and a dispatch that names none is still
-   bound by every list the host declares, which is the fail-closed reading for `platform-researcher`.
+   technology, so the guard reads it from the ledger's pre event for the calling agent in the same
+   session: the pre event's `headers` now record the dispatch's `technology`. The guard applies only
+   that technology's `worker.command` rules. A dispatch that names none, has returned, or cannot be
+   told apart from a parallel dispatch of the same agent falls back to every declared technology's
+   list, which is the fail-closed reading for `platform-researcher`.
 
 9. **The two model rules follow the developer tiers.** Under `worker-roster: tiered`,
    `KW-ARB-DIFFICULTY-001` answers from `plan.task.difficulty`, the rating the agent pick already
@@ -154,12 +157,13 @@ there too, where the person who owns the standard can see and change them.
 
 Stated so nobody reads a guarantee the code does not give.
 
-- **A read-only worker's dispatch technology is not visible to the worker guard.** The trigger is one
-  tool call, and neither guarded harness puts the dispatch header on it, so the guard evaluates every
-  declared technology's allow-list. That is the fail-closed reading: a dispatch naming `azure` is bound
-  by `azure`'s list because it is in the union, and a dispatch naming nothing is bound by every list.
-  A technology-specific refusal is therefore never lost, but another technology's broad rule can also
-  bind the agent.
+- **A read-only worker's dispatch technology is read from the ledger, not from the tool call.** The
+  trigger is one tool call, and neither guarded harness puts the dispatch header on it, so the guard
+  looks up the unreturned pre event for the calling agent in the same session and reads the
+  `technology` header recorded there. When the dispatch names none, has returned, the ledger cannot be
+  read, or two parallel dispatches of the same agent are open, the guard falls back to every declared
+  technology's allow-list. That is the fail-closed reading: a technology-specific refusal is never
+  lost, but another technology's broad rule can bind the agent in those cases.
 - **Only the `conductor`, `architect` and `reviewer` role folders are read.**
   `ArbiterConfigLoader` holds that list, and `ontology.roles` does not feed it. A host's
   `devops` role folder, or any other role folder, has no effect on the Arbiter. Requirement 6.6

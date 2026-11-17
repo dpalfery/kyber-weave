@@ -1501,12 +1501,13 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         classification.Headers.TryGetValue("TASK", out string? task);
         classification.Headers.TryGetValue("LENS", out string? lens);
         classification.Headers.TryGetValue("REFUTE", out string? refute);
-        if (planFile is null && task is null && lens is null && refute is null)
+        classification.Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        if (planFile is null && task is null && lens is null && refute is null && technology is null)
         {
             return null;
         }
 
-        return new ArbiterLedgerHeaders(planFile, task, lens, refute);
+        return new ArbiterLedgerHeaders(planFile, task, lens, refute, technology);
     }
 
     private static string MapPhase(ArbiterEvent ev)

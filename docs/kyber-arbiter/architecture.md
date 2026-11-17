@@ -205,7 +205,9 @@ Limits on those facts:
 `InFlightLedger` and `DecisionLog` persist `artifacts/arbiter/ledger.jsonl`
 (`kyber-arbiter.ledger/v1`) and `artifacts/arbiter/decisions.jsonl`
 (`kyber-arbiter.decision/v1`) as append-only lines under one lock file. Only the hook
-appends; the CLI only reads. Prompts and code are logged as digests, never in full.
+appends; the CLI only reads. A pre event's `headers` carry the dispatch's `plan-file`, `task`,
+`lens`, `refute` and `technology` values, which the worker guard reads to scope a read-only
+dispatch's command allow-list. Prompts and code are logged as digests, never in full.
 Each step-1 rule entry records what the model scored, so thresholds can be tuned from the log:
 `probabilities` (in the rule's answer order; for `noul`, one value for the first answer),
 `confidence`, and `threshold`, the floor or ceiling the score was compared against. A score
@@ -385,10 +387,12 @@ such as `timeout 10 az …`, a subshell, or a second command on the same line al
 technology's list refuses them. A redirect, a pipeline or a compound command is not one command, so it has
 no form a listed read may match and its whole text is the form: that is how `az vm list > resources.txt`
 is refused. A technology folder that declares no such rule refuses nothing. The tool-call event names no
-dispatch technology, so the guard evaluates every declared technology's `worker.command` rules: the
-technology the dispatch names is always in that union, and a dispatch that names none is still bound
-by every list the host declares, which is the fail-closed reading for a read-only agent. A judged
-command whose event
+dispatch technology, so the guard reads the ledger for the unreturned dispatch of the calling agent in
+the same session and takes the `technology` header that dispatch recorded. It then applies only that
+technology's `worker.command` rules. A dispatch that names no technology, has already returned, or
+cannot be told apart from a parallel dispatch of the same agent falls back to every declared
+technology's list, so a refusal is never lost; that is the fail-closed reading for a read-only agent.
+A judged command whose event
 names no working directory is refused too, because the technology's list lives under that directory and
 cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
 refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
@@ -441,10 +445,11 @@ from and `ArbiterRuleScopes` applies it only when the event's task names that te
 technology that builds on it. The task's own `Technology:` label is used when its plan was read, and
 the `TECHNOLOGY` header of a task-less dispatch otherwise. An event that names neither — a
 `bug-crusher` fix with no task, the conductor's own action — is judged by role folder rules and
-`arbiter.rules` alone. The worker guard is the one exception: its tool-call event names no dispatch
-technology, so **every declared technology's allow-list still binds a read-only dispatch**, which is
-the fail-closed reading for `platform-researcher`; the named technology's list is always part of that
-union.
+`arbiter.rules` alone. The worker guard applies the same scope to a read-only dispatch's command
+allow-list: it reads the dispatch's `technology` header from the ledger's pre event for the calling
+agent in the same session. A dispatch that names none, has returned, or cannot be told apart from a
+parallel dispatch of the same agent falls back to every declared technology's list, so the fail-closed
+reading holds for `platform-researcher`.
 
 One limit holds today and is recorded rather than claimed away: **only the `conductor`, `architect`
 and `reviewer` role folders are read** — `ArbiterConfigLoader` holds that list and `ontology.roles`
