@@ -245,16 +245,15 @@ public sealed class WorkerRosterTests
     }
 
     /// <summary>
-    /// A task file written before the removal records the roster it was written under. That roster is
-    /// gone, so the file is read as <c>tiered</c> and reported as a warning naming the change, rather than
-    /// dispatched against agents that no longer ship. Its tasks keep validating: the technology requirement
-    /// belongs to a file written under the roster that has it.
+    /// A task file that records the retired roster is read as <c>tiered</c>, warned about, and held to the
+    /// tiered requirement: its developer tasks need a technology line, because the dispatch that resolves their
+    /// removed agent names still has to find a technology's rules, skills, standard and gates.
     /// </summary>
     [Fact]
-    public void ATaskFileThatRecordsTheTechnologyRosterIsReadAsTieredAndWarns()
+    public void ATaskFileThatRecordsTheTechnologyRosterIsReadAsTieredWarnsAndStillNeedsTechnology()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        string text = PlanTaskFileProbe.TaskFile()
+        string text = WithoutTechnology(PlanTaskFileProbe.TaskFile())
             .Replace("schema-version:", "worker-roster: technology\nschema-version:", StringComparison.Ordinal);
         fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
 
@@ -265,6 +264,45 @@ public sealed class WorkerRosterTests
             item => item.Code == PlanTaskFileRules.RetiredTechnologyRoster);
         Assert.Equal(Severity.Warning, warning.Severity);
         Assert.Contains("tiered", warning.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+    }
+
+    /// <summary>
+    /// The old schema version is exempt because the build no longer writes it, and it is read with a warning. A
+    /// file that claims the tiered roster is not exempt even at that version: it is a file written now, and its
+    /// developer tasks need a technology line like any other.
+    /// </summary>
+    [Fact]
+    public void ALegacySchemaFileThatClaimsTheTieredRosterStillNeedsTechnology()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string text = WithoutTechnology(PlanTaskFileProbe.TaskFile(schemaVersion: 1))
+            .Replace("schema-version:", "worker-roster: tiered\nschema-version:", StringComparison.Ordinal);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
+
+        DiagnosticReport report = ValidateTiered(fixture);
+
+        Assert.Contains(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+    }
+
+    /// <summary>
+    /// A legacy file that makes no claim about the roster predates the requirement, so it keeps validating; the
+    /// conversion warning is the finding it raises.
+    /// </summary>
+    [Fact]
+    public void ALegacySchemaFileThatClaimsNoRosterKeepsValidating()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(
+            PlanTaskFileProbe.TaskFilePath,
+            WithoutTechnology(PlanTaskFileProbe.TaskFile(schemaVersion: 1)));
+
+        DiagnosticReport report = ValidateTiered(fixture);
+
         Assert.DoesNotContain(
             report.Items,
             item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);

@@ -2424,8 +2424,10 @@ worker-roster: tiered
 ship. Any other value is the same error. The setting is read when the task file is written and
 recorded in the file (`worker-roster`), and every later reader takes the run's roster from there. A
 task file written before the removal still records `technology`; it is read as `tiered` with
-`KW-DOC-TASKS-019`, and its tasks keep validating even without a `Technology:` line, because the
-technology requirement belongs to a file written under the roster that has it.
+`KW-DOC-TASKS-019`, and its developer tasks then owe a `Technology:` line like any other, because the
+dispatch still has to find a technology's rules, skills, standard and gates. The two forms this build
+no longer writes — the legacy JSON file and the version-1 schema — keep validating with their
+conversion warning, unless they claim the tiered roster.
 
 The setting is not published in the `AGENTS.md` Config Reg block, unlike the paths an agent looks up
 there: the task file is the record a run reads, and the CLI and the MCP server read the host setting

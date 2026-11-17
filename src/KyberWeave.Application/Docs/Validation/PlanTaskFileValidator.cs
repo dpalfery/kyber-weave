@@ -395,11 +395,15 @@ public sealed partial class PlanTaskFileValidator
         CheckTasks(parsed, file, taskFile, artifact.RelativePath, report);
         CheckDigest(parsed, artifact.RelativePath, kind, file, taskFile, report);
 
-        // A file that predates the tiered roster keeps validating: the technology requirement is on a file
-        // written under the roster that has it, and an older file is read with a warning, not made an error.
-        bool predatesTiered = legacy
-            || file.SchemaVersion == PlanTaskFileRules.LegacySchemaVersion
-            || string.Equals(file.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal);
+        // The two forms this build no longer writes keep validating, because they are read with a conversion
+        // warning and may predate the Technology field: the legacy JSON file and the version-1 schema. A file that
+        // claims the tiered roster is not one of them — it was written under this roster, so its developer tasks
+        // owe a technology line even at the old version — and neither is a current file that records the retired
+        // roster, which is read as tiered with a warning and needs the line like any other.
+        bool claimsTiered = string.Equals(
+            file.WorkerRoster?.Trim(), WorkerRosters.Tiered, StringComparison.Ordinal);
+        bool predatesTiered = !claimsTiered
+            && (legacy || file.SchemaVersion == PlanTaskFileRules.LegacySchemaVersion);
 
         foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
