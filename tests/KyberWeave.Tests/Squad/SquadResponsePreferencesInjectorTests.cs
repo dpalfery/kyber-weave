@@ -167,6 +167,9 @@ public sealed class SquadResponsePreferencesInjectorTests
 
         SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(render, "new");
 
+        Assert.Equal(
+            "<response-preferences>new</response-preferences>",
+            Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()));
         Assert.Equal(standard, Encoding.UTF8.GetString(injected.Files[1].Content.ToArray()));
         Assert.Equal("rules", Encoding.UTF8.GetString(injected.Files[2].Content.ToArray()));
     }
