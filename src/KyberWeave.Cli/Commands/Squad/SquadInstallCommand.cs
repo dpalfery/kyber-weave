@@ -167,7 +167,8 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             pinnedVersion,
             Adopt: settings.Adopt,
             DryRun: settings.DryRun,
-            Arbiter: arbiterWiring);
+            Arbiter: arbiterWiring,
+            WorkerRoster: configResult.Config?.WorkerRoster);
 
         // A global install that names a target the install lacks adds it to the existing ones, so the confirmation
         // lists every root the run writes beneath, not only the new target's.

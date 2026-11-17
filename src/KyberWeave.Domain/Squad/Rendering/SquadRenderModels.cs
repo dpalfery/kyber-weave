@@ -53,6 +53,11 @@ public interface ISquadRenderer
 /// What a render reads from the Squad source tree and the user's Copilot config, read before the render by the host
 /// so a renderer stays a pure function of its request. A request with no preloaded source and no inputs cannot render.
 /// </param>
+/// <param name="WorkerRoster">
+/// The host's <c>worker-roster</c>, or null for the default. Under <c>tiered</c> a rendered agent's
+/// <c>delegates-to</c> leaves out every agent that declares the <c>technology</c> roster, so the technology
+/// developers are not offered to a run that cannot dispatch them. Any other value renders unchanged.
+/// </param>
 /// <remarks>
 /// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
 /// a renderer where a harness actually reads its global agents from (for Copilot that is
@@ -75,7 +80,8 @@ public sealed record SquadRenderRequest(
     SquadSource? PreloadedSource = null,
     Func<string, string?>? EnvironmentReader = null,
     SquadArbiterWiring? Arbiter = null,
-    SquadRenderDiskInputs? DiskInputs = null)
+    SquadRenderDiskInputs? DiskInputs = null,
+    string? WorkerRoster = null)
 {
     /// <summary>Gets the canonical source this render starts from, or throws why it is not available.</summary>
     /// <returns>The preloaded source.</returns>

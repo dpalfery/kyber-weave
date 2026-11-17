@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
@@ -89,6 +90,32 @@ public sealed class TaskPromptService(
     {
         int named = TierIndexOf(name);
         return named < 0 ? null : DeveloperTiers[Math.Max(named, computed)];
+    }
+
+    /// <summary>
+    /// The refusal for a dispatch that names a technology developer while the run is on the tiered roster, or
+    /// null when the name belongs to a role both rosters use. The tier the task belongs on is named in the
+    /// message, so the caller can dispatch the right agent from the refusal alone.
+    /// </summary>
+    private static TaskPromptResult? RefusedTechnologyDeveloper(
+        string? named,
+        string? technology,
+        PlanTaskFileEntry? entry,
+        int failedAttempts)
+    {
+        if (named is null || technology is null
+            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(named, out ArbiterSquadAgent? agent)
+            || !string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal)
+            || !string.Equals(agent.TargetClass, "implementation", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string tier = DeveloperTier(entry?.Difficulty, failedAttempts);
+        return TaskPromptResult.NotBuilt(
+            $"No prompt: '{named}' is a worker-roster: technology agent, and this run is worker-roster: tiered. " +
+            $"This task's developer is '{tier}' (tier = min(hard, rated difficulty + failed attempts)). " +
+            $"Dispatch '{tier}' instead.");
     }
 
     /// <summary>The tier's position on the ladder, or -1 when the name is not a developer tier.</summary>
@@ -188,6 +215,11 @@ public sealed class TaskPromptService(
         RemovedAgentResolution? removed = null;
         if (string.Equals(fileRoster ?? config.WorkerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
         {
+            if (RefusedTechnologyDeveloper(requested ?? recorded, technology, entry, request.FailedAttempts) is { } refusal)
+            {
+                return refusal;
+            }
+
             removed = PlanTaskAgentPick.ResolveRemovedAgent(
                 requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
             agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);

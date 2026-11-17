@@ -213,6 +213,41 @@ public sealed class DeveloperTierSelectionTests
         Assert.Equal("docs-dev", result.Agent);
     }
 
+    /// <summary>
+    /// The recorded failure: a tiered run dispatched task 3.1 to <c>csharp-dev</c>. The dispatch tool must refuse
+    /// the technology developer and name the tier the task belongs on, so the worker choice cannot be bypassed.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp-dev", 0, "dev-easy")]
+    [InlineData("csharp-dev", 1, "dev-medium")]
+    [InlineData("test-dev", 2, "dev-hard")]
+    public void UnderTieredADispatchToATechnologyDeveloperIsRefusedNamingTheTier(
+        string technologyAgent,
+        int failedAttempts,
+        string tier)
+    {
+        using DocFixture fixture = Ready(Tiered, "easy");
+
+        TaskPromptResult result = Prompt(fixture, Tiered, agent: technologyAgent, failedAttempts: failedAttempts);
+
+        Assert.False(result.Built);
+        Assert.Contains(technologyAgent, result.Refusal, StringComparison.Ordinal);
+        Assert.Contains($"'{tier}'", result.Refusal, StringComparison.Ordinal);
+        Assert.Contains("tiered", result.Refusal, StringComparison.Ordinal);
+    }
+
+    /// <summary>The same name is untouched under the technology roster, which is the roster it belongs to.</summary>
+    [Fact]
+    public void UnderTechnologyADispatchToATechnologyDeveloperIsNotRefused()
+    {
+        using DocFixture fixture = Ready(Technology, "easy");
+
+        TaskPromptResult result = Prompt(fixture, Technology, agent: "csharp-dev");
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Equal("csharp-dev", result.Agent);
+    }
+
     [Fact]
     public void UnderTheTechnologyRosterThePickAndTheDispatchAreUnchanged()
     {

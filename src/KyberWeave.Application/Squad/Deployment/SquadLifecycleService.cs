@@ -227,7 +227,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 loadedPresets.Count > 0 ? loadedPresets : null,
                 null,
                 _environmentReader,
-                request.Arbiter);
+                request.Arbiter,
+                WorkerRoster: request.WorkerRoster);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
@@ -504,7 +505,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 loadedPresets.Count > 0 ? loadedPresets : null,
                 null,
                 _environmentReader,
-                request.Arbiter);
+                request.Arbiter,
+                WorkerRoster: request.WorkerRoster);
 
             SquadRenderResult renderResult =
                 await _renderer.RenderAsync(renderRequest, cancellationToken).ConfigureAwait(false);
