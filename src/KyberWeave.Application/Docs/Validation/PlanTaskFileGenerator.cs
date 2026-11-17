@@ -615,9 +615,9 @@ public sealed partial class PlanTaskFileGenerator
     /// write an agent the roster does not offer, so the task is picked again.
     /// </summary>
     private bool ServesConfiguredRoster(string agent) =>
-        ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(agent, out ArbiterSquadAgent? recorded) is false
-        || recorded.WorkerRoster is null
-        || string.Equals(recorded.WorkerRoster, _config.WorkerRoster, StringComparison.Ordinal);
+        ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(agent, out ArbiterSquadAgent? recorded)
+        && (recorded.WorkerRoster is null
+            || string.Equals(recorded.WorkerRoster, _config.WorkerRoster, StringComparison.Ordinal));
 
     private Dictionary<string, PlanTaskFileEntry> ReadExistingEntries(string taskFile)
     {
@@ -960,6 +960,7 @@ public sealed partial class PlanTaskFileGenerator
             foreach ((string field, bool same) in new (string, bool)[]
                      {
                          ("role", got.Role == want.Role),
+                         ("agent", got.Agent == want.Agent),
                          ("capabilities", got.Capabilities == want.Capabilities),
                          ("session", got.Session == want.Session),
                          ("files", (got.Files ?? []).SequenceEqual(want.Files ?? [])),

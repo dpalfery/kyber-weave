@@ -82,7 +82,18 @@ public sealed class TaskPromptService(
         if (string.Equals(named, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
             return DeveloperTiers[tier];
 
-        return Raised(named, tier) ?? named;
+        if (Raised(named, tier) is { } raised)
+            return raised;
+
+        // A name that ships nowhere is a hand edit, not a worker: a tiered dispatch falls back to the tier the
+        // task's rating selects rather than handing an unknown agent to the harness.
+        if (ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(named, out ArbiterSquadAgent? known)
+            && !string.Equals(known.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+        {
+            return named;
+        }
+
+        return entry is null || technology is not null ? DeveloperTiers[tier] : null;
     }
 
     /// <summary>The higher of a named tier and the computed one, or null when the name is not a developer tier.</summary>

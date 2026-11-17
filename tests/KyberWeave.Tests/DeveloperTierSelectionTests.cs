@@ -329,6 +329,53 @@ public sealed class DeveloperTierSelectionTests
         Assert.Equal("dev-medium", second.File.Tasks![0].Agent);
     }
 
+    /// <summary>
+    /// A hand-edited task file may name an agent that ships nowhere. The tiered dispatch must not hand that name to
+    /// the harness, and a rewrite must replace it; a check must report it.
+    /// </summary>
+    [Fact]
+    public void AnUnknownAgentNameIsReplacedByTheTierAndReportedByCheck()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
+        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using PlanTaskAgentPick picker = new(
+            new StubProvider("dev-medium"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+        PlanTaskFileOutcome written = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, picker)
+            .Run(Plan, PlanTaskFileMode.Write);
+        Assert.False(written.Report.HasErrors, string.Join("; ", written.Report.Items.Select(item => item.Message)));
+
+        // A dispatch that names a name shipping nowhere falls back to the tier; the file is still valid here.
+        TaskPromptResult dispatched = Prompt(fixture, Tiered, agent: "my-wrapper");
+        Assert.True(dispatched.Built, dispatched.Refusal);
+        Assert.Equal("dev-easy", dispatched.Agent);
+
+        string taskPath = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar));
+        File.WriteAllText(
+            taskPath,
+            File.ReadAllText(taskPath).Replace("agent: dev-medium", "agent: my-wrapper", StringComparison.Ordinal));
+
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files)
+            .Run(Plan, PlanTaskFileMode.Check);
+        Assert.Contains(
+            check.Report.Items,
+            item => item.Code == PlanTaskFileRules.DiffersFromPlan
+                    && item.Message.Contains("differs in agent", StringComparison.Ordinal));
+
+        // The dispatch path checks the file first, so the hand edit is refused rather than handed to a harness.
+        TaskPromptResult refused = Prompt(fixture, Tiered, agent: "my-wrapper");
+        Assert.False(refused.Built);
+        Assert.Contains("does not match the plan", refused.Refusal, StringComparison.Ordinal);
+
+        using PlanTaskAgentPick repick = new(
+            new StubProvider("dev-medium"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+        PlanTaskFileOutcome rewritten = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, repick)
+            .Run(Plan, PlanTaskFileMode.Write);
+        Assert.False(rewritten.Report.HasErrors, string.Join("; ", rewritten.Report.Items.Select(item => item.Message)));
+        Assert.Equal("dev-medium", rewritten.File!.Tasks![0].Agent);
+    }
+
     /// <summary>Every caller of a replaced agent lists its replacement, so the roster rule allows the dispatch.</summary>
     [Theory]
     [InlineData("conductor", "dev-easy")]
