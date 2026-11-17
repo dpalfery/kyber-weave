@@ -23,6 +23,11 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateTestBase
 {
+    private const string UpdatedAgentOnePath = ".codex/agents/one.toml";
+    private const string UpdatedAgentTwoPath = ".codex/agents/two.toml";
+    private const string NewWarpRolePath = ".warp/roles/three.md";
+    private const string AdoptedAgentPath = ".codex/agents/adopted.md";
+
     [Fact]
     public void ExecuteGlobalScopeKeepsIntentStagesAndBackupsInHomeJournalNotBesideTargetOrInState()
     {
@@ -814,5 +819,253 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     {
         AssertCaughtClaimMutation(subject, originalKind, mutation);
         AssertRehydratedClaimMutation(subject, originalKind, mutation);
+    }
+
+    [Fact]
+    public void ExecuteLeavesExactlyTheDirectoriesTheDeploymentNeeds()
+    {
+        using TempDirectory temp = new();
+        string root = temp.Path;
+        SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
+
+        Transaction(root).Execute(DirectoryCleanupUpdatePlan(root, receipt));
+
+        string[] expectedDirectories =
+        [
+            .. AncestorDirectories(StateRelativePath(
+                root,
+                Store(root).ResolveStateDirectory(root, SquadDeploymentScope.Project))),
+            ".codex",
+            ".codex/agents",
+            ".warp",
+            ".warp/roles"
+        ];
+        string[] actualDirectories = CaptureTree(root)
+            .Where(pair => pair.Value.Kind == TreeEntryKind.Directory)
+            .Select(pair => pair.Key)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expectedDirectories.Order(StringComparer.Ordinal), actualDirectories);
+        Assert.False(Directory.Exists(Path.Combine(
+            root,
+            ".kyber-weave",
+            ".squad-transaction")));
+        Assert.Equal("one v2", Read(root, UpdatedAgentOnePath));
+        Assert.Equal("two v2", Read(root, UpdatedAgentTwoPath));
+        Assert.Equal("three v1", Read(root, NewWarpRolePath));
+        Assert.Equal("adopted body", Read(root, AdoptedAgentPath));
+    }
+
+    [Fact]
+    public void ExecuteMidApplyFailureRestoresTheExactPriorTree()
+    {
+        using TempDirectory temp = new();
+        string root = temp.Path;
+        SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
+        SortedDictionary<string, TreeEntry> original = CaptureTree(root);
+        LifecycleStepFailingObserver observer = new(root, SquadTransactionStepKind.FileApplied);
+
+        Assert.Throws<InjectedSquadTransactionFailure>(() =>
+            Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
+
+        AssertTreesEqual(original, CaptureTree(root));
+    }
+
+    [Fact]
+    public void RecoverMidApplyFailureRestoresTheExactPriorTree()
+    {
+        using TempDirectory temp = new();
+        string root = temp.Path;
+        SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
+        SortedDictionary<string, TreeEntry> original = CaptureTree(root);
+        LifecycleStepFailingObserver observer = new(root, SquadTransactionStepKind.FileApplied);
+        Assert.Throws<InjectedSquadTransactionFailure>(() =>
+            Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
+        RestoreTree(
+            root,
+            Assert.IsType<SortedDictionary<string, TreeEntry>>(observer.InterruptedTreeSnapshot));
+        Assert.NotEqual(original.Keys, CaptureTree(root).Keys);
+
+        Transaction(root).Recover(root, SquadDeploymentScope.Project);
+
+        AssertTreesEqual(original, CaptureTree(root));
+    }
+
+    [Fact]
+    public void RecoverInterruptedAfterTheLastPublicationRestoresTheExactPriorTree()
+    {
+        using TempDirectory temp = new();
+        string root = temp.Path;
+        SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
+        SortedDictionary<string, TreeEntry> original = CaptureTree(root);
+        LastFileAppliedFailingObserver observer = new(root, NewWarpRolePath);
+        Assert.Throws<InjectedSquadTransactionFailure>(() =>
+            Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt)));
+        RestoreTree(
+            root,
+            Assert.IsType<SortedDictionary<string, TreeEntry>>(observer.InterruptedTreeSnapshot));
+
+        // A process that died here left every published stage out of the work tree, so the retained
+        // journal must still describe that tree well enough to roll it back.
+        Transaction(root).Recover(root, SquadDeploymentScope.Project);
+
+        AssertTreesEqual(original, CaptureTree(root));
+    }
+
+    [Fact]
+    public void ExecuteNeverRemovesADirectoryHoldingAForeignStageFileOrAnAdoptedFile()
+    {
+        using TempDirectory temp = new();
+        string root = temp.Path;
+        SquadReceipt receipt = SeedDirectoryCleanupDeployment(root);
+        ForeignStageFileObserver observer = new(root);
+
+        Transaction(root, observer).Execute(DirectoryCleanupUpdatePlan(root, receipt));
+
+        Assert.True(observer.Injected);
+        Assert.Empty(observer.Violations);
+        Assert.True(
+            observer.SawPendingStageOfAnotherTarget,
+            "The cleanup must leave a pending stage of another target alone.");
+        Assert.True(
+            observer.SawAppliedFilePrunedOtherBranches is true,
+            "The cleanup must still prune the applied files' now-empty staging branches.");
+        Assert.False(Directory.Exists(Path.Combine(
+            root,
+            ".kyber-weave",
+            ".squad-transaction")));
+    }
+
+    private static SquadReceipt SeedDirectoryCleanupDeployment(string root)
+    {
+        Write(root, UpdatedAgentOnePath, "one v1");
+        Write(root, UpdatedAgentTwoPath, "two v1");
+        Write(root, AdoptedAgentPath, "adopted body");
+        SquadReceipt receipt = Receipt(
+            new SquadOwnedFile(UpdatedAgentOnePath, Digest("one v1"), "codex", false),
+            new SquadOwnedFile(UpdatedAgentTwoPath, Digest("two v1"), "codex", false),
+            new SquadOwnedFile(NewWarpRolePath, Digest("three v1"), "warp", false),
+            new SquadOwnedFile(AdoptedAgentPath, Digest("adopted body"), "codex", true));
+        WriteState(root, Lock(), receipt);
+        return receipt;
+    }
+
+    private static SquadDeploymentPlan DirectoryCleanupUpdatePlan(
+        string root,
+        SquadReceipt receipt)
+    {
+        return SquadDeploymentPlanner.CreateUpdate(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [
+                Rendered(UpdatedAgentOnePath, "one v2"),
+                Rendered(UpdatedAgentTwoPath, "two v2"),
+                Rendered(NewWarpRolePath, "three v1", "warp"),
+                Rendered(AdoptedAgentPath, "adopted body")
+            ],
+            receipt,
+            [],
+            false,
+            new FixedTimeProvider(InstalledAt.AddDays(1)));
+    }
+
+    private static IReadOnlyList<string> AncestorDirectories(string relativePath)
+    {
+        string[] segments = relativePath.Split('/');
+        return
+        [
+            .. Enumerable.Range(1, segments.Length)
+                .Select(count => string.Join('/', segments[..count]))
+        ];
+    }
+
+    /// <summary>
+    ///     Fails after the publication of one named file, which models a process ending once the last
+    ///     artifact of the apply has left the work tree.
+    /// </summary>
+    private sealed class LastFileAppliedFailingObserver(
+        string root,
+        string relativePath) : ISquadTransactionObserver
+    {
+        public IReadOnlyDictionary<string, TreeEntry>? InterruptedTreeSnapshot { get; private set; }
+
+        public void AfterStep(SquadTransactionStep step)
+        {
+            if (step.Kind != SquadTransactionStepKind.FileApplied ||
+                !string.Equals(step.RelativePath, relativePath, StringComparison.Ordinal))
+                return;
+
+            InterruptedTreeSnapshot = CaptureTree(root);
+            throw new InjectedSquadTransactionFailure(step.Sequence);
+        }
+    }
+
+    /// <summary>
+    ///     Drops a file no part of this deployment owns into a staging directory once the first
+    ///     target file has been applied, and records whether the staging tree kept it from there on.
+    /// </summary>
+    private sealed class ForeignStageFileObserver(string root) : ISquadTransactionObserver
+    {
+        private readonly string _stagingDirectory = Path.Combine(
+            root,
+            ".kyber-weave",
+            ".squad-transaction",
+            "staging");
+
+        public bool Injected { get; private set; }
+
+        public bool SawPendingStageOfAnotherTarget { get; private set; }
+
+        public bool? SawAppliedFilePrunedOtherBranches { get; private set; }
+
+        public List<string> Violations { get; } = [];
+
+        public void AfterStep(SquadTransactionStep step)
+        {
+            if (!Injected)
+            {
+                if (step.Kind != SquadTransactionStepKind.FileApplied)
+                    return;
+
+                Directory.CreateDirectory(Staging("codex"));
+                File.WriteAllText(Staging("codex", "foreign.toml"), "foreign");
+                Injected = true;
+                return;
+            }
+
+            SawPendingStageOfAnotherTarget |= File.Exists(
+                Staging("warp", ".warp", "roles", "three.md"));
+            if (!File.Exists(Staging("codex", "foreign.toml")) ||
+                !Directory.Exists(Staging("codex")))
+                Violations.Add($"the foreign stage file's directory was removed by {step.Kind}");
+
+            string adoptedPath = Path.Combine(
+                root,
+                AdoptedAgentPath.Replace('/', Path.DirectorySeparatorChar));
+            if (!File.Exists(adoptedPath) ||
+                !Directory.Exists(Path.GetDirectoryName(adoptedPath)!))
+                Violations.Add($"the adopted file's directory was removed by {step.Kind}");
+
+            if (step.Kind == SquadTransactionStepKind.LockApplied)
+            {
+                bool prunedAppliedBranches =
+                    !Directory.Exists(Staging("codex", ".codex", "agents")) &&
+                    !Directory.Exists(Staging("warp"));
+                bool keptBlockedBranch =
+                    Directory.Exists(Staging()) && Directory.Exists(Staging("codex"));
+                SawAppliedFilePrunedOtherBranches = prunedAppliedBranches && keptBlockedBranch;
+            }
+        }
+
+        private string Staging(params string[] relativeSegments)
+        {
+            string path = _stagingDirectory;
+            foreach (string segment in relativeSegments)
+                path = Path.Combine(path, segment);
+
+            return path;
+        }
     }
 }
