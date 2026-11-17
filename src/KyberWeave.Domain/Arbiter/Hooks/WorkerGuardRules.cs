@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Rules;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -15,6 +16,30 @@ internal static class WorkerGuardRules
 
     /// <summary>The rule id an exhausted budget is refused under.</summary>
     internal const string BudgetRuleId = "KW-ARB-BUDGET-001";
+
+    /// <summary>The trigger a sub-agent's own command call raises, so a technology's rules can allow-list its forms.</summary>
+    internal const string CommandTrigger = "worker.command";
+
+    /// <summary>The fact holding the command as the harness reported it.</summary>
+    internal const string CommandTextFact = "command.text";
+
+    /// <summary>The fact holding the command's form: its program and leading words, options and their values removed.</summary>
+    internal const string CommandFormFact = "command.form";
+
+    /// <summary>The fact holding the command's program, the form's first word.</summary>
+    internal const string CommandProgramFact = "command.program";
+
+    /// <summary>The fact naming the calling sub-agent.</summary>
+    internal const string WorkerNameFact = "worker.name";
+
+    /// <summary>The fact naming the calling sub-agent's capability profile.</summary>
+    internal const string WorkerProfileFact = "worker.capability-profile";
+
+    /// <summary>The fact naming the harness the call arrived from.</summary>
+    internal const string WorkerHarnessFact = "worker.harness";
+
+    /// <summary>The capability profile whose command calls a technology's allow-list judges: read-only, can run commands.</summary>
+    internal const string PlatformReaderProfile = "platform-reader";
 
     /// <summary>The status line a worker whose budget ran out returns.</summary>
     internal const string BudgetExceededStatus = "STATUS: BUDGET_EXCEEDED";
@@ -37,6 +62,17 @@ internal static class WorkerGuardRules
     /// <summary>The capability profiles whose dispatches carry a budget: the developers and docs-dev.</summary>
     private static readonly HashSet<string> BudgetedProfiles = new(StringComparer.Ordinal) { "worker", "documentation" };
 
+    /// <summary>The leading words a command may carry before its program, which the form skips.</summary>
+    private static readonly HashSet<string> CommandWrappers = new(StringComparer.Ordinal)
+    {
+        "sudo", "env", "command", "exec", "nohup",
+    };
+
+    /// <summary>The characters that join or redirect commands: a command holding one has no single form.</summary>
+    private static readonly System.Buffers.SearchValues<char> ShellControl = System.Buffers.SearchValues.Create(";&|<>`");
+
+    private const string SubstitutionOpener = "$(";
+
     /// <summary>
     /// Whether the event can need a refusal at all, decided from the event alone: a root agent, an agent outside the Squad
     /// catalog, and a developer-less call that writes no file are never guarded. The guard process asks it before it
@@ -57,6 +93,7 @@ internal static class WorkerGuardRules
             ToolCall? call = Read(harness, stdin);
             return call is not null
                 && (call.WritePath is not null
+                    || IsCommandJudged(call)
                     || string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal)
                     || IsBudgeted(call.Agent.CapabilityProfile));
         }
@@ -68,6 +105,52 @@ internal static class WorkerGuardRules
 
     /// <summary>Whether a dispatch with this capability profile carries a budget.</summary>
     internal static bool IsBudgeted(string capabilityProfile) => BudgetedProfiles.Contains(capabilityProfile);
+
+    /// <summary>Whether a technology's command allow-list judges this call's command.</summary>
+    /// <remarks>
+    /// Only a profile that may run commands and may not write files is judged: a developer's commands are its
+    /// work, and judging them would refuse every build and test run.
+    /// </remarks>
+    internal static bool IsCommandJudged(ToolCall call) =>
+        call.Command is { Length: > 0 }
+        && string.Equals(call.Agent.CapabilityProfile, PlatformReaderProfile, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The refusal a technology's command allow-list makes, or null when no rule refuses this command. The rules of
+    /// every loaded technology folder are evaluated together; each rule narrows itself to its own tool's commands.
+    /// </summary>
+    internal static string? CommandRefusal(IReadOnlyList<ArbiterRule> rules, ToolCall call, string command)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(rules, CommandFacts(call, command), CommandTrigger);
+        if (!string.Equals(outcome.CombinedEffect, RuleEffects.Escalate, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string refusing = string.Join(", ", outcome.RuleAnswers
+            .Where(answer => !answer.Shadow
+                && string.Equals(answer.Effect, RuleEffects.Escalate, StringComparison.Ordinal))
+            .Select(answer => answer.RuleId)
+            .Distinct(StringComparer.Ordinal));
+        return $"{refusing}: this command is outside the forms this technology allows a read-only agent to run " +
+            $"('{FormOf(command)}'). Nothing ran. Use a listed read form, or report what you could not inspect.";
+    }
+
+    /// <summary>The facts a <c>worker.command</c> rule reads, from the call the harness reported.</summary>
+    internal static ArbiterFactSet CommandFacts(ToolCall call, string command)
+    {
+        string text = Collapse(command);
+        string form = FormOf(command);
+        return new ArbiterFactSet()
+            .With(WorkerNameFact, call.Agent.Name, ArbiterFactLabel.Derived)
+            .With(WorkerProfileFact, call.Agent.CapabilityProfile, ArbiterFactLabel.Derived)
+            .With(WorkerHarnessFact, call.Harness, ArbiterFactLabel.Derived)
+            .With(CommandTextFact, text, ArbiterFactLabel.Asserted)
+            .With(CommandFormFact, form, ArbiterFactLabel.Asserted)
+            .With(CommandProgramFact, ProgramOf(form), ArbiterFactLabel.Asserted);
+    }
 
     /// <summary>
     /// The one-time deny after a call that ran past the per-call limit. The denied call is counted like any other, so
@@ -140,7 +223,8 @@ internal static class WorkerGuardRules
 
             JsonObject? args = ArgumentsOf(root, "toolArgs");
             string? path = tool is "edit" or "create" && args is not null ? NodeText(args, "path") : null;
-            return new ToolCall(harness, agentId, agent, cwd, path);
+            string? command = tool is "bash" && args is not null ? NodeText(args, "command") : null;
+            return new ToolCall(harness, agentId, agent, cwd, path, command);
         }
 
         if (string.Equals(harness, ClaudeHarness, StringComparison.Ordinal))
@@ -162,7 +246,8 @@ internal static class WorkerGuardRules
                     "NotebookEdit" => NodeText(input, "notebook_path"),
                     _ => null,
                 };
-            return new ToolCall(harness, agentId, agent, cwd, path);
+            string? command = tool is "Bash" && input is not null ? NodeText(input, "command") : null;
+            return new ToolCall(harness, agentId, agent, cwd, path, command);
         }
 
         return null;
@@ -257,6 +342,59 @@ internal static class WorkerGuardRules
             ? text
             : null;
 
+    /// <summary>
+    /// A command's form: its program and leading words, with a leading wrapper (<c>sudo</c>, <c>env</c>) and every
+    /// option and option value removed, so <c>az vm list -o table</c> and <c>az vm list</c> are one form.
+    /// </summary>
+    /// <remarks>
+    /// A compound command, a redirect or a substitution has no single form, so its whole text is returned and no
+    /// listed form matches it: a redirect that writes a file is exactly what the allow-list must refuse.
+    /// </remarks>
+    private static string FormOf(string command)
+    {
+        string text = Collapse(command);
+        if (command.AsSpan().IndexOfAny(ShellControl) >= 0
+            || command.Contains('\n', StringComparison.Ordinal)
+            || command.Contains('\r', StringComparison.Ordinal)
+            || command.Contains(SubstitutionOpener, StringComparison.Ordinal))
+        {
+            return text;
+        }
+
+        string[] tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        int start = 0;
+        while (start < tokens.Length
+               && (CommandWrappers.Contains(tokens[start]) || IsAssignment(tokens[start])))
+        {
+            start++;
+        }
+
+        List<string> words = [];
+        for (int index = start; index < tokens.Length; index++)
+        {
+            if (tokens[index].StartsWith('-'))
+            {
+                break;
+            }
+
+            words.Add(tokens[index]);
+        }
+
+        return words.Count == 0 ? text : string.Join(' ', words);
+    }
+
+    private static string ProgramOf(string form) =>
+        form.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? form;
+
+    private static bool IsAssignment(string token)
+    {
+        int equals = token.IndexOf('=', StringComparison.Ordinal);
+        return equals > 0 && token[..equals].All(c => char.IsLetterOrDigit(c) || c == '_');
+    }
+
+    private static string Collapse(string command) =>
+        string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
     internal static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');
 
@@ -300,5 +438,11 @@ internal static class WorkerGuardRules
         }
     }
 
-    internal sealed record ToolCall(string Harness, string AgentId, ArbiterSquadAgent Agent, string? Cwd, string? WritePath);
+    internal sealed record ToolCall(
+        string Harness,
+        string AgentId,
+        ArbiterSquadAgent Agent,
+        string? Cwd,
+        string? WritePath,
+        string? Command);
 }

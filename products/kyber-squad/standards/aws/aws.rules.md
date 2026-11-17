@@ -20,3 +20,7 @@ last-reviewed: 2026-11-16
 
 - Never run a wildcard command that could delete or stop resources while inspecting.
   Prefer describe, list and get forms.
+- Run only these AWS CLI read forms: `aws * describe-*`, `aws * list-*`, `aws * get-*` and
+  `aws s3 ls`. Every other `aws` command is refused by the Arbiter where the worker guard
+  sees the call (Claude Code and Copilot CLI); on every other harness this list is an
+  instruction you are trusted to follow.

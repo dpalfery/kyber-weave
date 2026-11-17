@@ -215,6 +215,17 @@ public static class ArbiterTriggerCatalog
                 "review.changed-paths",
                 "review.base-ref",
             },
+            // Raised by the worker guard on a sub-agent's own command call, so a technology's rules can
+            // declare the forms a read-only dispatch may run.
+            ["worker.command"] = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "worker.name",
+                "worker.capability-profile",
+                "worker.harness",
+                "command.text",
+                "command.form",
+                "command.program",
+            },
         };
 
     /// <summary>Every fact any trigger supplies (with <c>rules.&lt;id&gt;.answer</c> as a pattern).</summary>
