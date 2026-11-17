@@ -18,12 +18,14 @@ namespace KyberWeave.Tests;
 /// which made the Squad and Utilities classes several times slower. A per-checkout root is
 /// small by construction and keeps concurrent worktrees from listing each other's leftovers.
 /// <para>
-/// On macOS the default root lives under the per-user temp directory (<c>getconf
-/// DARWIN_USER_TEMP_DIR</c>, under <c>/private/var/folders</c>), the location the owner chose
-/// because this machine's endpoint-security software skips it. That path is longer than a Unix
-/// domain socket can carry, so the platform's control pipe is moved to
-/// <see cref="ShortPipeDirectory" />, whose path is short enough for the 103-byte socket limit.
-/// Linux keeps <c>/tmp</c>; Windows has no <c>TMPDIR</c> and is left alone.
+/// On macOS the default root lives in <c>kw-test-temp</c> beside the per-user temp directory
+/// (<c>getconf DARWIN_USER_TEMP_DIR</c>), both inside the per-user folder under
+/// <c>/private/var/folders</c>, the tree this machine's endpoint-security software skips. The
+/// folder is a sibling of the temp directory rather than a child: canonicalisation reads every
+/// ancestor, and the shared temp directory held ~1,700 entries against four in its parent. That
+/// path is longer than a Unix domain socket can carry, so the platform's control pipe is moved
+/// to <see cref="ShortPipeDirectory" />, whose path is short enough for the 103-byte socket
+/// limit. Linux keeps <c>/tmp</c>; Windows has no <c>TMPDIR</c> and is left alone.
 /// </para>
 /// <para>
 /// <c>KW_TEST_TEMP_ROOT</c> moves the root under an absolute path the caller names, which is how
@@ -67,6 +69,12 @@ internal static class TestTempRoot
     private const int ShortKeyLength = 8;
     private const int DarwinUserTempDirectoryName = 65537;
 
+    /// <summary>
+    ///     The folder the macOS root lives in: a sibling of the per-user temp directory, created
+    ///     by the first run, so the shared temp directory is not an ancestor to list.
+    /// </summary>
+    private const string MacBaseFolderName = "kw-test-temp";
+
     [ModuleInitializer]
     internal static void RedirectTemp()
     {
@@ -78,8 +86,8 @@ internal static class TestTempRoot
         string? overridePath = Environment.GetEnvironmentVariable(OverrideVariable);
         bool defaultMacRoot = OperatingSystem.IsMacOS() && string.IsNullOrWhiteSpace(overridePath);
 
-        // The macOS per-user temp directory is where the files should go, but it is longer than
-        // the socket budget. Move the pipe now, before the platform reads its path.
+        // The macOS default base is inside the tree the endpoint scanner skips, but it is longer
+        // than the socket budget. Move the pipe now, before the platform reads its path.
         if (defaultMacRoot &&
             string.IsNullOrEmpty(Environment.GetEnvironmentVariable(PipeDirectoryVariable)))
         {
@@ -133,8 +141,8 @@ internal static class TestTempRoot
     }
 
     /// <summary>
-    ///     The base directory the root sits under when no override is set: the per-user temp
-    ///     directory on macOS, and <c>/tmp</c> everywhere else.
+    ///     The base directory the root sits under when no override is set: a dedicated folder
+    ///     beside the per-user temp directory on macOS, and <c>/tmp</c> everywhere else.
     /// </summary>
     /// <param name="isMacOS">Whether the current platform is macOS.</param>
     /// <param name="darwinUserTempDirectory">
@@ -144,9 +152,20 @@ internal static class TestTempRoot
     internal static string DefaultBasePath(bool isMacOS, string darwinUserTempDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(darwinUserTempDirectory);
-        return isMacOS
-            ? Path.TrimEndingDirectorySeparator(darwinUserTempDirectory)
-            : "/tmp";
+
+        string tempDirectory = Path.TrimEndingDirectorySeparator(darwinUserTempDirectory);
+        if (!isMacOS)
+        {
+            return "/tmp";
+        }
+
+        // A parent that is missing or the filesystem root leaves nowhere separate to put the
+        // folder, so the temp directory itself stays the base.
+        string? perUserFolder = Path.GetDirectoryName(tempDirectory);
+        return string.IsNullOrEmpty(perUserFolder) ||
+               string.Equals(perUserFolder, Path.GetPathRoot(tempDirectory), StringComparison.Ordinal)
+            ? tempDirectory
+            : Path.Combine(perUserFolder, MacBaseFolderName);
     }
 
     /// <summary>

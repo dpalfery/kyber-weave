@@ -10,14 +10,42 @@ public sealed class TestTempRootTests
 {
     private const string Key = "0123456789abcdef";
     private const string DarwinUserTemp = "/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn/T";
+    private const string DarwinUserFolder = "/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn";
+    private const string MacBase = DarwinUserFolder + "/kw-test-temp";
 
-    /// <summary>macOS defaults to the per-user temp directory an endpoint scanner skips.</summary>
+    /// <summary>
+    ///     macOS defaults to a folder beside the per-user temp directory, inside the tree an
+    ///     endpoint scanner skips, so the shared temp directory is not an ancestor to list.
+    /// </summary>
     [Fact]
-    public void DefaultBasePathOnMacOSIsTheUserTempDirectory()
+    public void DefaultBasePathOnMacOSIsAFolderBesideTheUserTempDirectory()
     {
         Assert.Equal(
-            DarwinUserTemp,
+            MacBase,
             TestTempRoot.DefaultBasePath(isMacOS: true, DarwinUserTemp + "/"));
+    }
+
+    /// <summary>
+    ///     Pins the reason for that placement: the base sits in the per-user folder, not under
+    ///     the temp directory that every tool on the machine writes to.
+    /// </summary>
+    [Fact]
+    public void TheMacDefaultBaseIsASiblingOfTheUserTempDirectoryNotAChild()
+    {
+        string basePath = TestTempRoot.DefaultBasePath(isMacOS: true, DarwinUserTemp);
+
+        Assert.Equal(DarwinUserFolder, Path.GetDirectoryName(basePath));
+        Assert.DoesNotContain(DarwinUserTemp + "/", basePath, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     A temp directory with no separate parent leaves nowhere to put the sibling, so the
+    ///     temp directory itself remains the base.
+    /// </summary>
+    [Fact]
+    public void AMacTempDirectoryWithNoUsableParentStaysTheBase()
+    {
+        Assert.Equal("/T", TestTempRoot.DefaultBasePath(isMacOS: true, "/T"));
     }
 
     /// <summary>Every other Unix keeps the short system temp directory.</summary>
@@ -29,16 +57,16 @@ public sealed class TestTempRootTests
 
     /// <summary>The macOS root is the same per-checkout, per-process shape under that base.</summary>
     [Fact]
-    public void NoOverridePutsTheRootUnderTheMacUserTempDirectory()
+    public void NoOverridePutsTheRootUnderTheMacBase()
     {
         string root = TestTempRoot.ResolveRoot(
             null,
             Key,
             4242,
             socketBudgetApplies: false,
-            defaultBasePath: DarwinUserTemp);
+            defaultBasePath: MacBase);
 
-        Assert.Equal($"{DarwinUserTemp}/kw-{Key}/4242", root);
+        Assert.Equal($"{MacBase}/kw-{Key}/4242", root);
     }
 
     /// <summary>Off macOS the unset override keeps today's behaviour: a short root under /tmp.</summary>
@@ -55,7 +83,7 @@ public sealed class TestTempRootTests
     }
 
     /// <summary>
-    ///     The per-user temp directory cannot carry the platform's control pipe, which is why the
+    ///     The default macOS root cannot carry the platform's control pipe, which is why the
     ///     redirect moves the pipe to the short directory.
     /// </summary>
     [Fact]
@@ -66,7 +94,7 @@ public sealed class TestTempRootTests
             Key,
             4242,
             socketBudgetApplies: false,
-            defaultBasePath: DarwinUserTemp);
+            defaultBasePath: MacBase);
 
         Assert.True(root.Length > TestTempRoot.MaxRootLength);
         Assert.Equal("/tmp", TestTempRoot.ShortPipeDirectory);
@@ -173,6 +201,7 @@ public sealed class TestTempRootTests
             string.IsNullOrEmpty(Environment.GetEnvironmentVariable(TestTempRoot.OverrideVariable)))
         {
             Assert.StartsWith("/var/folders/", tmpdir, StringComparison.Ordinal);
+            Assert.Contains("/kw-test-temp/kw-", tmpdir, StringComparison.Ordinal);
         }
     }
 

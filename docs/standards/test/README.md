@@ -365,10 +365,28 @@ are checked here, in the same order:
 
 Every test writes under one per-process root, `<base>/kw-<checkout-key>/<pid>`, because
 `TestTempRoot` redirects `TMPDIR` for the test process and every child it spawns. On macOS the
-base is the per-user temp directory (`getconf DARWIN_USER_TEMP_DIR`, under `/private/var/folders`),
-the location this machine's endpoint-security software (Microsoft Defender) skips; Linux and the
-rest use `/tmp`, which Defender scans. On 651 tests, `/tmp` took 46.9 s and the macOS user temp
-directory 33.7 s and 34.1 s.
+base is `/private/var/folders/<xx>/<hash>/kw-test-temp`, a folder the tests create beside the
+per-user temp directory (`getconf DARWIN_USER_TEMP_DIR`). That tree is the location this
+machine's endpoint-security software (Microsoft Defender) skips, and the folder is beside the
+shared temp directory rather than inside it: canonicalising a deployment path lists every
+ancestor, and on this machine the temp directory held 1,706 entries against 5 in its parent, so
+leaving the root out of it takes that listing off every install. Linux and the rest use `/tmp`,
+which Defender scans.
+
+Measured on the same 651 tests (`ArbiterInstallCommandTests`, the eight `SquadDeploymentState`
+classes and `SquadGlobalRootTests`), Defender real-time protection off, load average 6.5–8.6,
+runs back to back:
+
+| Base | Run 1 | Run 2 |
+|---|---|---|
+| per-user temp directory (`/var/folders/<xx>/<hash>/T`) | 23.35 s | 22.38 s |
+| `kw-test-temp` beside it | 19.23 s | 19.43 s |
+
+The slowest single test in those runs,
+`ArbiterInstallCommandTests.Install_ThreeGlobalTargets…`, took 9.61 s and 9.38 s under the temp
+directory and 7.56 s and 7.58 s under its sibling. The cache folder that
+`getconf DARWIN_USER_CACHE_DIR` returns is a third candidate, rejected on entry count: it held
+693 entries against 5 in the per-user folder.
 
 `KW_TEST_TEMP_ROOT=<absolute path>` moves the base while keeping the `kw-<key>/<pid>` shape, so a
 run still cannot see another checkout's or another process's files. A relative path, or one the
@@ -384,13 +402,14 @@ export KW_TEST_TEMP_ROOT=/Volumes/KWTestRam
 diskutil eject /Volumes/KWTestRam
 ```
 
-Measured on 651 tests, a RAM disk is about 26 % faster than `/tmp` and about 7 % faster than the
-default macOS user temp directory. Ejecting discards everything on it, so it needs no cleanup.
+Measured on 651 tests with `/tmp` as the base, a RAM disk is about 26 % faster. That comparison
+predates the default base change above and has not been repeated against `kw-test-temp`. Ejecting
+discards everything on it, so it needs no cleanup.
 
 **Why the path must stay short.** The test runner puts its control pipe at
 `$TMPDIR/MONITORTOHOST_<32 hex>`, and a Unix domain socket path is limited to 103 bytes, so a root
-that still carries that pipe may be at most 56 characters. The default macOS root is longer, so
-`TestTempRoot` moves the pipe to `/tmp` through `TESTINGPLATFORM_PIPE_DIRECTORY`. An override is
-held to the same limit and fails with the budget in its message unless you set
-`TESTINGPLATFORM_PIPE_DIRECTORY` yourself; `/Volumes/KWTestRam/kw-<16 hex>/<pid>` is about 44
-characters and fits.
+that still carries that pipe may be at most 56 characters. The default macOS root is about 85
+characters, so `TestTempRoot` moves the pipe to `/tmp` through
+`TESTINGPLATFORM_PIPE_DIRECTORY`. An override is held to the same limit and fails with the budget
+in its message unless you set `TESTINGPLATFORM_PIPE_DIRECTORY` yourself;
+`/Volumes/KWTestRam/kw-<16 hex>/<pid>` is about 44 characters and fits.
