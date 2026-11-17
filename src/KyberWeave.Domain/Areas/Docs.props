@@ -2,7 +2,7 @@
 
   <ItemGroup>
     <!-- The DocGraph engine's Markdown parser, used by the moved Docs types. -->
-    <PackageReference Include="Markdig" Version="1.5.1" />
+    <PackageReference Include="Markdig" Version="1.6.0" />
   </ItemGroup>
 
   <ItemGroup>
