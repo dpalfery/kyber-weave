@@ -14,14 +14,16 @@ namespace KyberWeave.Tests;
 /// <c>docs init</c> step that writes them, and writes no configuration itself.
 /// Global scope prints nothing, because there is no project.
 /// </summary>
-public sealed class SquadTaskGateHintTests : IDisposable
+/// <remarks>
+/// Each case's install or update runs once for the whole run through
+/// <see cref="PreparedSquadInstalls"/>, keyed by the configuration the command read. The test reads the
+/// recorded exit code and console output and checks that the prepared project still holds the configuration
+/// it started with; it never runs the command or changes the prepared install.
+/// </remarks>
+public sealed class SquadTaskGateHintTests
 {
     private const string HintFragment = "No task gates are declared";
     private const string DocsInitFragment = "kyber-weave docs init";
-
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
 
     /// <summary>
     /// A project with no config file gets the hint, because there are no task gates to find.
@@ -29,14 +31,12 @@ public sealed class SquadTaskGateHintTests : IDisposable
     [Fact]
     public void Install_ProjectScopeWithoutConfigFile_PrintsTaskGateHintAndWritesNoConfiguration()
     {
-        string targetDir = NewTargetDir("install-no-config");
-        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
-        CommandExecution execution = RunInstall(targetDir, global: false);
+        PreparedCase prepared = InstallCase("install-no-config", configYaml: null, global: false);
 
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains(HintFragment, execution.Output, StringComparison.Ordinal);
-        Assert.Contains(DocsInitFragment, execution.Output, StringComparison.OrdinalIgnoreCase);
-        AssertConfigurationFilesUnchanged(targetDir, before);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(DocsInitFragment, prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        prepared.AssertConfigurationUnchanged();
     }
 
     /// <summary>
@@ -45,22 +45,19 @@ public sealed class SquadTaskGateHintTests : IDisposable
     [Fact]
     public void Install_ProjectScopeWithConfigButNoTaskGates_PrintsTaskGateHintAndWritesNoConfiguration()
     {
-        string targetDir = NewTargetDir("install-empty-gates");
-        WriteProjectConfig(targetDir, """
+        const string yaml = """
             review:
               gates:
                 - id: probe
                   run: [git, --version]
-            """);
-        Assert.Empty(KyberWeaveConfigLoader.Load(targetDir).Review.TaskGates);
-        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+            """;
+        PreparedCase prepared = InstallCase("install-empty-gates", yaml, global: false);
+        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
 
-        CommandExecution execution = RunInstall(targetDir, global: false);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains(HintFragment, execution.Output, StringComparison.Ordinal);
-        Assert.Contains(DocsInitFragment, execution.Output, StringComparison.OrdinalIgnoreCase);
-        AssertConfigurationFilesUnchanged(targetDir, before);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(DocsInitFragment, prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        prepared.AssertConfigurationUnchanged();
     }
 
     /// <summary>
@@ -69,22 +66,19 @@ public sealed class SquadTaskGateHintTests : IDisposable
     [Fact]
     public void Install_ProjectScopeWithTaskGates_PrintsNoTaskGateHint()
     {
-        string targetDir = NewTargetDir("install-with-gates");
-        WriteProjectConfig(targetDir, """
+        const string yaml = """
             review:
               task-gates:
                 test-dev:
                   - id: probe
                     run: [git, --version]
-            """);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(targetDir).Review.TaskGates);
-        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+            """;
+        PreparedCase prepared = InstallCase("install-with-gates", yaml, global: false);
+        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
 
-        CommandExecution execution = RunInstall(targetDir, global: false);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.DoesNotContain(HintFragment, execution.Output, StringComparison.Ordinal);
-        AssertConfigurationFilesUnchanged(targetDir, before);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        prepared.AssertConfigurationUnchanged();
     }
 
     /// <summary>
@@ -93,18 +87,11 @@ public sealed class SquadTaskGateHintTests : IDisposable
     [Fact]
     public void Install_GlobalScope_PrintsNoTaskGateHint()
     {
-        string anchorDir = NewTargetDir("global-anchor");
-        string homeDir = Path.Combine(_temp.Path, "global-home");
-        string globalRoot = Path.Combine(_temp.Path, "global-roots", "codex");
-        IReadOnlyDictionary<string, byte[]?> beforeAnchor = SnapshotConfigurationFiles(anchorDir);
-        IReadOnlyDictionary<string, byte[]?> beforeHome = SnapshotConfigurationFiles(homeDir);
+        PreparedCase prepared = InstallCase("global", configYaml: null, global: true);
 
-        CommandExecution execution = RunGlobalInstall(anchorDir, homeDir, globalRoot);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.DoesNotContain(HintFragment, execution.Output, StringComparison.Ordinal);
-        AssertConfigurationFilesUnchanged(anchorDir, beforeAnchor);
-        AssertConfigurationFilesUnchanged(homeDir, beforeHome);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        prepared.AssertConfigurationUnchanged();
     }
 
     /// <summary>
@@ -114,17 +101,12 @@ public sealed class SquadTaskGateHintTests : IDisposable
     [Fact]
     public void Install_ProjectScopeWithBrokenConfig_SucceedsAndPrintsTaskGateHint()
     {
-        string targetDir = NewTargetDir("install-broken-config");
-        WriteProjectConfig(targetDir, "review:\n  task-gates: [oops\n");
-        Assert.False(KyberWeaveConfigLoader.TryLoad(targetDir).Success);
-        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+        PreparedCase prepared = InstallCase("install-broken-config", "review:\n  task-gates: [oops\n", global: false);
 
-        CommandExecution execution = RunInstall(targetDir, global: false);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains(HintFragment, execution.Output, StringComparison.Ordinal);
-        Assert.Contains(DocsInitFragment, execution.Output, StringComparison.OrdinalIgnoreCase);
-        AssertConfigurationFilesUnchanged(targetDir, before);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(DocsInitFragment, prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        prepared.AssertConfigurationUnchanged();
     }
 
     /// <summary>
@@ -133,32 +115,12 @@ public sealed class SquadTaskGateHintTests : IDisposable
     [Fact]
     public void Update_ProjectScopeWithoutConfigFile_PrintsTaskGateHintAndWritesNoConfiguration()
     {
-        string targetDir = NewTargetDir("update-no-config");
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "update-no-config-home"));
-        SquadStateStore stateStore = new(userPaths);
-        SeedDeployment(targetDir, stateStore);
-        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+        PreparedCase prepared = UpdateCase("update-no-config", configYaml: null);
 
-        CommandExecution execution = Capture(() => SquadTestCommands.Update(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false).Execute(null!, new SquadUpdateSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = false,
-                DryRun = false,
-                ReplaceManaged = true
-            }));
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains(HintFragment, execution.Output, StringComparison.Ordinal);
-        Assert.Contains(DocsInitFragment, execution.Output, StringComparison.OrdinalIgnoreCase);
-        AssertConfigurationFilesUnchanged(targetDir, before);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(DocsInitFragment, prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        prepared.AssertConfigurationUnchanged();
     }
 
     /// <summary>
@@ -167,93 +129,147 @@ public sealed class SquadTaskGateHintTests : IDisposable
     [Fact]
     public void Update_ProjectScopeWithTaskGates_PrintsNoTaskGateHint()
     {
-        string targetDir = NewTargetDir("update-with-gates");
-        WriteProjectConfig(targetDir, """
+        const string yaml = """
             review:
               task-gates:
                 test-dev:
                   - id: probe
                     run: [git, --version]
-            """);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(targetDir).Review.TaskGates);
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "update-with-gates-home"));
-        SquadStateStore stateStore = new(userPaths);
-        SeedDeployment(targetDir, stateStore);
-        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+            """;
+        PreparedCase prepared = UpdateCase("update-with-gates", yaml);
 
-        CommandExecution execution = Capture(() => SquadTestCommands.Update(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false).Execute(null!, new SquadUpdateSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = false,
-                DryRun = false,
-                ReplaceManaged = true
-            }));
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.DoesNotContain(HintFragment, execution.Output, StringComparison.Ordinal);
-        AssertConfigurationFilesUnchanged(targetDir, before);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        prepared.AssertConfigurationUnchanged();
     }
 
-    private string NewTargetDir(string name)
+    /// <summary>
+    /// Builds the one real project install for <paramref name="recipe"/> and records what it printed and
+    /// what the project's configuration files held before and after.
+    /// </summary>
+    private static PreparedCase InstallCase(string recipe, string? configYaml, bool global)
     {
-        string targetDir = Path.Combine(_temp.Path, name);
-        Directory.CreateDirectory(targetDir);
-        return targetDir;
+        string key = Key("install", recipe, configYaml, global);
+        return PreparedSquadInstalls.Get(key, () => BuildInstall(key, configYaml, global));
     }
 
-    private CommandExecution RunInstall(string targetDir, bool global)
+    /// <summary>Builds the one real project update for <paramref name="recipe"/> over a seeded deployment.</summary>
+    private static PreparedCase UpdateCase(string recipe, string? configYaml)
     {
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "install-home"));
-        SquadStateStore stateStore = new(userPaths);
-
-        return Capture(() => SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false).Execute(null!, new SquadInstallSettings
-            {
-                Path = targetDir,
-                Targets = ["codex"],
-                Global = global,
-                DryRun = false,
-                Adopt = false
-            }));
+        string key = Key("update", recipe, configYaml, global: false);
+        return PreparedSquadInstalls.Get(key, () => BuildUpdate(key, configYaml));
     }
 
-    private CommandExecution RunGlobalInstall(string anchorDir, string homeDir, string globalRoot)
-    {
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(homeDir);
-        SquadStateStore stateStore = new(userPaths);
+    private static string Key(string kind, string recipe, string? configYaml, bool global) =>
+        string.Join(
+            "/",
+            "task-gate-hint",
+            kind,
+            recipe,
+            global ? "global" : "project",
+            "codex",
+            "1.2.3",
+            configYaml is null ? "no-config" : Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(configYaml))));
 
-        return Capture(() => SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false,
-            readAnswer: null,
-            globalRoots: new CodexOnlyGlobalRoots(globalRoot)).Execute(null!, new SquadInstallSettings
-            {
-                Path = anchorDir,
-                Targets = ["codex"],
-                Global = true,
-                DryRun = false,
-                Adopt = false,
-                Yes = true
-            }));
+    private static PreparedCase BuildInstall(string key, string? configYaml, bool global)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string targetDir = Path.Combine(directory.Path, "target");
+            Directory.CreateDirectory(targetDir);
+            if (configYaml is not null)
+                WriteProjectConfig(targetDir, configYaml);
+
+            string homeDir = Path.Combine(directory.Path, "home");
+            string globalRoot = Path.Combine(directory.Path, "global-roots", "codex");
+            IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+            IReadOnlyDictionary<string, byte[]?> beforeHome = SnapshotConfigurationFiles(homeDir);
+
+            using FakeSquadReleaseSource releaseSource = new();
+            FakeSquadRenderer renderer = new();
+            FakeSquadUserPaths userPaths = new(homeDir);
+            SquadStateStore stateStore = new(userPaths);
+            CommandExecution execution = Capture(() => SquadTestCommands.Install(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                releaseSource: releaseSource,
+                renderer: renderer,
+                isInteractive: false,
+                readAnswer: null,
+                globalRoots: global ? new CodexOnlyGlobalRoots(globalRoot) : null).Execute(null!, new SquadInstallSettings
+                {
+                    Path = targetDir,
+                    Targets = ["codex"],
+                    Global = global,
+                    DryRun = false,
+                    Adopt = false,
+                    Yes = global
+                }));
+
+            PreparedCase prepared = new(
+                key,
+                directory,
+                execution,
+                before,
+                beforeHome,
+                targetDir,
+                homeDir);
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    private static PreparedCase BuildUpdate(string key, string? configYaml)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string targetDir = Path.Combine(directory.Path, "target");
+            Directory.CreateDirectory(targetDir);
+            if (configYaml is not null)
+                WriteProjectConfig(targetDir, configYaml);
+
+            using FakeSquadReleaseSource releaseSource = new();
+            FakeSquadRenderer renderer = new();
+            FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "home"));
+            SquadStateStore stateStore = new(userPaths);
+            SeedDeployment(targetDir, stateStore);
+            IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+
+            CommandExecution execution = Capture(() => SquadTestCommands.Update(
+                userPaths: userPaths,
+                stateStore: stateStore,
+                releaseSource: releaseSource,
+                renderer: renderer,
+                isInteractive: false).Execute(null!, new SquadUpdateSettings
+                {
+                    Path = targetDir,
+                    Targets = ["codex"],
+                    Global = false,
+                    DryRun = false,
+                    ReplaceManaged = true
+                }));
+
+            PreparedCase prepared = new(
+                key,
+                directory,
+                execution,
+                before,
+                new Dictionary<string, byte[]?>(StringComparer.Ordinal),
+                targetDir,
+                userPaths.HomeDirectory);
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
     }
 
     private static void WriteProjectConfig(string projectRoot, string yaml)
@@ -356,10 +372,41 @@ public sealed class SquadTaskGateHintTests : IDisposable
     private static CommandExecution Capture(Func<int> execute)
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
+        return new CommandExecution(execution.Result, execution.Output, execution.ErrorOutput);
     }
 
-    private sealed record CommandExecution(int ExitCode, string Output);
+    private sealed record CommandExecution(int ExitCode, string Output, string ErrorOutput);
+
+    /// <summary>
+    /// One prepared install or update: its record and the configuration files it started with, so the
+    /// "writes no configuration" assertion compares the prepared project's bytes with the bytes it was built from.
+    /// </summary>
+    private sealed class PreparedCase(
+        string key,
+        TempDirectory directory,
+        CommandExecution execution,
+        IReadOnlyDictionary<string, byte[]?> before,
+        IReadOnlyDictionary<string, byte[]?> beforeHome,
+        string targetRoot,
+        string homeRoot) : PreparedSquadInstall(
+            key,
+            directory,
+            new SquadInstallRecord
+            {
+                ExitCode = execution.ExitCode,
+                StandardOutput = execution.Output,
+                StandardError = execution.ErrorOutput
+            })
+    {
+        /// <summary>The prepared project root, which holds the configuration the command read.</summary>
+        public string TargetRoot => targetRoot;
+
+        public void AssertConfigurationUnchanged()
+        {
+            AssertConfigurationFilesUnchanged(targetRoot, before);
+            AssertConfigurationFilesUnchanged(homeRoot, beforeHome);
+        }
+    }
 
     /// <summary>
     /// Keeps a global install inside the temp directory: the one deployed target resolves
