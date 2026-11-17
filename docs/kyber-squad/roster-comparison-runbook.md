@@ -5,7 +5,7 @@ doc-type: runbook
 status: superseded
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 keywords:
   - worker roster
   - tiered roster

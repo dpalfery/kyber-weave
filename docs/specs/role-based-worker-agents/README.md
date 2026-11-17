@@ -4,7 +4,7 @@ title: Role-based worker agents specification
 doc-type: index
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 documentation-impact: extends-component
 impact-components: [KyberSquad, ReviewCouncil, DocGraph, KyberArbiter]
 ---
