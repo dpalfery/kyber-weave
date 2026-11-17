@@ -80,7 +80,7 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-TASKS-017` | A task file entry names more than one technology, which must be split into one task per technology |
 | `KW-DOC-TASKS-018` | Under the `tiered` worker roster, a developer task names no technology; a documentation or delivery task needs none |
 | `KW-CONFIG-REG-001` | A configuration registry property names a path that does not exist |
-| `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
+| `KW-CONFIG-REG-002` | The registry properties rendered into the root `AGENTS.md` no longer match configuration. A block differing only in legacy `README.md` standard names is a warning naming `docs standards migrate`, not an error |
 | `KW-DOC-LIFECYCLE-001` | A `plan` document sits in the plans folder but the plan index does not reach it |
 | `KW-DOC-LIFECYCLE-002` | A `todo` document sits in the todo folder but the todo index does not reach it |
 | `KW-DOC-LIFECYCLE-003` | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |

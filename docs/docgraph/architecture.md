@@ -170,9 +170,15 @@ carries its kind — `ConfigRegEntry` with `ConfigRegEntryKind.Path` or `ConfigR
 - **`ConfigRegEntryKind.Mode`**: the value is a mode word describing configuration state. The
   path-existence check is skipped for it, because there is nothing on disk to find. No other
   check is relaxed with it: path entries are still checked, without exception.
-- **Both kinds are covered by `KW-CONFIG-REG-002`**: the rendered block must match what the
-  configuration produces, whichever kind an entry carries. A mode property the configuration no
-  longer publishes, or one published with the wrong value, is as stale as a moved path.
+- **Both kinds are covered by `KW-CONFIG-REG-002`**: the properties the rendered block publishes
+  must match what the configuration produces, whichever kind an entry carries. A mode property the
+  configuration no longer publishes, or one published with the wrong value, is as stale as a moved
+  path. The generated prose around the properties is not compared: it is template text whose
+  wording changes between builds and it publishes nothing an agent resolves.
+- **The standards warning period also covers the block.** A block whose only differences are
+  standard properties still naming the folder's `README.md` is stale because the host has not run
+  the migration, so `KW-CONFIG-REG-002` is a warning naming `kyber-weave docs standards migrate`
+  rather than a planning-check failure. Any other difference stays an error.
 
 `<intake-assessment>` is the first instance. A repository that sets `ontology: intake: true`
 in `.kyber-weave/kyber-weave.yml` gets the property published with the value `enabled`;

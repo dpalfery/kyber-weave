@@ -35,7 +35,7 @@ generated block, or it declared `config-reg` entries of its own.
 | Id | Severity | Meaning |
 |---|---|---|
 | `KW-CONFIG-REG-001` | Error | A registry property names a path that does not exist |
-| `KW-CONFIG-REG-002` | Error | The rendered `AGENTS.md` block no longer matches configuration |
+| `KW-CONFIG-REG-002` | Error; Warning during the standards warning period | The properties the rendered `AGENTS.md` block publishes no longer match configuration. A block differing only in legacy `README.md` standard names is the warning period, and names `docs standards migrate` |
 
 ### Plan and todo lifecycle — `docs validate`
 
