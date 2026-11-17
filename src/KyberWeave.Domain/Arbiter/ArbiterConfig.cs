@@ -125,6 +125,13 @@ public sealed record ArbiterConfig
     /// <summary>The glob patterns that mark a path as a test file.</summary>
     public IReadOnlyList<string> TestFilePatterns { get; init; } = [];
 
+    /// <summary>
+    /// Each technology folder's <c>builds-on</c> parent, keyed by the technology whose standard names it. An event
+    /// in the child technology is judged by that parent's rules too; see <c>ArbiterRuleScopes</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RuleFolderParents { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>The <c>LENS-001</c> step-0 per-lens path table.</summary>
     public IReadOnlyList<ArbiterLensPathEntry> LensPaths { get; init; } = [];
 

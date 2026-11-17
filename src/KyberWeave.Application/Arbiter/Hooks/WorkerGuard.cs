@@ -9,8 +9,8 @@ namespace KyberWeave.Arbiter.Hooks;
 /// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into the
 /// repository's canonical checkout while a live run works in a worktree of its own
 /// (<c>KW-ARB-CHECKOUT-001</c>), ends a developer dispatch whose current turn has run past its budget of
-/// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), and refuses a read-only dispatch's command that its
-/// technology's <c>worker.command</c> rules do not allow.
+/// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), and refuses a read-only dispatch's command that the
+/// declared technology folders' <c>worker.command</c> rules do not allow.
 /// </summary>
 /// <remarks>
 /// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,

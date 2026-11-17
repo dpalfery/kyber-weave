@@ -40,6 +40,12 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths) : IPlanFacts
     /// <summary>The fact listing every task the plan holds, one <c>id: title</c> line each.</summary>
     public const string TaskListFact = "plan.task-list";
 
+    /// <summary>
+    /// The fact holding the task's one technology, from its <c>Technology:</c> label, when it names one. It selects
+    /// the technology folder's Arbiter rules; a task that names none leaves it absent.
+    /// </summary>
+    public const string TechnologyFact = ArbiterTriggerCatalog.TaskTechnologyFact;
+
     /// <summary>The longest task title the task list carries.</summary>
     private const int MaxTitleChars = 160;
 
@@ -115,6 +121,12 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths) : IPlanFacts
             facts = facts.With("plan.task.files", task.Files.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.depends-on", task.DependsOn.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.skills", task.Skills.ToList(), ArbiterFactLabel.Derived);
+            if (!string.IsNullOrWhiteSpace(task.Technology))
+            {
+                // The task's one technology, which selects the technology folder's Arbiter rules for this event.
+                facts = facts.With(TechnologyFact, task.Technology.Trim(), ArbiterFactLabel.Derived);
+            }
+
             if (!string.IsNullOrWhiteSpace(task.Difficulty))
             {
                 // The one rating in use, which the model-targeting difficulty rule reads under the tiered

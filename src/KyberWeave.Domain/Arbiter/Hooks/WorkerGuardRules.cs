@@ -127,14 +127,25 @@ internal static class WorkerGuardRules
         && string.Equals(call.Agent.CapabilityProfile, PlatformReaderProfile, StringComparison.Ordinal);
 
     /// <summary>
-    /// The refusal a technology's command allow-list makes, or null when no rule refuses this command. The rules of
-    /// every loaded technology folder are evaluated together; each rule narrows itself to its own tool's commands.
+    /// The refusal a technology's command allow-list makes, or null when no rule refuses this command. A rule
+    /// loaded from a technology folder judges only a task of that technology; the guard's tool-call event names no
+    /// dispatch technology, so it passes no scope and every loaded technology's list applies, which is the
+    /// fail-closed reading. Each rule still narrows itself to its own tool's commands.
     /// </summary>
-    internal static string? CommandRefusal(IReadOnlyList<ArbiterRule> rules, ToolCall call, string command)
+    /// <param name="rules">Every rule the configuration loaded.</param>
+    /// <param name="call">The sub-agent's tool call.</param>
+    /// <param name="command">The command the call declares.</param>
+    /// <param name="technologyScope">The technologies whose rules apply, or null for every rule.</param>
+    internal static string? CommandRefusal(
+        IReadOnlyList<ArbiterRule> rules,
+        ToolCall call,
+        string command,
+        IReadOnlyCollection<string>? technologyScope = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
 
-        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(rules, CommandFacts(call, command), CommandTrigger);
+        IReadOnlyList<ArbiterRule> scoped = ArbiterRuleScopes.Applicable(rules, technologyScope);
+        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(scoped, CommandFacts(call, command), CommandTrigger);
         if (!string.Equals(outcome.CombinedEffect, RuleEffects.Escalate, StringComparison.Ordinal))
         {
             return null;

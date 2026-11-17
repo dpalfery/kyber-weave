@@ -260,6 +260,12 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         facts = _gateReports.Enrich(facts, ev);
         facts = WithTaskReturns(facts, config, runScope);
 
+        // A technology folder's rules judge only a task of that technology or of one that builds on it. Role
+        // folder rules and arbiter.rules carry no technology and judge every event, and an event that names no
+        // task technology is judged by those alone.
+        IReadOnlyList<ArbiterRule> eventRules = ArbiterRuleScopes.Applicable(
+            rules, EventTechnology(classification, facts), config.Arbiter.RuleFolderParents);
+
         // The review's REVIEW_RUN names the store its findings sit in. A lens return's first finding is the
         // one the nitpick filter reads; a refutation reads whether the filter dropped the finding it refutes.
         string? reviewRun = HeaderBlock.Parse(prompt).Headers.TryGetValue("REVIEW_RUN", out string? run) ? run : null;
@@ -318,7 +324,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // Primary and secondary read one fact set and one candidate map, so their questions
         // can share a single provider call.
         Dictionary<string, ArbiterFact> candidateFacts = new(StringComparer.Ordinal);
-        TriggerPlan primary = PlanTrigger(trigger, facts, rules, candidateFacts);
+        TriggerPlan primary = PlanTrigger(trigger, facts, eventRules, candidateFacts);
 
         // Step 0 of the primary short-circuits: no provider call, and no secondary work.
         List<TriggerPlan> secondaries = [];
@@ -326,10 +332,10 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         {
             foreach (string secondary in secondaryNames)
             {
-                if (rules.Any(rule => rule.Enabled
+                if (eventRules.Any(rule => rule.Enabled
                     && string.Equals(rule.Trigger, secondary, StringComparison.Ordinal)))
                 {
-                    secondaries.Add(PlanTrigger(secondary, facts, rules, candidateFacts));
+                    secondaries.Add(PlanTrigger(secondary, facts, eventRules, candidateFacts));
                 }
             }
         }
@@ -382,7 +388,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         {
             ArbiterFactSet findingFacts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[index], gateCorroborated);
             Dictionary<string, ArbiterFact> findingCandidates = new(StringComparer.Ordinal);
-            TriggerPlan findingPlan = PlanTrigger(trigger, findingFacts, rules, findingCandidates);
+            TriggerPlan findingPlan = PlanTrigger(trigger, findingFacts, eventRules, findingCandidates);
             ArbiterFactSet findingBatch = findingCandidates.Aggregate(
                 findingFacts, (set, pair) => set.With(pair.Key, pair.Value.Value, pair.Value.Label));
             Step1Call findingCall = await AskAsync(
@@ -411,7 +417,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         }
 
         ArbiterDispatchEvaluation primaryResult = await RecordPrimaryAsync(
-            classification, ev, primaryJudgement, judged, notes, recordId, config, rules, effective, ledgerId, planDigest,
+            classification, ev, primaryJudgement, judged, notes, recordId, config, eventRules, effective, ledgerId, planDigest,
             elapsed, cancellationToken).ConfigureAwait(false);
         string primaryOutcome = primaryResult.Outcome;
         if (!effective.DryRun && reviewRun is not null && returned.Count > 0)
@@ -452,7 +458,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         foreach (TriggerPlan plan in secondaries)
         {
             ArbiterSecondaryEvaluation evaluated = await RecordSecondaryAsync(
-                classification, ev, plan, secondaryCall, primaryOutcome, config, rules, targeting, facts, table,
+                classification, ev, plan, secondaryCall, primaryOutcome, config, eventRules, targeting, facts, table,
                 effective, ledgerId, planDigest, priorDecisionId, elapsed, cancellationToken).ConfigureAwait(false);
             secondaryResults.Add(evaluated);
         }
@@ -474,6 +480,26 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
     /// <summary>The run the event's dispatch belongs to, when the git facts can read the run records; null outside any run.</summary>
     private ArbiterRunScope? RunScopeOf(ArbiterEvent ev) => (_gitFacts as IArbiterRunScopeSource)?.RunScopeOf(ev.Cwd);
+
+    /// <summary>
+    /// The technology that scopes the dispatch's technology folder rules: the task's own <c>Technology:</c> label
+    /// when its plan was read, else the dispatch's validated <c>TECHNOLOGY</c> header. A dispatch that names
+    /// neither is judged by role folder rules and <c>arbiter.rules</c> alone.
+    /// </summary>
+    private static string? EventTechnology(TriggerClassification classification, ArbiterFactSet facts)
+    {
+        if (facts.TryGet(ArbiterTriggerCatalog.TaskTechnologyFact, out ArbiterFact? fromTask)
+            && fromTask.Value is string taskTechnology
+            && !string.IsNullOrWhiteSpace(taskTechnology))
+        {
+            return taskTechnology.Trim();
+        }
+
+        return classification.Headers.TryGetValue("TECHNOLOGY", out string? header)
+               && !string.IsNullOrWhiteSpace(header)
+            ? header.Trim()
+            : null;
+    }
 
     /// <summary>
     /// The key a plan's stored report tails are kept under. Inside a run it names the run too, so a later run of
