@@ -3,6 +3,7 @@ using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Tests.Arbiter;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,25 +24,34 @@ namespace KyberWeave.Tests;
 /// provider has no key, is a no-op on repeat runs, merges config non-destructively, and
 /// renders through the existing Squad install pipeline with the trust step printed.
 /// RED: <c>ArbiterInstallCommand</c> and <c>ArbiterInstallSettings</c> do not exist yet.
+/// <para>
+/// The tests that assert the command's own decisions start from a class template: a deployment
+/// the fixture installed once through the real Squad lifecycle, copied into the test's root. The
+/// real install stays covered end to end by
+/// <see cref="Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks"/>
+/// and by <see cref="Install_SecondIdenticalRun_IsNoOpWithoutDuplicateWrites"/>.
+/// </para>
 /// The settings shape below mirrors <c>ArbiterUninstallSettings</c> (Target) and
 /// <c>ArbiterSettings</c> (Provider, KeyStdin): <c>Target</c>, <c>Provider</c>,
 /// <c>ArbiterKey</c> (--arbiter-key), <c>KeyStdin</c>, <c>Global</c>, over the inherited
 /// <c>Path</c>.
 /// </summary>
-public sealed class ArbiterInstallCommandTests : IDisposable
+public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTemplates>, IDisposable
 {
     private const string TypeSafeOrigin = "https://api.typesafe.ai";
 
     private readonly TempDirectory _temp = new();
     private readonly TempDirectory _home = new();
     private readonly FakeCredentialStore _store = new();
+    private readonly InstallCommandTemplates _templates;
     private readonly ArbiterTestHost _host;
 
     private string? _keyStdinValue;
     private string? _keyPromptValue;
 
-    public ArbiterInstallCommandTests()
+    public ArbiterInstallCommandTests(InstallCommandTemplates templates)
     {
+        _templates = templates;
         _host = ArbiterTestHost.Create(RegisterFakes);
     }
 
@@ -60,6 +70,17 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         services.AddSingleton<ICredentialStore>(_store);
         services.AddSingleton<IArbiterKeyInput>(new FakeArbiterKeyInput(() => _keyStdinValue, () => _keyPromptValue));
     }
+
+    // The tests that assert the command's own decisions (provider, key, config merge, scope output)
+    // start from the class template instead of rendering and committing the whole bundle again.
+    // Install_ThreeGlobalTargetsSharingOneHookFileName_AllExitZeroAndOneReceiptHoldsThreeBlocks is the
+    // test that still runs the real install end to end.
+    private ArbiterTestHost TemplateHost(InstalledSquadHome template) =>
+        ArbiterTestHost.Create(services =>
+        {
+            RegisterFakes(services);
+            services.AddSingleton<IArbiterInstallLifecycle>(new TemplateInstallLifecycle(template));
+        });
 
     /// <summary>
     /// An unknown target is client input, not a crash: exit 2 naming the roster.
@@ -91,8 +112,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-global");
         new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        using ArbiterTestHost templateHost = TemplateHost(_templates.GlobalClaude);
 
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -124,8 +146,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_EmptyProvider_ResolvesToNone()
     {
         string host = NewDir("install-empty-provider");
+        using ArbiterTestHost templateHost = TemplateHost(_templates.ProjectKilo);
 
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = string.Empty, Project = true }));
@@ -146,8 +169,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         string host = NewDir("install-keep-provider");
         WriteProviderConfig(host, "systemone");
         _store.Write(TypeSafeOrigin, "stored-key");
+        using ArbiterTestHost templateHost = TemplateHost(_templates.ProjectKilo);
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
+        CommandExecution execution = Capture(() => templateHost.Command<ArbiterInstallCommand>().Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
 
@@ -163,8 +187,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-change-provider");
         WriteProviderConfig(host, "systemone");
+        using ArbiterTestHost templateHost = TemplateHost(_templates.ProjectKilo);
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
+        CommandExecution execution = Capture(() => templateHost.Command<ArbiterInstallCommand>().Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
 
@@ -180,8 +205,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     public void Install_OmittedProviderOnAFreshMachine_DefaultsToNone()
     {
         string host = NewDir("install-fresh-provider");
+        using ArbiterTestHost templateHost = TemplateHost(_templates.ProjectKilo);
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterInstallCommand>().Execute(
+        CommandExecution execution = Capture(() => templateHost.Command<ArbiterInstallCommand>().Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Project = true }));
 
@@ -201,8 +227,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         const string key = "TS-INSTALL-KEY-7f3a9c1e4b2d";
         string host = NewDir("install-key");
+        using ArbiterTestHost templateHost = TemplateHost(_templates.ProjectKilo);
 
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -256,7 +283,8 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         const string key = "TS-INSTALL-REPEAT-1a2b3c4d5e6f";
         string host = NewDir("install-repeat");
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        using ArbiterTestHost templateHost = TemplateHost(_templates.ProjectKilo);
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
 
         CommandExecution first = Capture(() => command.Execute(
             null!,
@@ -302,8 +330,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
             "  targets: [kilo]\n" +
             "# keep this comment\n" +
             "custom-unrelated-key: custom-value\n");
+        using ArbiterTestHost templateHost = TemplateHost(_templates.ProjectKilo);
 
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings { Path = host, Target = "kilo", Provider = "none", Project = true }));
@@ -382,8 +411,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-global-default");
         new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp"]);
+        using ArbiterTestHost templateHost = TemplateHost(_templates.GlobalClaude);
 
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -418,8 +448,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
         Assert.False(File.Exists(UserHostConfigPath.Of(_home.Path)));
         Assert.False(Directory.Exists(Path.Combine(_home.Path, "docs")));
         Assert.False(File.Exists(Path.Combine(_home.Path, "AGENTS.md")));
+        using ArbiterTestHost templateHost = TemplateHost(_templates.GlobalClaude);
 
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -446,8 +477,9 @@ public sealed class ArbiterInstallCommandTests : IDisposable
     {
         string host = NewDir("install-d13");
         new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["claude", "warp", "copilot"]);
+        using ArbiterTestHost templateHost = TemplateHost(_templates.GlobalClaude);
 
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
+        ArbiterInstallCommand command = templateHost.Command<ArbiterInstallCommand>();
         CommandExecution execution = Capture(() => command.Execute(
             null!,
             new ArbiterInstallSettings
@@ -707,5 +739,68 @@ public sealed class ArbiterInstallCommandTests : IDisposable
             ArgumentException.ThrowIfNullOrWhiteSpace(origin);
             Entries.Remove(origin);
         }
+    }
+
+    /// <summary>
+    /// Stands in for the real lifecycle in the tests whose subject is the command, not the
+    /// deployment: it copies the class template into the root the command selected and reports the
+    /// real receipt that copy carries.
+    /// </summary>
+    private sealed class TemplateInstallLifecycle(InstalledSquadHome template) : IArbiterInstallLifecycle
+    {
+        public Task<SquadLifecycleResult> InstallAsync(
+            string root,
+            SquadDeploymentScope scope,
+            SquadTarget target,
+            SquadReceipt? existingReceipt,
+            bool dryRun,
+            SquadArbiterWiring wiring,
+            CancellationToken cancellationToken)
+        {
+            ArgumentNullException.ThrowIfNull(root);
+            if (dryRun || scope != template.Scope || !template.Targets.Contains(target))
+            {
+                throw new InvalidOperationException(
+                    $"The class template holds {template.Scope} scope for {string.Join(", ", template.Targets)}, " +
+                    $"so it cannot answer a {scope} install of {target}.");
+            }
+
+            return Task.FromResult(new SquadLifecycleResult(
+                true, Receipt: template.CopyInto(root, includeHostConfiguration: false)));
+        }
+    }
+}
+
+/// <summary>
+/// The two deployments the install tests start from: one project install of kilo and one global
+/// install of claude, built once per class instead of once per test.
+/// </summary>
+public sealed class InstallCommandTemplates : IDisposable
+{
+    private readonly InstalledSquadHome _projectKilo;
+    private readonly InstalledSquadHome _globalClaude;
+
+    public InstallCommandTemplates()
+    {
+        Task<InstalledSquadHome> project = Task.Run(
+            () => InstalledSquadHome.Build([SquadTarget.Kilo], SquadDeploymentScope.Project));
+        Task<InstalledSquadHome> global = Task.Run(
+            () => InstalledSquadHome.Build([SquadTarget.Claude]));
+        Task.WhenAll(project, global).GetAwaiter().GetResult();
+        _projectKilo = project.Result;
+        _globalClaude = global.Result;
+    }
+
+    /// <summary>A project root with kilo installed.</summary>
+    public InstalledSquadHome ProjectKilo => _projectKilo;
+
+    /// <summary>A home with claude installed at global scope.</summary>
+    public InstalledSquadHome GlobalClaude => _globalClaude;
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _projectKilo.Dispose();
+        _globalClaude.Dispose();
     }
 }

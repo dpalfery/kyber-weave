@@ -21,16 +21,51 @@ namespace KyberWeave.Tests;
 /// T5 contract: <c>arbiter uninstall --target &lt;t&gt;</c> removes only receipt-owned
 /// artifacts, honors <c>--remove-key</c>, and reports misuse without side effects.
 /// RED: <c>ArbiterUninstallCommand</c> and <c>ArbiterUninstallSettings</c> do not exist yet.
+/// <para>
+/// The tests whose subject is the uninstall start from one of the class templates: a home the
+/// fixture installed once through the real Squad lifecycle, copied into the test's own home.
+/// <see cref="Uninstall_DefaultScope_GlobalRealInstall_RemovesOwnedClaudeBlock_CleansState_AndPreservesForeignBytes"/>
+/// is the test that still runs a real install and then the real uninstall end to end.
+/// </para>
 /// </summary>
-public sealed class ArbiterUninstallCommandTests : IDisposable
+public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallCommandHomes>, IDisposable
 {
+    private const string ClaudeForeign = """
+        {
+          "model": "sonnet",
+          "permissions": { "allow": ["Bash"] },
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "^Read$",
+                "hooks": [
+                  { "type": "command", "command": "user-owned read hook" }
+                ]
+              }
+            ],
+            "PostToolUse": [
+              {
+                "matcher": "^Task$",
+                "hooks": [
+                  { "type": "command", "command": "user-owned task hook" }
+                ]
+              }
+            ]
+          },
+          "custom": { "keep": "this stays" },
+          "user": "keep me"
+        }
+        """;
+
     private readonly TempDirectory _temp = new();
     private readonly TempDirectory _home = new();
     private readonly FakeCredentialStore _store = new();
+    private readonly UninstallCommandHomes _homes;
     private readonly ArbiterTestHost _host;
 
-    public ArbiterUninstallCommandTests()
+    public ArbiterUninstallCommandTests(UninstallCommandHomes homes)
     {
+        _homes = homes;
         _host = ArbiterTestHost.Create(RegisterFakes);
     }
 
@@ -155,7 +190,10 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
             new ArbiterUninstallSettings { Path = host, Target = "kilo" }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("nothing to uninstall", execution.Output, StringComparison.OrdinalIgnoreCase);
+        // The captured console wraps at 80 columns and the temp root is long, so the status line's
+        // words can be split across lines; compare the words, not the line breaks.
+        string status = string.Join(' ', execution.Output.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        Assert.Contains("nothing to uninstall", status, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -257,34 +295,7 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         string home = _home.Path;
         string settingsPath = Path.Combine(home, ".claude", "settings.json");
         Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
-
-        string foreign = """
-            {
-              "model": "sonnet",
-              "permissions": { "allow": ["Bash"] },
-              "hooks": {
-                "PreToolUse": [
-                  {
-                    "matcher": "^Read$",
-                    "hooks": [
-                      { "type": "command", "command": "user-owned read hook" }
-                    ]
-                  }
-                ],
-                "PostToolUse": [
-                  {
-                    "matcher": "^Task$",
-                    "hooks": [
-                      { "type": "command", "command": "user-owned task hook" }
-                    ]
-                  }
-                ]
-              },
-              "custom": { "keep": "this stays" },
-              "user": "keep me"
-            }
-            """;
-        File.WriteAllText(settingsPath, foreign);
+        File.WriteAllText(settingsPath, ClaudeForeign);
 
         ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
         CommandExecution installExecution = Capture(() => install.Execute(
@@ -330,53 +341,16 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     /// <summary>
     /// Cursor and Codex share a single hook file, so uninstall must remove only the owned block and
     /// leave the user's bytes beside it untouched. A whole-file rewrite would re-encode unrelated
-    /// hook entries and silently change user content.
+    /// hook entries and silently change user content. The installed home, with this file's operator
+    /// content already merged, is the class template; the test copies it and runs the uninstall.
     /// </summary>
     [Fact]
     public void Uninstall_GlobalCodexHook_RemovesOnlyOwnedBlockAndPreservesForeignBytes()
     {
         string home = _home.Path;
+        _homes.HookedTargets.CopyInto(home);
         string hooksPath = Path.Combine(home, ".codex", "hooks.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(hooksPath)!);
 
-        const string foreign = """
-            {
-              "hooks": {
-                "PreToolUse": [
-                  {
-                    "matcher": "^Read$",
-                    "hooks": [
-                      { "type": "command", "command": "user-owned read hook" }
-                    ]
-                  }
-                ],
-                "PostToolUse": [
-                  {
-                    "matcher": "^Task$",
-                    "hooks": [
-                      { "type": "command", "command": "user-owned task hook" }
-                    ]
-                  }
-                ]
-              },
-              "custom": { "keep": "codex stays" },
-              "version": 1
-            }
-            """;
-        File.WriteAllText(hooksPath, foreign);
-
-        ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
-        CommandExecution installExecution = Capture(() => install.Execute(
-            null!,
-            new ArbiterInstallSettings
-            {
-                Path = home,
-                Target = "codex",
-                Provider = "none",
-                Global = true,
-            }));
-
-        Assert.Equal(0, installExecution.ExitCode);
         string installed = File.ReadAllText(hooksPath);
         Assert.Contains("kyber-weave-arbiter hook --harness codex", installed, StringComparison.Ordinal);
         Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
@@ -397,34 +371,15 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     /// <summary>
     /// Factory's global file carries a SubagentStop group with no matcher beside Pre and Post. A
     /// global install then uninstall removes every Squad entry, including the stop group, and
-    /// leaves the operator's own stop hook in place.
+    /// leaves the operator's own stop hook in place. The installed home is the class template.
     /// </summary>
     [Fact]
     public void Uninstall_GlobalFactoryHook_RemovesSubagentStopAndKeepsTheUsersOwn()
     {
         string home = _home.Path;
+        _homes.HookedTargets.CopyInto(home);
         string hooksPath = Path.Combine(home, ".factory", "hooks.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(hooksPath)!);
-        File.WriteAllText(hooksPath, """
-            {
-              "SubagentStop": [
-                { "hooks": [ { "type": "command", "command": "user-own-stop-notifier" } ] }
-              ]
-            }
-            """);
 
-        ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
-        CommandExecution installExecution = Capture(() => install.Execute(
-            null!,
-            new ArbiterInstallSettings
-            {
-                Path = home,
-                Target = "factory",
-                Provider = "none",
-                Global = true,
-            }));
-
-        Assert.Equal(0, installExecution.ExitCode);
         string installed = File.ReadAllText(hooksPath);
         Assert.Contains("kyber-weave-arbiter hook --harness factory", installed, StringComparison.Ordinal);
         Assert.Contains("\"SubagentStop\"", installed, StringComparison.Ordinal);
@@ -444,32 +399,20 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     /// <summary>
     /// OpenCode installs its owned shim under the target's true global root, not under the project
     /// convention it would otherwise guess from the home directory. A global uninstall must remove
-    /// the actual plugin file and leave the home-owned operator file alone.
+    /// the actual plugin file and leave the home-owned operator file alone. The installed home is
+    /// the class template.
     /// </summary>
     [Fact]
     public void Uninstall_GlobalOpenCodePlugin_RemovesOwnedFileUnderTheRealGlobalRoot()
     {
         string home = _home.Path;
+        _homes.HookedTargets.CopyInto(home);
         string globalRoot = new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.OpenCode);
         string owned = Path.Combine(globalRoot, "plugins", "kyber-arbiter.ts");
         string nonOwned = Path.Combine(home, ".opencode", "plugins", "custom.ts");
-        Directory.CreateDirectory(Path.GetDirectoryName(owned)!);
-        Directory.CreateDirectory(Path.GetDirectoryName(nonOwned)!);
-        File.WriteAllText(nonOwned, "// operator-owned plugin, never touched\n");
 
-        ArbiterInstallCommand install = _host.Command<ArbiterInstallCommand>();
-        CommandExecution installExecution = Capture(() => install.Execute(
-            null!,
-            new ArbiterInstallSettings
-            {
-                Path = home,
-                Target = "opencode",
-                Provider = "none",
-                Global = true,
-            }));
-
-        Assert.Equal(0, installExecution.ExitCode);
         Assert.True(File.Exists(owned), "the real install should write the OpenCode shim beneath the target's global root");
+        Assert.True(File.Exists(nonOwned), "operator-owned files next to the target root must stay intact");
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
@@ -484,15 +427,13 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     /// <summary>
     /// Uninstalling one global target must not disturb any other target that remains installed in the
     /// same user home. A target ledger can hold multiple global hooks; removing one should rewrite only
-    /// that target's entry.
+    /// that target's entry. The installed home is the class template.
     /// </summary>
     [Fact]
     public void Uninstall_OneGlobalTarget_LeavesOtherGlobalTargetsInstalled()
     {
         string home = _home.Path;
-
-        InstallGlobal(home, "claude");
-        InstallGlobal(home, "codex");
+        _homes.ClaudeAndCodex.CopyInto(home);
 
         ArbiterUninstallCommand uninstall = _host.Command<ArbiterUninstallCommand>();
         CommandExecution execution = Capture(() => uninstall.Execute(
@@ -562,14 +503,13 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
     /// roots, so the files differ even though the recorded paths do not. Uninstalling one target
     /// must remove that target's block and leave the other's file and receipt entry intact: the
     /// receipt is the ownership record, and a removal that recomputed the path instead of reading
-    /// it would look for the block where it is not.
+    /// it would look for the block where it is not. The cursor-and-codex home is the class template.
     /// </summary>
     [Fact]
     public void Uninstall_GlobalCodex_RemovesOnlyTheCodexBlockAndKeepsTheCursorBlock()
     {
         string home = _home.Path;
-        InstallGlobal(home, "cursor");
-        InstallGlobal(home, "codex");
+        _homes.CursorAndCodex.CopyInto(home);
 
         string cursorHooks = Path.Combine(home, ".cursor", "hooks.json");
         string codexHooks = Path.Combine(home, ".codex", "hooks.json");
@@ -595,22 +535,6 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         SquadOwnedBlock remaining = Assert.Single(ReadGlobalReceipt(home).Blocks);
         Assert.Equal("cursor", remaining.Target);
         Assert.Equal("hooks.json", remaining.RelativePath);
-    }
-
-    private void InstallGlobal(string home, string target)
-    {
-        ArbiterInstallCommand command = _host.Command<ArbiterInstallCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
-            null!,
-            new ArbiterInstallSettings
-            {
-                Path = home,
-                Target = target,
-                Provider = "none",
-                Global = true,
-            }));
-
-        Assert.Equal(0, execution.ExitCode);
     }
 
     private SquadStateStore NewStateStore(string name)
@@ -721,5 +645,100 @@ public sealed class ArbiterUninstallCommandTests : IDisposable
         public bool HasDeployment(string root, SquadTarget target, SquadDeploymentScope scope) => false;
 
         public bool AnotherTargetIsDeployed(string root, SquadTarget target) => false;
+    }
+}
+
+/// <summary>
+/// The class templates. Each is one real install; the tests copy the one they need, so the
+/// deployment transaction runs once for the class instead of once per test.
+/// </summary>
+public sealed class UninstallCommandHomes : IDisposable
+{
+    internal const string OperatorPlugin = "// operator-owned plugin, never touched\n";
+
+    internal const string CodexForeign = """
+        {
+          "hooks": {
+            "PreToolUse": [
+              {
+                "matcher": "^Read$",
+                "hooks": [
+                  { "type": "command", "command": "user-owned read hook" }
+                ]
+              }
+            ],
+            "PostToolUse": [
+              {
+                "matcher": "^Task$",
+                "hooks": [
+                  { "type": "command", "command": "user-owned task hook" }
+                ]
+              }
+            ]
+          },
+          "custom": { "keep": "codex stays" },
+          "version": 1
+        }
+        """;
+
+    internal const string FactoryForeign = """
+        {
+          "SubagentStop": [
+            { "hooks": [ { "type": "command", "command": "user-own-stop-notifier" } ] }
+          ]
+        }
+        """;
+
+    private readonly InstalledSquadHome _hookedTargets;
+    private readonly InstalledSquadHome _claudeAndCodex;
+    private readonly InstalledSquadHome _cursorAndCodex;
+
+    /// <summary>The three deployments the uninstall tests start from, built once and in parallel.</summary>
+    public UninstallCommandHomes()
+    {
+        Task<InstalledSquadHome> hooked = Task.Run(() => InstalledSquadHome.Build(
+            [SquadTarget.Codex, SquadTarget.Factory, SquadTarget.OpenCode],
+            seed: SeedOperatorContent));
+        Task<InstalledSquadHome> claudeAndCodex = Task.Run(
+            () => InstalledSquadHome.Build([SquadTarget.Claude, SquadTarget.Codex]));
+        Task<InstalledSquadHome> cursorAndCodex = Task.Run(
+            () => InstalledSquadHome.Build([SquadTarget.Cursor, SquadTarget.Codex]));
+        Task.WhenAll(hooked, claudeAndCodex, cursorAndCodex).GetAwaiter().GetResult();
+        _hookedTargets = hooked.Result;
+        _claudeAndCodex = claudeAndCodex.Result;
+        _cursorAndCodex = cursorAndCodex.Result;
+    }
+
+    /// <summary>A home with codex, factory and opencode over the operator content they merge with.</summary>
+    public InstalledSquadHome HookedTargets => _hookedTargets;
+
+    /// <summary>A home with claude and codex, so one uninstall leaves the other installed.</summary>
+    public InstalledSquadHome ClaudeAndCodex => _claudeAndCodex;
+
+    /// <summary>A home with cursor and codex, so one uninstall leaves exactly the other block.</summary>
+    public InstalledSquadHome CursorAndCodex => _cursorAndCodex;
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _hookedTargets.Dispose();
+        _claudeAndCodex.Dispose();
+        _cursorAndCodex.Dispose();
+    }
+
+    // The operator content each converted test asserts the install merged with and the uninstall
+    // left alone, seeded once into the template instead of into every test's home.
+    private static void SeedOperatorContent(string home)
+    {
+        Write(home, ".codex/hooks.json", CodexForeign);
+        Write(home, ".factory/hooks.json", FactoryForeign);
+        Write(home, ".opencode/plugins/custom.ts", OperatorPlugin);
+    }
+
+    private static void Write(string home, string relativePath, string content)
+    {
+        string path = Path.Combine(home, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content);
     }
 }
