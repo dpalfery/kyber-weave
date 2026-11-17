@@ -196,6 +196,35 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     }
 
     [Fact]
+    public void ADuplicateIdInOneFileIsReportedAndTheLastDeclarationWins()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: host-dup-001
+                trigger: delegate
+                question: Is this the first declaration?
+                answers: [yes, no]
+                effects: { yes: allow, no: allow }
+              - id: host-dup-001
+                trigger: delegate
+                question: Is this the second declaration?
+                answers: [yes, no]
+                effects: { yes: allow, no: allow }
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.DuplicateFolderRule);
+        Assert.Equal(Severity.Warning, finding.Severity);
+        Assert.Equal("host-dup-001", finding.Subject);
+        Assert.Equal(path, finding.FilePath);
+        Assert.Equal(
+            "Is this the second declaration?",
+            Assert.Single(rules, rule => rule.Id == "host-dup-001").Question);
+    }
+
+    [Fact]
     public void AParentsRulesLoadBeforeItsChildsEvenWhenTheHostListsOnlyTheChild()
     {
         WriteStandard("typescript", buildsOn: null);

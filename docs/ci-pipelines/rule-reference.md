@@ -421,6 +421,7 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-CONFIG-018` | Warning | A technology standard's `builds-on` names a parent whose standard does not exist. The parent's Arbiter rules are not read |
 | `KW-ARB-CONFIG-019` | Error | Technology standards name each other as `builds-on` parents in a cycle. The chain stops where it repeats |
 | `KW-ARB-CONFIG-020` | Info | A host folder declares a shipped rule id and so replaces or disables it. No rule is locked, so the declaration takes effect and the finding makes it visible |
+| `KW-ARB-CONFIG-021` | Warning | One folder file declares a rule id more than once. The last declaration wins, as it does across files |
 | `KW-ARB-MODEL-001` | Warning | Model targeting is not `off`, a hooked global target is installed, and its `model-targets.<harness>.json` is missing, unreadable, or older than the Squad lock. Remedy: `kyber-weave squad update`. Reported by `arbiter doctor` |
 | `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |

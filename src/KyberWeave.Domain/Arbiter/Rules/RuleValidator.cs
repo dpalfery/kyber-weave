@@ -92,6 +92,9 @@ public static class RuleValidator
     /// </summary>
     public const string ShippedRuleOverride = "KW-ARB-CONFIG-020";
 
+    /// <summary>One folder file declares a rule id more than once. The last declaration wins, as it does across files.</summary>
+    public const string DuplicateFolderRule = "KW-ARB-CONFIG-021";
+
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 

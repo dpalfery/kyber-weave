@@ -514,6 +514,7 @@ public static class ArbiterConfigLoader
             return;
         }
 
+        findings.AddRange(fileFindings);
         if (loaded.Count == 0)
             return;
 
@@ -602,6 +603,7 @@ public static class ArbiterConfigLoader
             }
 
             List<ArbiterRule> converted = [];
+            HashSet<string> seenIds = new(StringComparer.Ordinal);
             foreach (ArbiterRuleYaml? entry in document.Rules)
             {
                 if (entry is null)
@@ -635,6 +637,18 @@ public static class ArbiterConfigLoader
                     return false;
                 }
 
+                string id = entry.Id?.Trim() ?? string.Empty;
+                if (id.Length > 0 && !seenIds.Add(id))
+                {
+                    collected.Add(new Diagnostic(
+                        RuleValidator.DuplicateFolderRule,
+                        Severity.Warning,
+                        $"'{path}' declares rule '{id}' more than once. The last declaration is used.",
+                        id,
+                        path,
+                        "Remove the earlier declaration."));
+                }
+
                 foreach (ArbiterRule rule in entryRules)
                 {
                     foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile([rule], knownRules, path))
@@ -647,7 +661,9 @@ public static class ArbiterConfigLoader
                     }
                 }
 
-                converted.AddRange(entryRules);
+                // Replace in place, so a repeated id takes the position of its first declaration and the last
+                // declaration's content, exactly as a later file overrides an earlier one.
+                ReplaceRules(converted, entryRules);
             }
 
             loaded = converted;
