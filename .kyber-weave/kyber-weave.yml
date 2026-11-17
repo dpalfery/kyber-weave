@@ -82,12 +82,14 @@ review:
       blocking: true
     # Integration tests: real Squad deployments, real child programs, and file-system work
     # beyond a test's own scratch folder. They live in their own project so the unit `test`
-    # gate above stays inside its two-minute budget. A separate suite rather than
-    # `full-suite: true`, which stays reserved for the three whole-product gates.
+    # gate above stays inside its two-minute budget. `full-suite: true` keeps it out of a
+    # developer agent's run: CI is the safety net that runs it on every pull request, and a
+    # person at a terminal (or the council with --council) can run it too.
     - id: integration-test
       include: *net-test-paths
       run: [dotnet, test, tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj, -c, Release, --no-build]
       timeout-seconds: 900
+      full-suite: true
       blocking: true
     # The repository-policy tests (tests/KyberWeave.RepoPolicy.Tests): scripts, workflows, this
     # file, docs and source scans. A gate of their own so `test` coverage stays a measure of
@@ -379,8 +381,6 @@ review:
     "src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs":
       - KyberWeave.Tests.ReviewTaskGatesConfigTests
       - KyberWeave.Tests.ReviewGateKeysConfigTests
-    "src/KyberWeave.Domain/Review/SuppressionScan.cs":
-      - KyberWeave.Tests.ReviewSuppressionsCommandTests
     "src/KyberWeave.Core/Review/TestClassMapping.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
     "src/KyberWeave.Data/Arbiter/Facts/GateReportFacts.cs":
@@ -420,9 +420,11 @@ review:
         run: [kyber-weave, review, suppressions, "."]
       - &dotnet-tests
         id: tests
-        # The classes this change covers, resolved by `review gates` from `review.test-map` and the
-        # `<Stem>Tests` name convention. Declared after `dotnet-build` because `--no-build` reuses the
-        # artifacts directory that gate writes, so these classes run against the binaries it produced.
+        # The unit classes this change covers, resolved by `review gates` from `review.test-map` and
+        # the `<Stem>Tests` name convention, in tests/KyberWeave.Tests. Declared after `dotnet-build`
+        # because `--no-build` reuses the artifacts directory that gate writes, so these classes run
+        # against the binaries it produced. A change whose coverage lives only in the integration
+        # project runs no class here: that suite belongs to CI, not to a developer agent.
         # A change no class covers skips this gate with KW-REVIEW-026: a filter that matches nothing
         # exits 0, and would afterwards read as tests that ran and passed.
         include: *net-paths
