@@ -33,6 +33,10 @@ public sealed class SquadDeveloperAgentShellContractTests
     [
         "csharp-dev",
         "dal-dev",
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops",
         "docs-dev",
         "github-devops",
         "go-dev",
