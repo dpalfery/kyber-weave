@@ -420,6 +420,36 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     }
 
     /// <summary>
+    /// A comment above an entry explains why the entry exists. When the entry folds into another, its gates move and
+    /// the comment has to move with them: deleting it is the migration changing something other than the keys.
+    /// </summary>
+    [Fact]
+    public void ACommentAboveAFoldedEntryIsKept()
+    {
+        WriteConfig("""
+            review:
+              task-gates:
+                csharp-dev:
+                  - id: format
+                    run: [dotnet, format]
+                # dal-dev runs the same list, so it needs no entry of its own
+                dal-dev:
+                  - id: format
+                    run: [dotnet, format]
+            """);
+
+        CliRun run = Migrate("--write");
+
+        Assert.Equal(0, run.ExitCode);
+        string after = File.ReadAllText(ConfigPath);
+        Assert.Contains("# dal-dev runs the same list, so it needs no entry of its own", after, StringComparison.Ordinal);
+        Assert.DoesNotContain("dal-dev:", after, StringComparison.Ordinal);
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        Assert.Equal(["format"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
+    }
+
+    /// <summary>
     /// A host that already declares one technology gains the migrated entries in the block it wrote, rather than a
     /// second <c>technology-gates</c> key that no YAML document can hold twice.
     /// </summary>

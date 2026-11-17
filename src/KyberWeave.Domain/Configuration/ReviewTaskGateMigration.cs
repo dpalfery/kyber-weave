@@ -81,14 +81,16 @@ public static class ReviewTaskGateMigration
         List<TaskGateMove> moved = [];
         List<TaskGateMove> folded = [];
         List<TaskGateKeep> kept = [];
-        Decision[] decisions = Decide(block, review, moved, folded, kept);
+        Dictionary<string, List<int>> foldedInto = new(StringComparer.Ordinal);
+        Decision[] decisions = Decide(block, review, moved, folded, kept, foldedInto);
         if (moved.Count == 0)
             return new TaskGateMigrationPlan(yaml, moved, folded, kept);
 
         string suffix = lines[taskGates.Header].EndsWith('\r') ? "\r" : string.Empty;
         Dictionary<string, string> technologies =
             moved.ToDictionary(move => move.Agent, move => move.Technology, StringComparer.Ordinal);
-        List<List<string>> sections = Sections(block, decisions, technologies, block.EntryIndent, suffix);
+        List<List<string>> sections =
+            Sections(block, decisions, technologies, foldedInto, block.EntryIndent, suffix);
         bool everyEntryMoved = !decisions.Contains(Decision.Keep);
 
         List<Edit> edits = [];
@@ -169,16 +171,22 @@ public static class ReviewTaskGateMigration
     }
 
     /// <summary>Decides what happens to each entry, in file order, and records what each decision was based on.</summary>
+    /// <param name="block">The entries to decide on.</param>
+    /// <param name="review">The configuration the entries were read from.</param>
+    /// <param name="moved">Receives one record per entry written under a technology key.</param>
+    /// <param name="folded">Receives one record per entry dropped because another entry holds the same gates.</param>
+    /// <param name="kept">Receives one record per entry left under its agent key, with the reason.</param>
+    /// <param name="foldedInto">Receives, per technology, the entry positions that folded into its representative.</param>
     private static Decision[] Decide(
         Block block,
         ReviewConfig review,
         List<TaskGateMove> moved,
         List<TaskGateMove> folded,
-        List<TaskGateKeep> kept)
+        List<TaskGateKeep> kept,
+        Dictionary<string, List<int>> foldedInto)
     {
         Decision[] decisions = new Decision[block.Chunks.Count];
         Dictionary<string, int> representatives = new(StringComparer.Ordinal);
-        Dictionary<string, List<int>> foldedInto = new(StringComparer.Ordinal);
         HashSet<string> conflicted = new(StringComparer.Ordinal);
 
         for (int i = 0; i < block.Chunks.Count; i++)
@@ -281,10 +289,17 @@ public static class ReviewTaskGateMigration
         review.TaskGates.TryGetValue(agent, out IReadOnlyList<ReviewTaskGate>? gates) ? gates : [];
 
     /// <summary>The technology sections to write, in the order their entries appear in the file.</summary>
+    /// <param name="block">The entries the sections are built from.</param>
+    /// <param name="decisions">What happens to each entry.</param>
+    /// <param name="technologies">The technology each moved entry is written under.</param>
+    /// <param name="foldedInto">The entries that folded into each technology's representative.</param>
+    /// <param name="entryIndent">The indentation the block's entries sit at.</param>
+    /// <param name="suffix">The line ending the file uses.</param>
     private static List<List<string>> Sections(
         Block block,
         Decision[] decisions,
         IReadOnlyDictionary<string, string> technologies,
+        IReadOnlyDictionary<string, List<int>> foldedInto,
         int entryIndent,
         string suffix)
     {
@@ -301,6 +316,16 @@ public static class ReviewTaskGateMigration
                 continue;
 
             List<string> section = [.. block.Chunks[i].Trivia];
+
+            // A folded entry's comment explains the gate list that now lives under the technology key, so it is kept
+            // above that key rather than deleted with the entry. Blank lines are left out: the fold takes the
+            // whitespace with it, and a stack of them above one key reads as a gap rather than as a separator.
+            if (foldedInto.TryGetValue(technology, out List<int>? folded))
+            {
+                foreach (int index in folded)
+                    section.AddRange(block.Chunks[index].Trivia.Where(line => !IsBlank(line)));
+            }
+
             section.Add(KeyLine(entryIndent, technology, KeyComment(block.Chunks[i].KeyLine), suffix));
             section.AddRange(block.Chunks[i].Body);
             sections.Add(section);
