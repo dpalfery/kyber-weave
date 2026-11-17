@@ -881,8 +881,7 @@ public sealed class SquadTransaction : ISquadTransaction
                         ArtifactRole.TargetStage,
                         stagingRelativePath,
                         stagingPath,
-                        mutation.RelativePath,
-                        allowInFlight: true);
+                        mutation.RelativePath);
                 }
 
                 ClaimExistingNoOverwrite(
@@ -1900,31 +1899,22 @@ public sealed class SquadTransaction : ISquadTransaction
 
     }
 
-    /// <summary>
-    ///     Verifies a prepared artefact immediately before it is consumed. <paramref name="allowInFlight" />
-    ///     is true only for a batched file stage, whose batch generation already marked it may-have-moved;
-    ///     the lock and receipt stages travel the per-file path and must still be untouched here.
-    /// </summary>
     private static void VerifyPreparedStage(
         IntentDocument intent,
         ArtifactArea area,
         ArtifactRole role,
         string relativePath,
         string stagingPath,
-        string displayPath,
-        bool allowInFlight = false)
+        string displayPath)
     {
         IntentArtifact[] matches = intent.Artifacts.Where(artifact =>
                 artifact.Area == area &&
                 artifact.Role == role &&
                 string.Equals(artifact.Path, relativePath, StringComparison.Ordinal))
             .ToArray();
-        bool lifecycleAllowed = matches.Length == 1 &&
-                                (matches[0].LifecycleState == ArtifactLifecycleState.PreOperation ||
-                                 (allowInFlight &&
-                                  matches[0].LifecycleState == ArtifactLifecycleState.ActiveTransition));
         if (matches.Length != 1 ||
-            !lifecycleAllowed ||
+            matches[0].LifecycleState is not (
+                ArtifactLifecycleState.PreOperation or ArtifactLifecycleState.ActiveTransition) ||
             GetEntryKind(stagingPath) != matches[0].NodeKind ||
             !ArtifactFingerprintMatches(stagingPath, matches[0]))
             throw new InvalidDataException(
