@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0076-test-first-is-one-worker-per-task
@@ -33,6 +33,8 @@ decided-by:
   - adr/0055-factory-capture-is-a-hooks-plugin-pipeline
   - adr/0061-code-editing-runs-stop-on-unusable-tools
   - adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative
+  - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
+  - adr/0086-the-task-file-is-yaml
 sections:
   "#":
     keywords:
@@ -1752,33 +1754,70 @@ Operational contracts remain in
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
 `tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
 
-### The tracked task file and the paste-and-fill dispatch
+### The tracked task file and the inserted task prompt
 
 The conductor no longer derives its own prompts from the plan. Each prompt goes into a tracked
-task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.yml` beside the plan — and a specification's — `<spec-folder>/tasks.yml` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, with a hash in it
-([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). Tracking it
+task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.yml` beside the plan — and a specification's — `<spec-folder>/tasks.yml` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, written as YAML with a hash in it
+([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md),
+[ADR 0086](../adr/0086-the-task-file-is-yaml.md)). Tracking it
 rather than keeping it in `artifacts/` is what lets a push carry it to another machine, which is
-what makes resuming a run somewhere else possible at all.
+what makes resuming a run somewhere else possible at all. The JSON form an older release wrote
+(`<plan>.tasks.json`) is still read, with `KW-DOC-TASKS-014` and the conversion command, for two
+minor releases.
 
 - **What a prompt carries.** Files as path plus symbol, full test class names, the exact commands
-  to run, the acceptance criteria, and the standards to fetch. Line numbers are hints at most,
-  because an earlier task on the same file moves them. The measured run's prompts carried none of
-  this — the authoring contract asked for "exact files or symbols" and no commands — so a worker
-  could not name the class that proved its change and reported a green suite it never ran.
+  to run, the acceptance criteria, and the technology's own rules, skills and standard. Line
+  numbers are hints at most, because an earlier task on the same file moves them. The measured
+  run's prompts carried none of this — the authoring contract asked for "exact files or symbols"
+  and no commands — so a worker could not name the class that proved its change and reported a
+  green suite it never ran. The worker no longer fetches its standard to start: the prompt carries
+  it, and a topic the budget leaves out is the one case for
+  `docs_get_coding_standard_for_technology`.
+- **A task declares a difficulty and one technology.** `Difficulty:` is `easy`, `medium` or
+  `hard`, and a task that omits it is `medium`; anything else is `KW-DOC-TASKS-015`.
+  `Technology:` names one value from `ontology.technologies`: an undeclared value is
+  `KW-DOC-TASKS-016` and a second technology is `KW-DOC-TASKS-017`, which tells the author to
+  split the task. A standard may name one parent it builds on, so React on TypeScript or Tauri on
+  Rust also receives the parent's rules and skills. The task file entry records `difficulty`,
+  `difficulty-source` (`architect`, `default` or `decision-model`) and `technology`. When the task
+  file is written with a decision model configured, the same request that picks the agent asks
+  `KW-ARB-DIFFICULTY-001`; an answer at 0.8 or more replaces the architect's rating, and its
+  `standard` answer becomes `medium`
+  ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
+  No gate judges whether the rating is right.
 - **The conductor chooses the agent.** A plan task names the capabilities its work needs in plain
   words, never an agent or a skill, so a new agent needs no change to the architect. The finalize
-  tool's ready queue shows each task's capabilities, and the conductor dispatches the agent whose
-  description fits them; a `Role:` line in the plan is the owner's override. The worker loads the
-  skills its own agent file names
-  ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)).
-- **The machine delivers the packet.** The conductor dispatches by task id; the worker runs
-  `kyber-weave docs packet <task id> --agent <its name>`, which resolves the one Ready plan, checks the task file against
-  its execution digest (a stale file is refused with the fix), and prints only that task's packet with
-  `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker reports as
-  they were written; without it that section says none were supplied. No plan can know either slot:
-  a later prompt in that run needed a cause an earlier worker had found. A conductor that
-  could not read a 33 KB file and retyped it through helpers left its worker blocked; the machine
-  prints the packet so no one retypes it.
+  tool's ready queue shows each task's capabilities and its `agent=` pick, and the conductor
+  dispatches that agent; with no pick it chooses the agent whose description fits. A `Role:` line
+  in the plan is the owner's override. The worker loads the skills its own agent file names, and
+  its passed prompt carries the technology's skills as well
+  ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md),
+  [ADR 0082](../adr/0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md)).
+- **Task gates resolve by technology.** One resolver reads the agent's own `review.task-gates`
+  entry first, then `review.technology-gates.<technology>`, then the entry of the technology
+  agent the shipped map names, then the parent technology's by the same two steps. A task that
+  names a technology and resolves no gate is refused with a non-zero exit; no lists are merged
+  and no gate is added, and the council's `review.gates` is a different list.
+- **The machine delivers the prompt.** The conductor dispatches by task id with a leading header
+  block (`TASK`, `TECHNOLOGY`, `PLAN_FILE`, `PRIOR_RESULTS`, `FAILED_ATTEMPTS` as needed). On a
+  harness whose hook can rewrite the call, the dispatch hook replaces that block with the prompt
+  the task prompt service builds and keeps the text below it, so a retry's failure report still
+  reaches the worker. The prompt is built from the task file, checked against its plan, and the
+  same service prints it through `docs packet` and describes it through
+  `docs_build_task_prompt_for_agent_dispatch`. It holds the task, host facts, shared rules, the
+  parent's rules and skills, the technology's rules, skills and standard, and a last part naming
+  what the budget cut; every part sits inside its own tag. The default budget is 60,000
+  characters (`task-prompt-budget`); rules are never cut, and skills and standard sections go
+  least relevant to the task text first.
+- **A worker that gets no inserted prompt prints its own.** The hook can be absent or untrusted,
+  and some harnesses cannot rewrite the dispatch at all: Antigravity, ZCode, CommandCode and Warp
+  receive the prompt as `.agent_scratchpad/<task>/prompt.md`, the untracked scratch folder, and
+  the dispatch names that file. A worker that starts with only the header lines runs
+  `kyber-weave docs packet <task id> --agent <its name>` itself or stops; it never works from the
+  task id alone. `docs packet` resolves the one Ready plan, checks the task file against its
+  execution digest (a stale file is refused with the fix), and prints only that task's prompt with
+  `{worktree}` filled in. `--prior-results <file>` fills `{prior_results}` with earlier worker
+  reports as they were written; without it that section says none were supplied.
 - **The plan stays authoritative.** The owner approves the plan, it holds the `## Decisions` table,
   and the Arbiter reads task ids, files, dependencies, skills, task text, test rows and out-of-scope
   items from it. Only the conductor stops reading it — 68 KB in the measured run.
@@ -1793,7 +1832,7 @@ what makes resuming a run somewhere else possible at all.
   title, text, files, dependencies, skills), the test contract rows, the out-of-scope paths and the
   development mode. A status flip or an edit to a Decisions row is therefore not stale; any task
   edit is. Stale means the conductor refuses the file until the architect regenerates it. The
-  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, and leaves it untouched when already current. Finalization runs the same generator: the conductor's `docs_finalize_approved_plan_and_write_task_file` tool (CLI twin `docs finalize`, [ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)) records the approval, sets the plan Ready and writes the file, and refuses, undoing every change, on any `KW-DOC-TASKS-*` error; the architect's `FINALIZE` path is the fallback. A prompt is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
+  architect runs `kyber-weave docs tasks <plan> --write` after its last plan edit: the command derives every field, the digest (SHA-256 over the parsed document, `PlanDocumentParser.ExecutionDigest`) and each prompt from the plan, writes the file in place, and leaves it untouched when already current. Finalization runs the same generator: the conductor's `docs_finalize_approved_plan_and_write_task_file` tool (CLI twin `docs finalize`, [ADR 0078](../adr/0078-the-conductor-finalizes-and-archives-plans-through-two-docs-tools.md)) records the approval, sets the plan Ready and writes the file, and refuses, undoing every change, on any `KW-DOC-TASKS-*` error; the architect's `FINALIZE` path is the fallback. The task file's `prompt` field is the plan task's own text plus a `Command:` and an `Acceptance criteria:` line taken from the task or its test contract row, the `{worktree}` slot and the `{prior_results}` slot; the dispatch adds the host facts and the technology's rules, skills and standard around it. When the plan lacks one, the command writes nothing and names the task and the line to add (`-004`). `--check` exits 1 and names each difference without writing. A shell-less architect has the conductor run the command. A specification's digest is over its `tasks.md`: the conductor runs the same command on it before finalization. The parser ends a Depends value at the next bullet at the same or a shallower indent (deeper sub-bullets stay in the value), and ends a Files bullet list at the next bold-labelled bullet, so a spec item's `_Requirements:_` line and `**Acceptance:**` bullet are not taken as dependencies or files.
 - **Each finished task commits with a `Task:` line.** The worker commits on the feature branch with
   `Task: <id>` and its report in the commit body, and the branch is pushed after each integrated
   task, so `run start --resume` can read the completed tasks and their results from the commits
@@ -1807,7 +1846,7 @@ what makes resuming a run somewhere else possible at all.
 flowchart TD
     Architect["conductor finalize tool\nsets plan Ready + writes tasks.yml"]
     Validate["conductor validates the file\nthrough the docs tools"]
-    Paste["conductor dispatches by task id\nworker runs docs packet"]
+    Paste["conductor dispatches by task id\nhook inserts the task prompt"]
     Worker["worker dispatches, commits\nTask: id + report"]
     Resume["run start --resume\nreads the Task: lines"]
     Archive["docs-dev harvests, then the conductor's\narchive tool archives the plan\nand removes the file"]
@@ -1828,13 +1867,14 @@ here for the Squad's own readers:
 
 | Harness | Delivery path |
 |---|---|
-| Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Factory, Devin | rewrite: the dispatch hook replaces the task-id line with the full prompt |
+| Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Factory, Devin | rewrite: the dispatch hook replaces the dispatch's header block with the full prompt |
 | Antigravity | file until its live check passes: the dispatch names `.agent_scratchpad/<task>/prompt.md`, which the worker reads first |
 | ZCode, CommandCode | file until their live checks pass: each documents a tool-input rewrite field, but no Kyber-Weave hook or mod is rendered for it yet |
 | Warp | file: no dispatch hook exists, so the dispatch names the prompt file |
 
 On every path the conductor dispatches with the task id and the failed-attempt count, never with
-the prompt text. A worker that starts with only the header lines, because a hook was absent or
+the prompt text. On a file harness the dispatch also names the prompt file, and the worker reads
+it first. A worker that starts with only the header lines, because a hook was absent or
 untrusted, runs `kyber-weave docs packet <task id>` itself or stops; it never works from the task
 id alone.
 

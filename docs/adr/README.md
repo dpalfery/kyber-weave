@@ -4,7 +4,7 @@ title: Architecture decision records
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-17
 ---
 
 # Architecture decision records
@@ -103,6 +103,8 @@ existing record.
 | [0082](0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md) | [The decision model picks task agents, and headerless dispatches are delegations](0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md) | Accepted | 2026-11-14 | A Copilot CLI root dispatch to a Squad writer is a `delegate` without headers; plan and task come from the run's worktree, and unknown identity allows. The decision model picks each unassigned task's agent once when the task file is written (`agent=` on the ready queue); optional, provider `none` makes no call. `arbiter audit` reports `KW-ARB-AUDIT-006` when a configured model was never asked. |
 | [0083](0083-a-documented-rule-outranks-the-code-around-it-and-out-of-scope-work-becomes-todos.md) | [A documented rule outranks the code around it, and out-of-scope work becomes todos](0083-a-documented-rule-outranks-the-code-around-it-and-out-of-scope-work-becomes-todos.md) | Accepted | 2026-11-14 | New work follows a documented rule over contradicting code; existing breaches in touched areas are findings, and in untouched files pre-existing debt. Workers report out-of-scope issues as open items instead of fixing them; the architect files them as todos in one dispatch after review, the PR lists them under Follow-up work filed, and the final report asks whether to start a fresh run. |
 | [0084](0084-kyberdash-csharp-engine.md) | [KyberDash collector, canonical store, and engine ported to C# on .NET 10](0084-kyberdash-csharp-engine.md) | Accepted | 2026-11-15 | Ports the KyberDash OTLP collector, `canon.db` store (`SCHEMA_VERSION = 24`), incremental dirty-key projection, pricing/context/finding analyses, loopback `/api/kyber/*` and OTLP server, in-process `JobSchedulerService`, fallback transcript synthesizers, and 14-day checkpointed refresh to C# under `dash/server/` (`KyberDash.sln`), superseding decision 5 of ADR 0020 while keeping display layers and wire contracts unchanged. |
+| [0085](0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md) | [Tasks carry a difficulty and one technology, and a hook inserts the task prompt](0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md) | Accepted | 2026-11-17 | A task gains an optional `Difficulty:` and one `Technology:`; the task file carries both, the decision-model call that picks an agent also rates difficulty, and one prompt service builds the task's whole brief. A dispatch hook inserts that prompt in place of the header block, and a harness whose hook cannot rewrite the call gets the same prompt in `.agent_scratchpad/<task>/prompt.md`. Task gates resolve by technology. Amends ADR 0080 and ADR 0082. |
+| [0086](0086-the-task-file-is-yaml.md) | [The task file is YAML](0086-the-task-file-is-yaml.md) | Accepted | 2026-11-17 | The task file becomes `<plan>.tasks.yml`, and a specification's `tasks.yml`, at schema version 2; the JSON form is read for two minor releases with `KW-DOC-TASKS-014` and `docs tasks <plan> --convert` rewrites it. The file stays tracked, the plan stays authoritative, and the execution digest and lifecycle are unchanged. Amends ADR 0063. |
 
 ## Writing one
 

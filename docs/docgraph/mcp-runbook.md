@@ -6,12 +6,13 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
   - adr/0061-code-editing-runs-stop-on-unusable-tools
   - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
+  - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
 code-refs:
   - CodeGraphFreshness
   - CodeGraphProvisioner
@@ -1543,21 +1544,29 @@ still reports the root, a count of `0`, and unavailable revision markers when Gi
 read. It is also the one tool that always answers: under the stop rule every other tool can
 return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
 
-### `docs_build_task_prompt_for_agent_dispatch(taskId = null, technology = null, plan = null, priorResults = null, failedAttempts = 0, projectPath = null)`
+### `docs_build_task_prompt_for_agent_dispatch(taskId = null, technology = null, plan = null, priorResults = null, failedAttempts = 0, harness = null, projectPath = null)`
 
 The conductor's dispatch question: for this task, which agent do I dispatch, and is its prompt
 whole? It builds the same prompt `kyber-weave docs packet <task id>` prints, through the same
 service, and answers with the facts the dispatch needs and **never the prompt text**: the agent,
 the difficulty in use and who rated it (`architect`, `default` or `decision-model`), the one
-technology the task names, and what the prompt budget left out. The prompt itself reaches the
-worker through the dispatch hook, which replaces the task-id line of the dispatch before the
-worker starts, so the conductor never reads or retypes it.
+technology the task names, what the prompt budget left out, and the prompt file's path when this
+harness gets a file. The prompt reaches the worker through the dispatch hook, which replaces the
+dispatch's header block before the worker starts, so the conductor never reads or retypes it.
 
 `taskId` is written any natural way (`T1`, `t1`, `task 1`, `1`) and is resolved in the one plan
 that is Ready or In progress, or the one `plan` names. `priorResults` is the file a retry names,
-and `failedAttempts` is how many attempts already failed, so a retry's reply describes the same
-prompt the hook builds. Name `technology` instead of a task id for a dispatch that belongs to no
-task, such as a research request: the reply then describes the parts from the shared rules on.
+and `failedAttempts` is how many attempts already failed, so the tool and the hook are asked the
+same question. Name `technology` instead of a task id for a dispatch that belongs to no task,
+such as a research request: the reply then describes the parts from the shared rules on.
+
+Name `harness` as well when you know it. On a harness whose dispatch hook can rewrite the call,
+no file is written and the reply says `prompt file: none`. On Antigravity, ZCode, CommandCode and
+Warp the hook cannot rewrite the dispatch — the rows in the
+[dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — so the prompt
+is written to `.agent_scratchpad/<task>/prompt.md` (untracked) and the reply carries that path.
+Name the path in the dispatch and tell the worker to read it first. Omit `harness` when it is
+unknown: no file is written then.
 
 A task file that is missing or no longer matches its plan builds no prompt: the reply is
 `prompt: none` and a `reason:` line naming `kyber-weave docs tasks <plan> --write`, so no worker
