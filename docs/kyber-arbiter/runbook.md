@@ -4,13 +4,14 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers
+  - adr/0087-arbiter-rules-live-in-role-and-technology-folders
 ---
 
 # Kyber Arbiter runbook
@@ -474,6 +475,79 @@ kyber-weave arbiter tune [path] [--rule <id>] [--thresholds 0.5,0.6,0.7] [--json
 pre/post events, and implementation packets whose body names a planning path
 (`KW-ARB-AUDIT-001`…`-004`), and lists attestations for information. code-reviewer runs
 `audit --plan <PLAN_FILE>` at the end of a run and cites the result.
+
+## Overriding a shipped rule in a folder
+
+The 36 shipped rules live in three role files (`conductor` 21, `architect` 2, `reviewer` 13).
+A host's own copy of a role or technology folder sits under
+`<docs-root>/standards/<name>/<name>.arbiter-rules.yml`, and its declarations apply over the
+shipped ones before `arbiter.rules`. To get the folder to edit, install it:
+
+```bash
+kyber-weave docs init . --standards conductor
+```
+
+**Replace one rule in the folder.** A folder declaration with a shipped id replaces the whole
+rule, keeping its position in the set, so the entry restates the rule. To turn
+`KW-ARB-ROSTER-001` down to log only, write the rule as it ships with `enabled: false`:
+
+```yaml
+# docs/standards/conductor/conductor.arbiter-rules.yml
+rules:
+  - id: KW-ARB-ROSTER-001
+    enabled: false
+    trigger: [delegate, investigate]
+    question: Is the target in the caller's delegates-to?
+    answers: [listed, no-roster, not-listed]
+    decide:
+      - when: { fact: delegation.target, in: roster.caller.delegates-to }
+        answer: listed
+      - when: { fact: roster.caller.delegates-to, count: 0 }
+        answer: no-roster
+      - when: { fact: caller, exists: true }
+        answer: not-listed
+    effects: { listed: allow, no-roster: allow, not-listed: escalate }
+```
+
+`id` and `enabled: false` on their own are not enough: a rule with no trigger, question and
+answers is not a rule, and `arbiter validate` refuses the file as `KW-ARB-CONFIG-017`. To adjust
+effects instead, restate the rule the same way with the `effects` you want. Keep the trigger,
+question and answers as the rule ships: changing them puts a different question under a shipped
+id, and the informational finding is the only warning that you did.
+
+**Turn one rule down without restating it.** `arbiter.rules` in
+`.kyber-weave/kyber-weave.yml` tunes the loaded rule in place, so it needs only the fields that
+change:
+
+```yaml
+arbiter:
+  rules:
+    - id: KW-ARB-ROSTER-001
+      enabled: false
+```
+
+`arbiter.rules` is applied after every folder, so it wins over a folder declaration of the same
+rule. The two model rules are the exception: their shadow state belongs to
+`arbiter.model-targeting.mode`, and `shadow` on them is refused as `KW-ARB-CONFIG-014`.
+
+**Check the result.** Either route is reported and takes effect; no rule is locked, including the
+six that guard the tree and the run order. Run:
+
+```bash
+kyber-weave arbiter validate .
+```
+
+A folder declaration of a shipped id is listed as `KW-ARB-CONFIG-020` at informational severity,
+saying which file replaces or disables which rule; `--no-info` hides it. A host that installs a
+role folder verbatim gets one such finding per rule, because the copied template declares every
+shipped id — that is expected, not a fault.
+
+A file that cannot be read or parsed, or that names a trigger or fact the Arbiter does not have,
+is `KW-ARB-CONFIG-017` naming the file and the rule, and the shipped rules for that folder stay
+in force. `KW-ARB-CONFIG-018` reports a `builds-on` parent with no standard, `-019` a
+`builds-on` cycle, `-021` one file declaring an id twice (the last wins), and `-022` a key the
+file shape does not have (the key is ignored). `arbiter validate` exits non-zero on an error; a
+run itself still loads, with the shipped rules for that folder.
 
 ## Tuning thresholds (`arbiter tune`)
 

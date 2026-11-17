@@ -5,13 +5,14 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers
+  - adr/0087-arbiter-rules-live-in-role-and-technology-folders
 code-refs:
   - ArbiterEvaluator
   - RuleEngine
@@ -235,9 +236,13 @@ counted as before, against the whole ledger.
 
 ## The rules
 
-Thirty-four rules ship with permanent `KW-ARB-*` ids, tuned by id through `enabled`,
-thresholds, `shadow` where the rule supports it, and per-answer `effects`. Host rules use the
-same shape under non-`KW-ARB-` ids and may not use an effect that only a shipped rule may use.
+Thirty-six rules ship with permanent `KW-ARB-*` ids, in three role files — the `conductor` file
+holds 21, `architect` 2 and `reviewer` 13 — and a host may replace any of them from a role or
+technology folder. A rule is tuned by id through `enabled`, thresholds, `shadow` where the rule
+supports it, and per-answer `effects`. Host rules use the same shape under non-`KW-ARB-` ids and
+may not use an effect that only a shipped rule may use. Where the files are and in what order
+they load is [Where the rules come from](#where-the-rules-come-from), and the decision is
+[ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md).
 
 | Rule | Trigger | Step | Question |
 |---|---|---|---|
@@ -253,7 +258,7 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-READY-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Has every task this one depends on finished? Step 0: `no-task`, `overlaps-in-flight` (escalates), `ready`, `returns-unobservable`, `returns-unread` (no stored reports can be found for a loosely named plan, so it is not asked). Model only: `waiting` (escalates), reading `ledger.task-returns`. |
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the task name the target as its specialist? Step 0: `no-task`, `owner`, `no-mapping`. Model only: `not-owner` (escalates). |
 | `KW-ARB-OWNER-002` | `delegate` | 1 (`choice`, ≥ 0.8) | Which roster specialist owns this task? Shipped disabled (a host sets `enabled: true` to log the pick); every answer allows: a plan task names capabilities, and the conductor chooses the agent ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)). |
-| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode, did the worker's task gate fail on its new tests before it passed? Machine fact `gate.report.failing-run-first`: in the folder of the report the `TASK_GATE:` line claims as a pass, an accepted `--red` report (a gate summary starting `RED accepted`) written earlier. Step 0: `no-task`, `not-required` (standard mode, a `test-dev` or documentation target, or a `Not applicable` contract row), `failing-run-first`, `no-failing-run`. Every answer allows and is logged, `no-failing-run` included: a worker cannot make a failing run after implementing, so the answer is monitored rather than a stop (a host may override it to `escalate`). A claim or report that cannot be read leaves the fact absent: undecidable. A return whose harness stripped its routing headers names no plan task and answers `no-task`, as every return-side plan rule does there. It replaced `KW-ARB-MODE-001`, retired with the RED/GREEN task split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). |
+| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode, did the worker's task gate fail on its new tests before it passed? Machine fact `gate.report.failing-run-first`: in the folder of the report the `TASK_GATE:` line claims as a pass, an accepted `--red` report (a gate summary starting `RED accepted`) written earlier. Step 0: `no-task`, `not-required` (standard mode, a task whose files are all test files — the machine fact `plan.task.files-all-tests` — a documentation target, or a `Not applicable` contract row), `failing-run-first`, `no-failing-run`. Every answer allows and is logged, `no-failing-run` included: a worker cannot make a failing run after implementing, so the answer is monitored rather than a stop (a host may override it to `escalate`). A claim or report that cannot be read leaves the fact absent: undecidable. A return whose harness stripped its routing headers names no plan task and answers `no-task`, as every return-side plan rule does there. It replaced `KW-ARB-MODE-001`, retired with the RED/GREEN task split ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The tests-only clause replaced naming `test-dev`, so a dispatch to that agent still answers `not-required` because its task's files are test files. |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Is the target in the caller's `delegates-to`? Machine fact: the embedded catalog. Only a caller the catalog names with a `delegates-to` list is judged: an unidentified caller, a helper agent outside the Squad, and an agent that delegates to no one answer `no-roster`, which allows. |
 | `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | Has a run been started before an orchestrator hands a specialist that writes files any work? Machine facts: the catalog (the caller's `delegates-to` lists the target, whose profile is `worker`, `documentation`, `architect` or `product-planning`: a planner's plan belongs on the run branch), and `run.started`, a run record under `~/.kyber-weave/runs/` for this repository whose worktree still has its branch checked out. `not-started` escalates; unreadable evidence leaves the fact absent and allows. See the [runbook](runbook.md#reading-a-run-start-refusal). |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 (`choice`, ≥ 0.8) | Does the dispatch tell the worker to open a plan, specification or todo file? Step 0: `closeout`, `no-plan`. Model only: `names-plan` (escalates); `mentions-only` allows. |
@@ -280,6 +285,8 @@ each, what stays at step 0 and which answer only the model can give.
 | `KW-ARB-FAILURE-001` | `delegate.failure` | 0, then 1 | Is the current rework failure the same failure as the previous attempt of its cluster? Shadow. |
 | `KW-ARB-TRIM-001` | `sections.select` | 1 | Does this section of a document bear on the task? Shadow. |
 | `KW-ARB-COMMENT-001` | `comment.triage` | 1 | Is this bot review comment a real defect, a nitpick, or already fixed? Shadow. |
+| `KW-ARB-SEVERITY-001` | `review.verdict` | 1 (`choice`, ≥ 0.8) | Does a finding's stated severity match its stated impact: `too-high`, `about-right` or `too-low`? Advisory only; the verdict keeps the seat's severity. |
+| `KW-ARB-OVERRIDE-001` | `review.verdict` | 1 (`choice`, ≥ 0.85) | Does a finding that cites no host severity override belong to the class a `REVIEW.md` severity-override row describes? Asked once per applicable row; a confident `belongs` grades the finding at that row's severity. |
 | `KW-ARB-CHECKOUT-001` | `delegate.returned`, `delegate.planner.returned`, `investigate.returned` | 0 | Did the dispatch leave files in the repository's canonical checkout while its run works in its own worktree? Machine fact: `checkout.stray-paths`, git's diff of the canonical checkout against a snapshot `HookGitFacts` takes at dispatch, only for a target that writes files while a live run works in a separate worktree. No snapshot leaves the fact absent, which allows. The step-0 evidence lists the paths. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal). |
 
 **The plan-read ban is enforced at dispatch (`KW-ARB-PLANREAD-001`).** Workers treat their dispatch
@@ -331,9 +338,10 @@ Two answers are return-dependent: on a harness whose adapter declares returns un
 there, because a dispatch that never reports back would otherwise hold its files for the
 whole session.
 
-Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-015` and `KW-ARB-INSTALL-001`
+Diagnostics are permanent too: `KW-ARB-CONFIG-001`…`-022` and `KW-ARB-INSTALL-001`
 for configuration and scope validation (`-012` to `-015` cover model targeting, the store
-limits, the bot logins and the savings-only keys), `KW-ARB-MODEL-001` for a missing or stale
+limits, the bot logins and the savings-only keys, and `-017` to `-022` cover a role or
+technology rule file), `KW-ARB-MODEL-001` for a missing or stale
 model targets file, `KW-ARB-KEY-001` for a missing key,
 `KW-ARB-LOG-001` for an un-ignored log directory,
 `KW-ARB-BIN-001` for a missing binary, `KW-ARB-GUARD-001` for undeclared planning indexes,
@@ -380,6 +388,51 @@ cannot be read; the missing directory is itself a machine fact. Where no worker 
 refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
 the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
 [runbook](runbook.md#reading-a-canonical-checkout-refusal).
+
+## Where the rules come from
+
+`ArbiterConfigLoader` assembles one rule set for a configuration read, from four sources in a
+fixed order. This is [ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md).
+
+1. **The shipped role files.** `conductor`, `architect` and `reviewer`, embedded in the binary and
+   copied to `products/kyber-squad/standards/<role>/<role>.arbiter-rules.yml`. The split is by
+   role: 21, 2 and 13 rules, unchanged from the single file they replaced.
+2. **The host's role folders.** `<docs-root>/standards/<role>/<role>.arbiter-rules.yml` for the
+   same three roles. A folder rule with a shipped id replaces that rule whole, keeping its
+   position in the set. A folder may also add rules of its own, under ids without the `KW-ARB-`
+   prefix. `arbiter.rules` is the shorter route to tune a rule in place, because a folder
+   declaration must restate the rule in full.
+3. **The technology folders.** The file of every technology in `ontology.technologies`, and of
+   each technology's `builds-on` ancestors from its `<name>.standards.md` frontmatter, root parent
+   first so a child wins on a shared id. The technology templates that ship rules are `azure` and
+   `aws`, one allow-list rule each; every other shipped technology file is empty.
+4. **The host's `arbiter.rules`.** Applied last, over everything above, so it wins over a folder.
+
+A folder file is YAML with no frontmatter and may hold `rules`, `test-file-patterns` and
+`lens-paths`; a rule keeps the shape it had in the shipped file. A file that cannot be read,
+does not parse, or names a trigger or fact the Arbiter lacks is reported by
+`kyber-weave arbiter validate` as `KW-ARB-CONFIG-017` naming the file and the rule, and the
+shipped rules for that folder stay in force. `-018` reports a `builds-on` parent with no standard,
+`-019` a `builds-on` cycle, `-020` (informational) a folder declaring one of the 36 shipped ids,
+`-021` one file declaring an id twice, and `-022` a key the file shape does not have. The shipped
+rules for the technology folders are not embedded, so a broken technology file adds nothing
+rather than restoring a shipped set.
+
+**No rule is locked.** A folder declaration, `arbiter.rules`, `shadow` on a rule that supports it,
+and `model-targeting.mode` for the two model rules are each honoured, so a host can turn any rule
+down to log only — the six that guard the tree and the run order included. A rule that is off
+widens nothing: an answer the Arbiter cannot reach allows and is logged. The templates keep the
+six guard rules enabled as they ship.
+
+Two limits hold today and are recorded rather than claimed away. First, the configuration loader
+receives `ontology.technologies` and no task, so **every declared technology's rule file applies
+for the whole run**, not only to a task in that technology; the shipped allow-lists narrow
+themselves by tool word, so they are unaffected, but a host rule that does not narrow itself
+applies to every technology's tasks. Second, **only the `conductor`, `architect` and `reviewer`
+role folders are read**: `ArbiterConfigLoader` holds that list and `ontology.roles` does not feed
+it, so a `devops` role file has no effect. A host that installs a role folder verbatim also sees
+one informational `KW-ARB-CONFIG-020` per rule in it, because the copied template declares every
+shipped id.
 
 ## Secondary triggers, families and effects
 
@@ -641,6 +694,19 @@ one rung up the ladder after a failed attempt. It only retargets. No model call 
 that `KW-ARB-DIFFICULTY-001` is a step-1 rule and asks the decision model its question as every step-1
 rule does.
 
+**Under the tiered roster both rules follow the developer tiers.** With `worker-roster: tiered`,
+`KW-ARB-DIFFICULTY-001` answers from `plan.task.difficulty`, the rating the agent pick already recorded,
+so no second model call is made and a task with no recorded rating answers undecidable and keeps. The
+ladder is the three tiers' model profiles — `fast` for `dev-easy`, `general` for `dev-medium`, and
+`dev-hard` — and `model-targeting.difficulty-profiles` and `model-targeting.ladder` take those values
+whether or not the host set its own. A dispatch the conductor already put on the next tier targets the
+token it is already rendered with, so `same-as-rendered` stops the write. Under `technology`, and when
+no roster is given, both rules are as they ship.
+
+The effective block is resolved at evaluation, not at load, because a loaded configuration does not
+carry the run's roster: `ModelTargetingRules.Targeting` and `ModelTargetingRules.Apply` are called with
+`config.WorkerRoster`, so a configuration built in code follows its roster too.
+
 **Eligibility.** Only an implementation-class target reaches `delegate.model`. `ArbiterSquadCatalog.TargetClassFor`
 maps the `worker`, `publishing-worker` and `documentation` capability profiles to `implementation`. A planner classifies as
 `delegate.planner`, a reviewer and every other caller as `investigate`, and an unidentified target as
@@ -751,7 +817,10 @@ Each is omitted when it has no value.
 
 The `arbiter:` section is merged by `ArbiterConfigLoader` into the host configuration; with
 no section the Arbiter is disabled, the provider is `none`, and all shipped rules are
-enabled. A host may tune a shipped rule's `enabled`, confidence/probability threshold, and
+enabled. Before that merge the loader applies the host's role and technology folders, described in
+[Where the rules come from](#where-the-rules-come-from), and `arbiter.rules` is applied last, so it
+wins over a folder. A host may tune a
+shipped rule's `enabled`, confidence/probability threshold, and
 `effects`, and set `shadow` on the rules that support it. Anything else is a hint to add a host rule. The per-user
 `~/.config/kyber-weave/arbiter.yml` override may hold `provider:` and nothing else. The key
 never appears in any configuration file: `ArbiterKeyResolver` reads `TYPESAFE_API_KEY`,
