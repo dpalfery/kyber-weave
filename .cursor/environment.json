@@ -8,7 +8,7 @@
     },
     {
       "name": "codegraph",
-      "command": "*codegraph serve --mcp --path *"
+      "command": "*/codegraph serve --mcp --path *"
     },
     {
       "name": "azure-mcp",
