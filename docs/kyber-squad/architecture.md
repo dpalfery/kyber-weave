@@ -2494,11 +2494,11 @@ the harness-by-harness delivery path are in
   publish a line for it and no agent instruction resolves one. Nothing depends on the line: the task
   file is the record, and a dispatch with no task reads the host setting.
 - The design says `platform-researcher` replaces `azure-reader`. Both agents ship and both are legal
-  target agents; the conductor's, architect's and code-reviewer's `delegates-to` lists carry both.
-  The conductor's instructions read `azure-reader` as `platform-researcher` under `tiered`, but the
-  architect's own instruction still sends live Azure state to `azure-reader`, so on the architect's
-  path a tiered run keeps using the old agent until that body is updated or `azure-reader` leaves in
-  phase 5.
+  target agents, because the technology roster still needs `azure-reader` until phase 5 removes it;
+  the conductor's, architect's and code-reviewer's `delegates-to` lists carry both, and the
+  instructions that send a run to one of them name the other beside it for the `tiered` roster. A
+  tiered run therefore reaches `platform-researcher` and its read-only `platform-reader` profile,
+  and a technology-roster run keeps `azure-reader`.
 
 ## Related
 

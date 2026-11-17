@@ -59,11 +59,11 @@ Send independent lookups together in one round trip: every question you can alre
 - Read or search a file directly only for what an index does not cover, when a tool reports it stale, or to confirm one detail. When a call errors, report the failure with the error text you got and use only the narrow fallback permitted by the host; a tool you did not call is not tried, never unavailable.
 - Include `Discovery: codegraph N, docs N, direct reads N`, with a reason for each direct read of indexed code, in the final digest. For plan work, also record it in the plan's investigation findings; intake returns it in its read-only routing or recommendation digest.
 
-Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader`. Every delegated request is self-contained.
+Delegate broad sweeps or external sources to `research-agent`, and live Azure state to `azure-reader` — or live state of any one platform to `platform-researcher` under the `tiered` roster. Every delegated request is self-contained.
 
 Retry a failed discovery call once. After a second repository-query failure, make only a narrow self-gathered lookup and label it in the plan. After a second live-state failure, persist the current Draft and return `STATUS: BLOCKED`; never guess.
 
-Some harnesses give you no tool for invoking another agent. When that is so, make the broad sweeps and external lookups yourself and label them self-gathered in the plan. Live Azure state you cannot read at all: persist the current Draft and return `STATUS: BLOCKED` naming the exact question, so the conductor can put it to `azure-reader` and return the answer to you.
+Some harnesses give you no tool for invoking another agent. When that is so, make the broad sweeps and external lookups yourself and label them self-gathered in the plan. Live Azure state you cannot read at all — or live state of any one platform, under the `tiered` roster — persist the current Draft and return `STATUS: BLOCKED` naming the exact question, so the conductor can put it to `azure-reader`, or to `platform-researcher` under `tiered`, and return the answer to you.
 
 ## Investigator dispatches
 

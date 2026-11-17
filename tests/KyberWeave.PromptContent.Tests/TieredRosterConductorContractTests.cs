@@ -137,6 +137,22 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
+    public void TheArchitectSendsLivePlatformStateToTheTieredResearcher()
+    {
+        string[] unscoped =
+        [
+            .. Read(ArchitectPath).Split('\n')
+                .Where(line => line.Contains("`azure-reader`", StringComparison.Ordinal)
+                               && !line.Contains("`platform-researcher`", StringComparison.Ordinal))
+        ];
+
+        Assert.True(
+            unscoped.Length == 0,
+            "The architect must name `platform-researcher` wherever it names `azure-reader`, or a tiered run keeps " +
+            "dispatching the technology agent. Unscoped: " + string.Join(" | ", unscoped));
+    }
+
+    [Fact]
     public void TheArchitectPlansTheSchemaAndTheDataModel()
     {
         string architect = Read(ArchitectPath);
