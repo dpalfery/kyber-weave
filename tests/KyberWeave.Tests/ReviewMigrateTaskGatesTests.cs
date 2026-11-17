@@ -569,6 +569,31 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         return command!;
     }
 
+    /// <summary>
+    /// The configuration is team-shared and committed, so a link leading out of the repository is
+    /// refused instead of rewriting the file the link names.
+    /// </summary>
+    [Fact]
+    public void AConfigThatIsASymlinkOutsideTheRepositoryIsRefusedWithZeroBytesWritten()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
+
+        using TempDirectory outside = new();
+        string target = Path.Combine(outside.Path, "kyber-weave.yml");
+        File.WriteAllText(target, TwoAgentsOnOneTechnology() + "\n");
+        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        File.CreateSymbolicLink(ConfigPath, target);
+        string before = File.ReadAllText(target);
+
+        CliRun run = Migrate("--write");
+
+        Assert.Equal(1, run.ExitCode);
+        Assert.Contains("symbolic link", run.Output, StringComparison.Ordinal);
+        Assert.Equal(before, File.ReadAllText(target));
+        Assert.NotNull(new FileInfo(ConfigPath).LinkTarget);
+    }
+
     /// <summary>Writes the repository's configuration with the line endings a committed file has, and returns it.</summary>
     private string WriteConfig(string yaml)
     {
