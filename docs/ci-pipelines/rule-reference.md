@@ -90,7 +90,7 @@ Every Error refuses before anything leaves the machine and changes nothing, exce
 | `KW-DELIVER-007` | Error | `gh` could not list, create, update or read back the pull request, or an open pull request from the branch targets a different base (left for a person) |
 | `KW-DELIVER-008` | Info / Warning | A step taken. Warning: the pull request read back with a different title or description than was sent |
 
-A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C9`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem.
+A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C10`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem. `C10` is the archived plan's own `## Tasks` section: a numbered task still unticked means the plan records undelivered work, and the merge gate reads the archived copy so an archive moved by an older build is still caught.
 
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
