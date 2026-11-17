@@ -1,8 +1,8 @@
 ---
-id: specs/role-based-worker-agents/requirements
+id: archive/specs/role-based-worker-agents/requirements
 title: Role-based worker agents requirements
 doc-type: requirements
-status: draft
+status: archived
 owner: dpalfery
 last-reviewed: 2026-11-17
 component: KyberSquad
@@ -22,9 +22,9 @@ keywords:
 
 # Requirements Document
 
-**Phase status:** Approved
+**Phase status:** Delivered and archived, 2026-11-17
 
-Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed. Amended 2026-11-17 per the owner's decisions: the fourteen old agents are removed without a completed comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), the roster switch is gone, and `docs standards migrate` reshapes an existing standard instead of leaving its content unchanged.
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed. Amended 2026-11-17 per the owner's decisions: the fourteen old agents are removed without a completed comparison ([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), the roster switch is gone, and `docs standards migrate` reshapes an existing standard instead of leaving its content unchanged.
 
 ## Introduction
 
@@ -60,7 +60,7 @@ Owner decisions made on 2026-11-16 that shape these requirements:
    this specification and the pull request is closed.
 11. **The old agents are removed (2026-11-17).** The comparison was not used to decide: the owner
     removed the fourteen agents so that one roster ships, and anyone who wants the old ones
-    installs an older version ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
+    installs an older version ([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
 8. **Standards are templates.** Kyber-Weave ships one template folder per technology, the community
    can submit more, and onboarding installs the ones the user picks.
 9. **One stored-file format.** Data files this work adds or changes are YAML, the task file
@@ -89,6 +89,33 @@ Terms used below:
   (Requirement 12).
 
 The evidence behind each requirement is in the [design](design.md#evidence).
+
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| RQ-1 | Where is this document's lasting record? | Requirements 1–13, as delivered. The behaviour it delivered is in the component architecture mapped below. | Closed |
+
+## Design harvest
+
+This document declares no harvest rows of its own: the specification's items H1–H14 are declared in [design](design.md#design-harvest) and mapped there. These rows trace this document's own content.
+
+| ID | Design item | Target component | Target doc type | Harvested |
+|---|---|---|---|---|
+| RH-1 | Requirements 1–13, as delivered. — the Kyber-Squad part | Kyber-Squad | architecture | yes |
+| RH-2 | Requirements 1–13, as delivered. — the KyberArbiter part | KyberArbiter | architecture | yes |
+| RH-3 | Requirements 1–13, as delivered. — the ReviewCouncil part | ReviewCouncil | architecture | yes |
+| RH-4 | Requirements 1–13, as delivered. — the DocGraph part | DocGraph | architecture | yes |
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| RQ-1 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) | extends-component | archived |
+| RH-1 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) | extends-component | archived |
+| RH-2 | [KyberArbiter architecture](../../../kyber-arbiter/architecture.md) | extends-component | archived |
+| RH-3 | [ReviewCouncil architecture](../../../code-review/architecture.md) | extends-component | archived |
+| RH-4 | [DocGraph architecture](../../../documentation-ontology.md) | extends-component | archived |
 
 ## Requirements
 
@@ -535,7 +562,7 @@ describes it SHALL be marked superseded and kept for history.
 12.5. THE removal SHALL NOT wait for the measures that procedure would have recorded — tasks
 completed, attempts per task and the tier of each, task-gate failures, review findings by severity,
 tokens and wall time — because the owner's decision of 2026-11-17 did not rest on them
-([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
+([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
 
 12.6. AN agent SHALL be able to declare the roster it belongs to; an agent that declares none SHALL
 serve the one roster. The five new agents SHALL declare `tiered`, and an agent that declares
@@ -550,7 +577,7 @@ period, so that my configuration does not silently stop gating.
 
 13.1. THE removal SHALL rest on the owner's recorded decision: the owner removed the fourteen agents
 on 2026-11-17 without a completed comparison of Requirement 12
-([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
+([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
 
 13.2. A host's agent-keyed task-gate entries SHALL keep resolving for at least two minor releases
 after removal, through the shipped map of Requirement 10.3.
