@@ -88,6 +88,31 @@ public sealed class SquadTaskGateHintTests : IDisposable
     }
 
     /// <summary>
+    /// A tiered-rostered project keys its gates by technology, so technology-keyed gates are gates: no hint.
+    /// </summary>
+    [Fact]
+    public void Install_ProjectScopeWithTechnologyGates_PrintsNoTaskGateHint()
+    {
+        string targetDir = NewTargetDir("install-with-technology-gates");
+        WriteProjectConfig(targetDir, """
+            review:
+              technology-gates:
+                csharp:
+                  - id: probe
+                    run: [dotnet, build]
+            """);
+        Assert.Empty(KyberWeaveConfigLoader.Load(targetDir).Review.TaskGates);
+        Assert.NotEmpty(KyberWeaveConfigLoader.Load(targetDir).Review.TechnologyGates);
+        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+
+        CommandExecution execution = RunInstall(targetDir, global: false);
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.DoesNotContain(HintFragment, execution.Output, StringComparison.Ordinal);
+        AssertConfigurationFilesUnchanged(targetDir, before);
+    }
+
+    /// <summary>
     /// Global scope prints no hint, because there is no project whose gates could be missing.
     /// </summary>
     [Fact]
@@ -179,6 +204,47 @@ public sealed class SquadTaskGateHintTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "update-with-gates-home"));
+        SquadStateStore stateStore = new(userPaths);
+        SeedDeployment(targetDir, stateStore);
+        IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
+
+        CommandExecution execution = Capture(() => SquadTestCommands.Update(
+            userPaths: userPaths,
+            stateStore: stateStore,
+            releaseSource: releaseSource,
+            renderer: renderer,
+            isInteractive: false).Execute(null!, new SquadUpdateSettings
+            {
+                Path = targetDir,
+                Targets = ["codex"],
+                Global = false,
+                DryRun = false,
+                ReplaceManaged = true
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.DoesNotContain(HintFragment, execution.Output, StringComparison.Ordinal);
+        AssertConfigurationFilesUnchanged(targetDir, before);
+    }
+
+    /// <summary>
+    /// Update stays silent when the project declares only technology-keyed task gates.
+    /// </summary>
+    [Fact]
+    public void Update_ProjectScopeWithTechnologyGates_PrintsNoTaskGateHint()
+    {
+        string targetDir = NewTargetDir("update-with-technology-gates");
+        WriteProjectConfig(targetDir, """
+            review:
+              technology-gates:
+                csharp:
+                  - id: probe
+                    run: [dotnet, build]
+            """);
+        Assert.Empty(KyberWeaveConfigLoader.Load(targetDir).Review.TaskGates);
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "update-with-technology-gates-home"));
         SquadStateStore stateStore = new(userPaths);
         SeedDeployment(targetDir, stateStore);
         IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
