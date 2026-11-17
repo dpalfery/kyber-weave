@@ -78,6 +78,7 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-TASKS-015` | A task file entry names a `Difficulty:` other than `easy`, `medium` or `hard` |
 | `KW-DOC-TASKS-016` | A task file entry names a technology `ontology.technologies` does not declare |
 | `KW-DOC-TASKS-017` | A task file entry names more than one technology, which must be split into one task per technology |
+| `KW-DOC-TASKS-018` | Under the `tiered` worker roster, a developer task names no technology; a documentation or delivery task needs none |
 | `KW-CONFIG-REG-001` | A configuration registry property names a path that does not exist |
 | `KW-CONFIG-REG-002` | The registry block rendered into the root `AGENTS.md` no longer matches configuration |
 | `KW-DOC-LIFECYCLE-001` | A `plan` document sits in the plans folder but the plan index does not reach it |
@@ -91,8 +92,9 @@ The `KW-DOC-TASKS` rules in this table read the task file beside a plan, or a sp
 ([ADR 0086](../adr/0086-the-task-file-is-yaml.md)); the JSON form an older release wrote is read
 for two minor releases with `-014` and converted with `docs tasks <plan> --convert`. A task entry
 carries an optional `Difficulty:` (`easy`, `medium` or `hard`, `medium` when omitted) and at most
-one `Technology:`, checked against `ontology.technologies`; `-015` and `-016` name the bad value
-and `-017` tells the author to split a task that names two
+one `Technology:`, checked against `ontology.technologies`; `-015` and `-016` name the bad value,
+`-017` tells the author to split a task that names two, and `-018` names a developer task with no
+technology under the `tiered` roster
 ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
 
 The two `KW-CONFIG-REG` rules fire only once a repository has adopted the registry — its
