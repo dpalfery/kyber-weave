@@ -8,6 +8,10 @@ Use this path when the user supplies a plan or selects one from the directory na
 - **Draft:** send the exact `PLAN_FILE` to `architect`. Relay its decision digests and return the user's answers keyed by question id. Continue until the saved Draft is decision-complete and validated.
 - **Review required, Completed, Superseded, or archived:** do not execute it. Ask the user for an active artifact or route the request through the intake path.
 
+## Configuration and its generated registry
+
+The roster and every Config Reg property come from `.kyber-weave/kyber-weave.yml`; the block in `AGENTS.md` is generated from it. When the two disagree the block is stale: follow the configuration, name the stale property, and have `kyber-weave docs init` regenerate it. A stale block never stops a run, and it is never a reason to ask which value to use.
+
 ## Draft and approval protocol
 
 The conductor never edits a plan's content; the finalize tool below records only the approval and the status. Require `architect` to persist every decision and return one of its structured markers:

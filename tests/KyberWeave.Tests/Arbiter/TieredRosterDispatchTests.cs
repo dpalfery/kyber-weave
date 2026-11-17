@@ -153,17 +153,24 @@ public sealed class TieredRosterDispatchTests : IDisposable
     public void AStaleCatalogGainsTheTiersAndDropsTheReplacedTechnologyDevelopers()
     {
         ArbiterSquadCatalog stale = Catalog(
-            ("conductor", "orchestrator", null, ["architect", "csharp-dev", "docs-dev", "test-dev"]),
+            ("conductor", "orchestrator", null,
+                ["architect", "csharp-dev", "azure-reader", "github-devops", "docs-dev", "test-dev"]),
             ("architect", "architect", null, ["research-agent"]),
             ("csharp-dev", "worker", WorkerRosters.Technology, []),
             ("test-dev", "worker", WorkerRosters.Technology, []),
+            ("azure-reader", "platform-reader", WorkerRosters.Technology, []),
+            ("github-devops", "publishing-worker", WorkerRosters.Technology, []),
             ("docs-dev", "documentation", null, []),
             ("research-agent", "investigator", null, []));
         ArbiterSquadAgent conductor = stale.Agents["conductor"];
 
         IReadOnlyList<string> tiered = RosterDelegatesTo.For(conductor, WorkerRosters.Tiered, stale);
 
-        Assert.Equal(["architect", "docs-dev", "dev-easy", "dev-medium", "dev-hard"], tiered);
+        // The whole roster the second pass needed, from a catalog written before any of it existed: the three tiers,
+        // and the replacements for the two removed specialist agents.
+        Assert.Equal(
+            ["architect", "platform-researcher", "devops", "docs-dev", "dev-easy", "dev-medium", "dev-hard"],
+            tiered);
         Assert.Equal(conductor.DelegatesTo, RosterDelegatesTo.For(conductor, WorkerRosters.Technology, stale));
     }
 

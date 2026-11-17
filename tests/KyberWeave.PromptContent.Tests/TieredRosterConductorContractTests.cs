@@ -170,19 +170,24 @@ public sealed class TieredRosterConductorContractTests
     /// The second end-to-end tiered run stopped before its first dispatch because the generated Config Reg block in
     /// <c>AGENTS.md</c> still said <c>worker-roster: technology</c> while the configuration said <c>tiered</c>. The
     /// block is generated from the configuration, so the configuration is the authority; a stale block is reported
-    /// and fixed with <c>docs init</c>, and it never stops a run.
+    /// and fixed with <c>docs init</c>, and it never stops a run. Every path the input router can take carries the
+    /// rule: the conductor body is at its Copilot size cap, so it lives in each path contract a run reads whole.
     /// </summary>
-    [Fact]
-    public void TheConductorTreatsTheConfigurationAsTheRosterAuthorityAndNeverHaltsOnAStaleBlock()
+    [Theory]
+    [InlineData(PlanPath)]
+    [InlineData(SpecPath)]
+    [InlineData(IntakePath)]
+    public void TheConductorTreatsTheConfigurationAsTheRegistryAuthorityAndNeverHaltsOnAStaleBlock(string path)
     {
-        string conductor = Read(ConductorPath);
+        string contract = Read(path);
 
         Assert.Contains(
-            "The configuration is the authority over the generated registry",
-            conductor,
+            "The roster and every Config Reg property come from `.kyber-weave/kyber-weave.yml`",
+            contract,
             StringComparison.Ordinal);
-        Assert.Contains("docs init", conductor, StringComparison.Ordinal);
-        Assert.Contains("never stop a run over it", conductor, StringComparison.Ordinal);
+        Assert.Contains("the block is stale", contract, StringComparison.Ordinal);
+        Assert.Contains("docs init", contract, StringComparison.Ordinal);
+        Assert.Contains("never stops a run", contract, StringComparison.Ordinal);
     }
 
     /// <summary>The callers that send work to the live-platform agent list its tiered replacement too.</summary>
