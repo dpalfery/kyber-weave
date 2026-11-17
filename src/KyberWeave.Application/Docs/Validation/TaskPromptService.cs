@@ -594,6 +594,12 @@ public sealed class TaskPromptService(
             return null;
 
         string body = standard.Body.Trim();
+
+        // A body that opens with '##' has no lead: the whole first section is a section, and
+        // returning it as the lead would print it again from StandardSections.
+        if (body.StartsWith("## ", StringComparison.Ordinal))
+            return null;
+
         int firstSection = body.IndexOf("\n## ", StringComparison.Ordinal);
         return firstSection < 0 ? body : body[..firstSection].TrimEnd();
     }

@@ -246,6 +246,36 @@ public sealed class TaskPromptServiceTests
         Assert.Contains("STANDARD-NAMING-MARKER", result.Prompt, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A standard may open directly with its first <c>##</c> heading. That heading is a section
+    /// like the others, not a lead: treating it as one would print the first section twice, the
+    /// second copy uncuttable.
+    /// </summary>
+    [Fact]
+    public void AStandardThatOpensWithASectionIsNotPrintedTwice()
+    {
+        using DocFixture fixture = Ready();
+        fixture.Write("6-Docs/standards/csharp/csharp.standards.md", Document(
+            "standards/csharp", "C# coding standard", "coding-standard",
+            """
+            ## Naming and layout
+
+            LEADLESS-MARKER: names use PascalCase.
+
+            ## Testing
+
+            LEADLESS-TESTING-MARKER: tests use xUnit.
+            """,
+            technology: "csharp"));
+
+        TaskPromptResult result = Build(fixture);
+
+        Assert.True(result.Built, result.Refusal);
+        string standard = Between(result.Prompt, "standard");
+        Assert.Equal(2, standard.Split("LEADLESS-MARKER").Length);
+        Assert.Equal(2, standard.Split("## Naming and layout").Length);
+    }
+
     [Fact]
     public void NeitherATaskIdNorATechnologyBuildsNoPromptAndSaysWhy()
     {

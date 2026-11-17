@@ -228,6 +228,30 @@ public sealed class PlanTaskFileValidatorTests
         Assert.Equal(1, run.Exit);
     }
 
+    /// <summary>
+    /// YAML reads every scalar as text, and the number normalizer converts the numeric fields. A
+    /// non-finite value such as <c>NaN</c> parses as a double but has no JSON literal, so converting
+    /// it would throw an ArgumentException out of the reader instead of reporting a malformed file.
+    /// </summary>
+    [Fact]
+    public void ANonFiniteAgentConfidenceIsKWDOCTASKS001()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, """
+            schema-version: 1
+            plan: docs/plans/2026-08-01-task-file.md
+            execution-digest: not-used
+            tasks:
+              - id: T1
+                agent-confidence: NaN
+            """);
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, Malformed);
+        Assert.Equal(1, run.Exit);
+    }
+
     /// <summary>A task file larger than the validator reads is reported as one that could not be read, never loaded whole.</summary>
     [Fact]
     public void ATaskFileLargerThanTheValidatorReadsIsKWDOCTASKS001AndNamesWhy()

@@ -521,18 +521,18 @@ public sealed class DocSpecValidator
         {
             foreach (string docsRoot in _config.DocsRoots)
             {
-                string relativeFolder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
+                string relativeFolder = RepositoryRelative($"{docsRoot}/{DocsLayout.Standards}/{scope}");
                 if (!checkedFolders.Add(relativeFolder)) continue;
 
                 string absoluteFolder = Combine(relativeFolder);
-                if (!Directory.Exists(absoluteFolder)) continue;
+                if (!Directory.Exists(absoluteFolder) || LinksIt(relativeFolder)) continue;
 
-                string standard = DocsLayout.StandardFile(docsRoot, scope);
+                string standard = RepositoryRelative(DocsLayout.StandardFile(docsRoot, scope));
                 string legacy = $"{relativeFolder}/README.md";
 
-                if (!File.Exists(Combine(standard)))
+                if (!ExistsWithoutLink(standard))
                 {
-                    if (File.Exists(Combine(legacy)))
+                    if (ExistsWithoutLink(legacy))
                     {
                         report.Add(new Diagnostic(
                             MissingFolderFile, Severity.Warning,
@@ -565,7 +565,7 @@ public sealed class DocSpecValidator
                              DocsLayout.ArbiterRulesFile(docsRoot, scope)
                          })
                 {
-                    if (File.Exists(Combine(file))) continue;
+                    if (ExistsWithoutLink(RepositoryRelative(file))) continue;
 
                     report.Add(new Diagnostic(
                         MissingFolderFile, Severity.Error,
@@ -578,37 +578,82 @@ public sealed class DocSpecValidator
     }
 
     /// <summary>
+    /// The canonical repository-relative form of a path built from a configured docs root. A root
+    /// written as <c>.</c> denotes the repository itself, and the loader records its documents
+    /// without a <c>./</c> prefix; paths that keep one would miss the byPath index.
+    /// </summary>
+    private static string RepositoryRelative(string relativePath) =>
+        string.Join(
+            '/',
+            relativePath
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Where(segment => segment != "."));
+
+    /// <summary>
+    /// True when <paramref name="relativePath"/> names an existing file reachable without crossing
+    /// a symbolic link or junction. The corpus loader skips links, so a file this returns false
+    /// for is not a document the validators ever see: counting it would suppress the missing-file
+    /// finding for a file no worker can reach.
+    /// </summary>
+    private bool ExistsWithoutLink(string relativePath) =>
+        !LinksIt(relativePath) && File.Exists(Combine(relativePath));
+
+    /// <summary>True when any segment of <paramref name="relativePath"/> is a symbolic link or junction.</summary>
+    private bool LinksIt(string relativePath)
+    {
+        string current = _repoRoot;
+        foreach (string segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            FileSystemInfo entry = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+            if (entry.LinkTarget is not null) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Checks each standard's <c>builds-on</c> key: the parent must be declared, must not be
     /// the standard itself, and must not itself build on another technology. One level only,
     /// because a chain would make the set of rules a task receives depend on how deep it
-    /// runs, and the budget is sized for one parent.
+    /// runs, and the budget is sized for one parent. A role-scoped standard is checked the
+    /// same way: it names no technology of its own, but its parent still has to be declared.
     /// </summary>
     private void ValidateBuildsOn(DocumentSet set, DiagnosticReport report)
     {
-        Dictionary<string, string> declaredParents = new(StringComparer.Ordinal);
-        Dictionary<string, DocumentModel> owners = new(StringComparer.Ordinal);
+        List<(string Scope, string Parent, DocumentModel Doc)> declared = [];
+        Dictionary<string, string> parentsByTechnology = new(StringComparer.Ordinal);
 
         foreach (DocumentModel doc in set.Documents)
         {
             if (doc.DocType != DocType.CodingStandard) continue;
 
             string? parent = doc.Frontmatter.BuildsOn?.Trim();
-            string? technology = doc.Frontmatter.Technology?.Trim();
-            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(technology)) continue;
+            if (string.IsNullOrWhiteSpace(parent)) continue;
 
-            declaredParents[technology] = parent;
-            owners[technology] = doc;
+            string? technology = doc.Frontmatter.Technology?.Trim();
+            string? role = doc.Frontmatter.Role?.Trim();
+            // A standard with neither key is already a KW-DOC-SPEC-011 finding; there is no
+            // scope name to report a parent against, so its builds-on waits for that repair.
+            if (string.IsNullOrWhiteSpace(technology) && string.IsNullOrWhiteSpace(role)) continue;
+
+            // Every document is checked on its own: two standards that name one technology are
+            // two claims about its parent, and keeping only the last would drop the first one's
+            // finding. The map exists only for the one-level chain check below.
+            declared.Add((string.IsNullOrWhiteSpace(technology) ? role! : technology, parent, doc));
+            if (!string.IsNullOrWhiteSpace(technology))
+                parentsByTechnology.TryAdd(technology, parent);
         }
 
-        foreach ((string technology, string parent) in declaredParents)
+        foreach ((string scope, string parent, DocumentModel doc) in declared)
         {
-            DocumentModel doc = owners[technology];
-
-            if (string.Equals(parent, technology, StringComparison.Ordinal))
+            if (string.Equals(parent, scope, StringComparison.Ordinal))
             {
                 report.Add(new Diagnostic(
                     InvalidBuildsOn, Severity.Error,
-                    $"the '{technology}' standard builds on itself.",
+                    $"the '{scope}' standard builds on itself.",
                     doc.Subject, doc.RelativePath,
                     "Name a different declared technology, or drop builds-on."));
                 continue;
@@ -618,7 +663,7 @@ public sealed class DocSpecValidator
             {
                 report.Add(new Diagnostic(
                     InvalidBuildsOn, Severity.Error,
-                    $"the '{technology}' standard builds on undeclared technology '{parent}'.",
+                    $"the '{scope}' standard builds on undeclared technology '{parent}'.",
                     doc.Subject, doc.RelativePath,
                     StringDistance.Nearest(parent, _config.Technologies) is { } near
                         ? $"Closest declared technology: '{near}'."
@@ -626,11 +671,11 @@ public sealed class DocSpecValidator
                 continue;
             }
 
-            if (declaredParents.TryGetValue(parent, out string? grandParent))
+            if (parentsByTechnology.TryGetValue(parent, out string? grandParent))
             {
                 report.Add(new Diagnostic(
                     InvalidBuildsOn, Severity.Error,
-                    $"the '{technology}' standard builds on '{parent}', which itself builds on " +
+                    $"the '{scope}' standard builds on '{parent}', which itself builds on " +
                     $"'{grandParent}'.",
                     doc.Subject, doc.RelativePath,
                     "A template names at most one parent, and that parent names none. Flatten " +

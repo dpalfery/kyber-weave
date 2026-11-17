@@ -220,6 +220,56 @@ public class StandardsFolderShapeTests
         Assert.Contains(report.Items, i => i.Code == DocSpecValidator.StandardHeadings);
     }
 
+    /// <summary>
+    /// A docs root written as <c>.</c> is the repository itself. The loader records those
+    /// documents without a <c>./</c> prefix, so the folder check must build the same paths or its
+    /// heading check silently finds no document and reports nothing.
+    /// </summary>
+    [Fact]
+    public void AStandardUnderTheRepositoryRootIsCheckedForItsHeadings()
+    {
+        const string OwnHeadings = """
+            ## Stack
+
+            ## Commands
+            """;
+        using DocFixture fixture = new DocFixture()
+            .Write("standards/dotnet/dotnet.standards.md", Standard("dotnet", OwnHeadings))
+            .Write("standards/dotnet/dotnet.rules.md", Rules("dotnet"))
+            .Write("standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+        OntologyConfig ontology = new() { DocsRoots = ["."], Technologies = ["dotnet"] };
+
+        DiagnosticReport report = fixture.Validate(ontology);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.StandardHeadings
+            && i.Message.Contains("## Stack", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The loader never follows a symbolic link, so a linked file is not in the corpus. Counting
+    /// it as present would suppress the missing-file finding for a file no worker can read.
+    /// </summary>
+    [Fact]
+    public void AFileBehindASymlinkIsNotCountedAsPresent()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("6-Docs/standards/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("6-Docs/standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n")
+            .Write("outside/dotnet.rules.md", Rules("dotnet"));
+        File.CreateSymbolicLink(
+            Path.Combine(fixture.Root, "6-Docs", "standards", "dotnet", "dotnet.rules.md"),
+            Path.Combine(fixture.Root, "outside", "dotnet.rules.md"));
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.MissingFolderFile
+            && i.Message.Contains("dotnet.rules.md", StringComparison.Ordinal));
+    }
+
     private static string RoleRules(string scope) => Rules(scope).Replace(
         "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
 
