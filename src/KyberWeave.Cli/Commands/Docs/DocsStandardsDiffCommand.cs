@@ -44,6 +44,13 @@ public sealed class DocsStandardsDiffCommand : Command<DocsStandardsDiffSettings
             AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
             return 1;
         }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]The standards folders could not be read, so nothing was compared.[/] " +
+                Markup.Escape(exception.Message));
+            return 1;
+        }
 
         if (result.Folders.Count == 0)
         {
