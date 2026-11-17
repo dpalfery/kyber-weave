@@ -74,7 +74,7 @@ Needs no code index. Exits non-zero on any error.
 | `KW-DOC-SPEC-012` | A declared technology, role or platform folder is missing one of its four files; a legacy `README.md` standard is a warning naming the migration command |
 | `KW-DOC-SPEC-013` | A standard's headings are not the six the ontology requires, in order |
 | `KW-DOC-SPEC-014` | `builds-on` names an undeclared parent, the standard itself, or a parent that already names a parent; or it sits outside a coding standard |
-| `KW-DOC-TASKS-014` | A task file is in the JSON form an older release wrote, or declares schema version 1: it is read with a warning naming `kyber-weave docs tasks <plan> --convert` |
+| `KW-DOC-TASKS-014` | A task file is in the JSON form an older release wrote (hint: `--convert`), or declares schema version 1 (hint: `--write`): either is read with a warning |
 | `KW-DOC-TASKS-015` | A task file entry names a `Difficulty:` other than `easy`, `medium` or `hard` |
 | `KW-DOC-TASKS-016` | A task file entry names a technology `ontology.technologies` does not declare |
 | `KW-DOC-TASKS-017` | A task file entry names more than one technology, which must be split into one task per technology |
@@ -90,7 +90,9 @@ Needs no code index. Exits non-zero on any error.
 The `KW-DOC-TASKS` rules in this table read the task file beside a plan, or a specification's
 `tasks.yml` beside its `tasks.md`. The file is YAML at schema version 2
 ([ADR 0086](../adr/0086-the-task-file-is-yaml.md)); the JSON form an older release wrote is read
-for two minor releases with `-014` and converted with `docs tasks <plan> --convert`. A task entry
+for two minor releases with `-014` and converted with `docs tasks <plan> --convert`. A YAML file
+that still declares schema version 1 is read too, and `-014` names `docs tasks <plan> --write` to
+rewrite it at the current version. A task entry
 carries an optional `Difficulty:` (`easy`, `medium` or `hard`, `medium` when omitted) and at most
 one `Technology:`, checked against `ontology.technologies`; `-015` and `-016` name the bad value,
 `-017` tells the author to split a task that names two, and `-018` names a developer task with no
