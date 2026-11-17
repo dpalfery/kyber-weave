@@ -1,5 +1,6 @@
 using KyberWeave.Core.Docs.Scaffolding;
 using Xunit;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Tests;
 
@@ -137,14 +138,31 @@ public class KyberStandardsTemplateShapeTests
     }
 
     [Fact]
-    public void AnEmptyArbiterRulesFileIsShippedForEveryTechnology()
+    public void EveryShippedArbiterRulesFileDeclaresItsRulesList()
     {
-        foreach (string technology in KyberStandardsTemplates.All)
+        foreach (string folder in KyberStandardsTemplates.AllFolders)
         {
-            KyberStandardsTemplates.TryGetPart(
-                technology, KyberStandardsTemplates.Part.ArbiterRules, out string? rules);
+            Assert.True(
+                KyberStandardsTemplates.TryGetPart(
+                    folder, KyberStandardsTemplates.Part.ArbiterRules, out string? rules),
+                $"{folder} has no arbiter-rules template.");
 
-            Assert.Contains("rules: []", rules, StringComparison.Ordinal);
+            YamlStream document = new();
+            document.Load(new StringReader(rules));
+            YamlDocument root = Assert.Single(document.Documents);
+            YamlMappingNode mapping = Assert.IsType<YamlMappingNode>(root.RootNode);
+            Assert.True(
+                mapping.Children.TryGetValue(new YamlScalarNode("rules"), out YamlNode? declared),
+                $"{folder} declares no top-level 'rules:' key.");
+            YamlSequenceNode list = Assert.IsType<YamlSequenceNode>(declared);
+
+            foreach (YamlMappingNode rule in list.Children.Cast<YamlMappingNode>())
+            {
+                Assert.True(
+                    rule.Children.TryGetValue(new YamlScalarNode("id"), out YamlNode? id) &&
+                    !string.IsNullOrWhiteSpace(Assert.IsType<YamlScalarNode>(id).Value),
+                    $"{folder} declares a rule with no id.");
+            }
         }
     }
 }
