@@ -108,7 +108,7 @@ public sealed class SquadSourceTests
     [InlineData("general", "copilot", "GPT-6.1 Terra (copilot)")]
     [InlineData("general", "cursor", "grok-4.7[]")]
     [InlineData("general", "kilo", "opencode-go/muse-spark-1.3-contributor")]
-    [InlineData("general", "opencode", "opencode-go/kimi-k2.7-code")]
+    [InlineData("general", "opencode", "opencode-go/muse-spark-1.3-contributor")]
     [InlineData("general", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=medium]")]
     [InlineData("general", "devin", "swe-2-high")]
     [InlineData("reviewer", "claude", "sonnet")]
