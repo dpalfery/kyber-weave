@@ -123,11 +123,8 @@ public sealed class TaskPromptService(
             return null;
         }
 
-        string tier = DeveloperTier(entry?.Difficulty, failedAttempts);
         return TaskPromptResult.NotBuilt(
-            $"No prompt: '{named}' is a worker-roster: technology agent, and this run is worker-roster: tiered. " +
-            $"This task's developer is '{tier}' (tier = min(hard, rated difficulty + failed attempts)). " +
-            $"Dispatch '{tier}' instead.");
+            "No prompt: " + PlanTaskAgentPick.TieredDeveloperRefusal(named, entry?.Difficulty, failedAttempts));
     }
 
     /// <summary>The tier's position on the ladder, or -1 when the name is not a developer tier.</summary>

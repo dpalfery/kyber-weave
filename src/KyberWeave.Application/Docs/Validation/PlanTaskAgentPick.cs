@@ -128,6 +128,23 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     }
 
     /// <summary>
+    /// The sentence that refuses a dispatch to a technology developer under the tiered roster and names the tier the
+    /// task belongs on. Both dispatch paths that refuse one — the task-prompt tool and the Arbiter's roster rule —
+    /// read it from here, so the refusal a conductor sees is the same whichever path answered.
+    /// </summary>
+    /// <param name="named">The technology developer the dispatch named.</param>
+    /// <param name="difficulty">The task's rating: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    /// <param name="failedAttempts">How many attempts at the task already failed, which steps a developer up.</param>
+    public static string TieredDeveloperRefusal(string named, string? difficulty, int failedAttempts = 0)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(named);
+        string tier = DeveloperTier(difficulty, failedAttempts);
+        return $"'{named}' is a worker-roster: technology agent, and this run is worker-roster: tiered. " +
+            $"This task's developer is '{tier}' (tier = min(hard, rated difficulty + failed attempts)). " +
+            $"Dispatch '{tier}' instead.";
+    }
+
+    /// <summary>
     /// The agent a removed name resolves to and the sentence that reports it, or null when the name is not one the
     /// removal deletes. A removed technology developer becomes the tier its task's difficulty gives; a removed
     /// platform or planning agent becomes the role that took its work over (Requirement 13.5).
