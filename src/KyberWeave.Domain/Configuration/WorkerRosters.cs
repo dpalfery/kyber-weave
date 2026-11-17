@@ -20,14 +20,6 @@ public static class WorkerRosters
     /// <summary>The rosters a host may select, in the order a diagnostic lists them.</summary>
     public static IReadOnlyList<string> All { get; } = [Tiered];
 
-    /// <summary>True when <paramref name="value"/> is one of the rosters a host may select.</summary>
-    public static bool IsKnown(string? value) => string.Equals(value, Tiered, StringComparison.Ordinal);
-
-    /// <summary>
-    /// The roster a recorded value means now. Absent, and the removed <see cref="Technology"/> value, both
-    /// mean <see cref="Tiered"/>: there is no other roster to dispatch from.
-    /// </summary>
-    /// <param name="recorded">The roster a host configuration or task file records, or null.</param>
-    public static string Resolve(string? recorded) =>
-        string.Equals(recorded, Technology, StringComparison.Ordinal) ? Tiered : recorded ?? Tiered;
+    /// <summary>True when <paramref name="value"/> is the roster a host may select.</summary>
+    public static bool IsKnown(string? value) => string.Equals(value?.Trim(), Tiered, StringComparison.Ordinal);
 }

@@ -405,7 +405,7 @@ public sealed partial class PlanTaskFileValidator
         {
             if (entry is not null)
             {
-                CheckTaskScope(entry, taskFile, artifact.RelativePath, file.WorkerRoster, predatesTiered, report);
+                CheckTaskScope(entry, taskFile, artifact.RelativePath, predatesTiered, report);
                 CheckPrompt(entry, taskFile, artifact.RelativePath, planningDirectories, report);
             }
         }
@@ -594,28 +594,40 @@ public sealed partial class PlanTaskFileValidator
     }
 
     /// <summary>
-    /// Reports a task file written under the roster the removal deleted. The file is still read, as
-    /// <c>tiered</c>, because there is no other roster to dispatch from; the warning names the change.
+    /// Reports a task file whose recorded roster is not <c>tiered</c>. The file is still read, as <c>tiered</c>,
+    /// because there is no other roster to dispatch from; the warning names the value and the change.
     /// </summary>
+    /// <remarks>
+    /// An unknown value is reported for the same reason as the retired <c>technology</c> one: a value this build
+    /// does not know must not select a dispatch path, so it is read as the one roster there is and the author is
+    /// told. An absent value is the tiered roster and says nothing.
+    /// </remarks>
     private static void CheckWorkerRoster(
         PlanTaskFile file,
         string taskFile,
         string artifactPath,
         DiagnosticReport report)
     {
-        if (!string.Equals(file.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+        string recorded = file.WorkerRoster?.Trim() ?? string.Empty;
+        if (recorded.Length == 0 || string.Equals(recorded, WorkerRosters.Tiered, StringComparison.Ordinal))
         {
             return;
         }
 
+        string message = string.Equals(recorded, WorkerRosters.Technology, StringComparison.Ordinal)
+            ? $"Task file '{taskFile}' records worker-roster 'technology'. The removal deleted that roster's worker " +
+              "agents, so the file is read as 'tiered'."
+            : $"Task file '{taskFile}' records worker-roster '{recorded}', which is not a roster. The only roster " +
+              "is 'tiered', so the file is read as that.";
+
         report.Add(new Diagnostic(
             RetiredTechnologyRoster,
             Severity.Warning,
-            $"Task file '{taskFile}' records worker-roster 'technology'. The removal deleted that roster's worker " +
-            "agents, so the file is read as 'tiered'.",
+            message,
             artifactPath,
             taskFile,
-            Hint: $"Run {TaskFileCommand.Write(artifactPath)}: it rewrites the file under the roster now in use."));
+            Hint: $"Run {TaskFileCommand.Write(artifactPath)}: it rewrites the file under the roster now in use, " +
+            "and state a 'Technology:' line on every task a developer agent will do."));
     }
 
     /// <summary>Reports a prompt with no command, no acceptance criteria, or a plan read in it.</summary>
@@ -627,12 +639,10 @@ public sealed partial class PlanTaskFileValidator
         PlanTaskFileEntry entry,
         string taskFile,
         string artifactPath,
-        string? workerRoster,
         bool predatesTiered,
         DiagnosticReport report)
     {
         if (!predatesTiered
-            && string.Equals(WorkerRosters.Resolve(workerRoster), WorkerRosters.Tiered, StringComparison.Ordinal)
             && string.IsNullOrWhiteSpace(entry.Technology)
             && NeedsTechnology(entry))
         {

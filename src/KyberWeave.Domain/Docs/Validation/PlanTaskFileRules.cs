@@ -68,8 +68,9 @@ public static partial class PlanTaskFileRules
     public const string MissingTechnologyUnderTiered = "KW-DOC-TASKS-018";
 
     /// <summary>
-    /// Warning: the task file records <c>worker-roster: technology</c>. The removal deleted that roster's
-    /// agents, so the file is read as <c>tiered</c> and the warning names the change.
+    /// Warning: the task file records a <c>worker-roster</c> value that is not <c>tiered</c>. The removal
+    /// deleted the per-technology roster, so the file is read as <c>tiered</c> and the warning names the value
+    /// and the change.
     /// </summary>
     public const string RetiredTechnologyRoster = "KW-DOC-TASKS-019";
 

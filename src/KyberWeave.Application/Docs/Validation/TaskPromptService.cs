@@ -184,14 +184,9 @@ public sealed class TaskPromptService(
 
         string? requested = Clean(request.Agent) ?? Clean(entry?.Role);
         string? recorded = Clean(entry?.Agent);
-        string? agent = requested ?? recorded;
-        RemovedAgentResolution? removed = null;
-        if (string.Equals(WorkerRosters.Resolve(fileRoster ?? config.WorkerRoster), WorkerRosters.Tiered, StringComparison.Ordinal))
-        {
-            removed = PlanTaskAgentPick.ResolveRemovedAgent(
-                requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
-            agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);
-        }
+        RemovedAgentResolution? removed = PlanTaskAgentPick.ResolveRemovedAgent(
+            requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
+        string? agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);
         string? taskText = entry is null ? null : PlanTaskPacket.Fill(entry, root, priorResults);
         // The dispatch header is routing metadata, so the count is put back where the worker reads it: a retry
         // starts knowing how many attempts already failed.

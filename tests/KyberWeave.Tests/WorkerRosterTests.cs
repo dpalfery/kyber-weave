@@ -87,6 +87,54 @@ public sealed class WorkerRosterTests
         Assert.Equal(WorkerRosters.Tiered, catalog.Agents["dev-medium"].WorkerRoster);
     }
 
+    /// <summary>
+    /// Any recorded roster value that is not <c>tiered</c> is read as <c>tiered</c> and reported. A value this
+    /// build does not know must never select a dispatch path: there is no other roster to dispatch from, so an
+    /// unknown value would otherwise skip the tiered checks and hand a worker a prompt it cannot use.
+    /// </summary>
+    [Fact]
+    public void AnUnknownRecordedRosterIsReadAsTieredAndWarns()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string text = WithoutTechnology(PlanTaskFileProbe.TaskFile())
+            .Replace("schema-version:", "worker-roster: side-by-side\nschema-version:", StringComparison.Ordinal);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
+
+        DiagnosticReport report = ValidateTiered(fixture);
+
+        Diagnostic warning = Assert.Single(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.RetiredTechnologyRoster);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Contains("side-by-side", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("tiered", warning.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+    }
+
+    /// <summary>
+    /// A cased or space-padded <c>tiered</c> still means the tiered roster, so the tiered checks run and the
+    /// value is reported as a typo rather than silently selecting nothing.
+    /// </summary>
+    [Fact]
+    public void ACasedOrPaddedRosterValueStillRunsTheTieredChecks()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string text = WithoutTechnology(PlanTaskFileProbe.TaskFile())
+            .Replace("schema-version:", "worker-roster: \" Tiered \"\nschema-version:", StringComparison.Ordinal);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
+
+        DiagnosticReport report = ValidateTiered(fixture);
+
+        Assert.Contains(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+        Assert.Contains(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.RetiredTechnologyRoster);
+    }
+
     [Fact]
     public void TheTaskFileRecordsTheRosterItWasWrittenUnder()
     {
