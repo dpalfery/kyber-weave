@@ -137,6 +137,15 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
+    public void TheConductorDispatchesTheTieredDeliveryAgentForRunStart()
+    {
+        string line = LineContaining(Read(ConductorPath), "RUN-START: true");
+
+        Assert.Contains("`devops`", line, StringComparison.Ordinal);
+        Assert.Contains("tiered", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheArchitectSendsLivePlatformStateToTheTieredResearcher()
     {
         string[] unscoped =
@@ -187,4 +196,8 @@ public sealed class TieredRosterConductorContractTests
     /// <summary>The frontmatter line that starts with <paramref name="name"/>, or an empty string.</summary>
     private static string FrontmatterLine(string text, string name) =>
         text.Split('\n').FirstOrDefault(line => line.StartsWith(name, StringComparison.Ordinal)) ?? string.Empty;
+
+    /// <summary>The first line holding <paramref name="phrase"/>, or an empty string.</summary>
+    private static string LineContaining(string text, string phrase) =>
+        text.Split('\n').FirstOrDefault(line => line.Contains(phrase, StringComparison.Ordinal)) ?? string.Empty;
 }
