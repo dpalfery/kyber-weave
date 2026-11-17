@@ -86,6 +86,13 @@ internal static class CommandAppFixture
         Build(strictParsing: true, DocsStandardsMigrateBranch);
 
     /// <summary>
+    /// The <c>docs standards diff</c> boundary, strict for the same reason as
+    /// <see cref="DocsStandardsMigrate"/>.
+    /// </summary>
+    public static CommandApp DocsStandardsDiff() =>
+        Build(strictParsing: true, DocsStandardsDiffBranch);
+
+    /// <summary>
     /// Both branches at once, strict: <c>docs init</c> and the council <c>review gates</c> in one
     /// app, which is what a case needs when it scaffolds a repository and then gates it.
     /// </summary>
@@ -124,6 +131,11 @@ internal static class CommandAppFixture
         config.AddBranch("docs", docs => docs.AddBranch(
             "standards",
             standards => standards.AddCommand<DocsStandardsMigrateCommand>("migrate")));
+
+    private static void DocsStandardsDiffBranch(IConfigurator config) =>
+        config.AddBranch("docs", docs => docs.AddBranch(
+            "standards",
+            standards => standards.AddCommand<DocsStandardsDiffCommand>("diff")));
 
     private static void ReviewGatesBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewGatesCommand>("gates"); });

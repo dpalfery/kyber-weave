@@ -274,6 +274,205 @@ public class DocsStandardsMigrateCommandTests
             StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A second actor may create the standard between planning and applying. The rename is then
+    /// skipped, and the skipped rename is not reported as one the migration made.
+    /// </summary>
+    [Fact]
+    public void ARenameWhoseTargetAppearsAfterPlanningIsSkippedAndNotReported()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
+        StandardsFolderMigration migration = new(repo.Path, Declared);
+
+        IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
+        File.WriteAllText(StandardPath(repo.Path, "csharp"), "written by someone else");
+
+        List<StandardsFolderChange> applied = migration.Apply(planned, "csharp", null, null);
+
+        Assert.DoesNotContain(applied, change => change.Kind == StandardsFolderChangeKind.Rename);
+        Assert.Equal("written by someone else", File.ReadAllText(StandardPath(repo.Path, "csharp")));
+        Assert.True(File.Exists(Path.Combine(folder, "README.md")));
+    }
+
+    /// <summary>
+    /// The reshape text is derived from the legacy file, so a rename skipped because the target
+    /// appeared must take its reshape with it instead of overwriting the second actor's standard.
+    /// </summary>
+    [Fact]
+    public void AReshapeIsSkippedWhenItsRenameWasSkipped()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
+        StandardsFolderMigration migration = new(repo.Path, Declared);
+
+        IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
+        Assert.Contains(planned, change => change.Kind == StandardsFolderChangeKind.Reshape);
+        File.WriteAllText(StandardPath(repo.Path, "csharp"), "written by someone else");
+
+        List<StandardsFolderChange> applied = migration.Apply(planned, "csharp", null, null);
+
+        Assert.DoesNotContain(applied, change => change.Kind == StandardsFolderChangeKind.Reshape);
+        Assert.Equal("written by someone else", File.ReadAllText(StandardPath(repo.Path, "csharp")));
+    }
+
+    /// <summary>
+    /// An add whose target appears between planning and applying is not clobbered, and is not
+    /// reported as written.
+    /// </summary>
+    [Fact]
+    public void AnAddWhoseTargetAppearsAfterPlanningIsSkippedAndNotReported()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        StandardsFolderMigration migration = new(repo.Path, Declared);
+
+        IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
+        string rules = Path.Combine(folder, "csharp.rules.md");
+        File.WriteAllText(rules, "theirs");
+
+        List<StandardsFolderChange> applied = migration.Apply(planned, "csharp", null, null);
+
+        Assert.DoesNotContain(applied, change => change.To.EndsWith("csharp.rules.md", StringComparison.Ordinal));
+        Assert.Equal("theirs", File.ReadAllText(rules));
+    }
+
+    /// <summary>
+    /// A standards folder kept as a symbolic link out of the repository is refused: a migration
+    /// writes stubs beside the host's standard and must not put them outside the tree it was given.
+    /// </summary>
+    [Fact]
+    public void AFolderThatIsASymlinkOutsideTheRepositoryIsRefused()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
+
+        using TempDirectory repo = new();
+        using TempDirectory outside = new();
+        Directory.CreateDirectory(Path.Combine(repo.Path, "6-Docs", "standards"));
+        Directory.CreateSymbolicLink(
+            Path.Combine(repo.Path, "6-Docs", "standards", "csharp"), outside.Path);
+
+        IOException error = Assert.Throws<IOException>(() =>
+            new StandardsFolderMigration(repo.Path, Declared).Run());
+
+        Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
+        Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
+    }
+
+    /// <summary>
+    /// Reshaping writes the standard in place, so a standard kept as a symbolic link out of the
+    /// repository is refused rather than rewritten at its target.
+    /// </summary>
+    [Fact]
+    public void AStandardThatIsASymlinkOutsideTheRepositoryIsNotReshaped()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
+
+        using TempDirectory repo = new();
+        using TempDirectory outside = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string hostStandard = Path.Combine(outside.Path, "csharp.standards.md");
+        File.WriteAllText(hostStandard, LegacyCsharpWithOwnHeadings);
+        File.CreateSymbolicLink(StandardPath(repo.Path, "csharp"), hostStandard);
+
+        IOException error = Assert.Throws<IOException>(() =>
+            new StandardsFolderMigration(repo.Path, Declared).Run());
+
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.Equal(LegacyCsharpWithOwnHeadings, File.ReadAllText(hostStandard));
+    }
+
+    /// <summary>
+    /// A standard the folder holds but the process may not read is an error that names it, not a
+    /// folder treated as having no standard and answered with a stub.
+    /// </summary>
+    [Fact]
+    public void AStandardThatCannotBeReadIsReportedRatherThanReplacedByAStub()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string standard = StandardPath(repo.Path, "csharp");
+        File.WriteAllText(standard, LegacyCsharp);
+
+        if (!TryMakeUnreadable(standard))
+            Assert.Skip("An unreadable file needs a POSIX mode, so this case cannot be arranged here.");
+
+        try
+        {
+            IOException error = Assert.Throws<IOException>(() =>
+                new StandardsFolderMigration(repo.Path, Declared).Run());
+
+            Assert.Contains("csharp.standards.md", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            RestoreReadable(standard);
+        }
+    }
+
+    /// <summary>
+    /// A standards file the process may not read is a diagnosable refusal, not a stack trace:
+    /// the command names the failure and exits 1.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableStandardIsRefusedWithADiagnostic()
+    {
+        using TempDirectory repo = new();
+        string configDirectory = Path.Combine(repo.Path, ".kyber-weave");
+        Directory.CreateDirectory(configDirectory);
+        File.WriteAllText(
+            Path.Combine(configDirectory, "kyber-weave.yml"),
+            "ontology:\n  docs-root: 6-Docs\n  technologies:\n    - csharp\n");
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string standard = StandardPath(repo.Path, "csharp");
+        File.WriteAllText(standard, LegacyCsharp);
+        if (!TryMakeUnreadable(standard))
+            Assert.Skip("An unreadable file needs a POSIX mode, so this case cannot be arranged here.");
+
+        try
+        {
+            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+                CommandAppFixture.DocsStandardsMigrate().Run(
+                    ["docs", "standards", "migrate", repo.Path]));
+
+            Assert.Equal(1, execution.Result);
+            Assert.Contains("could not be read or written", execution.Output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            RestoreReadable(standard);
+        }
+    }
+
+    /// <summary>Clears a file's read bits, answering false on a platform that has none.</summary>
+    private static bool TryMakeUnreadable(string path)
+    {
+        if (OperatingSystem.IsWindows())
+            return false;
+
+        File.SetUnixFileMode(path, UnixFileMode.None);
+        return true;
+    }
+
+    /// <summary>Puts a file's read bits back so the temporary tree can be disposed.</summary>
+    private static void RestoreReadable(string path)
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+    }
+
     private static IReadOnlyList<string> LevelTwoHeadings(string text) =>
         [.. text.Split('\n')
             .Where(line => line.StartsWith("## ", StringComparison.Ordinal))

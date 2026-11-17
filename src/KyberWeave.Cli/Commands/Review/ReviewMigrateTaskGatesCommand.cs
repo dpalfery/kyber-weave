@@ -3,6 +3,7 @@ using System.Text;
 
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 using KyberWeave.Data.Review;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -167,9 +168,22 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
             return 0;
         }
 
+        // The configuration is committed and team-shared, so it is written where the repository
+        // holds it: a link leading out of the tree would put the rewrite somewhere no one else
+        // committed it.
+        string relative = Path.GetRelativePath(root, path);
+        if (relative.StartsWith("..", StringComparison.Ordinal)
+            || Tree.LeadsOutsideThroughSymlink(root, relative))
+        {
+            return Refuse(
+                $"'{path}' is, or is reached through, a symbolic link that leads outside '{root}'. " +
+                "A repository-scope configuration is written inside the repository, so nothing was written.");
+        }
+
         try
         {
-            File.WriteAllText(path, plan.Text, new UTF8Encoding(bom));
+            byte[] body = new UTF8Encoding(false).GetBytes(plan.Text);
+            AtomicFile.WriteAllBytes(path, bom ? [.. Encoding.UTF8.GetPreamble(), .. body] : body);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {

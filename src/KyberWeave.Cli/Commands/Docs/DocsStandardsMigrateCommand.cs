@@ -35,7 +35,18 @@ public sealed class DocsStandardsMigrateCommand : Command<DocsStandardsMigrateSe
         }
 
         StandardsFolderMigration migration = new(settings.Path, ontology);
-        StandardsFolderMigrationResult result = migration.Run(settings.DryRun);
+        StandardsFolderMigrationResult result;
+        try
+        {
+            result = migration.Run(settings.DryRun);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            AnsiConsole.MarkupLine(
+                $"[red]The standards folders could not be read or written, so nothing was migrated.[/] " +
+                Markup.Escape(exception.Message));
+            return 1;
+        }
 
         if (result.Changes.Count == 0)
         {

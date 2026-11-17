@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -136,18 +137,29 @@ public sealed partial class StandardsFolderMigration
                 }
 
                 string? reshapedText = null;
+                List<StandardSectionMove> plannedMoves = [];
                 if (standardText is not null
                     && StandardShape.Reshape(standardText, DocsLayout.StandardHeadings) is { } shape)
                 {
                     reshapedText = shape.Text;
                     planned.Add(new StandardsFolderChange(
                         StandardsFolderChangeKind.Reshape, standard, standard));
-                    moves.AddRange(shape.Moves.Select(move =>
+                    plannedMoves.AddRange(shape.Moves.Select(move =>
                         new StandardSectionMove(standard, move.Heading, move.Under)));
                 }
 
-                changes.AddRange(planned);
-                if (!dryRun) Apply(planned, scope, owner, reshapedText);
+                // Only what the migration actually did is reported: a change whose target another
+                // actor created between planning and applying is skipped, and claiming it would
+                // tell the operator about a write that never happened.
+                List<StandardsFolderChange> applied = dryRun
+                    ? planned
+                    : Apply(planned, scope, owner, reshapedText);
+
+                changes.AddRange(applied);
+                if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
+                {
+                    moves.AddRange(plannedMoves);
+                }
             }
         }
 
@@ -155,32 +167,47 @@ public sealed partial class StandardsFolderMigration
     }
 
     /// <summary>
-    /// Applies the planned changes for one folder. Called per folder so a failure leaves the
-    /// nodes before it complete and rerunnable: every write is a create, and the rename is
-    /// skipped when its target already exists.
+    /// Applies the planned changes for one folder, answering the changes it actually made.
+    /// Called per folder so a failure leaves the nodes before it complete and rerunnable: every
+    /// write is a create, and a rename whose target already exists is skipped rather than reported.
     /// </summary>
-    private void Apply(
+    internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
         string? owner,
         string? reshapedText)
     {
+        List<StandardsFolderChange> applied = [];
+        HashSet<string> skippedRenames = new(StringComparer.Ordinal);
+
         foreach (StandardsFolderChange change in planned)
         {
             switch (change.Kind)
             {
                 case StandardsFolderChangeKind.Rename:
-                    if (!File.Exists(Absolute(change.To)))
-                        File.Move(Absolute(change.From), Absolute(change.To));
-                    break;
+                    string renameFrom = RequireWritable(change.From);
+                    string renameTo = RequireWritable(change.To);
+                    if (File.Exists(renameTo))
+                    {
+                        skippedRenames.Add(change.To);
+                        break;
+                    }
 
-                case StandardsFolderChangeKind.Reshape:
-                    if (reshapedText is not null)
-                        File.WriteAllText(
-                            Absolute(change.To), reshapedText, new UTF8Encoding(false));
+                    try
+                    {
+                        File.Move(renameFrom, renameTo);
+                    }
+                    catch (IOException) when (File.Exists(renameTo))
+                    {
+                        skippedRenames.Add(change.To);
+                        break;
+                    }
+
+                    applied.Add(change);
                     break;
 
                 case StandardsFolderChangeKind.Add:
+                    string target = RequireWritable(change.To);
                     string fileName = Path.GetFileName(change.To);
                     string kind = fileName.EndsWith(DocsLayout.ArbiterRulesSuffix, StringComparison.Ordinal)
                         ? "arbiter"
@@ -193,8 +220,59 @@ public sealed partial class StandardsFolderMigration
                     string content = kind == "arbiter"
                         ? ArbiterRulesStub(scope)
                         : Stub(scope, kind, owner);
-                    File.WriteAllText(Absolute(change.To), content, new UTF8Encoding(false));
+                    if (TryCreateNew(target, content)) applied.Add(change);
                     break;
+
+                case StandardsFolderChangeKind.Reshape:
+                    // The reshape's text was derived from the legacy file. When the rename was
+                    // skipped, the target now holds another actor's standard, and writing the
+                    // reshape over it would replace that standard with the legacy text.
+                    if (reshapedText is null || skippedRenames.Contains(change.To)) break;
+
+                    AtomicFile.WriteAllText(RequireWritable(change.To), reshapedText);
+                    applied.Add(change);
+                    break;
+            }
+        }
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Writes a new file and never replaces one, reporting whether the file was created. A
+    /// target that appeared since the folder was planned makes the change a no-op, so a second
+    /// actor's file is left byte-for-byte intact.
+    /// </summary>
+    private static bool TryCreateNew(string path, string content)
+    {
+        string directory = Path.GetDirectoryName(path)!;
+        string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            using (FileStream stream = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(new UTF8Encoding(false).GetBytes(content));
+            }
+
+            if (File.Exists(path)) return false;
+
+            File.Move(temporary, path, overwrite: false);
+            return true;
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Best effort: the write or the move already decided the outcome.
             }
         }
     }
@@ -259,14 +337,70 @@ public sealed partial class StandardsFolderMigration
         return match.Success ? match.Groups["owner"].Value.Trim() : null;
     }
 
+    /// <summary>
+    /// Reads a standard, distinguishing a file the folder does not hold from one it holds but
+    /// cannot use. An absent file is null; an unreadable one is an error naming it, so a
+    /// permission failure is never mistaken for a folder with no standard and answered with a stub.
+    /// </summary>
     private string? ReadOrNull(string relativePath)
     {
         string full = Absolute(relativePath);
-        return File.Exists(full) ? File.ReadAllText(full) : null;
+        if (!File.Exists(full)) return null;
+
+        try
+        {
+            return File.ReadAllText(full);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException(
+                $"'{relativePath}' exists but could not be read: {exception.Message}", exception);
+        }
     }
 
     private string Absolute(string relativePath) =>
         Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>
+    /// The full path a write may reach, refusing one that leaves the repository, whether by a
+    /// rooted or <c>..</c> segment or through a symbolic link between here and the file.
+    /// </summary>
+    /// <remarks>
+    /// A standards folder is host-owned, and a host may keep one behind a link. Following it would
+    /// put this tool's stub outside the tree it was told to migrate, so the link is refused and the
+    /// folder reported instead. Links that stay inside the root are left alone.
+    /// </remarks>
+    private string RequireWritable(string relativePath)
+    {
+        string boundary = _repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string full = Path.GetFullPath(Absolute(relativePath));
+        if (!full.StartsWith(boundary, StringComparison.Ordinal))
+        {
+            throw new IOException(
+                $"Refusing to write '{relativePath}': it resolves outside the repository root, so nothing was written.");
+        }
+
+        string current = _repoRoot.TrimEnd(Path.DirectorySeparatorChar);
+        foreach (string segment in full[boundary.Length..].Split(
+                     Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            FileSystemInfo entry = Directory.Exists(current)
+                ? new DirectoryInfo(current)
+                : new FileInfo(current);
+            if (entry.LinkTarget is null) continue;
+
+            string? resolved = entry.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
+            if (resolved is null || !resolved.StartsWith(boundary, StringComparison.Ordinal))
+            {
+                throw new IOException(
+                    $"Refusing to write '{relativePath}': it passes through the symbolic link '{current}', " +
+                    "which leads outside the repository root, so nothing was written.");
+            }
+        }
+
+        return full;
+    }
 
     [GeneratedRegex(@"^owner:\s*(?<owner>\S.*)$", RegexOptions.Multiline)]
     private static partial Regex OwnerLine();
