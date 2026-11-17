@@ -103,7 +103,7 @@ public static class TaskGateResolver
 
     /// <summary>
     /// The technology a template names in its standard's <c>builds-on</c> key, or null when it names none, has
-    /// no standard of its own, or the name is not something a folder can be called.
+    /// no standard of its own, cannot read its standard, or the name is not something a folder can be called.
     /// </summary>
     /// <param name="repoRoot">The repository root the standards folders sit under.</param>
     /// <param name="config">The effective configuration, whose ontology names the documentation root.</param>
@@ -129,13 +129,22 @@ public static class TaskGateResolver
             if (!File.Exists(path))
                 continue;
 
-            FrontmatterReadResult read = MarkdownFrontmatterReader.Read(File.ReadAllText(path));
-            if (!read.HasFrontmatter)
-                continue;
+            try
+            {
+                FrontmatterReadResult read = MarkdownFrontmatterReader.Read(File.ReadAllText(path));
+                if (!read.HasFrontmatter)
+                    continue;
 
-            StandardBuildsOn parent = MarkdownFrontmatterReader.Deserializer.Deserialize<StandardBuildsOn>(read.Yaml);
-            if (Clean(parent.BuildsOn) is { } buildsOn && ConfigSlug.IsValid(buildsOn))
-                return buildsOn;
+                StandardBuildsOn parent = MarkdownFrontmatterReader.Deserializer.Deserialize<StandardBuildsOn>(read.Yaml);
+                if (Clean(parent.BuildsOn) is { } buildsOn && ConfigSlug.IsValid(buildsOn))
+                    return buildsOn;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // An unreadable or malformed standard names no parent. Gate resolution falls back to the mapped
+                // agent's entry, which is what it does for a technology with no standard of its own.
+                continue;
+            }
         }
 
         return null;
