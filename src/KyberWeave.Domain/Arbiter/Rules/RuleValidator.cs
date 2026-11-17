@@ -80,6 +80,24 @@ public static class RuleValidator
     /// </summary>
     public const string RuleFolderInvalid = "KW-ARB-CONFIG-017";
 
+    /// <summary>A technology's standard names a <c>builds-on</c> parent whose standard does not exist.</summary>
+    public const string MissingRuleFolderParent = "KW-ARB-CONFIG-018";
+
+    /// <summary>Technology standards name each other as <c>builds-on</c> parents in a cycle.</summary>
+    public const string RuleFolderCycle = "KW-ARB-CONFIG-019";
+
+    /// <summary>
+    /// A host folder declares a shipped rule id, replacing or disabling it. Informational: no rule is locked, so the
+    /// declaration takes effect, and the finding makes sure it is not silent.
+    /// </summary>
+    public const string ShippedRuleOverride = "KW-ARB-CONFIG-020";
+
+    /// <summary>One folder file declares a rule id more than once. The last declaration wins, as it does across files.</summary>
+    public const string DuplicateFolderRule = "KW-ARB-CONFIG-021";
+
+    /// <summary>A folder rules file has a top-level or rule key the Arbiter does not know. The key is ignored.</summary>
+    public const string UnknownRuleFolderKey = "KW-ARB-CONFIG-022";
+
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 

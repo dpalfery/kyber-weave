@@ -8,6 +8,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Text;
 using YamlDotNet.Core;
+using YamlDotNet.RepresentationModel;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -23,6 +24,31 @@ public static class ArbiterConfigLoader
 
     /// <summary>The role folders a host may override, in the order they are read.</summary>
     private static readonly string[] RoleFolders = ["conductor", "architect", "reviewer"];
+
+    /// <summary>The keys a folder rules file may write at top level.</summary>
+    private static readonly HashSet<string> FolderTopLevelKeys = new(StringComparer.Ordinal)
+    {
+        "rules",
+        "test-file-patterns",
+        "lens-paths",
+    };
+
+    /// <summary>The keys one rule entry in a folder rules file may write.</summary>
+    private static readonly HashSet<string> FolderRuleKeys = new(StringComparer.Ordinal)
+    {
+        "id",
+        "enabled",
+        "confidence-at-least",
+        "probability-below",
+        "effects",
+        "shadow",
+        "for-each",
+        "trigger",
+        "question",
+        "answers",
+        "decide",
+        "ask",
+    };
 
     /// <summary>
     /// The rule folders one configuration read applies over the shipped role templates, and the task technologies whose
@@ -40,6 +66,15 @@ public static class ArbiterConfigLoader
         IReadOnlyList<string> DocsRoots,
         IReadOnlyList<string> Technologies,
         Func<string, string?>? ReadFile = null);
+
+    /// <summary>One folder's rules file: its path, its text, or the reason the reader could not supply it.</summary>
+    private readonly record struct FolderRulesSource(string Path, string? Text, string? ReadError);
+
+    /// <summary>What one folder rules file contributes: its rules, and the retrieval settings the config form supports.</summary>
+    private sealed record FolderRulesDocument(
+        List<ArbiterRule> Rules,
+        List<string> TestFilePatterns,
+        List<ArbiterLensPathEntry> LensPaths);
 
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
@@ -112,11 +147,18 @@ public static class ArbiterConfigLoader
         // Arbiter is off: a run with it off needs none of this to work.
         IReadOnlyList<ArbiterRule> baseRules = defaults.Rules;
         IReadOnlyList<Diagnostic> folderFindings = [];
+        IReadOnlyList<string> testFilePatterns = defaults.TestFilePatterns;
+        IReadOnlyList<ArbiterLensPathEntry> lensPaths = defaults.LensPaths;
         if (enabled && folders is not null && baseRules.Count > 0)
         {
-            (IReadOnlyList<ArbiterRule> loaded, IReadOnlyList<Diagnostic> findings) = LoadRuleFolders(baseRules, folders);
+            (IReadOnlyList<ArbiterRule> loaded,
+                IReadOnlyList<Diagnostic> findings,
+                IReadOnlyList<string> folderPatterns,
+                IReadOnlyList<ArbiterLensPathEntry> folderLensPaths) = LoadRuleFolders(baseRules, folders);
             baseRules = loaded;
             folderFindings = findings;
+            testFilePatterns = MergeTestFilePatterns(defaults.TestFilePatterns, folderPatterns);
+            lensPaths = MergeLensPaths(defaults.LensPaths, folderLensPaths);
         }
 
         // A rule id may expand to one rule per trigger, so shipped rules are keyed
@@ -187,8 +229,8 @@ public static class ArbiterConfigLoader
             ExplicitlyEnabled = section?.Enabled,
             Provider = MergeProvider(defaults.Provider, section?.Provider),
             Rules = ModelTargetingRules.Apply(rules, modelTargeting.Mode),
-            TestFilePatterns = defaults.TestFilePatterns,
-            LensPaths = defaults.LensPaths,
+            TestFilePatterns = testFilePatterns,
+            LensPaths = lensPaths,
             ModelTargeting = modelTargeting,
             RuleFolderFindings = folderFindings,
             Stores = MergeStores(defaults.Stores, section?.Stores),
@@ -342,7 +384,10 @@ public static class ArbiterConfigLoader
     /// </remarks>
     /// <param name="shipped">The shipped rules the host folders override and the technology folders extend.</param>
     /// <param name="request">The repository, docs roots and task technologies to read.</param>
-    internal static (IReadOnlyList<ArbiterRule> Rules, IReadOnlyList<Diagnostic> Findings) LoadRuleFolders(
+    internal static (IReadOnlyList<ArbiterRule> Rules,
+        IReadOnlyList<Diagnostic> Findings,
+        IReadOnlyList<string> TestFilePatterns,
+        IReadOnlyList<ArbiterLensPathEntry> LensPaths) LoadRuleFolders(
         IReadOnlyList<ArbiterRule> shipped,
         RuleFolderRequest request)
     {
@@ -351,47 +396,205 @@ public static class ArbiterConfigLoader
 
         List<ArbiterRule> rules = [.. shipped];
         List<Diagnostic> findings = [];
+        List<string> testFilePatterns = [];
+        List<ArbiterLensPathEntry> lensPaths = [];
+        HashSet<string> applied = new(StringComparer.Ordinal);
+        IReadOnlySet<string> shippedIds = new HashSet<string>(
+            shipped.Select(rule => rule.Id), StringComparer.Ordinal);
 
         foreach (string role in RoleFolders)
-            TryApplyFolder(rules, request, role, findings);
+        {
+            if (applied.Add(role))
+                TryApplyFolder(rules, request, role, shippedIds, findings, testFilePatterns, lensPaths);
+        }
 
         foreach (string technology in request.Technologies
                      .Where(name => !string.IsNullOrWhiteSpace(name))
+                     .Select(name => name.Trim())
                      .Distinct(StringComparer.Ordinal))
         {
-            TryApplyFolder(rules, request, technology.Trim(), findings);
+            foreach (string folder in FolderChain(request, technology, findings))
+            {
+                if (applied.Add(folder))
+                    TryApplyFolder(rules, request, folder, shippedIds, findings, testFilePatterns, lensPaths);
+            }
         }
 
-        return (rules, findings);
+        return (rules, findings, testFilePatterns, lensPaths);
+    }
+
+    /// <summary>
+    /// The folders to read for <paramref name="technology"/>, root parent first so a child's rule wins on a shared id.
+    /// </summary>
+    /// <remarks>
+    /// The parent is the one the folder's standard names in <c>builds-on</c>, whether or not the host listed it. A
+    /// missing parent or a cycle is a finding, never an exception: the chain stops there and the folders found so far
+    /// are read.
+    /// </remarks>
+    private static List<string> FolderChain(RuleFolderRequest request, string technology, List<Diagnostic> findings)
+    {
+        List<string> chain = [];
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        string current = technology;
+        string? namedBy = null;
+
+        while (true)
+        {
+            if (!seen.Add(current))
+            {
+                findings.Add(new Diagnostic(
+                    RuleValidator.RuleFolderCycle,
+                    Severity.Error,
+                    $"The standards' builds-on chain cycles back to '{current}', so the Arbiter stops reading parents there.",
+                    current,
+                    namedBy,
+                    "Remove the cycle from the standards' builds-on keys."));
+                break;
+            }
+
+            chain.Add(current);
+
+            (string Path, string Text)? standard = FindStandardFile(request, current);
+            if (standard is null)
+                break;
+
+            string? parent = BuildsOnOf(standard.Value.Text);
+            if (parent is null)
+                break;
+
+            if (FindStandardFile(request, parent) is null)
+            {
+                findings.Add(new Diagnostic(
+                    RuleValidator.MissingRuleFolderParent,
+                    Severity.Warning,
+                    $"'{Path.GetFileName(standard.Value.Path)}' names '{parent}' as its builds-on parent, but that folder has no standard, so its Arbiter rules are not read.",
+                    parent,
+                    standard.Value.Path,
+                    "Add the parent's standard, or remove the builds-on key."));
+                break;
+            }
+
+            namedBy = standard.Value.Path;
+            current = parent;
+        }
+
+        chain.Reverse();
+        return chain;
+    }
+
+    /// <summary>The first docs root that holds a scope folder's standard, with its text, or null.</summary>
+    private static (string Path, string Text)? FindStandardFile(RuleFolderRequest request, string name)
+    {
+        if (request.ReadFile is null)
+            return null;
+
+        foreach (string docsRoot in request.DocsRoots)
+        {
+            if (string.IsNullOrWhiteSpace(docsRoot))
+                continue;
+
+            string path = Path.Combine(
+                request.RepositoryRoot,
+                docsRoot,
+                DocsLayout.Standards,
+                name,
+                $"{name}{DocsLayout.StandardsSuffix}");
+            try
+            {
+                string? text = request.ReadFile(path);
+                if (text is not null)
+                    return (path, text);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>The <c>builds-on</c> parent a standard's frontmatter names, or null when it names none.</summary>
+    private static string? BuildsOnOf(string standardText)
+    {
+        FrontmatterReadResult frontmatter = MarkdownFrontmatterReader.Read(standardText);
+        if (!frontmatter.HasFrontmatter || string.IsNullOrWhiteSpace(frontmatter.Yaml))
+            return null;
+
+        try
+        {
+            StandardBuildsOnYaml? document =
+                MarkdownFrontmatterReader.Deserializer.Deserialize<StandardBuildsOnYaml>(frontmatter.Yaml);
+            string? parent = document?.BuildsOn?.Trim();
+            return string.IsNullOrEmpty(parent) ? null : parent;
+        }
+        catch (YamlException)
+        {
+            return null;
+        }
     }
 
     private static void TryApplyFolder(
         List<ArbiterRule> rules,
         RuleFolderRequest request,
         string name,
-        List<Diagnostic> findings)
+        IReadOnlySet<string> shippedIds,
+        List<Diagnostic> findings,
+        List<string> testFilePatterns,
+        List<ArbiterLensPathEntry> lensPaths)
     {
-        (string Path, string Text)? file = FolderRulesFile(request, name);
-        if (file is null)
+        FolderRulesSource? source = FindFolderRulesFile(request, name);
+        if (source is null)
             return;
 
-        if (!TryReadFolderRules(file.Value.Path, file.Value.Text, rules, out List<ArbiterRule>? loaded, out IReadOnlyList<Diagnostic> fileFindings))
+        FolderRulesSource file = source.Value;
+        if (file.Text is null)
+        {
+            findings.Add(UnreadableFolderFile(file.Path, file.ReadError ?? "the file could not be read"));
+            return;
+        }
+
+        if (!TryReadFolderRules(file.Path, file.Text, rules, shippedIds, out FolderRulesDocument? document, out IReadOnlyList<Diagnostic> fileFindings))
         {
             findings.AddRange(fileFindings);
             return;
         }
 
+        findings.AddRange(fileFindings);
+        testFilePatterns.AddRange(document.TestFilePatterns);
+        lensPaths.AddRange(document.LensPaths);
+
+        List<ArbiterRule> loaded = document.Rules;
         if (loaded.Count == 0)
             return;
+
+        foreach (IGrouping<string, ArbiterRule> group in loaded.GroupBy(rule => rule.Id, StringComparer.Ordinal))
+        {
+            if (!shippedIds.Contains(group.Key))
+                continue;
+
+            bool disabled = group.All(rule => !rule.Enabled);
+            findings.Add(new Diagnostic(
+                RuleValidator.ShippedRuleOverride,
+                Severity.Info,
+                $"'{file.Path}' {(disabled ? "disables" : "replaces")} shipped rule '{group.Key}'.",
+                group.Key,
+                file.Path,
+                "No rule is locked: the folder's declaration takes effect. Remove it to use the shipped rule."));
+        }
 
         ReplaceRules(rules, loaded);
     }
 
     /// <summary>
-    /// The first of the docs roots that holds the folder's rules file, with its text. Null when none does, or when
-    /// the caller supplied no reader because it has no repository.
+    /// The first of the docs roots that holds the folder's rules file, with its text or the reason it could not be
+    /// read. Null when none does, or when the caller supplied no reader because it has no repository.
     /// </summary>
-    private static (string Path, string Text)? FolderRulesFile(RuleFolderRequest request, string name)
+    /// <remarks>
+    /// A reader failure is a finding, never an exception: an unreadable file must leave the rest of the configuration
+    /// loading, with the shipped rules still enforced for that folder.
+    /// </remarks>
+    private static FolderRulesSource? FindFolderRulesFile(RuleFolderRequest request, string name)
     {
         if (request.ReadFile is null)
             return null;
@@ -407,9 +610,16 @@ public static class ArbiterConfigLoader
                 DocsLayout.Standards,
                 name,
                 $"{name}{DocsLayout.ArbiterRulesSuffix}");
-            string? text = request.ReadFile(path);
-            if (text is not null)
-                return (path, text);
+            try
+            {
+                string? text = request.ReadFile(path);
+                if (text is not null)
+                    return new FolderRulesSource(path, text, null);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return new FolderRulesSource(path, null, ex.Message);
+            }
         }
 
         return null;
@@ -417,80 +627,227 @@ public static class ArbiterConfigLoader
 
     /// <summary>
     /// Parses one folder's rules file text. Returns false when the file must not be applied, with the findings that say
-    /// why; an empty file returns true with no rules.
+    /// why; an empty file returns true with no rules. Any failure — a parse error, an empty rule entry, or anything
+    /// else the YAML reader raises — is one finding, so one bad file never takes the configuration down with it.
     /// </summary>
     private static bool TryReadFolderRules(
         string path,
         string text,
         IReadOnlyList<ArbiterRule> knownRules,
-        [NotNullWhen(true)] out List<ArbiterRule>? loaded,
+        IReadOnlySet<string> shippedIds,
+        [NotNullWhen(true)] out FolderRulesDocument? result,
         out IReadOnlyList<Diagnostic> findings)
     {
-        loaded = null;
+        result = null;
         List<Diagnostic> collected = [];
+        findings = collected;
         string folder = Path.GetFileName(Path.GetDirectoryName(path)) ?? path;
 
-        ArbiterDefaultRulesYaml? document;
         try
         {
-            document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(text);
-        }
-        catch (YamlException ex)
-        {
-            collected.Add(new Diagnostic(
-                RuleValidator.RuleFolderInvalid,
-                Severity.Error,
-                $"'{path}' is not a readable Arbiter rules file, so the shipped rules are used for '{folder}': {ex.Message}",
-                folder,
-                path,
-                "Fix the YAML, or remove the file to use the shipped rules for the folder."));
-            findings = collected;
-            return false;
-        }
+            ArbiterDefaultRulesYaml? document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(text);
+            ReportUnknownKeys(path, text, collected);
 
-        if (document?.Rules is null || document.Rules.Count == 0)
-        {
-            loaded = [];
-            findings = collected;
-            return true;
-        }
-
-        List<ArbiterRule> converted = [];
-        foreach (ArbiterRuleYaml entry in document.Rules)
-        {
-            if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? entryRules, out string? error))
+            List<ArbiterRule> converted = [];
+            HashSet<string> seenIds = new(StringComparer.Ordinal);
+            foreach (ArbiterRuleYaml? entry in document?.Rules ?? [])
             {
-                collected.Add(new Diagnostic(
-                    RuleValidator.RuleFolderInvalid,
-                    Severity.Error,
-                    $"'{path}' holds an invalid rule, so the shipped rules are used for '{folder}': {error}",
-                    entry.Id?.Trim() ?? folder,
-                    path,
-                    "Fix the rule, or remove the file to use the shipped rules for the folder."));
-                findings = collected;
+                if (entry is null)
+                {
+                    collected.Add(new Diagnostic(
+                        RuleValidator.RuleFolderInvalid,
+                        Severity.Error,
+                        $"'{path}' has an empty rule entry, so the shipped rules are used for '{folder}'.",
+                        folder,
+                        path,
+                        "Give every entry under 'rules:' an id, or remove the entry."));
+                    return false;
+                }
+
+                if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? entryRules, out string? error))
+                {
+                    collected.Add(new Diagnostic(
+                        RuleValidator.RuleFolderInvalid,
+                        Severity.Error,
+                        $"'{path}' holds an invalid rule, so the shipped rules are used for '{folder}': {error}",
+                        entry.Id?.Trim() ?? folder,
+                        path,
+                        "Fix the rule, or remove the file to use the shipped rules for the folder."));
+                    return false;
+                }
+
+                Diagnostic? guard = FolderEntryGuard(path, entry, shippedIds);
+                if (guard is not null)
+                {
+                    collected.Add(guard);
+                    return false;
+                }
+
+                string id = entry.Id?.Trim() ?? string.Empty;
+                if (id.Length > 0 && !seenIds.Add(id))
+                {
+                    collected.Add(new Diagnostic(
+                        RuleValidator.DuplicateFolderRule,
+                        Severity.Warning,
+                        $"'{path}' declares rule '{id}' more than once. The last declaration is used.",
+                        id,
+                        path,
+                        "Remove the earlier declaration."));
+                }
+
+                // Replace in place, so a repeated id takes the position of its first declaration and the last
+                // declaration's content, exactly as a later file overrides an earlier one.
+                ReplaceRules(converted, entryRules);
+            }
+
+            foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile(converted, knownRules, path))
+            {
+                if (diagnostic.Severity != Severity.Error)
+                    continue;
+
+                collected.Add(diagnostic);
                 return false;
             }
 
-            foreach (ArbiterRule rule in entryRules)
-            {
-                foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile([rule], knownRules, path))
-                {
-                    if (diagnostic.Severity != Severity.Error)
-                        continue;
+            result = new FolderRulesDocument(
+                converted,
+                document?.TestFilePatterns is null
+                    ? []
+                    : [.. document.TestFilePatterns
+                        .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+                        .Select(pattern => pattern.Trim())],
+                document?.LensPaths is null
+                    ? []
+                    : [.. document.LensPaths
+                        .Where(entry => !string.IsNullOrWhiteSpace(entry.Lens))
+                        .Select(entry => new ArbiterLensPathEntry(
+                            entry.Lens!.Trim(),
+                            entry.NotApplicableWhenAllMatch is null ? [] : [.. entry.NotApplicableWhenAllMatch]))]);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            collected.Add(UnreadableFolderFile(path, ex.Message));
+            return false;
+        }
+    }
 
-                    collected.Add(diagnostic);
-                    findings = collected;
-                    return false;
-                }
-            }
+    /// <summary>
+    /// The guards <c>arbiter.rules</c> applies to a host rule entry, applied to a folder file's entry: a reserved id
+    /// prefix, a rule-level <c>for-each</c>, and an effect only shipped rules may use. A violation drops the file, as a
+    /// violation in <c>arbiter.rules</c> refuses the configuration.
+    /// </summary>
+    private static Diagnostic? FolderEntryGuard(string path, ArbiterRuleYaml entry, IReadOnlySet<string> shippedIds)
+    {
+        string id = entry.Id?.Trim() ?? string.Empty;
+        if (id.Length == 0)
+            return null;
 
-            converted.AddRange(entryRules);
+        if (!shippedIds.Contains(id) && id.StartsWith(ShippedIdPrefix, StringComparison.Ordinal))
+        {
+            return new Diagnostic(
+                RuleValidator.DuplicateOrReservedId,
+                Severity.Error,
+                $"'{path}' declares '{id}', which uses the reserved '{ShippedIdPrefix}' prefix. A folder replaces a shipped rule by its id, or declares its own id without that prefix.",
+                id,
+                path,
+                "Give the rule an id without the reserved prefix.");
         }
 
-        loaded = converted;
-        findings = collected;
-        return true;
+        if (entry.ForEach is not null)
+        {
+            return new Diagnostic(
+                RuleValidator.SavingsValueInvalid,
+                Severity.Error,
+                $"'{path}' sets for-each on '{id}' at rule level. List iteration belongs inside an ask.",
+                id,
+                path,
+                "Move for-each inside the ask, or remove it.");
+        }
+
+        if (entry.Effects is not null)
+        {
+            foreach ((string answer, string effect) in entry.Effects)
+            {
+                if (!ShippedOnlyEffects.Contains(effect))
+                    continue;
+
+                return new Diagnostic(
+                    RuleValidator.SavingsValueInvalid,
+                    Severity.Error,
+                    $"'{path}' maps '{answer}' to '{effect}' on '{id}', an effect only shipped rules may use.",
+                    id,
+                    path,
+                    "Use an effect the rule's trigger family allows, such as allow or escalate.");
+            }
+        }
+
+        return null;
     }
+
+    /// <summary>
+    /// Reports a key at top level or in a rule entry that the folder rules shape does not have, so a typo such as
+    /// <c>rule:</c> is visible rather than silently ignored. The key is ignored; the rest of the file still loads.
+    /// </summary>
+    private static void ReportUnknownKeys(string path, string text, List<Diagnostic> found)
+    {
+        YamlStream stream = new();
+        stream.Load(new StringReader(text));
+        if (stream.Documents.Count == 0 || stream.Documents[0].RootNode is not YamlMappingNode root)
+            return;
+
+        HashSet<string> reported = new(StringComparer.Ordinal);
+        foreach ((YamlNode node, YamlNode value) in root.Children)
+        {
+            if (node is not YamlScalarNode { Value: string key })
+                continue;
+
+            if (!FolderTopLevelKeys.Contains(key))
+            {
+                if (reported.Add("top:" + key))
+                    found.Add(UnknownKey(path, "top-level", key));
+                continue;
+            }
+
+            if (!string.Equals(key, "rules", StringComparison.Ordinal) || value is not YamlSequenceNode rules)
+                continue;
+
+            foreach (YamlNode item in rules.Children)
+            {
+                if (item is not YamlMappingNode mapping)
+                    continue;
+
+                foreach (YamlNode ruleKeyNode in mapping.Children.Keys)
+                {
+                    if (ruleKeyNode is not YamlScalarNode { Value: string ruleKey })
+                        continue;
+                    if (FolderRuleKeys.Contains(ruleKey))
+                        continue;
+
+                    if (reported.Add("rule:" + ruleKey))
+                        found.Add(UnknownKey(path, "rule", ruleKey));
+                }
+            }
+        }
+    }
+
+    private static Diagnostic UnknownKey(string path, string scope, string key) =>
+        new(
+            RuleValidator.UnknownRuleFolderKey,
+            Severity.Warning,
+            $"'{path}' has an unknown {scope} key '{key}'.",
+            key,
+            path,
+            "Check the key against the rule file shape: rules, test-file-patterns and lens-paths at top level.");
+
+    private static Diagnostic UnreadableFolderFile(string path, string cause) =>
+        new(
+            RuleValidator.RuleFolderInvalid,
+            Severity.Error,
+            $"'{path}' could not be read as an Arbiter rules file, so the shipped rules are used for its folder: {cause}",
+            Path.GetFileName(Path.GetDirectoryName(path)) ?? path,
+            path,
+            "Fix the file, or remove it to use the shipped rules for the folder.");
 
     /// <summary>
     /// Replaces every rule of the loaded ids with the loaded rules, keeping the position of the first replaced rule so
@@ -1219,6 +1576,38 @@ public static class ArbiterConfigLoader
             entry.Lens ?? string.Empty,
             entry.NotApplicableWhenAllMatch is null ? [] : [.. entry.NotApplicableWhenAllMatch])).ToList();
     }
+
+    /// <summary>The shipped test patterns plus the folder files' patterns, in order, without repeats.</summary>
+    private static IReadOnlyList<string> MergeTestFilePatterns(
+        IReadOnlyList<string> defaults,
+        IReadOnlyList<string> folderPatterns) =>
+        folderPatterns.Count == 0
+            ? defaults
+            : [.. defaults.Concat(folderPatterns).Distinct(StringComparer.Ordinal)];
+
+    /// <summary>
+    /// The shipped lens paths plus the folder files' entries. A folder entry for a lens the defaults already hold replaces
+    /// that row, so a host can correct a lens's applicability where it declares the lens's rules.
+    /// </summary>
+    private static IReadOnlyList<ArbiterLensPathEntry> MergeLensPaths(
+        IReadOnlyList<ArbiterLensPathEntry> defaults,
+        IReadOnlyList<ArbiterLensPathEntry> folderPaths)
+    {
+        if (folderPaths.Count == 0)
+            return defaults;
+
+        List<ArbiterLensPathEntry> merged = [.. defaults];
+        foreach (ArbiterLensPathEntry entry in folderPaths)
+        {
+            int index = merged.FindIndex(existing => string.Equals(existing.Lens, entry.Lens, StringComparison.Ordinal));
+            if (index < 0)
+                merged.Add(entry);
+            else
+                merged[index] = entry;
+        }
+
+        return merged;
+    }
 }
 
 /// <summary>The top-level shape of one embedded role <c>arbiter-rules.yml</c>.</summary>
@@ -1229,6 +1618,12 @@ internal sealed class ArbiterDefaultRulesYaml
     public List<string>? TestFilePatterns { get; set; }
 
     public List<ArbiterLensPathYaml>? LensPaths { get; set; }
+}
+
+/// <summary>The one key the Arbiter reads from a scope folder's standard frontmatter.</summary>
+internal sealed class StandardBuildsOnYaml
+{
+    public string? BuildsOn { get; set; }
 }
 
 /// <summary>One <c>lens-paths</c> row in the embedded rules.</summary>

@@ -418,6 +418,11 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-CONFIG-015` | Error | A savings value is out of range or in a forbidden place: `stores.max-item-bytes` outside 1 to 1048576, `stores.retain-days` below 1 (a value above 3650 is clamped, not refused), a blank `comment-triage.bot-logins` entry, a `dispatch-budget` value below 1, a host rule using `for-each`, or a host rule mapping an answer to an effect only shipped rules may use |
 | `KW-ARB-CONFIG-016` | Warning | The provider timeout in force (after the user override) plus two seconds of evaluation does not fit the hook timeout rendered from the repository's `timeout-ms` |
 | `KW-ARB-CONFIG-017` | Error | A role or technology folder's `<name>.arbiter-rules.yml` cannot be read, or holds a rule the Arbiter cannot use. The file and rule are named, and the shipped rules are used for that folder |
+| `KW-ARB-CONFIG-018` | Warning | A technology standard's `builds-on` names a parent whose standard does not exist. The parent's Arbiter rules are not read |
+| `KW-ARB-CONFIG-019` | Error | Technology standards name each other as `builds-on` parents in a cycle. The chain stops where it repeats |
+| `KW-ARB-CONFIG-020` | Info | A host folder declares a shipped rule id and so replaces or disables it. No rule is locked, so the declaration takes effect and the finding makes it visible |
+| `KW-ARB-CONFIG-021` | Warning | One folder file declares a rule id more than once. The last declaration wins, as it does across files |
+| `KW-ARB-CONFIG-022` | Warning | A folder rules file has a top-level or rule key the Arbiter does not know. The key is ignored, and the name and file are reported |
 | `KW-ARB-MODEL-001` | Warning | Model targeting is not `off`, a hooked global target is installed, and its `model-targets.<harness>.json` is missing, unreadable, or older than the Squad lock. Remedy: `kyber-weave squad update`. Reported by `arbiter doctor` |
 | `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |
