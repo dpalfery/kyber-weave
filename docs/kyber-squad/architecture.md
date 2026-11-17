@@ -1458,7 +1458,13 @@ agents read the new text on their next turn. An entry file that was locally edit
 preserved and reported by update, and stops receiving updates until it is deleted or re-deployed.
 
 **Preserved-file reporting.** A locally edited entry file is reported in the update warnings and
-keeps its bytes. Known gap: under `ReplaceManaged` mode, preserved stale entries are not reported.
+keeps its bytes; an entry kept inside a shared hook file gets the same warning, naming its
+container. Known gap: under `ReplaceManaged` mode, preserved stale entries are not reported.
+
+The receipt holds only the digest of the bytes Squad shipped, so `squad status` cannot tell a
+kept edit from a hand edit made after an update. It treats both the same way and never prints a
+bare drift line for them: it says `modified locally (kept at update; run squad update
+--replace-managed to take the shipped file)`. Only the flag ends the difference.
 
 **Project-scope risk (D-B).** Project-scope installs commit the operator's own text into every
 entry file on all 13 targets. That text is operator-owned, not a defect in the repository, and a
