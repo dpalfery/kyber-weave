@@ -275,6 +275,51 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
+    /// A second actor may create the standard between planning and applying. The rename is then
+    /// skipped, and the skipped rename is not reported as one the migration made.
+    /// </summary>
+    [Fact]
+    public void ARenameWhoseTargetAppearsAfterPlanningIsSkippedAndNotReported()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
+        StandardsFolderMigration migration = new(repo.Path, Declared);
+
+        IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
+        File.WriteAllText(StandardPath(repo.Path, "csharp"), "written by someone else");
+
+        List<StandardsFolderChange> applied = migration.Apply(planned, "csharp", null, null);
+
+        Assert.DoesNotContain(applied, change => change.Kind == StandardsFolderChangeKind.Rename);
+        Assert.Equal("written by someone else", File.ReadAllText(StandardPath(repo.Path, "csharp")));
+        Assert.True(File.Exists(Path.Combine(folder, "README.md")));
+    }
+
+    /// <summary>
+    /// An add whose target appears between planning and applying is not clobbered, and is not
+    /// reported as written.
+    /// </summary>
+    [Fact]
+    public void AnAddWhoseTargetAppearsAfterPlanningIsSkippedAndNotReported()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        StandardsFolderMigration migration = new(repo.Path, Declared);
+
+        IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
+        string rules = Path.Combine(folder, "csharp.rules.md");
+        File.WriteAllText(rules, "theirs");
+
+        List<StandardsFolderChange> applied = migration.Apply(planned, "csharp", null, null);
+
+        Assert.DoesNotContain(applied, change => change.To.EndsWith("csharp.rules.md", StringComparison.Ordinal));
+        Assert.Equal("theirs", File.ReadAllText(rules));
+    }
+
+    /// <summary>
     /// A standards folder kept as a symbolic link out of the repository is refused: a migration
     /// writes stubs beside the host's standard and must not put them outside the tree it was given.
     /// </summary>

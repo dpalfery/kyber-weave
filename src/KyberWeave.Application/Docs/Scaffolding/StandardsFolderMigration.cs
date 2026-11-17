@@ -137,18 +137,29 @@ public sealed partial class StandardsFolderMigration
                 }
 
                 string? reshapedText = null;
+                List<StandardSectionMove> plannedMoves = [];
                 if (standardText is not null
                     && StandardShape.Reshape(standardText, DocsLayout.StandardHeadings) is { } shape)
                 {
                     reshapedText = shape.Text;
                     planned.Add(new StandardsFolderChange(
                         StandardsFolderChangeKind.Reshape, standard, standard));
-                    moves.AddRange(shape.Moves.Select(move =>
+                    plannedMoves.AddRange(shape.Moves.Select(move =>
                         new StandardSectionMove(standard, move.Heading, move.Under)));
                 }
 
-                changes.AddRange(planned);
-                if (!dryRun) Apply(planned, scope, owner, reshapedText);
+                // Only what the migration actually did is reported: a change whose target another
+                // actor created between planning and applying is skipped, and claiming it would
+                // tell the operator about a write that never happened.
+                List<StandardsFolderChange> applied = dryRun
+                    ? planned
+                    : Apply(planned, scope, owner, reshapedText);
+
+                changes.AddRange(applied);
+                if (applied.Any(change => change.Kind == StandardsFolderChangeKind.Reshape))
+                {
+                    moves.AddRange(plannedMoves);
+                }
             }
         }
 
@@ -156,28 +167,37 @@ public sealed partial class StandardsFolderMigration
     }
 
     /// <summary>
-    /// Applies the planned changes for one folder. Called per folder so a failure leaves the
-    /// nodes before it complete and rerunnable: every write is a create, and the rename is
-    /// skipped when its target already exists.
+    /// Applies the planned changes for one folder, answering the changes it actually made.
+    /// Called per folder so a failure leaves the nodes before it complete and rerunnable: every
+    /// write is a create, and a rename whose target already exists is skipped rather than reported.
     /// </summary>
-    private void Apply(
+    internal List<StandardsFolderChange> Apply(
         IReadOnlyList<StandardsFolderChange> planned,
         string scope,
         string? owner,
         string? reshapedText)
     {
+        List<StandardsFolderChange> applied = [];
+
         foreach (StandardsFolderChange change in planned)
         {
             switch (change.Kind)
             {
                 case StandardsFolderChangeKind.Rename:
-                    if (!File.Exists(Absolute(change.To)))
-                        File.Move(Absolute(change.From), Absolute(change.To));
-                    break;
+                    string renameFrom = RequireWritable(change.From);
+                    string renameTo = RequireWritable(change.To);
+                    if (File.Exists(renameTo)) break;
 
-                case StandardsFolderChangeKind.Reshape:
-                    if (reshapedText is not null)
-                        AtomicFile.WriteAllText(RequireWritable(change.To), reshapedText);
+                    try
+                    {
+                        File.Move(renameFrom, renameTo);
+                    }
+                    catch (IOException) when (File.Exists(renameTo))
+                    {
+                        break;
+                    }
+
+                    applied.Add(change);
                     break;
 
                 case StandardsFolderChangeKind.Add:
@@ -194,8 +214,58 @@ public sealed partial class StandardsFolderMigration
                     string content = kind == "arbiter"
                         ? ArbiterRulesStub(scope)
                         : Stub(scope, kind, owner);
-                    AtomicFile.WriteAllText(target, content);
+                    if (TryCreateNew(target, content)) applied.Add(change);
                     break;
+
+                case StandardsFolderChangeKind.Reshape:
+                    if (reshapedText is not null)
+                    {
+                        AtomicFile.WriteAllText(RequireWritable(change.To), reshapedText);
+                        applied.Add(change);
+                    }
+
+                    break;
+            }
+        }
+
+        return applied;
+    }
+
+    /// <summary>
+    /// Writes a new file and never replaces one, reporting whether the file was created. A
+    /// target that appeared since the folder was planned makes the change a no-op, so a second
+    /// actor's file is left byte-for-byte intact.
+    /// </summary>
+    private static bool TryCreateNew(string path, string content)
+    {
+        string directory = Path.GetDirectoryName(path)!;
+        string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+
+        try
+        {
+            using (FileStream stream = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(new UTF8Encoding(false).GetBytes(content));
+            }
+
+            if (File.Exists(path)) return false;
+
+            File.Move(temporary, path, overwrite: false);
+            return true;
+        }
+        catch (IOException) when (File.Exists(path))
+        {
+            return false;
+        }
+        finally
+        {
+            try
+            {
+                File.Delete(temporary);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Best effort: the write or the move already decided the outcome.
             }
         }
     }
