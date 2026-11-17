@@ -125,6 +125,25 @@ public sealed class ArbiterPlanReadRuleTests
         Assert.Equal("no-plan", Answer(prompt));
     }
 
+    /// <summary>
+    /// Every dispatch header is routing metadata, including the retry headers: a <c>PRIOR_RESULTS</c> line naming a
+    /// planning path is how the hook finds the retry file, not an instruction telling the worker to open a plan.
+    /// </summary>
+    [Fact]
+    public void RetryHeadersAreRoutingMetadataNotAWorkerInstruction()
+    {
+        const string prompt =
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/2026-11-07-ready-tasks.md\nTASK: T26\n" +
+            "PRIOR_RESULTS: docs/plans/2026-11-07-ready-tasks.md\nFAILED_ATTEMPTS: 2\n\nImplement T26.";
+        ArbiterFactSet facts = Facts(prompt);
+
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(Fact(facts, "delegation.planning-paths")));
+        string head = Assert.IsType<string>(Fact(facts, "delegation.body-head"));
+        Assert.DoesNotContain("PRIOR_RESULTS", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("FAILED_ATTEMPTS", head, StringComparison.Ordinal);
+        Assert.Equal("no-plan", Answer(prompt));
+    }
+
     /// <summary>A read instruction that is not a packet command still names the plan, with its header lines removed.</summary>
     [Fact]
     public void AnInstructionToReadThePlanStillReachesTheQuestionWithoutItsHeaders()
