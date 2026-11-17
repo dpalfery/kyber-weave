@@ -32,8 +32,41 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>The last tier of the step-up ladder, which a failed attempt never climbs past.</summary>
     public const string HardTier = "dev-hard";
 
+    /// <summary>The agent a removed planning agent's schema and data-model work goes to.</summary>
+    public const string ArchitectAgent = "architect";
+
+    /// <summary>The agent that replaces the removed read-only platform agent.</summary>
+    public const string PlatformResearcherAgent = "platform-researcher";
+
+    /// <summary>The agent that replaces the removed delivery agent.</summary>
+    public const string DevopsAgent = "devops";
+
     /// <summary>The three developer agents in step-up order (Requirement 3.2).</summary>
     public static IReadOnlyList<string> DeveloperTiers { get; } = [EasyTier, DeveloperKind, HardTier];
+
+    /// <summary>
+    /// The names the removal phase deletes, each mapped to the agent that does its work afterwards. A technology
+    /// developer maps to <see cref="DeveloperKind"/>: the task's difficulty and failed attempts then choose the
+    /// tier, as they do for every developer dispatch under the tiered roster.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> RemovedAgents { get; } =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["csharp-dev"] = DeveloperKind,
+            ["dal-dev"] = DeveloperKind,
+            ["maui-dev"] = DeveloperKind,
+            ["pulumi-dev"] = DeveloperKind,
+            ["typescript-dev"] = DeveloperKind,
+            ["react-dev"] = DeveloperKind,
+            ["rust-dev"] = DeveloperKind,
+            ["tauri-dev"] = DeveloperKind,
+            ["go-dev"] = DeveloperKind,
+            ["python-dev"] = DeveloperKind,
+            ["test-dev"] = DeveloperKind,
+            ["sql-database-architect"] = ArchitectAgent,
+            ["azure-reader"] = PlatformResearcherAgent,
+            ["github-devops"] = DevopsAgent,
+        };
 
     /// <summary>The question every pick asks.</summary>
     public const string Question = "Which agent should do this task, judged by the abilities it needs and the files it changes?";
@@ -64,6 +97,49 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
 
     /// <inheritdoc />
     public void Dispose() => (_provider as IDisposable)?.Dispose();
+
+    /// <summary>
+    /// The developer tier for a task: <c>min(hard, rated difficulty + failed attempts)</c>. A task with no rating
+    /// is a medium task, as the task file writes it, so a dispatch that belongs to no task also starts at medium.
+    /// </summary>
+    /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    /// <param name="failedAttempts">How many attempts at this task already failed.</param>
+    public static string DeveloperTier(string? difficulty, int failedAttempts)
+    {
+        int rated = difficulty?.Trim() switch
+        {
+            "easy" => 0,
+            "hard" => DeveloperTiers.Count - 1,
+            _ => 1,
+        };
+
+        // Long arithmetic: a retry count at the top of its range must clamp to the last tier, not wrap to a
+        // negative index a few steps below zero.
+        long climbed = Math.Min(
+            DeveloperTiers.Count - 1,
+            rated + (long)Math.Max(failedAttempts, 0));
+        return DeveloperTiers[(int)climbed];
+    }
+
+    /// <summary>
+    /// The agent a removed name resolves to and the sentence that reports it, or null when the name is not one the
+    /// removal deletes. A removed technology developer becomes the tier its task's difficulty gives; a removed
+    /// platform or planning agent becomes the role that took its work over (Requirement 13.5).
+    /// </summary>
+    /// <param name="agent">The agent a plan, task file or dispatch names.</param>
+    /// <param name="difficulty">The task's rating: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
+    /// <param name="failedAttempts">How many attempts at the task already failed, which steps a developer up.</param>
+    public static RemovedAgentResolution? ResolveRemovedAgent(string? agent, string? difficulty, int failedAttempts = 0)
+    {
+        string? named = string.IsNullOrWhiteSpace(agent) ? null : agent.Trim();
+        if (named is null || !RemovedAgents.TryGetValue(named, out string? replacement))
+            return null;
+
+        string resolved = string.Equals(replacement, DeveloperKind, StringComparison.Ordinal)
+            ? DeveloperTier(difficulty, failedAttempts)
+            : replacement;
+        return new RemovedAgentResolution(named, resolved, $"'{named}' was removed; this task goes to '{resolved}'.");
+    }
 
     /// <summary>
     /// The agents a task may go to under both rosters: every agent of the installed Squad whose capability profile
@@ -246,3 +322,9 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         return first.StartsWith(prefix, StringComparison.Ordinal) ? first[prefix.Length..].TrimStart(':', ' ') : first;
     }
 }
+
+/// <summary>A removed agent's replacement, and the sentence that reports the substitution.</summary>
+/// <param name="Named">The removed agent the plan, task file or dispatch still names.</param>
+/// <param name="Resolved">The agent that does the work now.</param>
+/// <param name="Report">One sentence naming both, for the conductor's output.</param>
+public sealed record RemovedAgentResolution(string Named, string Resolved, string Report);

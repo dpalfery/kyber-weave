@@ -49,6 +49,10 @@ public sealed record TaskPromptRequest(
 /// The repository-relative file the prompt was written to, for a dispatch whose harness cannot rewrite it; null
 /// when the prompt is not written to a file.
 /// </param>
+/// <param name="Substitution">
+/// The sentence reporting that a removed agent's name was replaced by the agent that works the task now, or null
+/// when nothing was substituted.
+/// </param>
 public sealed record TaskPromptResult(
     bool Built,
     string Prompt,
@@ -58,7 +62,8 @@ public sealed record TaskPromptResult(
     string? Technology,
     IReadOnlyList<string> LeftOut,
     string? Refusal,
-    string? PromptFile = null)
+    string? PromptFile = null,
+    string? Substitution = null)
 {
     /// <summary>A refusal that names the command repairing the reason no prompt was built.</summary>
     /// <param name="refusal">Why the prompt could not be built, and what repairs it.</param>

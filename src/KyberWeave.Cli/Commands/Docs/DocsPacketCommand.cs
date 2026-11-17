@@ -144,6 +144,11 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
         }
 
         Console.Out.WriteLine(prompt.Prompt);
+        if (prompt.Substitution is not null)
+        {
+            // A warning to the conductor, not part of the prompt: the hook inserts stdout unchanged.
+            Console.Error.WriteLine(prompt.Substitution);
+        }
 
         // The test command is a packet extra, not part of the prompt the hook inserts, so it is printed here.
         if (PacketTestCommand.Render(
