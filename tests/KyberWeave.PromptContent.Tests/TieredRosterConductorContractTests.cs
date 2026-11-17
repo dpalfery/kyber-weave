@@ -65,7 +65,7 @@ public sealed class TieredRosterConductorContractTests
         Assert.Contains("worker-roster", conductor, StringComparison.Ordinal);
         Assert.Contains("tiered", conductor, StringComparison.Ordinal);
         Assert.Contains("docs_build_task_prompt_for_agent_dispatch", conductor, StringComparison.Ordinal);
-        Assert.Contains("dispatch the agent it names", conductor, StringComparison.Ordinal);
+        Assert.Contains("`docs_build_task_prompt_for_agent_dispatch` answers with it", conductor, StringComparison.Ordinal);
         Assert.Contains("task file records", conductor, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -110,14 +110,15 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
-    public void TheReplacedAgentsAreReadAsTheirTieredReplacements()
+    public void TheConductorNamesTheTieredDeliveryAndPlatformAgents()
     {
         string conductor = Read(ConductorPath);
 
-        Assert.Contains("`github-devops`", conductor, StringComparison.Ordinal);
-        Assert.Contains("read `devops`", conductor, StringComparison.Ordinal);
-        Assert.Contains("`azure-reader`", conductor, StringComparison.Ordinal);
-        Assert.Contains("read `platform-researcher`", conductor, StringComparison.Ordinal);
+        Assert.Contains(
+            "Under `tiered` the delivery agent is `devops` and the live-platform agent is `platform-researcher`",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.Contains("under `technology` every name reads as written", conductor, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -182,6 +183,23 @@ public sealed class TieredRosterConductorContractTests
         {
             yield return [path];
         }
+    }
+
+    [Fact]
+    public void TheSelectionRulesAreScopedToTheRosterTheyBelongTo()
+    {
+        string conductor = Read(ConductorPath);
+        string skill = Read(DeliveryExecutionPath);
+
+        Assert.Contains(
+            "On the `technology` roster, when none is named, assign it to the delegate whose description trigger matches its files",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "On the `technology` roster, choose each task's agent by matching the abilities it needs against the descriptions of the agents you can dispatch",
+            skill,
+            StringComparison.Ordinal);
+        Assert.Contains("Under `tiered` the dispatch tool names the agent", skill, StringComparison.Ordinal);
     }
 
     [Fact]
