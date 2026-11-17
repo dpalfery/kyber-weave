@@ -1561,8 +1561,8 @@ same question. Name `technology` instead of a task id for a dispatch that belong
 such as a research request: the reply then describes the parts from the shared rules on.
 
 Name `harness` as well when you know it. On a harness whose dispatch hook can rewrite the call,
-no file is written and the reply says `prompt file: none`. On Antigravity, ZCode, CommandCode and
-Warp the hook cannot rewrite the dispatch — the rows in the
+no file is written and the reply says `prompt file: none`. On ZCode, CommandCode and Warp the
+hook cannot rewrite the dispatch — the rows in the
 [dispatch delivery path](../kyber-arbiter/architecture.md#dispatch-delivery-path) — so the prompt
 is written to `.agent_scratchpad/<task>/prompt.md` (untracked) and the reply carries that path.
 Name the path in the dispatch and tell the worker to read it first. Omit `harness` when it is

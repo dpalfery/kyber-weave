@@ -47,14 +47,18 @@ public sealed class ReviewCatalogueService(
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResult.Reported(1, report);
 
+        // A host may declare a technology no template ships: `docs init` scaffolds it as stubs. Its gates are
+        // reported as not shipped, not refused, because the technology is the host's own choice.
+        HashSet<string> declared = new(config.Ontology.Technologies, StringComparer.OrdinalIgnoreCase);
+
         // Validation is case-insensitive, so slugs map to their canonical spelling before the case-sensitive family match.
         IReadOnlyList<string> technologies = (request.Technologies.Count > 0
             ? request.Technologies
-            : config.Ontology.Technologies).Select(CanonicalSlug).ToList();
+            : config.Ontology.Technologies).Select(technology => CanonicalSlug(technology, declared)).ToList();
 
         foreach (string technology in technologies)
         {
-            if (!KyberStandardsTemplates.TryGet(technology, out _))
+            if (!KyberStandardsTemplates.TryGet(technology, out _) && !declared.Contains(technology))
                 return ReviewCommandResult.Refused(UnknownTechnologyMessage(technology));
         }
 
@@ -80,10 +84,13 @@ public sealed class ReviewCatalogueService(
     }
 
     /// <summary>The canonical spelling of a known slug, so any casing the validator accepts renders.</summary>
-    private static string CanonicalSlug(string technology)
+    private static string CanonicalSlug(string technology, IReadOnlySet<string> declared)
     {
-        return KyberStandardsTemplates.All.FirstOrDefault(
-            slug => string.Equals(slug, technology, StringComparison.OrdinalIgnoreCase)) ?? technology;
+        string? known = KyberStandardsTemplates.All.FirstOrDefault(
+            slug => string.Equals(slug, technology, StringComparison.OrdinalIgnoreCase));
+        known ??= declared.FirstOrDefault(
+            slug => string.Equals(slug, technology, StringComparison.OrdinalIgnoreCase));
+        return known ?? technology;
     }
 
     /// <summary>

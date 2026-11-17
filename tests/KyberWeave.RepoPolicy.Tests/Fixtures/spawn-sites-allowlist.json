@@ -482,6 +482,18 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
     },
     {
+      "file": "tests/KyberWeave.Tests/ReviewGatesTechnologyGateTests.cs",
+      "text": "ProcessStartInfo start = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run in the Git helper at line 199: ProcessRunner timeout 60 s kills the child tree on expiry. git argv only (init, add, commit, worktree add) in a temp fixture repository; the test needs a real worktree to prove the plan is found outside this checkout."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/ReviewGatesTechnologyGateTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp fixture repository. The helper asserts the exit code, so a failed git call fails the test rather than hanging."
+    },
+    {
       "file": "tests/KyberWeave.RepoPolicy.Tests/SbomTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"python3\")",
       "count": 1,
