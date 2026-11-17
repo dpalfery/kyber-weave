@@ -626,7 +626,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 5.2
   - _Requirements: 13.2, 13.3, 13.4_
 
-- [ ] 5.4 Resolve removed agent names and clean rendered files
+- [x] 5.4 Resolve removed agent names and clean rendered files
   - **Objective:** Resolve a removed agent named in a plan or machine task list to a developer agent by difficulty, and make a Squad update remove a removed agent's rendered files only when the Squad wrote them unedited.
   - **Files:**
     - `src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs`: the substitution and its report

@@ -356,6 +356,8 @@ public sealed partial class DocsTools
 
         text.Append("prompt: built\n");
         text.Append("agent: ").Append(prompt.Agent ?? "none").Append('\n');
+        if (prompt.Substitution is not null)
+            text.Append("substituted: ").Append(prompt.Substitution).Append('\n');
         text.Append("difficulty: ").Append(prompt.Difficulty ?? "none");
         if (prompt.DifficultySource is not null)
             text.Append(" (source: ").Append(prompt.DifficultySource).Append(')');

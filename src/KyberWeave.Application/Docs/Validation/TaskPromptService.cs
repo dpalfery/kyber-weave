@@ -49,40 +49,31 @@ public sealed class TaskPromptService(
     /// </summary>
     /// <param name="difficulty">The rating in use: <c>easy</c>, <c>medium</c> or <c>hard</c>, or null when none is recorded.</param>
     /// <param name="failedAttempts">How many attempts at this task already failed.</param>
-    public static string DeveloperTier(string? difficulty, int failedAttempts)
-    {
-        int rated = Clean(difficulty) switch
-        {
-            "easy" => 0,
-            "hard" => DeveloperTiers.Count - 1,
-            _ => 1,
-        };
-
-        // Long arithmetic: a retry count at the top of its range must clamp to the last tier, not wrap to a
-        // negative index a few steps below zero.
-        long climbed = Math.Min(
-            DeveloperTiers.Count - 1,
-            rated + (long)Math.Max(failedAttempts, 0));
-        return DeveloperTiers[(int)climbed];
-    }
+    public static string DeveloperTier(string? difficulty, int failedAttempts) =>
+        PlanTaskAgentPick.DeveloperTier(difficulty, failedAttempts);
 
     private static IReadOnlyList<string> DeveloperTiers => PlanTaskAgentPick.DeveloperTiers;
 
     /// <summary>
     /// The agent a tiered-roster dispatch goes to. The developer kind — which the task file records, never a tier —
     /// resolves to the tier the rating and the failed attempts give. A dispatch that already names a tier never
-    /// moves down: a failed attempt is never retried on a lower tier (Requirement 3.5). Any other agent the dispatch,
-    /// the plan or the pick names — <c>docs-dev</c>, <c>devops</c>, <c>platform-researcher</c> — is left as it is. A
-    /// task that names neither an agent nor a technology is documentation or delivery work, so it keeps its empty
-    /// agent.
+    /// moves down: a failed attempt is never retried on a lower tier (Requirement 3.5). A name the removal phase
+    /// deletes resolves to its replacement first, whatever tier the rating would choose (Requirement 13.5). Any other
+    /// agent the dispatch, the plan or the pick names — <c>docs-dev</c>, <c>devops</c>, <c>platform-researcher</c> — is
+    /// left as it is. A task that names neither an agent nor a technology is documentation or delivery work, so it
+    /// keeps its empty agent.
     /// </summary>
     private static string? TieredAgent(
         string? requested,
         string? recorded,
         PlanTaskFileEntry? entry,
         string? technology,
-        int failedAttempts)
+        int failedAttempts,
+        RemovedAgentResolution? removed)
     {
+        if (removed is not null)
+            return removed.Resolved;
+
         int tier = TierIndexOf(DeveloperTier(entry?.Difficulty, failedAttempts));
         if ((requested ?? recorded) is not { } named)
             return entry is null || technology is not null ? DeveloperTiers[tier] : null;
@@ -194,9 +185,12 @@ public sealed class TaskPromptService(
         string? requested = Clean(request.Agent) ?? Clean(entry?.Role);
         string? recorded = Clean(entry?.Agent);
         string? agent = requested ?? recorded;
+        RemovedAgentResolution? removed = null;
         if (string.Equals(fileRoster ?? config.WorkerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
         {
-            agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts);
+            removed = PlanTaskAgentPick.ResolveRemovedAgent(
+                requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
+            agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);
         }
         string? taskText = entry is null ? null : PlanTaskPacket.Fill(entry, root, priorResults);
         // The dispatch header is routing metadata, so the count is put back where the worker reads it: a retry
@@ -242,7 +236,8 @@ public sealed class TaskPromptService(
             technology,
             leftOut,
             null,
-            promptFile);
+            promptFile,
+            removed?.Report);
     }
 
     /// <summary>
