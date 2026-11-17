@@ -310,6 +310,21 @@ public sealed class TaskPromptServiceTests
         Assert.Contains("T1 reported: built, four tests green.", Between(result.Prompt, "task"), StringComparison.Ordinal);
     }
 
+    /// <summary>The dispatch's failed-attempt count reaches the worker inside the prompt, not only the request.</summary>
+    [Fact]
+    public void TheFailedAttemptCountReachesThePrompt()
+    {
+        using DocFixture fixture = Ready();
+        KyberWeaveConfig config = Config();
+
+        TaskPromptResult result = Service(fixture, config).Build(
+            new TaskPromptRequest(fixture.Root, TaskId: "T1", FailedAttempts: 2),
+            config);
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Contains("FAILED_ATTEMPTS: 2", Between(result.Prompt, "task"), StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// The prior-results slot reads only the run's own scratch area: a tracked file, an absolute path outside the
     /// repository and a path that climbs out with <c>..</c> are refused before anything is read.

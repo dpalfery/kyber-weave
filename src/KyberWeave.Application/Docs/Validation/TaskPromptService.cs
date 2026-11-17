@@ -120,6 +120,14 @@ public sealed class TaskPromptService(
 
         string? agent = Clean(request.Agent) ?? Clean(entry?.Role) ?? Clean(entry?.Agent);
         string? taskText = entry is null ? null : PlanTaskPacket.Fill(entry, root, priorResults);
+        // The dispatch header is routing metadata, so the count is put back where the worker reads it: a retry
+        // starts knowing how many attempts already failed.
+        if (taskText is not null && request.FailedAttempts > 0)
+        {
+            taskText = string.Create(
+                CultureInfo.InvariantCulture,
+                $"FAILED_ATTEMPTS: {request.FailedAttempts}\n\n{taskText}");
+        }
         string? hostText = entry is null
             ? null
             : hostFacts.Render(root, config, agent, taskId, null, technology);

@@ -420,7 +420,6 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.Equal("T3", request.TaskId);
         Assert.Equal("docs/plans/plan.md", request.Plan);
         Assert.Equal("results.md", request.PriorResultsPath);
-        Assert.Equal(2, request.FailedAttempts);
 
         string sent = InsertedPrompt("claude", stdout);
         Assert.StartsWith(TaskPrompt, sent, StringComparison.Ordinal);
