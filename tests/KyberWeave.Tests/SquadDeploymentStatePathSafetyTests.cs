@@ -566,4 +566,120 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             "Deployment containment helpers must delegate to " +
             $"SquadFileSystemPathSemantics: {string.Join(", ", offenders)}");
     }
+
+    /// <summary>
+    ///     A difference in case can appear in the middle of a path, not only in its last segment. The
+    ///     canonical spelling of every existing segment is the one on disk, so a variant spelling of a
+    ///     parent directory must not leak into the result.
+    /// </summary>
+    [Fact]
+    public void CanonicalizeUsesTheOnDiskSpellingOfAMiddleSegment()
+    {
+        using TempDirectory fixture = new();
+        string onDiskMiddle = Path.Combine(fixture.Path, "MiddleSegment");
+        string onDiskLeaf = Path.Combine(onDiskMiddle, "leaf.md");
+        Directory.CreateDirectory(onDiskMiddle);
+        File.WriteAllText(onDiskLeaf, "leaf");
+        string variantPath = Path.Combine(fixture.Path, "middlesegment", "leaf.md");
+        string canonicalRoot = SquadFileSystemPathSemantics.Instance.Canonicalize(fixture.Path);
+
+        string canonical = SquadFileSystemPathSemantics.Instance.Canonicalize(variantPath);
+
+        Assert.Equal(Path.Combine(canonicalRoot, "MiddleSegment", "leaf.md"), canonical);
+        if (Directory.Exists(Path.Combine(fixture.Path, "middlesegment")))
+        {
+            // Case-insensitive volume: the variant names the same entry, so it converges.
+            Assert.Equal(
+                SquadFileSystemPathSemantics.Instance.Canonicalize(onDiskLeaf),
+                canonical);
+            return;
+        }
+
+        // Case-sensitive volume: the variant names nothing, so only the existing prefix is corrected
+        // and the missing tail keeps the caller's spelling.
+        Assert.Equal(
+            Path.Combine(canonicalRoot, "middlesegment", "leaf.md"),
+            canonical);
+    }
+
+    /// <summary>
+    ///     A symlink in the middle of a path is followed for the canonical spelling and honoured by the
+    ///     containment decisions, so a link pointing outside the root cannot carry a path inside it.
+    /// </summary>
+    [Fact]
+    public void CanonicalizeFollowsASymlinkedSegmentAndContainmentHonoursIt()
+    {
+        using TempDirectory fixture = new();
+        using TempDirectory outside = new();
+        string realDirectory = Path.Combine(fixture.Path, "real");
+        string realLeaf = Path.Combine(realDirectory, "leaf.md");
+        Directory.CreateDirectory(realDirectory);
+        File.WriteAllText(realLeaf, "leaf");
+        string insideLink = Path.Combine(fixture.Path, "inside-link");
+        Directory.CreateSymbolicLink(insideLink, realDirectory);
+        string outsideLeaf = Path.Combine(outside.Path, "leaf.md");
+        File.WriteAllText(outsideLeaf, "outside");
+        string outsideLink = Path.Combine(fixture.Path, "outside-link");
+        Directory.CreateSymbolicLink(outsideLink, outside.Path);
+        string canonicalRealLeaf =
+            Path.Combine(SquadFileSystemPathSemantics.Instance.Canonicalize(realDirectory), "leaf.md");
+
+        Assert.Equal(
+            canonicalRealLeaf,
+            SquadFileSystemPathSemantics.Instance.Canonicalize(Path.Combine(insideLink, "leaf.md")));
+        Assert.True(
+            SquadFileSystemPathSemantics.Instance.IsWithin(
+                fixture.Path,
+                Path.Combine(insideLink, "leaf.md")));
+        Assert.False(
+            SquadFileSystemPathSemantics.Instance.IsWithin(
+                fixture.Path,
+                Path.Combine(outsideLink, "leaf.md")));
+    }
+
+    /// <summary>
+    ///     The trailing segments of a path need not exist: resolution canonicalises the prefix that is
+    ///     on disk and keeps the caller's spelling for the rest, which is what lets an install plan a
+    ///     file that is not there yet.
+    /// </summary>
+    [Fact]
+    public void CanonicalizeKeepsANotYetExistingTailInItsGivenSpelling()
+    {
+        using TempDirectory fixture = new();
+        string existing = Path.Combine(fixture.Path, "Existing");
+        Directory.CreateDirectory(existing);
+
+        string canonicalExisting = SquadFileSystemPathSemantics.Instance.Canonicalize(existing);
+
+        string canonical = SquadFileSystemPathSemantics.Instance.Canonicalize(
+            Path.Combine(fixture.Path, "Existing", "new", "deeper", "leaf.md"));
+
+        Assert.Equal(Path.Combine(canonicalExisting, "new", "deeper", "leaf.md"), canonical);
+    }
+
+    /// <summary>
+    ///     Each check answers from the filesystem as it is at that moment: replacing a directory with a
+    ///     symlink between two checks must change the answer the second time.
+    /// </summary>
+    [Fact]
+    public void ContainmentRefusesAPathWhoseIntermediateDirectoryBecameASymlinkBetweenChecks()
+    {
+        using TempDirectory fixture = new();
+        using TempDirectory outside = new();
+        string middle = Path.Combine(fixture.Path, "middle");
+        string leaf = Path.Combine(middle, "leaf.md");
+        Directory.CreateDirectory(middle);
+        File.WriteAllText(leaf, "leaf");
+        File.WriteAllText(Path.Combine(outside.Path, "leaf.md"), "outside");
+
+        Assert.True(SquadFileSystemPathSemantics.Instance.IsWithin(fixture.Path, leaf));
+
+        Directory.Delete(middle, recursive: true);
+        Directory.CreateSymbolicLink(middle, outside.Path);
+
+        Assert.False(SquadFileSystemPathSemantics.Instance.IsWithin(fixture.Path, leaf));
+        Assert.Equal(
+            Path.Combine(SquadFileSystemPathSemantics.Instance.Canonicalize(outside.Path), "leaf.md"),
+            SquadFileSystemPathSemantics.Instance.Canonicalize(leaf));
+    }
 }
