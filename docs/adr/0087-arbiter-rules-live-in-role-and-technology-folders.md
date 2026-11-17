@@ -141,9 +141,9 @@ there too, where the person who owns the standard can see and change them.
    on the harnesses that have no worker guard. A read-only dispatch's tool call names no dispatch
    technology, so the guard reads it from the ledger's pre event for the calling agent in the same
    session: the pre event's `headers` now record the dispatch's `technology`. The guard applies only
-   that technology's `worker.command` rules. A dispatch that names none, has returned, or cannot be
-   told apart from a parallel dispatch of the same agent falls back to every declared technology's
-   list, which is the fail-closed reading for `platform-researcher`.
+   that technology's `worker.command` rules. A dispatch that names none, names one the host does not
+   declare, has returned, or cannot be told apart from a parallel dispatch of the same agent falls
+   back to every declared technology's list, which is the fail-closed reading for `platform-researcher`.
 
 9. **The two model rules follow the developer tiers.** Under `worker-roster: tiered`,
    `KW-ARB-DIFFICULTY-001` answers from `plan.task.difficulty`, the rating the agent pick already

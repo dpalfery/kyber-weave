@@ -486,7 +486,8 @@ that technology or a technology that builds on it; an event that names no task t
 task-less dispatch, is judged by the role folders and `arbiter.rules` alone. A read-only dispatch's
 command allow-list follows the technology named on its dispatch: the worker guard reads the
 dispatch's `technology` header from its ledger pre event, and falls back to every declared list when
-the dispatch names none or cannot be identified. To get the folder to edit, install it:
+the dispatch names none, names a technology the host does not declare, or cannot be identified. To get
+the folder to edit, install it:
 
 ```bash
 kyber-weave docs init . --standards conductor

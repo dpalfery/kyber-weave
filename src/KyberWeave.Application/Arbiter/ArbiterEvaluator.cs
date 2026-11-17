@@ -483,8 +483,9 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
     /// <summary>
     /// The technology that scopes the dispatch's technology folder rules: the task's own <c>Technology:</c> label
-    /// when its plan was read, else the dispatch's validated <c>TECHNOLOGY</c> header. A dispatch that names
-    /// neither is judged by role folder rules and <c>arbiter.rules</c> alone.
+    /// when its plan was read, else the dispatch's <c>TECHNOLOGY</c> header. A header naming a technology the host
+    /// does not declare has no folder to load, and a dispatch that names neither is judged by role folder rules and
+    /// <c>arbiter.rules</c> alone.
     /// </summary>
     private static string? EventTechnology(TriggerClassification classification, ArbiterFactSet facts)
     {

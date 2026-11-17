@@ -189,6 +189,14 @@ public sealed class WorkerGuard(
             // An unreadable ledger leaves the dispatch unknown, so every list applies.
         }
 
+        // A dispatch can name a technology the host does not declare: a typo, or a folder it never installed. That
+        // names no list, so every declared list must still bind the agent.
+        if (technology is not null
+            && !loaded.Config.Ontology.Technologies.Contains(technology, StringComparer.Ordinal))
+        {
+            technology = null;
+        }
+
         IReadOnlyCollection<string>? scope = technology is null ? null : [technology];
         return WorkerGuardRules.CommandRefusal(loaded.Config.Arbiter.Rules, call, call.Command!, scope);
     }

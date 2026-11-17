@@ -202,6 +202,21 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     }
 
     /// <summary>
+    /// An undeclared technology is a typo or a folder the host does not have, so it cannot name an allow-list:
+    /// every declared list still binds the read-only agent.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherWhoseDispatchNamesAnUndeclaredTechnologyIsRefusedByEveryDeclaredList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("azuree");
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Two dispatches of the same agent in one session cannot be told apart from the tool call, so the guard
     /// falls back to every declared list rather than guess which technology the call belongs to.
     /// </summary>
