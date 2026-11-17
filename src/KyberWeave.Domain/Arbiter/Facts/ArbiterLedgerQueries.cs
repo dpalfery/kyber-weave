@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Arbiter;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -64,10 +65,12 @@ public static class ArbiterLedgerQueries
     /// was not delivered) stops holding its files <see cref="UnreturnedDispatchHorizon"/> after it started,
     /// measured against the dispatch being gated, or the newest event when that one is not recorded.
     /// <para>
-    /// An earlier attempt at the same plan task is not in flight for that task's next attempt. A pre event is
-    /// written for every evaluation, and a conductor can be allowed a dispatch and then spend the turn elsewhere
-    /// without running the worker; its own task's files then intersected its retry and the retry answered
-    /// <c>overlaps-in-flight</c> forever, which is how a three-task run lost one task to three refusals.
+    /// A served evaluation is advisory: the calling agent asserts the facts and then decides whether to dispatch at
+    /// all, so an allowed one is no evidence that a worker ran. An earlier served evaluation of the same plan task
+    /// therefore does not hold that task's files against its next attempt. A conductor was allowed task 1.2's
+    /// dispatch, spent the turn on another task's escalation, and every later attempt at 1.2 intersected that
+    /// evaluation's files and answered <c>overlaps-in-flight</c> forever, losing the task. A hook event is a
+    /// dispatch the harness itself reported, so it keeps holding its files for the whole run, as it always has.
     /// </para>
     /// </remarks>
     /// <param name="events">The events a ledger read returned, in append order.</param>
@@ -89,6 +92,7 @@ public static class ArbiterLedgerQueries
         ArbiterLedgerEvent? gated = excludeEventId is null
             ? null
             : events.FirstOrDefault(e => e.Id == excludeEventId);
+        bool advisory = string.Equals(gated?.Harness, ArbiterServeToken.Harness, StringComparison.Ordinal);
         string? gatedTask = gated?.Headers?.Task;
         string? gatedPlan = gated?.Headers?.PlanFile;
         DateTimeOffset? now = (gated ?? (events.Count > 0 ? events[^1] : null))?.At;
@@ -96,7 +100,7 @@ public static class ArbiterLedgerQueries
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != excludeEventId
                 && !paired.Contains(e.Id)
-                && !SameTask(e, gatedTask, gatedPlan)
+                && !(advisory && SameTask(e, gatedTask, gatedPlan))
                 && (now is null || now.Value - e.At <= UnreturnedDispatchHorizon)
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))

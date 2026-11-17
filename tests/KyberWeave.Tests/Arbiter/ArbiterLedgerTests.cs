@@ -414,24 +414,25 @@ public sealed class ArbiterLedgerTests : IDisposable
     }
 
     /// <summary>
-    /// A second attempt at the same task is not a concurrent writer of its own files. The second end-to-end tiered
-    /// run asked the Arbiter about task 1.2, was allowed, then spent the turn on another task's escalation and never
-    /// dispatched it; every later attempt at 1.2 saw that unpaired earlier evaluation as work in flight and answered
-    /// <c>overlaps-in-flight</c> (KW-ARB-READY-001), so the task was refused three times and never delivered.
+    /// A second attempt at the same task is not a concurrent writer of its own files when the first was an advisory
+    /// evaluation. The second end-to-end tiered run asked the Arbiter about task 1.2, was allowed, then spent the turn
+    /// on another task's escalation and never dispatched it; every later attempt at 1.2 saw that unpaired earlier
+    /// evaluation as work in flight and answered <c>overlaps-in-flight</c> (KW-ARB-READY-001), so the task was refused
+    /// three times and never delivered.
     /// </summary>
     [Fact]
-    public async Task InFlightPaths_DoesNotCountAnEarlierAttemptAtTheSameTask()
+    public async Task InFlightPaths_DoesNotCountAnEarlierServedAttemptAtTheSameTask()
     {
         var ledger = new InFlightLedger(ArbiterDirectory);
         const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
         ArbiterLedgerHeaders task12 = new(plan, "1.2");
         ArbiterLedgerHeaders task13 = new(plan, "1.3");
         var firstAttempt = NewEvent(At(0), ArbiterLedgerPhases.Pre,
-            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12);
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
         var otherTask = NewEvent(At(1), ArbiterLedgerPhases.Pre,
-            trigger: "delegate", taskFiles: ["src/Truncate.cs"], headers: task13);
+            trigger: "delegate", taskFiles: ["src/Truncate.cs"], headers: task13, harness: "serve");
         var retry = NewEvent(At(2), ArbiterLedgerPhases.Pre,
-            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12);
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
         await ledger.AppendAsync(firstAttempt);
         await ledger.AppendAsync(otherTask);
         await ledger.AppendAsync(retry);
@@ -440,6 +441,26 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Equal(["src/Truncate.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
         // The other task still sees this task's unpaired attempts: they are a different task's work.
         Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: otherTask.Id));
+    }
+
+    /// <summary>
+    /// A hook event is a dispatch the harness itself reported, so it keeps holding its files for the whole run: a
+    /// retry of the same task is refused while that dispatch has no return.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_AHookDispatchOfTheSameTaskStillHoldsItsFiles()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        var dispatch = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        var retry = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        await ledger.AppendAsync(dispatch);
+        await ledger.AppendAsync(retry);
+
+        Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
     }
 
     [Fact]
