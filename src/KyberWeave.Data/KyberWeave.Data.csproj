@@ -25,6 +25,8 @@
     <InternalsVisibleTo Include="KyberWeave.Application" />
     <!-- The provider's transport constructor is driven directly by the embedding client tests. -->
     <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Testing" />
     <!-- Temporary: the closeout gates still in the engine read the bounded reader and PresentFile
          until they move. Drop this entry when the last caller of either leaves KyberWeave.Core.Docs. -->
     <InternalsVisibleTo Include="KyberWeave.Core.Docs" />

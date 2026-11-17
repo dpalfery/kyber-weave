@@ -75,7 +75,6 @@ internal static class TestTempRoot
     /// </summary>
     private const string MacBaseFolderName = "kw-test-temp";
 
-    [ModuleInitializer]
     internal static void RedirectTemp()
     {
         if (OperatingSystem.IsWindows())

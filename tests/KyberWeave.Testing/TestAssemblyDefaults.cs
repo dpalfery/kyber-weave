@@ -1,4 +1,3 @@
-using System.Runtime.CompilerServices;
 using KyberWeave.Cli.Commands.Docs;
 
 namespace KyberWeave.Tests;
@@ -9,7 +8,6 @@ namespace KyberWeave.Tests;
 /// </summary>
 internal static class TestAssemblyDefaults
 {
-    [ModuleInitializer]
     internal static void DisableLivePacketCheck()
     {
         DocsTasksCommand.PacketProviderOverride = _ => null;
