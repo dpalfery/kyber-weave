@@ -568,9 +568,9 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     }
 
     /// <summary>
-    ///     A difference in case can appear in the middle of a path, not only in its last segment. The
-    ///     canonical spelling of every existing segment is the one on disk, so a variant spelling of a
-    ///     parent directory must not leak into the result.
+    ///     A difference in case can appear in the middle of a path, not only in its last segment. Where
+    ///     the variant spelling names the directory that is on disk, the result carries the on-disk
+    ///     spelling; where it names nothing, only the existing prefix is corrected.
     /// </summary>
     [Fact]
     public void CanonicalizeUsesTheOnDiskSpellingOfAMiddleSegment()
@@ -585,10 +585,12 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
 
         string canonical = SquadFileSystemPathSemantics.Instance.Canonicalize(variantPath);
 
-        Assert.Equal(Path.Combine(canonicalRoot, "MiddleSegment", "leaf.md"), canonical);
         if (Directory.Exists(Path.Combine(fixture.Path, "middlesegment")))
         {
-            // Case-insensitive volume: the variant names the same entry, so it converges.
+            // Case-insensitive volume: the variant names the entry on disk, so it converges.
+            Assert.Equal(
+                Path.Combine(canonicalRoot, "MiddleSegment", "leaf.md"),
+                canonical);
             Assert.Equal(
                 SquadFileSystemPathSemantics.Instance.Canonicalize(onDiskLeaf),
                 canonical);

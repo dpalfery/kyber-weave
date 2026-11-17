@@ -554,16 +554,16 @@
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; mkfifo of one path the test creates."
     },
     {
-      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTests.cs",
+      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTestBase.cs",
       "text": "ProcessStartInfo startInfo = new(\"fsutil.exe\")",
       "count": 1,
-      "bound": "Windows only (guarded by OperatingSystem.IsWindows). Started by the Run at line 5440: ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
+      "bound": "Windows only (guarded by OperatingSystem.IsWindows in TryEnableWindowsDirectoryCaseSensitivity). Started by the Run in that helper: ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
     },
     {
-      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTests.cs",
+      "file": "tests/KyberWeave.Tests/SquadDeploymentStateTestBase.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
-      "bound": "Windows only (guarded by OperatingSystem.IsWindows). ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
+      "bound": "Windows only (guarded by OperatingSystem.IsWindows in TryEnableWindowsDirectoryCaseSensitivity). ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
     },
     {
       "file": "tests/KyberWeave.Tests/SquadHarnessLauncherTests.cs",
