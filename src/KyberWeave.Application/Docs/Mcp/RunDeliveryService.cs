@@ -20,7 +20,8 @@ public sealed class RunDeliveryService(
     RunDeliveryPorts ports) : IRunDeliveryService
 {
     private const string DeliverFallbackNext =
-        "next: dispatch github-devops with the create-pull-request skill to open the pull request. Nothing was pushed.";
+        "next: dispatch " + RunDelivery.DeliveryAgents +
+        " with the create-pull-request skill to open the pull request. Nothing was pushed.";
 
     private readonly string _repositoryRoot = repositoryRoot ?? throw new ArgumentNullException(nameof(repositoryRoot));
     private readonly IDocsQueryService _query = query ?? throw new ArgumentNullException(nameof(query));

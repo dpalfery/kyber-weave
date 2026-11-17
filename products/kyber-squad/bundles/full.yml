@@ -12,10 +12,12 @@ agents:
   - dev-easy
   - dev-hard
   - dev-medium
+  - devops
   - docs-dev
   - github-devops
   - go-dev
   - maui-dev
+  - platform-researcher
   - product-owner
   - pulumi-dev
   - python-dev
