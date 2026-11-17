@@ -86,6 +86,12 @@ public static class RuleValidator
     /// <summary>Technology standards name each other as <c>builds-on</c> parents in a cycle.</summary>
     public const string RuleFolderCycle = "KW-ARB-CONFIG-019";
 
+    /// <summary>
+    /// A host folder declares a shipped rule id, replacing or disabling it. Informational: no rule is locked, so the
+    /// declaration takes effect, and the finding makes sure it is not silent.
+    /// </summary>
+    public const string ShippedRuleOverride = "KW-ARB-CONFIG-020";
+
     /// <summary>The CLI scope conflict <c>--global</c> and <c>--project</c> attempted together.</summary>
     public const string InstallScopeConflict = "KW-ARB-INSTALL-001";
 

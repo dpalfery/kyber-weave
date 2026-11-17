@@ -91,16 +91,108 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     [Fact]
     public void AHostRoleFolderReplacesTheShippedRuleOfTheSameId()
     {
-        WriteFolder("conductor", HostScopeRule);
+        string path = WriteFolder("conductor", HostScopeRule);
 
         (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
             Load("arbiter:\n  enabled: true\n", technologies: []);
 
-        Assert.Empty(findings);
+        Diagnostic notice = Assert.Single(findings);
+        Assert.Equal(RuleValidator.ShippedRuleOverride, notice.Code);
+        Assert.Equal(Severity.Info, notice.Severity);
+        Assert.Equal("KW-ARB-SCOPE-001", notice.Subject);
+        Assert.Equal(path, notice.FilePath);
         ArbiterRule replaced = Assert.Single(rules, rule => rule.Id == "KW-ARB-SCOPE-001");
         Assert.Equal("Does the host's own scope question hold?", replaced.Question);
         Assert.Equal(["in-task", "beyond-task"], replaced.Answers);
         Assert.Equal(ArbiterConfig.ProductDefaults.Rules.Count, rules.Count);
+    }
+
+    [Fact]
+    public void ADisabledReplacementOfAShippedRuleIsReportedAndTakesEffect()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: KW-ARB-SCOPE-002
+                trigger: delegate
+                question: Does the delegation ask for work the plan task does not describe?
+                answers: [yes, no]
+                effects: { yes: allow, no: escalate }
+                enabled: false
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic notice = Assert.Single(findings);
+        Assert.Equal(RuleValidator.ShippedRuleOverride, notice.Code);
+        Assert.Equal("KW-ARB-SCOPE-002", notice.Subject);
+        Assert.Equal(path, notice.FilePath);
+        Assert.False(Assert.Single(rules, rule => rule.Id == "KW-ARB-SCOPE-002").Enabled);
+    }
+
+    [Fact]
+    public void AFolderRuleWithTheReservedPrefixIsRefused()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: KW-ARB-HOST-ONLY-001
+                trigger: delegate
+                question: Is this dispatch a host-only read?
+                answers: [yes, no]
+                effects: { yes: allow, no: allow }
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.DuplicateOrReservedId);
+        Assert.Equal(Severity.Error, finding.Severity);
+        Assert.Equal(path, finding.FilePath);
+        Assert.Equal("KW-ARB-HOST-ONLY-001", finding.Subject);
+        AssertShippedRules(rules);
+    }
+
+    [Fact]
+    public void AFolderRuleMappingAShippedOnlyEffectIsRefused()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: host-effect-001
+                trigger: delegate
+                question: Is this dispatch a host-only read?
+                answers: [yes, no]
+                effects: { yes: keep, no: allow }
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.SavingsValueInvalid);
+        Assert.Equal(Severity.Error, finding.Severity);
+        Assert.Equal(path, finding.FilePath);
+        AssertShippedRules(rules);
+    }
+
+    [Fact]
+    public void AFolderRuleSettingForEachAtRuleLevelIsRefused()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: host-foreach-001
+                trigger: delegate
+                question: Is this dispatch a host-only read?
+                answers: [yes, no]
+                for-each: plan.task.files
+                effects: { yes: allow, no: allow }
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.SavingsValueInvalid);
+        Assert.Equal(Severity.Error, finding.Severity);
+        Assert.Equal(path, finding.FilePath);
+        AssertShippedRules(rules);
     }
 
     [Fact]
@@ -224,7 +316,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             """,
             technologies: []);
 
-        Assert.Empty(findings);
+        Assert.Single(findings, item => item.Code == RuleValidator.ShippedRuleOverride);
         Assert.True(Assert.Single(rules, rule => rule.Id == "KW-ARB-SCOPE-001").Shadow);
         Assert.Equal("Does the host's own scope question hold?", rules.Single(rule => rule.Id == "KW-ARB-SCOPE-001").Question);
         Assert.False(Assert.Single(rules, rule => rule.Id == "KW-ARB-SCOPE-002").Enabled);

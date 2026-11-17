@@ -355,11 +355,13 @@ public static class ArbiterConfigLoader
         List<ArbiterRule> rules = [.. shipped];
         List<Diagnostic> findings = [];
         HashSet<string> applied = new(StringComparer.Ordinal);
+        IReadOnlySet<string> shippedIds = new HashSet<string>(
+            shipped.Select(rule => rule.Id), StringComparer.Ordinal);
 
         foreach (string role in RoleFolders)
         {
             if (applied.Add(role))
-                TryApplyFolder(rules, request, role, findings);
+                TryApplyFolder(rules, request, role, shippedIds, findings);
         }
 
         foreach (string technology in request.Technologies
@@ -370,7 +372,7 @@ public static class ArbiterConfigLoader
             foreach (string folder in FolderChain(request, technology, findings))
             {
                 if (applied.Add(folder))
-                    TryApplyFolder(rules, request, folder, findings);
+                    TryApplyFolder(rules, request, folder, shippedIds, findings);
             }
         }
 
@@ -492,6 +494,7 @@ public static class ArbiterConfigLoader
         List<ArbiterRule> rules,
         RuleFolderRequest request,
         string name,
+        IReadOnlySet<string> shippedIds,
         List<Diagnostic> findings)
     {
         FolderRulesSource? source = FindFolderRulesFile(request, name);
@@ -505,7 +508,7 @@ public static class ArbiterConfigLoader
             return;
         }
 
-        if (!TryReadFolderRules(file.Path, file.Text, rules, out List<ArbiterRule>? loaded, out IReadOnlyList<Diagnostic> fileFindings))
+        if (!TryReadFolderRules(file.Path, file.Text, rules, shippedIds, out List<ArbiterRule>? loaded, out IReadOnlyList<Diagnostic> fileFindings))
         {
             findings.AddRange(fileFindings);
             return;
@@ -513,6 +516,21 @@ public static class ArbiterConfigLoader
 
         if (loaded.Count == 0)
             return;
+
+        foreach (IGrouping<string, ArbiterRule> group in loaded.GroupBy(rule => rule.Id, StringComparer.Ordinal))
+        {
+            if (!shippedIds.Contains(group.Key))
+                continue;
+
+            bool disabled = group.All(rule => !rule.Enabled);
+            findings.Add(new Diagnostic(
+                RuleValidator.ShippedRuleOverride,
+                Severity.Info,
+                $"'{file.Path}' {(disabled ? "disables" : "replaces")} shipped rule '{group.Key}'.",
+                group.Key,
+                file.Path,
+                "No rule is locked: the folder's declaration takes effect. Remove it to use the shipped rule."));
+        }
 
         ReplaceRules(rules, loaded);
     }
@@ -565,6 +583,7 @@ public static class ArbiterConfigLoader
         string path,
         string text,
         IReadOnlyList<ArbiterRule> knownRules,
+        IReadOnlySet<string> shippedIds,
         [NotNullWhen(true)] out List<ArbiterRule>? loaded,
         out IReadOnlyList<Diagnostic> findings)
     {
@@ -609,6 +628,13 @@ public static class ArbiterConfigLoader
                     return false;
                 }
 
+                Diagnostic? guard = FolderEntryGuard(path, entry, shippedIds);
+                if (guard is not null)
+                {
+                    collected.Add(guard);
+                    return false;
+                }
+
                 foreach (ArbiterRule rule in entryRules)
                 {
                     foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile([rule], knownRules, path))
@@ -632,6 +658,59 @@ public static class ArbiterConfigLoader
             collected.Add(UnreadableFolderFile(path, ex.Message));
             return false;
         }
+    }
+
+    /// <summary>
+    /// The guards <c>arbiter.rules</c> applies to a host rule entry, applied to a folder file's entry: a reserved id
+    /// prefix, a rule-level <c>for-each</c>, and an effect only shipped rules may use. A violation drops the file, as a
+    /// violation in <c>arbiter.rules</c> refuses the configuration.
+    /// </summary>
+    private static Diagnostic? FolderEntryGuard(string path, ArbiterRuleYaml entry, IReadOnlySet<string> shippedIds)
+    {
+        string id = entry.Id?.Trim() ?? string.Empty;
+        if (id.Length == 0)
+            return null;
+
+        if (!shippedIds.Contains(id) && id.StartsWith(ShippedIdPrefix, StringComparison.Ordinal))
+        {
+            return new Diagnostic(
+                RuleValidator.DuplicateOrReservedId,
+                Severity.Error,
+                $"'{path}' declares '{id}', which uses the reserved '{ShippedIdPrefix}' prefix. A folder replaces a shipped rule by its id, or declares its own id without that prefix.",
+                id,
+                path,
+                "Give the rule an id without the reserved prefix.");
+        }
+
+        if (entry.ForEach is not null)
+        {
+            return new Diagnostic(
+                RuleValidator.SavingsValueInvalid,
+                Severity.Error,
+                $"'{path}' sets for-each on '{id}' at rule level. List iteration belongs inside an ask.",
+                id,
+                path,
+                "Move for-each inside the ask, or remove it.");
+        }
+
+        if (entry.Effects is not null)
+        {
+            foreach ((string answer, string effect) in entry.Effects)
+            {
+                if (!ShippedOnlyEffects.Contains(effect))
+                    continue;
+
+                return new Diagnostic(
+                    RuleValidator.SavingsValueInvalid,
+                    Severity.Error,
+                    $"'{path}' maps '{answer}' to '{effect}' on '{id}', an effect only shipped rules may use.",
+                    id,
+                    path,
+                    "Use an effect the rule's trigger family allows, such as allow or escalate.");
+            }
+        }
+
+        return null;
     }
 
     private static Diagnostic UnreadableFolderFile(string path, string cause) =>
