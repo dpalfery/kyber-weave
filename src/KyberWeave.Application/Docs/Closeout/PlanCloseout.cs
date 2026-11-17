@@ -178,7 +178,6 @@ public sealed partial class PlanCloseout
                 plan, plan,
                 Hint: "Tick every task that completed: '- [ ] <id>' becomes '- [x] <id>'. A task that did not " +
                 "complete needs an escalation, and the plan stays open until it has one. Then run the closeout again."));
-            return new PlanCloseoutOutcome(report, false);
         }
 
         // The archive gate reads the plan where it would be archived, so the copy goes there for the check and
@@ -407,13 +406,54 @@ public sealed partial class PlanCloseout
         return (string.Join(newline, lines), removed);
     }
 
-    /// <summary>The ids of the tasks a plan still lists unchecked, in the order they appear.</summary>
-    private static List<string> UncheckedTasks(string planText) =>
-        [.. UncheckedTask().Matches(planText)
-            .Select(match => match.Groups["id"].Value.TrimEnd('.', ':', ')'))
-            .Where(id => id.Length > 0)];
+    /// <summary>
+    /// The ids of the tasks a plan still lists unchecked, in the order they appear. Only the <c>## Tasks</c>
+    /// section counts, and only outside a fenced block: a prose checklist elsewhere, or the checkbox grammar
+    /// shown as an example, is not a task.
+    /// </summary>
+    private static List<string> UncheckedTasks(string planText)
+    {
+        List<string> ids = [];
+        bool inTasks = false;
+        bool inFence = false;
+        foreach (string line in planText.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            string trimmed = line.TrimStart();
+            if (trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal))
+            {
+                inFence = !inFence;
+                continue;
+            }
 
-    [GeneratedRegex(@"^[ \t]*-[ \t]+\[ \][ \t]+(?<id>[^\s]+)", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
+            if (inFence)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("## ", StringComparison.Ordinal) || line.StartsWith("# ", StringComparison.Ordinal))
+            {
+                inTasks = line.StartsWith("## ", StringComparison.Ordinal) && IsTasksHeadingLine(line[3..]);
+                continue;
+            }
+
+            if (inTasks && UncheckedTask().Match(line) is { Success: true } match)
+            {
+                ids.Add(match.Groups["id"].Value.TrimEnd('.', ':', ')'));
+            }
+        }
+
+        return ids;
+    }
+
+    private static bool IsTasksHeadingLine(string text)
+    {
+        string normalized = text.Trim().TrimEnd('.', ':').Trim();
+        return normalized.Equals("Tasks", StringComparison.OrdinalIgnoreCase)
+               || normalized.Equals("Implementation Tasks", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [GeneratedRegex(@"^[ \t]*-[ \t]+\[ \][ \t]+(?<id>\d+(?:\.\d+)?)\.?(?:[ \t]|$)",
+        RegexOptions.CultureInvariant)]
     private static partial Regex UncheckedTask();
 
     [GeneratedRegex(@"^status:[^\r\n]*", RegexOptions.Multiline | RegexOptions.CultureInvariant)]

@@ -59,7 +59,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-CLOSEOUT-003` | Error | The plan index is missing. (A missing archived plan inventory, or one without the `Plan / Status / Date / Archive Date / Canonical Docs / Goal` table, is created or completed by `--archive` instead of refused.) |
 | `KW-DOC-CLOSEOUT-004` | Info / Warning | A step the command took or, without `--archive`, would take. Warning: `git add` could not stage the touched files |
 | `KW-DOC-CLOSEOUT-005` | Error | `--date` is not `yyyy-MM-dd` |
-| `KW-DOC-CLOSEOUT-006` | Error | The plan's task list still has unchecked tasks (`- [ ] <id>`). The documentation developer ticks every completed task before archiving, so an archived plan never records unfinished work as done |
+| `KW-DOC-CLOSEOUT-006` | Error | The plan's `## Tasks` section still has unchecked numbered tasks (`- [ ] <id>`). Prose checklists elsewhere and fenced examples do not count. The documentation developer ticks every completed task before archiving, so an archived plan never records unfinished work as done |
 | `KW-DOC-PLANREF-001` | Error | A plan or specification argument (to `docs closeout`, `docs tasks` or `arbiter plan`) matches more than one active file; the finding lists the candidates |
 
 ### Plan finalize — `docs finalize` and `docs_finalize_approved_plan_and_write_task_file`
