@@ -192,7 +192,9 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
-            HookOutcomeKind.PassThrough => string.Empty,
+            HookOutcomeKind.PassThrough => inserted
+                ? RenderAllowWithArgs(envelope.Args, _promptArgument, insertion.Text)
+                : string.Empty,
             HookOutcomeKind.Allow => inserted
                 ? RenderAllowWithArgs(envelope.Args, _promptArgument, insertion.Text)
                 : ReadGuard.IsImplementationSpecialist(target)
@@ -201,8 +203,13 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
                         : RenderAllow(),
             HookOutcomeKind.AllowWithRewrite => RenderAllowWithRewritten(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                    "Hook engine returned allow-with-rewrite without rewritten input.")),
+                    "Hook engine returned allow-with-rewrite without rewritten input."),
+                _promptArgument,
+                inserted ? insertion.Text : null),
             HookOutcomeKind.AllowWithNote => RenderAllowNote(
+                envelope.Args,
+                _promptArgument,
+                inserted ? insertion.Text : null,
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderBlock(
@@ -286,12 +293,28 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
             ? value.GetString()
             : null;
 
-    private static string RenderAllowNote(string note) =>
-        new JsonObject
+    private static string RenderAllowNote(
+        JsonElement args,
+        string promptArgument,
+        string? insertedPrompt,
+        string note)
+    {
+        JsonObject output = new()
         {
             ["decision"] = "allow",
             ["note"] = note,
-        }.ToJsonString();
+        };
+        if (insertedPrompt is not null)
+        {
+            JsonObject updated = JsonNode.Parse(args.GetRawText()) as JsonObject
+                ?? throw new InvalidOperationException(
+                    "Malformed plugin hook event: args is not a JSON object.");
+            updated[promptArgument] = insertedPrompt;
+            output["args"] = updated;
+        }
+
+        return output.ToJsonString();
+    }
 
     private static string LogNoteAndAllow(HookOutcome outcome, HookContext context)
     {
@@ -329,7 +352,7 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
         }.ToJsonString();
     }
 
-    private static string RenderAllowWithRewritten(string rewrittenInputJson)
+    private static string RenderAllowWithRewritten(string rewrittenInputJson, string promptArgument, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -343,16 +366,21 @@ public sealed class PluginHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned invalid rewritten input JSON: {ex.Message}", ex);
         }
 
-        if (rewritten is not JsonObject)
+        if (rewritten is not JsonObject updated)
         {
             throw new InvalidOperationException(
                 "Hook engine rewritten input must be a JSON object.");
         }
 
+        if (insertedPrompt is not null)
+        {
+            updated[promptArgument] = insertedPrompt;
+        }
+
         return new JsonObject
         {
             ["decision"] = "allow",
-            ["args"] = rewritten,
+            ["args"] = updated,
         }.ToJsonString();
     }
 }

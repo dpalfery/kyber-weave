@@ -372,7 +372,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
             string output = outcome.Kind switch
             {
-                HookOutcomeKind.PassThrough => string.Empty,
+                HookOutcomeKind.PassThrough => inserted
+                    ? RenderLocalPreAllowPrompt(toolInput, insertion.Text)
+                    : string.Empty,
                 HookOutcomeKind.Allow => inserted
                     ? RenderLocalPreAllowPrompt(toolInput, insertion.Text)
                     : ReadGuard.IsImplementationSpecialist(target)
@@ -380,11 +382,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                         : string.Empty,
                 HookOutcomeKind.AllowWithRewrite => RenderLocalPreAllowRaw(
                     outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                        "Hook engine returned allow-with-rewrite without rewritten input.")),
+                        "Hook engine returned allow-with-rewrite without rewritten input."),
+                    inserted ? insertion.Text : null),
                 HookOutcomeKind.Deny => RenderLocalPreDeny(
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine denied without a reason.")),
                 HookOutcomeKind.AllowWithNote => RenderLocalPreAllowNote(
+                    toolInput,
+                    inserted ? insertion.Text : null,
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine allowed with a note but wrote none.")),
                 _ => throw new InvalidOperationException(
@@ -500,7 +505,9 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
             return outcome.Kind switch
             {
-                HookOutcomeKind.PassThrough => string.Empty,
+                HookOutcomeKind.PassThrough => inserted
+                    ? RenderCliAllowPrompt(args, insertion.Text)
+                    : string.Empty,
                 HookOutcomeKind.Allow => inserted
                     ? RenderCliAllowPrompt(args, insertion.Text)
                     : ReadGuard.IsImplementationSpecialist(target)
@@ -509,11 +516,14 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                             : string.Empty,
                 HookOutcomeKind.AllowWithRewrite => RenderCliAllowRewritten(
                     outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                        "Hook engine returned allow-with-rewrite without rewritten input.")),
+                        "Hook engine returned allow-with-rewrite without rewritten input."),
+                    inserted ? insertion.Text : null),
                 HookOutcomeKind.Deny => RenderCliDeny(
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine denied without a reason.")),
                 HookOutcomeKind.AllowWithNote => RenderCliAllowNote(
+                    args,
+                    inserted ? insertion.Text : null,
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine allowed with a note but wrote none.")),
                 _ => throw new InvalidOperationException(
@@ -859,16 +869,25 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         return string.Join("/", parts);
     }
 
-    private static string RenderLocalPreAllowNote(string note) =>
-        new JsonObject
+    private static string RenderLocalPreAllowNote(JsonElement toolInput, string? insertedPrompt, string note)
+    {
+        JsonObject output = new()
         {
-            ["hookSpecificOutput"] = new JsonObject
-            {
-                ["hookEventName"] = "PreToolUse",
-                ["permissionDecision"] = "allow",
-                ["permissionDecisionReason"] = note,
-            },
-        }.ToJsonString();
+            ["hookEventName"] = "PreToolUse",
+            ["permissionDecision"] = "allow",
+            ["permissionDecisionReason"] = note,
+        };
+        if (insertedPrompt is not null)
+        {
+            JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+                ?? throw new InvalidOperationException(
+                    "Malformed Copilot hook event: tool_input is not a JSON object.");
+            updated["prompt"] = insertedPrompt;
+            output["updatedInput"] = updated;
+        }
+
+        return new JsonObject { ["hookSpecificOutput"] = output }.ToJsonString();
+    }
 
     private static string RenderLocalPreDeny(string reason) =>
         new JsonObject
@@ -901,7 +920,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                 "Malformed Copilot hook event: tool_input is not a JSON object."),
             node => node["prompt"] = prompt);
 
-    private static string RenderLocalPreAllowRaw(string rewrittenInputJson)
+    private static string RenderLocalPreAllowRaw(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -915,7 +934,13 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned invalid rewritten input JSON: {ex.Message}", ex);
         }
 
-        return RenderLocalPreAllow(rewritten, _ => { });
+        return RenderLocalPreAllow(rewritten, node =>
+        {
+            if (insertedPrompt is not null)
+            {
+                node["prompt"] = insertedPrompt;
+            }
+        });
     }
 
     private static string RenderLocalPreAllow(JsonNode updatedInput, Action<JsonObject> mutate)
@@ -958,12 +983,29 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
             },
         }.ToJsonString();
 
-    private static string RenderCliAllowNote(string note) =>
-        new JsonObject
+    private static string RenderCliAllowNote(JsonObject args, string? insertedPrompt, string note)
+    {
+        JsonObject output = new()
         {
             ["permissionDecision"] = "allow",
             ["permissionDecisionReason"] = note,
-        }.ToJsonString();
+        };
+        if (insertedPrompt is not null)
+        {
+            output["modifiedArgs"] = PromptArgs(args, insertedPrompt);
+        }
+
+        return output.ToJsonString();
+    }
+
+    private static JsonObject PromptArgs(JsonObject args, string prompt)
+    {
+        JsonObject node = JsonNode.Parse(args.ToJsonString()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Copilot CLI hook event: toolArgs is not a JSON object.");
+        node["prompt"] = prompt;
+        return node;
+    }
 
     private static string RenderCliDeny(string reason) =>
         new JsonObject
@@ -999,7 +1041,7 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
         }.ToJsonString();
     }
 
-    private static string RenderCliAllowRewritten(string rewrittenInputJson)
+    private static string RenderCliAllowRewritten(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -1013,16 +1055,21 @@ public sealed partial class CopilotHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned invalid rewritten input JSON: {ex.Message}", ex);
         }
 
-        if (rewritten is not JsonObject)
+        if (rewritten is not JsonObject updated)
         {
             throw new InvalidOperationException(
                 "Hook engine rewritten input must be a JSON object.");
         }
 
+        if (insertedPrompt is not null)
+        {
+            updated["prompt"] = insertedPrompt;
+        }
+
         return new JsonObject
         {
             ["permissionDecision"] = "allow",
-            ["modifiedArgs"] = rewritten,
+            ["modifiedArgs"] = updated,
         }.ToJsonString();
     }
 

@@ -264,7 +264,9 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             string sentPrompt = inserted ? insertion.Text : prompt;
             return outcome.Kind switch
             {
-                HookOutcomeKind.PassThrough => string.Empty,
+                HookOutcomeKind.PassThrough => inserted
+                    ? RenderPreAllowPrompt(toolInput, sentPrompt)
+                    : string.Empty,
                 HookOutcomeKind.Allow when outcome.ModelToken is not null => RenderPreAllowModel(
                     ModelInputOf(pending.Input, toolInput, sentPrompt, inserted), outcome.ModelToken, pending.Written, context),
                 // A write the engine asked for that did not hold falls back to today's model allow: the header is
@@ -279,10 +281,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                         : string.Empty,
                 HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                     outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                        "Hook engine returned allow-with-rewrite without rewritten input.")),
+                        "Hook engine returned allow-with-rewrite without rewritten input."),
+                    inserted ? sentPrompt : null),
                 HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
                     toolInput,
                     sentPrompt,
+                    inserted,
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine allowed with a note but wrote none.")),
                 HookOutcomeKind.Deny => RenderPreDeny(
@@ -596,12 +600,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string.Equals(tool, "Bash", StringComparison.Ordinal)
         || string.Equals(tool, "PowerShell", StringComparison.Ordinal);
 
-    private static string RenderPreAllowNote(JsonElement toolInput, string prompt, string note)
+    private static string RenderPreAllowNote(JsonElement toolInput, string prompt, bool inserted, string note)
     {
         JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
             ?? throw new InvalidOperationException(
                 "Malformed Claude hook event: tool_input is not a JSON object.");
-        updated["prompt"] = HeaderBlock.Strip(prompt);
+        updated["prompt"] = inserted ? prompt : HeaderBlock.Strip(prompt);
         return new JsonObject
         {
             ["hookSpecificOutput"] = new JsonObject
@@ -753,7 +757,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
     private static string OneLine(string text) => text.ReplaceLineEndings(" ");
 
-    private static string RenderPreAllowRaw(string rewrittenInputJson)
+    private static string RenderPreAllowRaw(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -767,7 +771,13 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned invalid rewritten input JSON: {ex.Message}", ex);
         }
 
-        return RenderPreAllow(rewritten, _ => { });
+        return RenderPreAllow(rewritten, node =>
+        {
+            if (insertedPrompt is not null)
+            {
+                node["prompt"] = insertedPrompt;
+            }
+        });
     }
 
     private static string RenderPreAllow(JsonNode updatedInput, Action<JsonObject> mutate)

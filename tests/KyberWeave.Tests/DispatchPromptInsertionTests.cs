@@ -276,6 +276,43 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", updated.GetProperty("prompt").GetString());
     }
 
+    /// <summary>
+    /// Every allow path delivers the inserted prompt: a note, a rewritten dispatch and a pass-through would otherwise
+    /// start the worker with the short dispatch and no prompt.
+    /// </summary>
+    [Theory]
+    [InlineData("claude", HookOutcomeKind.AllowWithNote)]
+    [InlineData("claude", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("claude", HookOutcomeKind.PassThrough)]
+    [InlineData("copilot-vscode", HookOutcomeKind.AllowWithNote)]
+    [InlineData("copilot-vscode", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("copilot-vscode", HookOutcomeKind.PassThrough)]
+    [InlineData("copilot-cli", HookOutcomeKind.AllowWithNote)]
+    [InlineData("copilot-cli", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("copilot-cli", HookOutcomeKind.PassThrough)]
+    [InlineData("codex", HookOutcomeKind.AllowWithNote)]
+    [InlineData("codex", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("codex", HookOutcomeKind.PassThrough)]
+    [InlineData("cursor", HookOutcomeKind.AllowWithNote)]
+    [InlineData("cursor", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("cursor", HookOutcomeKind.PassThrough)]
+    [InlineData("opencode", HookOutcomeKind.AllowWithNote)]
+    [InlineData("opencode", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("opencode", HookOutcomeKind.PassThrough)]
+    public void EveryAllowPathDeliversTheInsertedPrompt(string harness, HookOutcomeKind kind)
+    {
+        RecordingEngine engine = new()
+        {
+            PreResult = new HookOutcome(kind, Reason: "note from the rule", RewrittenInputJson: "{\"marker\":\"kept\"}"),
+        };
+        IHarnessHookAdapter adapter = Adapter(engine, harness);
+        string payload = Payload(harness, TaskDispatch);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt(harness, stdout));
+    }
+
     [Fact]
     public void ARetrysFailureReportAndCountersSurviveIntoThePromptAndTheWorker()
     {
