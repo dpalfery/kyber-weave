@@ -203,6 +203,32 @@ public sealed class TieredRosterConductorContractTests
     }
 
     [Fact]
+    public void TheBugFlowScopesTheTechnologySpecialistsToTheirRoster()
+    {
+        string bugCrusher = Read(BugCrusherSkillPath);
+
+        Assert.Contains(
+            "Under `worker-roster: technology`, if the fix is more than a few lines or sits in a specialist's domain, hand it to that specialist",
+            bugCrusher,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The tiered fix dispatch passes the failed-attempt count, so the count must be the one the attempt budget
+    /// already keeps, and the dispatch must carry it for the hook that builds the prompt.
+    /// </summary>
+    [Fact]
+    public void TheBugFlowDefinesTheFailedAttemptCountItPasses()
+    {
+        string bugCrusher = Read(BugCrusherSkillPath);
+        string line = LineContaining(bugCrusher, "docs_build_task_prompt_for_agent_dispatch");
+
+        Assert.Contains("attempts already counted for this defect under", line, StringComparison.Ordinal);
+        Assert.Contains("0 on the first fix attempt and 1 on the second", line, StringComparison.Ordinal);
+        Assert.Contains("`FAILED_ATTEMPTS:`", line, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TheArchitectSendsLivePlatformStateToTheTieredResearcher()
     {
         string[] unscoped =
