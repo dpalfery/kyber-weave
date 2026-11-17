@@ -24,8 +24,8 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     public const string EasyTier = "dev-easy";
 
     /// <summary>
-    /// The tier that stands for the developer kind under the tiered roster: the pick records the kind, and
-    /// the task's difficulty and failed attempts then choose the tier.
+    /// The tier that stands for the developer kind under the tiered roster. A pick returns it as the kind of
+    /// worker; the task-file writer records the tier the rating gives, and the dispatch steps it up by failed attempts.
     /// </summary>
     public const string DeveloperKind = "dev-medium";
 

@@ -2441,9 +2441,9 @@ instead and needs none.
 
 ### How a tier is chosen
 
-The task file records the *kind* of worker and the difficulty, never a tier: under `tiered` a pick
-records `dev-medium` whatever the rating, so a later step-up cannot contradict the file. The tier is
-computed again for every dispatch:
+The task file records the developer tier the rating in use gives — `dev-easy`, `dev-medium` or
+`dev-hard` — or the documentation or delivery agent a pick named. The tier is computed again for
+every dispatch from the recorded rating, so a retry steps up from the tier the file names:
 
 ```text
 tier = min(hard, rated difficulty + failed attempts)

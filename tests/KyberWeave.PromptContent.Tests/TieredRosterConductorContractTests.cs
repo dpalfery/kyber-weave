@@ -256,7 +256,7 @@ public sealed class TieredRosterConductorContractTests
             bugCrusher,
             StringComparison.Ordinal);
         Assert.Contains(
-            "That name is the kind of worker — developer, `docs-dev` or `devops` — and the dispatch tool names the developer tier",
+            "That name is the developer tier the task's rating gives — `dev-easy`, `dev-medium` or `dev-hard` — or `docs-dev`/`devops` for other work",
             conductor,
             StringComparison.Ordinal);
         Assert.Contains("The dispatch tool names the agent", skill, StringComparison.Ordinal);

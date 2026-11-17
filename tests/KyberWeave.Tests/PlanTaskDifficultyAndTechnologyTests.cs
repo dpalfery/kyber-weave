@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
@@ -40,6 +41,22 @@ public sealed class PlanTaskDifficultyAndTechnologyTests
         Assert.Equal("hard", entry.Difficulty);
         Assert.Equal("architect", entry.DifficultySource);
         Assert.Equal("csharp", entry.Technology);
+    }
+
+    /// <summary>
+    /// A rating the tier ladder cannot use must not fall through to medium in silence: the parse reports the
+    /// value and the exact form, so the architect sees the mistake while the plan is still a Draft.
+    /// </summary>
+    [Fact]
+    public void AnUnparseableDifficultyIsReportedInsteadOfSilentlyBecomingMedium()
+    {
+        PlanDocument plan = PlanDocumentParser.Parse(Plan("- **Difficulty:** Hard"));
+
+        Diagnostic finding = Assert.Single(
+            plan.Diagnostics, item => item.Code == PlanDocumentParser.InvalidDifficultyRule);
+        Assert.Contains("Hard", finding.Message, StringComparison.Ordinal);
+        Assert.Contains("easy, medium, hard", finding.Message, StringComparison.Ordinal);
+        Assert.Equal("T1", finding.Subject);
     }
 
     [Fact]

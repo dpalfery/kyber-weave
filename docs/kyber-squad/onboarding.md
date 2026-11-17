@@ -505,8 +505,8 @@ to compare them. What changes is which agent does developer work, test-only work
 platform inspection.
 
 **How a tier is chosen.** Under `tiered` the plan still writes `Difficulty:` and `Technology:` on
-each file-changing task, and the machine task file records the difficulty and the kind of worker —
-never a tier. Each dispatch's tier is
+each file-changing task, and the machine task file records the difficulty and the tier that rating
+gives. Each dispatch's tier is
 `tier = min(hard, rated difficulty + failed attempts)`: an `easy` task starts on `dev-easy`,
 `medium` and an unrated task on `dev-medium`, and `hard` on `dev-hard`. A failed attempt moves the
 task exactly one tier up and never down, and the ordinary limit of three rework dispatches per

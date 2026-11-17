@@ -56,8 +56,8 @@ public sealed class TaskPromptService(
     private static IReadOnlyList<string> DeveloperTiers => PlanTaskAgentPick.DeveloperTiers;
 
     /// <summary>
-    /// The agent a tiered-roster dispatch goes to. The developer kind — which the task file records, never a tier —
-    /// resolves to the tier the rating and the failed attempts give. A dispatch that already names a tier never
+    /// The agent a tiered-roster dispatch goes to. The developer kind, which a task file written before the tier
+    /// was recorded may still hold, resolves to the tier the rating and the failed attempts give. A dispatch that already names a tier never
     /// moves down: a failed attempt is never retried on a lower tier (Requirement 3.5). A name the removal phase
     /// deletes resolves to its replacement first, whatever tier the rating would choose (Requirement 13.5). Any other
     /// agent the dispatch, the plan or the pick names — <c>docs-dev</c>, <c>devops</c>, <c>platform-researcher</c> — is

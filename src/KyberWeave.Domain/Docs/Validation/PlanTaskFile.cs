@@ -66,8 +66,9 @@ public sealed record PlanTaskFile(
 /// </param>
 /// <param name="Prompt">The worker's whole brief, pasted unchanged at dispatch.</param>
 /// <param name="Agent">
-/// The agent the decision model picked for the task from its capabilities when the file was written; null when the
-/// plan assigned a <paramref name="Role"/>, when no model is configured, or when the pick fell below the confidence floor.
+/// The developer tier the task's rating in use gives, or the documentation or delivery agent the decision model
+/// picked from its capabilities; null when the plan assigned a <paramref name="Role"/> or the task names no
+/// technology and no model picked one.
 /// </param>
 /// <param name="AgentConfidence">The model's confidence in <paramref name="Agent"/>; null when there is no pick.</param>
 /// <param name="Difficulty">
