@@ -49,8 +49,14 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// developer maps to <see cref="DeveloperKind"/>: the task's difficulty and failed attempts then choose the
     /// tier, as they do for every developer dispatch under the tiered roster.
     /// </summary>
+    /// <remarks>
+    /// The lookup ignores case because the name it answers comes from a plan's hand-written <c>Role:</c> line, which
+    /// no check normalises: an author who writes <c>CSharp-Dev</c> must still reach the developer tier rather than
+    /// have the conductor dispatch a name no installed agent answers to. The values stay the canonical lowercase
+    /// agent names.
+    /// </remarks>
     public static IReadOnlyDictionary<string, string> RemovedAgents { get; } =
-        new Dictionary<string, string>(StringComparer.Ordinal)
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["csharp-dev"] = DeveloperKind,
             ["dal-dev"] = DeveloperKind,

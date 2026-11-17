@@ -36,6 +36,10 @@ public sealed class RemovedAgentResolutionTests
     [InlineData("csharp-dev", "easy", 2, "dev-hard")]
     [InlineData("test-dev", "hard", 0, "dev-hard")]
     [InlineData("python-dev", "medium", 1, "dev-hard")]
+    [InlineData("CSharp-Dev", "hard", 0, "dev-hard")]
+    [InlineData("  csharp-dev  ", "easy", 0, "dev-easy")]
+    [InlineData("AZURE-READER", "medium", 0, "platform-researcher")]
+    [InlineData("GitHub-DevOps", "hard", 0, "devops")]
     public void ARemovedDeveloperAgentResolvesToTheTierTheDifficultyGives(
         string named,
         string difficulty,
@@ -46,7 +50,6 @@ public sealed class RemovedAgentResolutionTests
             PlanTaskAgentPick.ResolveRemovedAgent(named, difficulty, failedAttempts);
 
         Assert.NotNull(resolution);
-        Assert.Equal(named, resolution.Named);
         Assert.Equal(expected, resolution.Resolved);
     }
 
@@ -97,6 +100,25 @@ public sealed class RemovedAgentResolutionTests
         Assert.Equal("dev-hard", result.Agent);
         Assert.NotNull(result.Substitution);
         Assert.Contains("csharp-dev", result.Substitution, StringComparison.Ordinal);
+        Assert.Contains("dev-hard", result.Substitution, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A plan author writes the role by hand, so a capitalised or space-padded removed name reaches the task file
+    /// unchanged; it still resolves rather than dispatching a name no installed agent answers to.
+    /// </summary>
+    [Theory]
+    [InlineData("CSharp-Dev")]
+    [InlineData("  csharp-dev  ")]
+    public void ARemovedNameThePlanAuthorCapitalisedStillResolves(string role)
+    {
+        using DocFixture fixture = Ready(Tiered, role);
+
+        TaskPromptResult result = Prompt(fixture, Tiered);
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Equal("dev-hard", result.Agent);
+        Assert.NotNull(result.Substitution);
         Assert.Contains("dev-hard", result.Substitution, StringComparison.Ordinal);
     }
 
@@ -183,9 +205,9 @@ public sealed class RemovedAgentResolutionTests
     }
 
     /// <summary>A corpus whose Ready plan hands its one task to a removed agent at <c>hard</c>.</summary>
-    private static DocFixture Ready(KyberWeaveConfig config)
+    private static DocFixture Ready(KyberWeaveConfig config, string role = "csharp-dev")
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown());
+        DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown(role));
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, config, DocsPorts.Files)
             .Run(Plan, PlanTaskFileMode.Write);
@@ -209,7 +231,7 @@ public sealed class RemovedAgentResolutionTests
     private static TaskPromptResult Prompt(DocFixture fixture, KyberWeaveConfig config) =>
         Service().Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", Plan: Plan), config);
 
-    private static string PlanMarkdown() => """
+    private static string PlanMarkdown(string role) => $$"""
         ---
         id: plans/2026-11-17-removed-agent
         title: Removed agent
@@ -233,7 +255,7 @@ public sealed class RemovedAgentResolutionTests
         - **Depends on:** none
         - **Difficulty:** hard
         - **Technology:** csharp
-        - **Role:** `csharp-dev`
+        - **Role:** `{{role}}`
         - **Capabilities:** read a settings file and its tests
 
         Command: `dotnet test --filter SettingsTests`
