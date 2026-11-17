@@ -154,6 +154,32 @@ public sealed class DeveloperTierSelectionTests
         Assert.Equal("dev-hard", Prompt(fixture, Tiered, failedAttempts: 1).Agent);
     }
 
+    /// <summary>
+    /// A retry count is caller-supplied and can be at the top of its range. The clamp is the last tier, not an
+    /// overflowed index, so the prompt is still built for the strongest developer rather than throwing.
+    /// </summary>
+    [Theory]
+    [InlineData("easy")]
+    [InlineData("medium")]
+    [InlineData("hard")]
+    public void AnImpossibleFailedAttemptCountSaturatesAtHard(string difficulty)
+    {
+        using DocFixture fixture = Ready(Tiered, difficulty);
+
+        TaskPromptResult result = Prompt(fixture, Tiered, failedAttempts: int.MaxValue);
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Equal("dev-hard", result.Agent);
+    }
+
+    [Fact]
+    public void TheTierSaturatingBoundaryMatchesTheLadder()
+    {
+        Assert.Equal("dev-hard", TaskPromptService.DeveloperTier("easy", int.MaxValue));
+        Assert.Equal("dev-hard", TaskPromptService.DeveloperTier("easy", 2));
+        Assert.Equal("dev-easy", TaskPromptService.DeveloperTier("easy", 0));
+    }
+
     [Fact]
     public void ADispatchWithNoTaskStartsAtMediumThenClimbsToHard()
     {

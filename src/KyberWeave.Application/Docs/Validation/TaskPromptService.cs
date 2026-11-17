@@ -58,10 +58,12 @@ public sealed class TaskPromptService(
             _ => 1,
         };
 
-        int climbed = Math.Min(
+        // Long arithmetic: a retry count at the top of its range must clamp to the last tier, not wrap to a
+        // negative index a few steps below zero.
+        long climbed = Math.Min(
             DeveloperTiers.Count - 1,
-            rated + Math.Max(failedAttempts, 0));
-        return DeveloperTiers[climbed];
+            rated + (long)Math.Max(failedAttempts, 0));
+        return DeveloperTiers[(int)climbed];
     }
 
     private static IReadOnlyList<string> DeveloperTiers => PlanTaskAgentPick.DeveloperTiers;
