@@ -82,10 +82,63 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
 
         Assert.Empty(findings);
         AssertShippedRules(rules);
+        Assert.All(rules, rule => Assert.Null(rule.Technology));
         string[] ids = [.. rules.Select(rule => rule.Id).Distinct(StringComparer.Ordinal)];
         Assert.Equal(21, ids.Count(id => RoleOf(id) == "conductor"));
         Assert.Equal(2, ids.Count(id => RoleOf(id) == "architect"));
         Assert.Equal(13, ids.Count(id => RoleOf(id) == "reviewer"));
+    }
+
+    [Fact]
+    public void ATechnologyFoldersRuleCarriesThatTechnologyAndARoleFoldersDoesNot()
+    {
+        WriteFolder("conductor", HostScopeRule);
+        WriteStandard("csharp", buildsOn: null);
+        WriteFolder("csharp", ChildReadRule);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["csharp"]);
+
+        Assert.Single(findings, item => item.Code == RuleValidator.ShippedRuleOverride);
+        Assert.Null(Assert.Single(rules, rule => rule.Id == "KW-ARB-SCOPE-001").Technology);
+        Assert.Equal("csharp", Assert.Single(rules, rule => rule.Id == "react-read-001").Technology);
+    }
+
+    [Fact]
+    public void AParentsRuleCarriesTheParentAndTheChildsRuleTheChild()
+    {
+        WriteStandard("typescript", buildsOn: null);
+        WriteFolder("typescript", ParentReadRule);
+        WriteStandard("react", buildsOn: "typescript");
+        WriteFolder("react", ChildReadRule);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["react"]);
+
+        Assert.Empty(findings);
+        Assert.Equal("typescript", Assert.Single(rules, rule => rule.Id == "typescript-read-001").Technology);
+        Assert.Equal("react", Assert.Single(rules, rule => rule.Id == "react-read-001").Technology);
+    }
+
+    [Fact]
+    public void TheLoadedConfigurationCarriesEachTechnologysBuildsOnParent()
+    {
+        WriteStandard("typescript", buildsOn: null);
+        WriteFolder("typescript", ParentReadRule);
+        WriteStandard("react", buildsOn: "typescript");
+        WriteFolder("react", ChildReadRule);
+        WriteConfig("""
+            ontology:
+              docs-root: docs
+              technologies: [react, typescript]
+            arbiter:
+              enabled: true
+            """);
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+
+        Assert.Equal("typescript", config.Arbiter.RuleFolderParents["react"]);
+        Assert.False(config.Arbiter.RuleFolderParents.ContainsKey("typescript"));
     }
 
     [Fact]
@@ -342,6 +395,35 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             "The parent's rules must be loaded before the child's.");
     }
 
+    /// <summary>
+    /// A technology folder's restatement of a shipped rule is an override for that technology, not a removal of
+    /// the shipped rule for every other technology.
+    /// </summary>
+    [Fact]
+    public void ATechnologysOverrideOfAShippedRuleLeavesTheShippedRuleForOtherTechnologies()
+    {
+        WriteStandard("azure", buildsOn: null);
+        WriteFolder("azure", HostScopeRule);
+        WriteStandard("sql-server", buildsOn: null);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["azure", "sql-server"]);
+
+        Assert.Contains(findings, item => item.Code == RuleValidator.ShippedRuleOverride);
+        Assert.Equal(2, rules.Count(rule => rule.Id == "KW-ARB-SCOPE-001"));
+
+        IReadOnlyDictionary<string, string> parents = new Dictionary<string, string>(StringComparer.Ordinal);
+        ArbiterRule forSqlServer = Assert.Single(
+            ArbiterRuleScopes.Applicable(rules, "sql-server", parents),
+            rule => rule.Id == "KW-ARB-SCOPE-001");
+        Assert.Null(forSqlServer.Technology);
+
+        ArbiterRule forAzure = Assert.Single(
+            ArbiterRuleScopes.Applicable(rules, "azure", parents),
+            rule => rule.Id == "KW-ARB-SCOPE-001");
+        Assert.Equal("azure", forAzure.Technology);
+    }
+
     [Fact]
     public void AChildsRuleWinsOnAnIdTheParentDeclaresToo()
     {
@@ -354,9 +436,21 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             Load("arbiter:\n  enabled: true\n", technologies: ["react"]);
 
         Assert.Empty(findings);
+        IReadOnlyDictionary<string, string> parents = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["react"] = "typescript",
+        };
+        Assert.Equal(2, rules.Count(rule => rule.Id == "host-shared-001"));
         Assert.Equal(
             "Does the child's shared question hold?",
-            Assert.Single(rules, rule => rule.Id == "host-shared-001").Question);
+            Assert.Single(
+                ArbiterRuleScopes.Applicable(rules, "react", parents),
+                rule => rule.Id == "host-shared-001").Question);
+        Assert.Equal(
+            "Does the parent's shared question hold?",
+            Assert.Single(
+                ArbiterRuleScopes.Applicable(rules, "typescript", parents),
+                rule => rule.Id == "host-shared-001").Question);
     }
 
     [Fact]

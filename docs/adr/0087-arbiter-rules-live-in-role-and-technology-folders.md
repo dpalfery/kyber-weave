@@ -26,7 +26,9 @@ role-based-worker-agents specification). It changes where the Arbiter's rules ar
 it decides: the three steps and the blocking contract of
 [ADR 0053](0053-kyber-arbiter-three-step-decision-gates.md) and
 [ADR 0072](0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md) are
-unchanged.
+unchanged. Amended 2026-11-17: a technology folder's rules now judge only an event whose task is in
+that technology or in a technology that builds on it, and a read-only worker's command allow-list
+follows the technology its dispatch names. The loading order below is unchanged.
 
 ## Context
 
@@ -74,18 +76,26 @@ there too, where the person who owns the standard can see and change them.
    4. the host's `arbiter.rules` list, which keeps working and is applied last, so it wins over a
       folder.
 
-   Nothing is read when `arbiter.enabled` is false, and a user-level configuration has no
-   repository to read folders from, so folders apply to the repository's own configuration only.
+   A rule loaded from a technology folder keeps that folder's name, and the evaluator applies it only
+   to an event whose task names that technology or a technology that builds on it: a parent's rule
+   reaches its child's task, and a child's rule does not reach its parent's. An event that names no
+   task technology — a task-less dispatch, the conductor's own action — is judged by the role folder
+   rules and `arbiter.rules` alone. Nothing is read when `arbiter.enabled` is false, and a user-level
+   configuration has no repository to read folders from, so folders apply to the repository's own
+   configuration only.
 
-4. **A folder declaration replaces a rule; it does not merge into it.** A folder rule with the
-   id of a rule already loaded replaces that rule whole, keeping the first rule's position in
-   the set. An id that is not loaded is added to the set; it may not carry the `KW-ARB-` prefix,
-   which is reserved for the shipped rules. So the entry restates the rule: `id` and
-   `enabled: false` alone is not a valid folder rule, because a rule without a trigger, question
-   and answers is not a rule. `arbiter.rules` is the short route for a tune-up: `id` plus
-   `enabled`, a threshold or `effects` adjusts the loaded rule in place. A folder declaration of
-   a shipped rule id is reported as `KW-ARB-CONFIG-020` at informational severity, saying whether
-   it replaces or disables the rule, so it is never silent.
+4. **A folder declaration replaces a rule; it does not merge into it.** A role folder's rule with
+   the id of a rule already loaded replaces that rule whole, keeping the first rule's position in
+   the set. A technology folder's rule of an id that is already loaded is an override for that
+   technology: it shadows the earlier rule for that technology and for the technologies that build
+   on it, while the earlier rule stays in force for every other technology. Among a technology and
+   its `builds-on` ancestors, the child's declaration wins. An id that is not loaded is added to the
+   set; it may not carry the `KW-ARB-` prefix, which is reserved for the shipped rules. So the entry
+   restates the rule: `id` and `enabled: false` alone is not a valid folder rule, because a rule
+   without a trigger, question and answers is not a rule. `arbiter.rules` is the short route for a
+   tune-up: `id` plus `enabled`, a threshold or `effects` adjusts the loaded rule in place. A folder
+   declaration of a shipped rule id is reported as `KW-ARB-CONFIG-020` at informational severity,
+   saying whether it replaces or disables the rule, so it is never silent.
 
 5. **No rule is locked.** Every rule, including the six that guard the tree and the run order
    (`READY-001`, `DIFF-001`, `PLANNER-DIFF-001`, `READONLY-001`, `CHECKOUT-001`, `ROSTER-001`),
@@ -131,7 +141,13 @@ there too, where the person who owns the standard can see and change them.
    the tool. The `azure` and `aws` templates each ship one rule (`AZURE-READONLY-001`,
    `AWS-READONLY-001`); a technology that declares no such rule refuses nothing. The list is
    enforced where a worker guard runs (Claude Code and Copilot CLI) and is an instruction only
-   on the harnesses that have no worker guard.
+   on the harnesses that have no worker guard. A read-only dispatch's tool call names no dispatch
+   technology, so the guard reads it from the ledger's pre event for the calling agent in the same
+   session: the pre event's `headers` now record the dispatch's `technology`. The guard applies only
+   that technology's `worker.command` rules and those of the technologies it builds on. A dispatch that
+   names none, names one the host does not
+   declare, has returned, or cannot be told apart from a parallel dispatch of the same agent falls
+   back to every declared technology's list, which is the fail-closed reading for `platform-researcher`.
 
 9. **The two model rules follow the developer tiers.** Under `worker-roster: tiered`,
    `KW-ARB-DIFFICULTY-001` answers from `plan.task.difficulty`, the rating the agent pick already
@@ -145,12 +161,13 @@ there too, where the person who owns the standard can see and change them.
 
 Stated so nobody reads a guarantee the code does not give.
 
-- **Every declared technology's rule file is loaded for the whole run, not the current task's.**
-  The configuration loader receives `ontology.technologies` and has no task in hand, so a
-  technology's rules are evaluated against every event of the run. The shipped allow-lists are
-  unaffected in practice because each narrows itself by its own tool word (`az`, `aws`), but a
-  host's technology rule that does not narrow itself applies to tasks of every technology.
-  Requirement 7.2 says the task's technology.
+- **A read-only worker's dispatch technology is read from the ledger, not from the tool call.** The
+  trigger is one tool call, and neither guarded harness puts the dispatch header on it, so the guard
+  looks up the unreturned pre event for the calling agent in the same session and reads the
+  `technology` header recorded there. When the dispatch names none, names a technology the host does not
+  declare, has returned, the ledger cannot be read, or two parallel dispatches of the same agent are
+  open, the guard falls back to every declared technology's allow-list. That is the fail-closed reading: a technology-specific refusal is never
+  lost, but another technology's broad rule can bind the agent in those cases.
 - **Only the `conductor`, `architect` and `reviewer` role folders are read.**
   `ArbiterConfigLoader` holds that list, and `ontology.roles` does not feed it. A host's
   `devops` role folder, or any other role folder, has no effect on the Arbiter. Requirement 6.6
@@ -169,20 +186,18 @@ Stated so nobody reads a guarantee the code does not give.
 - **Lock the six rules that guard the tree and the run order.** The owner's decision is that no
   rule is locked. A host that disables one gets the informational finding that says so, and the
   Arbiter's fail-safe still allows what it cannot decide.
-- **Load technology rules only for a task whose technology names them, by filtering at
-  evaluation.** No implementation was built for it in this phase; the limit is recorded above
-  instead of claimed away.
 
 ## Consequences
 
 - A host sees and changes an Arbiter rule in the folder whose standard it governs, and a
-  technology's rule reaches only the registers that technology's folder.
+  technology's rule reaches only the registers that technology's folder and its children govern.
 - `kyber-weave arbiter validate` is the one check for a folder file: it names the file and the
   rule, and a run continues with the shipped rules for a folder whose file is broken.
 - The rule set is assembled in one place (`ArbiterConfigLoader`) from four sources, in a fixed
   order, so a host can predict which declaration wins.
-- A technology rule applies to the whole run, and a role folder other than the three does not
-  apply at all; both are recorded above and are the first candidates for a later specification.
+- A technology rule judges only its own technology's tasks and its children's; an event that names
+  no task technology gets none of them. A role folder other than the three does not apply at all.
+  Both are recorded above.
 - Installing a role folder verbatim reports one informational `KW-ARB-CONFIG-020` per rule in it,
   because the copied template declares every shipped id. The findings change nothing and are
   hidden by `--no-info`; the alternative — silently treating an unchanged copy as no declaration

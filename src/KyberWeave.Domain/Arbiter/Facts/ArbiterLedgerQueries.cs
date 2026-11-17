@@ -172,6 +172,52 @@ public static class ArbiterLedgerQueries
     }
 
     /// <summary>
+    /// The technology a read-only agent's dispatch names, read from its unreturned pre events in one session.
+    /// </summary>
+    /// <remarks>
+    /// A tool call names neither the task nor the technology it belongs to, so the dispatch it answers is the one
+    /// pre event for <paramref name="target"/> in <paramref name="session"/> that no return has claimed. Parallel
+    /// dispatches of the same agent cannot be told apart from the call, and a dispatch that names no technology
+    /// names none for this purpose: both answer null, which the caller reads as "apply every technology's rules"
+    /// so a refusal is never lost.
+    /// </remarks>
+    /// <param name="events">The events a ledger read returned, in append order.</param>
+    /// <param name="target">The calling agent's name, as the event's dispatch target.</param>
+    /// <param name="session">The harness session the call belongs to; null names no session and answers null.</param>
+    public static string? DispatchTechnology(IReadOnlyList<ArbiterLedgerEvent> events, string target, string? session)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        if (string.IsNullOrWhiteSpace(session))
+        {
+            return null;
+        }
+
+        HashSet<string> returned = events
+            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
+            .Select(e => e.PreId!)
+            .ToHashSet(StringComparer.Ordinal);
+        List<ArbiterLedgerEvent> candidates = [.. events
+            .Where(e => e.Phase == ArbiterLedgerPhases.Pre
+                && !returned.Contains(e.Id)
+                && string.Equals(e.Target, target, StringComparison.Ordinal)
+                && string.Equals(e.Session, session, StringComparison.Ordinal))];
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        string[] technologies = [.. candidates
+            .Select(e => e.Headers?.Technology?.Trim())
+            .OfType<string>()
+            .Where(technology => technology.Length > 0)
+            .Distinct(StringComparer.Ordinal)];
+        return technologies.Length == 1 && candidates.All(e => !string.IsNullOrWhiteSpace(e.Headers?.Technology))
+            ? technologies[0]
+            : null;
+    }
+
+    /// <summary>
     /// The completed tasks: a returned worker output whose
     /// <c>^RESULT:\s+(PASS|FAIL)\b</c> marker read <c>PASS</c>, a worker digest whose
     /// <c>TASK_GATE:</c> line read <c>PASS</c> under a finished <c>STATUS:</c>, or an

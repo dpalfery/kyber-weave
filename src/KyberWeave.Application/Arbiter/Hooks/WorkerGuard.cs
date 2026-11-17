@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Arbiter.Hooks;
@@ -9,14 +10,15 @@ namespace KyberWeave.Arbiter.Hooks;
 /// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into the
 /// repository's canonical checkout while a live run works in a worktree of its own
 /// (<c>KW-ARB-CHECKOUT-001</c>), ends a developer dispatch whose current turn has run past its budget of
-/// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), and refuses a read-only dispatch's command that its
-/// technology's <c>worker.command</c> rules do not allow.
+/// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), and refuses a read-only dispatch's command that the
+/// declared technology folders' <c>worker.command</c> rules do not allow.
 /// </summary>
 /// <remarks>
 /// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,
 /// the checkout's git files and one append-only counter file per subagent are all it reads for the write and
 /// budget refusals. The command allow-list is the one place it reads the project's configuration and evaluates
-/// step 0, and only for a capability profile that may run commands and may not write files. A root agent (a
+/// step 0, and only for a capability profile that may run commands and may not write files; there it also reads
+/// the ledger's dispatch headers, to learn the technology the read-only agent's dispatch named. A root agent (a
 /// person's own session, or the conductor) is never guarded, and neither is an agent outside the Squad
 /// catalog. Any error allows, and the log says why (ADR 0072).
 /// </remarks>
@@ -94,7 +96,7 @@ public sealed class WorkerGuard(
                                  (now ?? (() => clock.GetUtcNow()))(),
                                  seat ? seatBudgetLoader ?? LoadSeatBudget : budgetLoader ?? LoadBudget)
                              ?? WriteRefusal(call, home)
-                             ?? CommandRefusal(call);
+                             ?? CommandRefusal(call, home);
             if (reason is not null)
             {
                 stdout.Write(WorkerGuardRules.Deny(harness, reason));
@@ -152,9 +154,11 @@ public sealed class WorkerGuard(
     /// <remarks>
     /// A judged command with no working directory is refused rather than allowed: the technology's list lives under
     /// the working directory, so without one the guard cannot read what the command was allowed to run. The event
-    /// naming no directory is itself a machine fact, which is what ADR 0072 permits a refusal on.
+    /// naming no directory is itself a machine fact, which is what ADR 0072 permits a refusal on. The dispatch's
+    /// technology scopes the list: a dispatch that names none, has returned, or cannot be told apart from a parallel
+    /// one falls back to every declared technology's list, so a refusal is never lost.
     /// </remarks>
-    private string? CommandRefusal(WorkerGuardRules.ToolCall call)
+    private string? CommandRefusal(WorkerGuardRules.ToolCall call, string home)
     {
         if (!WorkerGuardRules.IsCommandJudged(call))
         {
@@ -174,7 +178,89 @@ public sealed class WorkerGuard(
             return null;
         }
 
-        return WorkerGuardRules.CommandRefusal(loaded.Config.Arbiter.Rules, call, call.Command!);
+        string? technology = null;
+        try
+        {
+            technology = ArbiterLedgerQueries.DispatchTechnology(
+                LedgerEvents(call.Cwd, home), call.Agent.Name, call.SessionId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // An unreadable ledger leaves the dispatch unknown, so every list applies.
+        }
+
+        // A dispatch can name a technology the host does not declare: a typo, or a folder it never installed. That
+        // names no list, so every declared list must still bind the agent.
+        if (technology is not null
+            && !loaded.Config.Ontology.Technologies.Contains(technology, StringComparer.Ordinal))
+        {
+            technology = null;
+        }
+
+        IReadOnlyCollection<string>? scope = technology is null ? null : [technology];
+        return WorkerGuardRules.CommandRefusal(
+            loaded.Config.Arbiter.Rules,
+            call,
+            call.Command!,
+            scope,
+            loaded.Config.Arbiter.RuleFolderParents);
+    }
+
+    /// <summary>
+    /// The ledger events that can name this call's dispatch: the project's and the user-level project ledger's,
+    /// when they are readable. Anything unreadable leaves the dispatch unknown, so every list applies.
+    /// </summary>
+    private static IReadOnlyList<ArbiterLedgerEvent> LedgerEvents(string cwd, string home)
+    {
+        List<ArbiterLedgerEvent> events = [];
+        foreach (string directory in LedgerDirectories(cwd, home))
+        {
+            try
+            {
+                if (!File.Exists(Path.Combine(directory, InFlightLedger.FileName)))
+                {
+                    continue;
+                }
+
+                events.AddRange(new InFlightLedger(directory).ReadAll());
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A ledger that cannot be read answers no dispatch, which is the fail-closed reading.
+            }
+        }
+
+        return [.. events.OrderBy(e => e.At)];
+    }
+
+    /// <summary>The project and user-level directories one repository's ledger may sit in.</summary>
+    private static IReadOnlyList<string> LedgerDirectories(string cwd, string home)
+    {
+        string root = RepositoryRootOf(cwd);
+        List<string> directories = [Path.Combine(root, "artifacts", "arbiter")];
+        if (!string.IsNullOrWhiteSpace(home))
+        {
+            directories.Add(Path.Combine(
+                home, ".kyber-weave", "arbiter", "projects", ArbiterHookDecisionEngine.ProjectRootKey(root)));
+        }
+
+        return [.. directories.Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The nearest ancestor holding <c>.git</c>, or the working directory when no ancestor does.</summary>
+    private static string RepositoryRootOf(string cwd)
+    {
+        string full = Path.GetFullPath(cwd);
+        for (DirectoryInfo? directory = new(full); directory is not null; directory = directory.Parent)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, ".git"))
+                || File.Exists(Path.Combine(directory.FullName, ".git")))
+            {
+                return directory.FullName;
+            }
+        }
+
+        return full;
     }
 
     /// <summary>

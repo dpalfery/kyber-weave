@@ -11,6 +11,12 @@ namespace KyberWeave.Core.Arbiter;
 /// </remarks>
 public static class ArbiterTriggerCatalog
 {
+    /// <summary>
+    /// The fact holding the task's one technology, from its <c>Technology:</c> label, when it names one. It
+    /// selects the technology folder's rules; a task that names none leaves it absent.
+    /// </summary>
+    public const string TaskTechnologyFact = "plan.task.technology";
+
     private static readonly IReadOnlySet<string> DelegateFacts = new HashSet<string>(StringComparer.Ordinal)
     {
         "caller",
@@ -39,6 +45,7 @@ public static class ArbiterTriggerCatalog
         "plan.task.files",
         "plan.task.depends-on",
         "plan.task.skills",
+        "plan.task.technology",
         "plan.out-of-scope",
         "plan.test-contract.row",
         "ledger.in-flight.paths",

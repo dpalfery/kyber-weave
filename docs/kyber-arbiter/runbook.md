@@ -481,7 +481,16 @@ pre/post events, and implementation packets whose body names a planning path
 The 36 shipped rules live in three role files (`conductor` 21, `architect` 2, `reviewer` 13).
 A host's own copy of a role or technology folder sits under
 `<docs-root>/standards/<name>/<name>.arbiter-rules.yml`, and its declarations apply over the
-shipped ones before `arbiter.rules`. To get the folder to edit, install it:
+shipped ones before `arbiter.rules`. A technology folder's rule judges only an event whose task names
+that technology or a technology that builds on it; an event that names no task technology, such as a
+task-less dispatch, is judged by the role folders and `arbiter.rules` alone. A technology folder's
+restatement of an id a role folder or another technology already declares is an override for its own
+technology and the technologies that build on it; the earlier rule stays in force for the others. A
+read-only dispatch's
+command allow-list follows the technology named on its dispatch and the technologies it builds on:
+the worker guard reads the dispatch's `technology` header from its ledger pre event, and falls back to
+every declared list when the dispatch names none, names a technology the host does not declare, or
+cannot be identified. To get the folder to edit, install it:
 
 ```bash
 kyber-weave docs init . --standards conductor

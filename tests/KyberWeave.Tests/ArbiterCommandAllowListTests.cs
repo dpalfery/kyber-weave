@@ -25,8 +25,11 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
+    private const string DispatchSession = "sess-1";
+
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repository = new();
+    private int _dispatchSequence;
 
     public void Dispose()
     {
@@ -155,6 +158,95 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         Assert.Empty(Guard("claude", Command("claude", "az vm delete --name db", agent: "dal-dev")));
     }
 
+    /// <summary>
+    /// A read-only dispatch that names its technology is bound by that technology's list: the mutating command
+    /// is refused under <c>azure</c>.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherBoundToTheDispatchedTechnologyIsRefusedByThatTechnologysList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("azure");
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A technology folder's allow-list binds only a task of that technology: an <c>aws</c> researcher is not
+    /// judged by the <c>azure</c> list, even though the host declares both.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherBoundToAnotherTechnologyIsNotJudgedByTheAzureList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("aws");
+
+        Assert.Empty(Guard("claude", Command("claude", "az login")));
+    }
+
+    /// <summary>
+    /// A dispatch that names no technology is fail-closed: every declared technology's list still binds the
+    /// read-only agent, so a technology scoped to its own tasks never turns a refusal into an allow.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherWhoseDispatchNamesNoTechnologyIsRefusedByEveryDeclaredList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology(technology: null);
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A child technology's dispatch is bound by its parent's allow-list too, as every technology folder rule is.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherBoundToAChildTechnologyIsRefusedByItsParentsList()
+    {
+        ChildOfAzureRepository(_repository.Path);
+        WriteDispatchTechnology("child");
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An undeclared technology is a typo or a folder the host does not have, so it cannot name an allow-list:
+    /// every declared list still binds the read-only agent.
+    /// </summary>
+    [Fact]
+    public void APlatformResearcherWhoseDispatchNamesAnUndeclaredTechnologyIsRefusedByEveryDeclaredList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("azuree");
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Two dispatches of the same agent in one session cannot be told apart from the tool call, so the guard
+    /// falls back to every declared list rather than guess which technology the call belongs to.
+    /// </summary>
+    [Fact]
+    public void TwoConcurrentDispatchesWithDifferentTechnologiesFallBackToEveryDeclaredList()
+    {
+        TwoTechnologyRepository(_repository.Path, "azure", "aws");
+        WriteDispatchTechnology("azure");
+        WriteDispatchTechnology("aws");
+
+        // `az login` is outside azure's list and names no aws tool: only the fail-closed union refuses it.
+        string answer = Guard("claude", Command("claude", "az login"));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ATechnologyWithNoCommandRuleRefusesNothing()
     {
@@ -220,6 +312,86 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A repository that declares several technologies and holds each one's shipped standards folder, so every
+    /// declared technology's rules file is loaded for one guard event that names no technology.
+    /// </summary>
+    private static void TwoTechnologyRepository(string root, params string[] technologies)
+    {
+        Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
+        File.WriteAllText(
+            Path.Combine(root, ".kyber-weave", "kyber-weave.yml"),
+            $"ontology:\n  docs-root: docs\n  technologies: [{string.Join(", ", technologies)}]\n\narbiter:\n  enabled: true\n");
+
+        foreach (string technology in technologies)
+        {
+            string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", technology);
+            string target = Path.Combine(root, "docs", "standards", technology);
+            Directory.CreateDirectory(target);
+            foreach (string file in Directory.EnumerateFiles(source))
+            {
+                File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+            }
+        }
+    }
+
+    /// <summary>
+    /// A repository that declares <c>child</c>, whose standard builds on the shipped <c>azure</c> folder, so the
+    /// parent's allow-list is loaded for a task in the child.
+    /// </summary>
+    private static void ChildOfAzureRepository(string root)
+    {
+        TechnologyRepository(root, "azure");
+        File.WriteAllText(
+            Path.Combine(root, ".kyber-weave", "kyber-weave.yml"),
+            "ontology:\n  docs-root: docs\n  technologies: [child]\n\narbiter:\n  enabled: true\n");
+
+        string directory = Path.Combine(root, "docs", "standards", "child");
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(
+            Path.Combine(directory, "child.standards.md"),
+            "---\nid: standards/child\nbuilds-on: azure\n---\n\n# child\n");
+    }
+
+    /// <summary>
+    /// Writes the dispatch pre event a worker's tool call belongs to: the platform researcher, in the same
+    /// session as the call, naming <paramref name="technology"/> or no technology.
+    /// </summary>
+    private void WriteDispatchTechnology(string? technology)
+    {
+        string directory = Path.Combine(_repository.Path, "artifacts", "arbiter");
+        Directory.CreateDirectory(directory);
+        object dispatch = technology is null
+            ? new
+            {
+                schema = "kyber-arbiter.ledger/v1",
+                id = $"pre-{_dispatchSequence++}",
+                at = "2026-11-17T09:00:00.0000000Z",
+                source = "hook",
+                harness = "claude",
+                session = DispatchSession,
+                phase = "pre",
+                target = "platform-researcher",
+                trigger = "delegate",
+            }
+            : new
+            {
+                schema = "kyber-arbiter.ledger/v1",
+                id = $"pre-{_dispatchSequence++}",
+                at = "2026-11-17T09:00:00.0000000Z",
+                source = "hook",
+                harness = "claude",
+                session = DispatchSession,
+                phase = "pre",
+                target = "platform-researcher",
+                trigger = "delegate",
+                headers = new { technology },
+            };
+        File.AppendAllText(
+            Path.Combine(directory, "ledger.jsonl"),
+            JsonSerializer.Serialize(dispatch) + Environment.NewLine);
+    }
+
     private string Guard(string harness, string json)
     {
         using StringWriter stdout = new();
@@ -242,6 +414,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             ? JsonSerializer.Serialize(new
             {
                 cwd = _repository.Path,
+                session_id = DispatchSession,
                 hook_event_name = "PreToolUse",
                 agent_id = "agent-1",
                 agent_type = agent,
@@ -251,6 +424,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             : JsonSerializer.Serialize(new
             {
                 cwd = _repository.Path,
+                sessionId = DispatchSession,
                 agentId = "agent-1",
                 parentAgentId = "root",
                 agentType = agent,

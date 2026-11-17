@@ -51,12 +51,13 @@ public static class ArbiterConfigLoader
     };
 
     /// <summary>
-    /// The rule folders one configuration read applies over the shipped role templates, and the task technologies whose
-    /// folders it adds.
+    /// The rule folders one configuration read applies over the shipped role templates, and the technologies whose
+    /// folders it reads. Every folder's rules carry that folder's name, so the evaluator judges an event only by the
+    /// folders its task technology belongs to.
     /// </summary>
     /// <param name="RepositoryRoot">The repository root the docs roots hang under.</param>
     /// <param name="DocsRoots">Repository-relative docs roots; each root's <c>standards/</c> holds the folders.</param>
-    /// <param name="Technologies">The task's technology first, then its declared parent, so a child receives both.</param>
+    /// <param name="Technologies">Every technology the host declares; each one's folder and its <c>builds-on</c> parents are read.</param>
     /// <param name="ReadFile">
     /// Reads a folder file's text, or returns null when it does not exist. The repository that owns the disk supplies
     /// it: the domain layer never touches the file system (<c>DomainPurityTests</c>).
@@ -110,8 +111,8 @@ public static class ArbiterConfigLoader
         Merge(defaults, section, folders: null);
 
     /// <summary>
-    /// Merges the host configuration over the defaults, first applying the host's role folders and the task's
-    /// technology folders, then the host's <c>arbiter.rules</c> settings last.
+    /// Merges the host configuration over the defaults, first applying the host's role folders and every declared
+    /// technology's folder, then the host's <c>arbiter.rules</c> settings last.
     /// </summary>
     /// <param name="defaults">The shipped configuration the folders and the host section apply over.</param>
     /// <param name="section">The host's <c>arbiter:</c> section, or null.</param>
@@ -149,16 +150,19 @@ public static class ArbiterConfigLoader
         IReadOnlyList<Diagnostic> folderFindings = [];
         IReadOnlyList<string> testFilePatterns = defaults.TestFilePatterns;
         IReadOnlyList<ArbiterLensPathEntry> lensPaths = defaults.LensPaths;
+        IReadOnlyDictionary<string, string> folderParents = defaults.RuleFolderParents;
         if (enabled && folders is not null && baseRules.Count > 0)
         {
             (IReadOnlyList<ArbiterRule> loaded,
                 IReadOnlyList<Diagnostic> findings,
                 IReadOnlyList<string> folderPatterns,
-                IReadOnlyList<ArbiterLensPathEntry> folderLensPaths) = LoadRuleFolders(baseRules, folders);
+                IReadOnlyList<ArbiterLensPathEntry> folderLensPaths,
+                IReadOnlyDictionary<string, string> parents) = LoadRuleFolders(baseRules, folders);
             baseRules = loaded;
             folderFindings = findings;
             testFilePatterns = MergeTestFilePatterns(defaults.TestFilePatterns, folderPatterns);
             lensPaths = MergeLensPaths(defaults.LensPaths, folderLensPaths);
+            folderParents = parents;
         }
 
         // A rule id may expand to one rule per trigger, so shipped rules are keyed
@@ -230,6 +234,7 @@ public static class ArbiterConfigLoader
             Provider = MergeProvider(defaults.Provider, section?.Provider),
             Rules = ModelTargetingRules.Apply(rules, modelTargeting.Mode),
             TestFilePatterns = testFilePatterns,
+            RuleFolderParents = folderParents,
             LensPaths = lensPaths,
             ModelTargeting = modelTargeting,
             RuleFolderFindings = folderFindings,
@@ -263,6 +268,7 @@ public static class ArbiterConfigLoader
             Provider = MergeProvider(ArbiterProviderConfig.DefaultNone, section?.Provider),
             Rules = merged.Rules,
             TestFilePatterns = merged.TestFilePatterns,
+            RuleFolderParents = merged.RuleFolderParents,
             LensPaths = merged.LensPaths,
             ModelTargeting = merged.ModelTargeting,
             RuleFolderFindings = merged.RuleFolderFindings,
@@ -374,20 +380,22 @@ public static class ArbiterConfigLoader
     }
 
     /// <summary>
-    /// Reads the host's role folders over <paramref name="shipped"/> and adds the folders of the task's technologies.
+    /// Reads the host's role folders over <paramref name="shipped"/> and adds every declared technology's folder.
     /// </summary>
     /// <remarks>
     /// A folder file that cannot be read, or that holds a rule the Arbiter cannot use, is reported and skipped: the
     /// shipped rules for that folder stay in force, so a broken folder narrows nothing and widens nothing. An empty
-    /// file is valid and adds nothing. The host's <c>arbiter.rules</c> settings are applied by the caller after this,
-    /// so they win over a folder.
+    /// file is valid and adds nothing. A technology folder's rules carry that folder's name, and the parent map says
+    /// which technology each one builds on, so the evaluator can judge an event by its task's technology. The host's
+    /// <c>arbiter.rules</c> settings are applied by the caller after this, so they win over a folder.
     /// </remarks>
     /// <param name="shipped">The shipped rules the host folders override and the technology folders extend.</param>
     /// <param name="request">The repository, docs roots and task technologies to read.</param>
     internal static (IReadOnlyList<ArbiterRule> Rules,
         IReadOnlyList<Diagnostic> Findings,
         IReadOnlyList<string> TestFilePatterns,
-        IReadOnlyList<ArbiterLensPathEntry> LensPaths) LoadRuleFolders(
+        IReadOnlyList<ArbiterLensPathEntry> LensPaths,
+        IReadOnlyDictionary<string, string> Parents) LoadRuleFolders(
         IReadOnlyList<ArbiterRule> shipped,
         RuleFolderRequest request)
     {
@@ -398,6 +406,7 @@ public static class ArbiterConfigLoader
         List<Diagnostic> findings = [];
         List<string> testFilePatterns = [];
         List<ArbiterLensPathEntry> lensPaths = [];
+        Dictionary<string, string> parents = new(StringComparer.Ordinal);
         HashSet<string> applied = new(StringComparer.Ordinal);
         IReadOnlySet<string> shippedIds = new HashSet<string>(
             shipped.Select(rule => rule.Id), StringComparer.Ordinal);
@@ -405,7 +414,7 @@ public static class ArbiterConfigLoader
         foreach (string role in RoleFolders)
         {
             if (applied.Add(role))
-                TryApplyFolder(rules, request, role, shippedIds, findings, testFilePatterns, lensPaths);
+                TryApplyFolder(rules, request, role, technology: null, shippedIds, findings, testFilePatterns, lensPaths);
         }
 
         foreach (string technology in request.Technologies
@@ -413,14 +422,21 @@ public static class ArbiterConfigLoader
                      .Select(name => name.Trim())
                      .Distinct(StringComparer.Ordinal))
         {
-            foreach (string folder in FolderChain(request, technology, findings))
+            List<string> chain = FolderChain(request, technology, findings);
+            for (int index = 1; index < chain.Count; index++)
+            {
+                if (!string.Equals(chain[index], chain[index - 1], StringComparison.Ordinal))
+                    parents[chain[index]] = chain[index - 1];
+            }
+
+            foreach (string folder in chain)
             {
                 if (applied.Add(folder))
-                    TryApplyFolder(rules, request, folder, shippedIds, findings, testFilePatterns, lensPaths);
+                    TryApplyFolder(rules, request, folder, folder, shippedIds, findings, testFilePatterns, lensPaths);
             }
         }
 
-        return (rules, findings, testFilePatterns, lensPaths);
+        return (rules, findings, testFilePatterns, lensPaths, parents);
     }
 
     /// <summary>
@@ -538,6 +554,7 @@ public static class ArbiterConfigLoader
         List<ArbiterRule> rules,
         RuleFolderRequest request,
         string name,
+        string? technology,
         IReadOnlySet<string> shippedIds,
         List<Diagnostic> findings,
         List<string> testFilePatterns,
@@ -568,22 +585,29 @@ public static class ArbiterConfigLoader
         if (loaded.Count == 0)
             return;
 
+        if (technology is not null)
+        {
+            loaded = [.. loaded.Select(rule => rule.Technology is null ? rule with { Technology = technology } : rule)];
+        }
+
         foreach (IGrouping<string, ArbiterRule> group in loaded.GroupBy(rule => rule.Id, StringComparer.Ordinal))
         {
             if (!shippedIds.Contains(group.Key))
                 continue;
 
             bool disabled = group.All(rule => !rule.Enabled);
+            string effect = disabled ? "disables" : technology is null ? "replaces" : "overrides";
+            string scope = technology is null ? string.Empty : $" for technology '{technology}'";
             findings.Add(new Diagnostic(
                 RuleValidator.ShippedRuleOverride,
                 Severity.Info,
-                $"'{file.Path}' {(disabled ? "disables" : "replaces")} shipped rule '{group.Key}'.",
+                $"'{file.Path}' {effect} shipped rule '{group.Key}'{scope}.",
                 group.Key,
                 file.Path,
-                "No rule is locked: the folder's declaration takes effect. Remove it to use the shipped rule."));
+                "No rule is locked: the folder's declaration takes effect for its scope. Remove it to use the shipped rule."));
         }
 
-        ReplaceRules(rules, loaded);
+        ReplaceRules(rules, loaded, technology);
     }
 
     /// <summary>
@@ -853,15 +877,27 @@ public static class ArbiterConfigLoader
     /// Replaces every rule of the loaded ids with the loaded rules, keeping the position of the first replaced rule so
     /// the shipped order survives an override. An id the set does not hold is appended.
     /// </summary>
-    private static void ReplaceRules(List<ArbiterRule> rules, IReadOnlyList<ArbiterRule> loaded)
+    /// <summary>
+    /// Replaces the rules of the loaded ids, keeping their first position. A technology folder's declaration
+    /// (<paramref name="technology"/> not null) replaces only the rules for that same technology, so an earlier
+    /// role-folder or other-technology rule of that id stays in force for every other technology; the scoped
+    /// declaration shadows it only where the technology matches.
+    /// </summary>
+    private static void ReplaceRules(
+        List<ArbiterRule> rules,
+        IReadOnlyList<ArbiterRule> loaded,
+        string? technology = null)
     {
         HashSet<string> ids = new(loaded.Select(rule => rule.Id), StringComparer.Ordinal);
         int index = rules.FindIndex(rule => ids.Contains(rule.Id));
-        List<ArbiterRule> kept = [.. rules.Where(rule => !ids.Contains(rule.Id))];
+        List<ArbiterRule> kept = technology is null
+            ? [.. rules.Where(rule => !ids.Contains(rule.Id))]
+            : [.. rules.Where(rule => !ids.Contains(rule.Id)
+                || !string.Equals(rule.Technology, technology, StringComparison.Ordinal))];
         if (index < 0)
             index = kept.Count;
 
-        kept.InsertRange(index, loaded);
+        kept.InsertRange(Math.Min(index, kept.Count), loaded);
         rules.Clear();
         rules.AddRange(kept);
     }
