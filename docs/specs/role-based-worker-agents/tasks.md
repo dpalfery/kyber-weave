@@ -482,7 +482,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 3.4, 3.5, 2.8
   - _Requirements: 1.9, 3.1, 3.2, 3.3, 3.5, 3.6_
 
-- [ ] 3.7 Teach the conductor, the architect and the bug flow
+- [x] 3.7 Teach the conductor, the architect and the bug flow
   - **Objective:** Tell the conductor to dispatch with a task id only and to move a failed task one tier up; give the architect schema and data-model planning; tell the bug flow to hand fixes to a developer agent.
   - **Files:**
     - `products/kyber-squad/agents/conductor.md`, `products/kyber-squad/agents/conductor/references/`, `products/kyber-squad/skills/delivery-execution/SKILL.md`
