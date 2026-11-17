@@ -114,7 +114,6 @@ public sealed class TaskPromptService(
         string? taskId = Clean(request.TaskId);
 
         PlanTaskFileEntry? entry = null;
-        string? fileRoster = null;
         if (taskId is not null)
         {
             string? plan = Clean(request.Plan);
@@ -149,8 +148,8 @@ public sealed class TaskPromptService(
                     $"No prompt: '{taskId}' names no one task in {plan}. Its tasks are: {ids}.");
             }
 
-            // The roster is taken from the task file, so a file outlives a configuration change (Requirement 12.2).
-            fileRoster = outcome.File.WorkerRoster;
+            // There is one roster, so the file's recorded value selects nothing here: the validator reports a
+            // value that is not `tiered` and reads the file as tiered, and this service does the same.
         }
 
         string? technology = Clean(entry?.Technology) ?? Clean(request.Technology);
