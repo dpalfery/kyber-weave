@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Mcp
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-16
 decided-by:
   - adr/0051-dotnet-cli-spawns-stdio-children-through-one-bounded-session
   - adr/0052-docs-branch-writes-repository-scope-mcp-configuration
@@ -75,7 +75,7 @@ keys differ, and they differ more than you would expect:
 |---|---|---|---|
 | [Claude Code](#claude-code) | `.mcp.json` (repo root) | `mcpServers` | Committed servers need approval on first run |
 | [Factory](#factory) | `.factory/mcp.json` (repo root) or `~/.factory/mcp.json` | `mcpServers` | Same shape as Claude Code, but a Task-dispatched droid sees only the servers its own droid file whitelists |
-| [Cursor](#cursor) | `.cursor/mcp.json` | `mcpServers` | Same shape as Claude Code, and subagents inherit the session's servers rather than holding a grant of their own |
+| [Cursor](#cursor) | Desktop/local CLI: `.cursor/mcp.json`; Cloud Agents: personal or team settings | `mcpServers` | Same shape as Claude Code, and subagents inherit the session's servers rather than holding a grant of their own |
 | [VS Code / Copilot in the editor](#vs-code-and-github-copilot-in-the-editor) | `.vscode/mcp.json` | `servers` | Not `.mcp.json`, and not `mcpServers` |
 | [Copilot coding agent](#github-copilot-coding-agent) | Repository settings, not a file | `mcpServers` | `tools` is required; the binary must be installed first |
 | [Codex CLI](#codex-cli) | `~/.codex/config.toml` | `[mcp_servers.<name>]` | TOML, and the table name is snake_case; custom agents inherit the session's servers and cannot override them |
@@ -213,8 +213,8 @@ mechanical.
 
 ### Cursor
 
-`.cursor/mcp.json` in the repository, or `~/.cursor/mcp.json` to get it in every project.
-The shape matches Claude Code:
+For desktop and local CLI sessions, use `.cursor/mcp.json` in the repository, or
+`~/.cursor/mcp.json` to get it in every project. The shape matches Claude Code:
 
 ```json
 {
@@ -231,6 +231,39 @@ Cursor subagents inherit every tool from the parent session, including MCP tools
 file carries no `tools` allow-list key (cursor.com/docs/subagents.md, read 2026-10-31). That is why
 Squad renders no per-agent MCP grant here: the wiring above is the whole grant, and every Squad
 agent — `conductor` included — already reaches the server once the file exists.
+
+#### Cursor Cloud Agents
+
+Cloud Agent registration is separate. Add and enable personal servers through the MCP dropdown at
+[cursor.com/agents](https://cursor.com/agents), or have a team admin add shared servers under
+**Dashboard → Plugins & MCPs**. Create both `kw-docs` and `codegraph` as stdio servers with the
+same commands and arguments as this repository's `.cursor/mcp.json`; Cursor documents HTTP and
+stdio for Cloud Agents, but not SSE or `mcp-remote`
+([Cloud Agent capabilities](https://cursor.com/docs/cloud-agent/capabilities#mcp-tools), read
+2026-11-16). The repository file above is not the Cloud Agent registration step.
+
+The `mcpServerAllowlist` in `.cursor/environment.json` only approves those registrations; it does
+not distribute or install a server. Cursor matches a stdio entry against the **full shell-resolved
+command string**, including arguments, and supports `*` as a wildcard. The environment therefore
+uses these path-independent entries rather than a bare executable name:
+
+```json
+{ "name": "kw-docs", "command": "*kyber-weave-mcp --repo-root *" },
+{ "name": "codegraph", "command": "*codegraph serve --mcp --path *" }
+```
+
+The `name` is only a display name; the command pattern grants the permission
+([MCP allowlist rules](https://cursor.com/docs/enterprise/model-and-integration-management#mcp-allowlist),
+read 2026-11-16). Do not copy `${userHome}` or `${workspaceFolder}` into that allowlist: the
+[environment schema](https://cursor.com/schemas/environment.schema.json) documents a command pattern,
+not variable interpolation. Both variables are supported in `mcp.json` command, argument and
+environment values ([config interpolation](https://cursor.com/docs/mcp#config-interpolation), read
+2026-11-16).
+
+After adding the personal or team registrations, start a new Cloud Agent and verify the repository
+with `docs_get_source_repository_and_revision` (the current name, not the retired `docs_status`) and
+`codegraph_explore`. If only Cursor's built-in tools appear, recheck registration, enablement, the
+allowlist and the stdio launch; an allowlist alone cannot make either server appear.
 
 ### Command Code
 
