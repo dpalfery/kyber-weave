@@ -417,7 +417,7 @@ jobs:
           dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
           -c ${{ env.CONFIGURATION }}
           --no-restore
-          --filter FullyQualifiedName~SquadDeploymentStateTests
+          --filter FullyQualifiedName~SquadDeploymentState
 
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
