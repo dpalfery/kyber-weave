@@ -21,7 +21,7 @@ code-refs:
 ## Status
 
 Accepted, 2026-11-17. Decided by the owner. It settles the removal question the
-[role-based worker agents specification](../specs/role-based-worker-agents/README.md) left open: whether the
+[role-based worker agents specification](../archive/specs/role-based-worker-agents/README.md) left open: whether the
 fourteen old agents leave once a comparison of the two rosters has run.
 
 ## Context

@@ -43,8 +43,16 @@ first, and the second is shipped policy.
 | `fast` | Bounded, checkable work | `bug-crusher`, `dev-easy`, `platform-researcher`, `research-agent` |
 | `general` | Standard implementation and support | `dev-medium`, `devops`, `docs-dev` |
 | `dev-hard` | The strongest developer tier | `dev-hard` |
-| `orchestration` | Coordination and dispatch | none: the conductor names no profile and runs on its session's model |
 | `reviewer` | Adversarial code reading | `code-reviewer`, `review-lens`, `review-triage` |
+
+The conductor is not in the table: it names no profile and runs on the model its session was started
+with, and the `orchestration` profile that used to pin that model was removed with it. `dev-hard` is a
+profile of its own rather than an alias of `architect`: its rows are the `architect` profile's stronger
+coding model on each harness, so a step-up from `dev-medium` is a real upgrade on every harness that
+renders one, and a later rotation of a planning model changes `architect` and leaves `dev-hard` alone
+([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
+On GitHub Copilot the three developer tiers are visibly different: Claude Haiku 5.5 for `fast`,
+GPT-6.1 Terra for `general` and Gemini 4 Hydrogen for `dev-hard`.
 
 Bundled tokens live in `products/kyber-squad/profiles/models.yml`, one column per harness.
 The bundled matrix is the baseline; a preset changes only what it names.
@@ -69,7 +77,7 @@ profiles:
     opencode: github-copilot/grok-4.7
 ```
 
-That example is an OpenCode-only profile on the GitHub Copilot provider. `orchestration` is
+That example is an OpenCode-only profile on the GitHub Copilot provider. `dev-hard` is
 omitted, so it keeps the bundled token.
 
 ### Merge rules

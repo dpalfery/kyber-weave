@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core.Docs
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-17
 ---
 
 # Adopting DocGraph in an existing repository
@@ -46,7 +46,7 @@ drop. The one key `docs init` will rewrite there is `ontology.docs-root`, in pla
 when `--docs-root` moves it, so the catalog and the validator never end up reading
 different trees. Comments and every other key survive the edit.
 
-Passing `--kyber-standards` scaffolds every technology template that ships — sixteen of them —
+Passing `--kyber-standards` scaffolds every technology template that ships — fourteen of them —
 under `<docs-root>/standards/`, merges their technologies into `ontology.technologies` in
 `.kyber-weave/kyber-weave.yml`, and registers each `<{tech}-coding-standard>` property in
 Config Reg. Each folder it writes holds four files: `<name>.standards.md`,
@@ -58,6 +58,15 @@ joins `ontology.technologies`, a role name joins `ontology.roles`, and a file yo
 have is left byte-for-byte unchanged and reported. The four role folders (`conductor`,
 `architect`, `reviewer`, `devops`) and the four platform folders (`github`, `azure-devops`,
 `gitlab`, `jira`) are installed the same way.
+
+An existing host that holds each standard as `README.md` is not blocked: for two minor releases
+`docs validate` reports the old name and a standard whose headings are not the six as warnings, each
+naming the two commands. `kyber-weave docs standards migrate` renames the files, adds any of the four
+a folder lacks, and reshapes a standard whose headings are not the six — each authored section
+becomes a `###` under the heading it best fits, every move is printed, and no authored text is
+dropped. `docs init` then regenerates the Config Reg block, whose entries may still name the legacy
+files. A standard already under the six headings is left byte for byte alone, and a second run
+changes nothing.
 
 ### Review gates
 

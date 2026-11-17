@@ -16,6 +16,7 @@ decided-by:
   - adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
   - adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence
   - adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch
+  - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
 code-refs:
   - VerdictEngine
   - GateRunService

@@ -425,6 +425,18 @@ fixed order. This is [ADR 0087](../adr/0087-arbiter-rules-live-in-role-and-techn
    `aws`, one allow-list rule each; every other shipped technology file is empty.
 4. **The host's `arbiter.rules`.** Applied last, over everything above, so it wins over a folder.
 
+```mermaid
+flowchart LR
+    A["1. Shipped role files<br/>conductor 21, architect 2, reviewer 13<br/>embedded in the binary"]
+    B["2. Host role folders<br/>&lt;docs-root&gt;/standards/&lt;role&gt;/<br/>&lt;role&gt;.arbiter-rules.yml"]
+    C["3. Technology folders<br/>the task's technology,<br/>then its builds-on ancestors<br/>root parent first"]
+    D["4. Host arbiter.rules<br/>and model-targeting.mode"]
+    E["One rule set for the event"]
+    A --> B --> C --> D --> E
+    B -.->|"same id: replaces the rule whole"| A
+    C -.->|"scoped: judges only an event<br/>whose task is that technology<br/>or builds on it"| D
+```
+
 A folder file is YAML with no frontmatter and may hold `rules`, `test-file-patterns` and
 `lens-paths`; a rule keeps the shape it had in the shipped file. A file that cannot be read,
 does not parse, or names a trigger the Arbiter does not know is reported by

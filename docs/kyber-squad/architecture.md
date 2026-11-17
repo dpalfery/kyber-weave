@@ -35,6 +35,7 @@ decided-by:
   - adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative
   - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
   - adr/0086-the-task-file-is-yaml
+  - adr/0088-the-old-technology-agents-are-removed-without-a-comparison
 sections:
   "#":
     keywords:
@@ -392,6 +393,12 @@ versions.
 ---
 
 ## 4. Deployment Scopes and State Topology
+
+Kyber is deployed at the user level: one `kyber-weave squad install --global` per harness per
+machine serves every project on it. A project-level install is the rare exception, for a repository
+that has to pin a different version or a different target set. A user-level install cannot carry a
+per-project choice, and with one worker roster there is nothing per-project left to choose; the task
+file records the roster a run used, so a run's readers never depend on the deploy scope.
 
 Squad maintains deployment state under the user's home directory across three scopes:
 
@@ -1772,6 +1779,17 @@ what makes resuming a run somewhere else possible at all. The JSON form an older
 (`<plan>.tasks.json`) is still read, with `KW-DOC-TASKS-014` and the conversion command, for two
 minor releases.
 
+| File | Format |
+|---|---|
+| Host configuration, model and capability profiles, gate catalogue | YAML |
+| Arbiter rules | YAML, one `<name>.arbiter-rules.yml` per role, technology or platform folder |
+| Task file | YAML (`<plan>.tasks.yml`, a specification's `tasks.yml`); the JSON form is read for two minor releases with a warning |
+| Standards, rules, skills, agents | Markdown |
+| The task prompt | Markdown parts inside named tags, inserted by the dispatch hook or written to the untracked scratch folder on a fallback harness |
+| Arbiter decision log, gate reports | machine output (JSON lines, JSON), not authored |
+
+New data files use the `.yml` extension, as every YAML file in the repository does.
+
 - **What a prompt carries.** Files as path plus symbol, full test class names, the exact commands
   to run, the acceptance criteria, and the technology's own rules, skills and standard. Line
   numbers are hints at most, because an earlier task on the same file moves them. The measured
@@ -1785,7 +1803,9 @@ minor releases.
   `Technology:` names one value from `ontology.technologies`: an undeclared value is
   `KW-DOC-TASKS-016` and a second technology is `KW-DOC-TASKS-017`, which tells the author to
   split the task. A standard may name one parent it builds on, so React on TypeScript or Tauri on
-  Rust also receives the parent's rules and skills. The task file entry records `difficulty`,
+  Rust also receives the parent's rules and skills. A change that spans two unrelated technologies —
+  an endpoint and its database migration — is written as two tasks with a dependency between them,
+  so plans carry more, smaller tasks than they did before. The task file entry records `difficulty`,
   `difficulty-source` (`architect`, `default` or `decision-model`) and `technology`. When the task
   file is written with a decision model configured, the same request that picks the agent asks
   `KW-ARB-DIFFICULTY-001`; an answer at 0.8 or more replaces the architect's rating, and its
@@ -1815,7 +1835,19 @@ minor releases.
   parent's rules and skills, the technology's rules, skills and standard, and a last part naming
   what the budget cut; every part sits inside its own tag. The default budget is 60,000
   characters (`task-prompt-budget`); rules are never cut, and skills and standard sections go
-  least relevant to the task text first.
+  least relevant to the task text first. The default is sized so the largest shipped template fits
+  with nothing cut:
+
+  | Part | Characters, largest case |
+  |---|---|
+  | Task's own prompt | 6,000 (the task-text cap) |
+  | Host facts | 6,000 (the host-rules cap) |
+  | Shared rules, with the cross-technology testing rules | about 5,000 |
+  | The technology's standard, with its Testing section | about 15,000 (C# was 10,215 when this was sized) |
+  | The technology's rules, taking what its agent body held | up to 12,000 (Tauri's agent body was 12,858) |
+  | The technology's skills | up to 3,000 |
+  | **One technology, total** | **about 47,000** |
+  | A parent's rules and skills, where a template names one | up to 10,000 more |
 - **A worker that gets no inserted prompt prints its own.** The hook can be absent or untrusted,
   and some harnesses cannot rewrite the dispatch at all: ZCode, CommandCode and Warp
   receive the prompt as `.agent_scratchpad/<task>/prompt.md`, the untracked scratch folder, and
@@ -2412,13 +2444,18 @@ through the shipped technology map, and `kyber-weave review migrate-task-gates` 
 The three developer agents are one body rendered three times. They differ only in name, description
 and model profile (`fast`, `general`, `dev-hard`), use the `worker` capability profile, and name no
 technology, command or skill: the task prompt carries the technology's rules, skills and standard,
-and the agent reads them there.
+and the agent reads them there. Three agents rather than one is the cost paid for choosing a model:
+picking an agent is the one way to pick a model that works on all thirteen harnesses
+([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
 
 `platform-researcher` uses the `platform-reader` capability profile: it reads files and live state
 and runs commands, and can neither write files, publish nor delegate. `devops` uses
 `publishing-worker`, does what the delivery work needs — run start, push, pull request, pipeline
 files — and names no platform: the task or the host configuration names the one platform, and its
-folder's rules and skills reach it through the prompt.
+folder's rules and skills reach it through the prompt. Delivery in product code is still GitHub-only:
+the run delivery tool pushes a branch and opens a pull request on GitHub, and the Azure DevOps,
+GitLab and Jira folders give the agent rules and skills, which is instruction only until a later
+change adds product code for those platforms.
 
 ### The roster switch
 
@@ -2470,6 +2507,32 @@ stays on `dev-hard`, where the existing circuit-breaker applies unchanged: the l
 dispatches per failure cluster, and above it architect mediation. A dispatch that belongs to no task
 has no rating, so it starts on `dev-medium` and moves to `dev-hard` on its second attempt. A task
 whose role is `docs-dev` or `devops` keeps that role and is never stepped up.
+
+One step up, never a jump to `dev-hard` on the third try, is the owner's choice of the existing
+ladder over a shortcut ([ADR 0085](../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md)).
+The conductor's instructions state the same sentence, so a run with the Arbiter off behaves the same.
+
+```mermaid
+flowchart TD
+    C["conductor dispatches:<br/>task id + failed attempts<br/>+ technology, when the dispatch has no task"]
+    T["docs_build_task_prompt_for_agent_dispatch<br/>tier = min(hard, rated difficulty + failed attempts)"]
+    H["dispatch hook builds the prompt<br/>and replaces the task-id line before the worker starts"]
+    E["dev-easy<br/>profile fast"]
+    M["dev-medium<br/>profile general"]
+    D["dev-hard<br/>profile dev-hard"]
+    Done["completion digest<br/>READY_FOR_REVIEW"]
+
+    C --> T --> H
+    H -->|"easy, 0 failed"| E
+    H -->|"medium or unrated, 0 failed"| M
+    H -->|"hard"| D
+    E -->|"attempt failed"| M
+    M -->|"attempt failed"| D
+    D -->|"attempt failed: stays on dev-hard<br/>three-dispatch limit, then the architect"| D
+    E --> Done
+    M --> Done
+    D --> Done
+```
 
 A wrong rating therefore costs one attempt and corrects itself; nothing validates whether a rating is
 right.

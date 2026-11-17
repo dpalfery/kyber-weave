@@ -1,8 +1,8 @@
 ---
-id: specs/role-based-worker-agents/design
+id: archive/specs/role-based-worker-agents/design
 title: Role-based worker agents design
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
 last-reviewed: 2026-11-17
 component: KyberSquad
@@ -20,9 +20,9 @@ keywords:
 
 # Role-based worker agents design
 
-**Phase status:** Approved
+**Phase status:** Delivered and archived, 2026-11-17
 
-Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed. Amended 2026-11-17 per the owner's decisions: the old agents are removed without a comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), `dev-hard` resolves to each harness's stronger coding model, the task file records the developer tier, `docs standards migrate` reshapes a standard, and the harness table records the delivery path as built.
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed. Amended 2026-11-17 per the owner's decisions: the old agents are removed without a comparison ([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), `dev-hard` resolves to each harness's stronger coding model, the task file records the developer tier, `docs standards migrate` reshapes a standard, and the harness table records the delivery path as built.
 
 ## Overview
 
@@ -37,15 +37,15 @@ replace the last two.
 The Squad went from 24 agents to 15. The fourteen per-technology agents are removed now, on the
 owner's decision of 2026-11-17: the comparison this design planned was not used to decide, and
 anyone who wants the old agents installs an older version
-([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). The
+([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). The
 roster switch is gone, so no run can choose between two sets of workers.
 
 This design covers the [requirements](requirements.md). It absorbs the standards plan first
 drafted on [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), which is closed,
 changes one decision of that plan (who fetches the standards), and amends
-[ADR 0063](../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md),
-[ADR 0080](../../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md) and
-[ADR 0082](../../adr/0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md).
+[ADR 0063](../../../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md),
+[ADR 0080](../../../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md) and
+[ADR 0082](../../../adr/0082-the-decision-model-picks-task-agents-and-headerless-dispatches-are-delegations.md).
 
 ## Evidence
 
@@ -197,12 +197,12 @@ it loads no skill by name, and it has a stated stopping rule that feeds the step
 | The owner rule does not bind current plans | `KW-ARB-OWNER-001` escalates only when a plan carries the older `Skills:` line; a plan that names capabilities answers `no-mapping`, which allows. |
 | Five agents list who they may dispatch | `delegates-to` in `conductor` and `bug-crusher` lists every technology agent; `conductor`, `architect` and `code-reviewer` list `azure-reader`. `KW-ARB-ROSTER-001` escalates a dispatch to an unlisted agent. |
 | Some dispatches have no task | `bug-crusher` hands a larger fix to a technology agent by name, and `azure-reader` is dispatched by planners and reviewers, both outside any task file. |
-| An answer the Arbiter cannot reach allows | [ADR 0072](../../adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md): no clause matched, no provider, an error or a floor not met all allow and are logged. |
+| An answer the Arbiter cannot reach allows | [ADR 0072](../../../adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers.md): no clause matched, no provider, an error or a floor not met all allow and are logged. |
 | The Arbiter sees a sub-agent's own tool calls on two harnesses | Runbook: "Only Copilot CLI and Claude run the worker guard". |
 | Host task gates are keyed by agent name | `review.task-gates` in the host configuration; four call sites look a key up by agent: `ReviewGatesService`, `PacketHostFacts.AppendGates`, `PacketTestCommandRenderer` and `TriggerFactBuilder`. An unknown agent gets a warning, an empty report and exit code 0. |
 | Council gates are keyed by gate id | `review.gates`: this repository declares 44, of which 24 are three skill checks repeated for eight skills. They do not name agents. |
 | A task packet command exists | `kyber-weave docs packet <task>` prints the task file's prompt plus a host facts section built by `PacketHostFacts` at print time, capped at 6,000 characters of host rules, never written into the task file. |
-| Workers fetch standards themselves | [ADR 0064](../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) and the plan first drafted on pull request 625: the worker calls `docs_get_coding_standard_for_technology` in its first step. |
+| Workers fetch standards themselves | [ADR 0064](../../../adr/0064-project-knowledge-lives-in-gates-and-standards-reached-through-tools.md) and the plan first drafted on pull request 625: the worker calls `docs_get_coding_standard_for_technology` in its first step. |
 | Standards and skills are small | Shipped standards run 4,153 to 10,215 characters (C# is the largest); the nine skills run 997 to 7,487; the four largest agent bodies run 10,352 to 12,858. Host rules in a packet are capped at 6,000 characters. |
 | The task file is JSON | `<plan>.tasks.json` and a specification's `tasks.json` (ADR 0063). Host configuration, Arbiter rules, model and capability profiles are YAML. |
 
@@ -480,7 +480,7 @@ routing headers from the prompt before a worker starts.
 
 As built, eleven harnesses take the prompt inside the dispatch and three take the file. A harness
 counts as a rewrite only where its adapter inserts the prompt in a field the harness applies; the
-table is the Arbiter's [dispatch delivery path](../../kyber-arbiter/architecture.md#dispatch-delivery-path)
+table is the Arbiter's [dispatch delivery path](../../../kyber-arbiter/architecture.md#dispatch-delivery-path)
 table, and the rewrite set is the one `DispatchPromptInsertion.CanRewriteDispatch` carries.
 
 | Harness | Delivery path | How the prompt travels |
@@ -651,13 +651,13 @@ developer tasks owe a `Technology:` line like any other. `tiered` is the only ro
 absent key means, and a task file still records the roster it was written under.
 
 The comparison the two-roster design planned is retired with the runbook that described it
-([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). It was
+([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). It was
 not used to decide the removal.
 
 ### Removal
 
 Carried out on 2026-11-17 on the owner's decision
-([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). The
+([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). The
 comparison was not used to decide: two reduced comparison passes on a scratch project both failed
 for product defects that were then fixed, and three acceptance runs on the Hotshot Logistics demo
 on GitHub Copilot CLI on 2026-11-17 started, planned and stopped before dispatching any developer,
@@ -798,7 +798,58 @@ Estimates, for planning only.
 | D25 | How is a skills file typed and scoped? | A new `skill` document type; rules and skills may name a technology or role only inside that folder. | Carried from the plan on pull request 625, where it was a recommendation. Reusing an existing type would blur rules and procedures. | carried from pull request 625; owner directed the fold 2026-11-16 |
 | D26 | When is the bundle stitched? | When asked, from one index lookup shared by the standards tool and the task prompt. | Carried from the plan on pull request 625. Always current; no second stored copy. | carried from pull request 625; owner directed the fold 2026-11-16 |
 | D27 | How do standards rank in search? | Standards, skills and technology rules at 0.55; the shared rules file at 1.0. | Carried from the plan on pull request 625. Matches the weight plans and specifications already have. | carried from pull request 625; owner directed the fold 2026-11-16 |
-| D28 | Was the comparison used to decide the removal? | No. The owner decided on 2026-11-17 to remove the fourteen agents, and the comparison D5 named is retired with its runbook. | Two reduced comparison passes on a scratch project both failed for product defects that were then fixed; three acceptance runs on the Hotshot Logistics demo on GitHub Copilot CLI on 2026-11-17 started, planned and stopped before dispatching any developer, for defects that were also fixed. Kept both rosters cost too much. | user: explicit decision 2026-11-17, recorded in [ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md) |
+| D28 | Was the comparison used to decide the removal? | No. The owner decided on 2026-11-17 to remove the fourteen agents, and the comparison D5 named is retired with its runbook. | Two reduced comparison passes on a scratch project both failed for product defects that were then fixed; three acceptance runs on the Hotshot Logistics demo on GitHub Copilot CLI on 2026-11-17 started, planned and stopped before dispatching any developer, for defects that were also fixed. Kept both rosters cost too much. | user: explicit decision 2026-11-17, recorded in [ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md) |
+
+## Closeout mapping
+
+Every decision D1–D28 and harvest item H1–H14 maps to the living document that now
+carries it. The same evidence is in [the specification index](README.md#closeout-mapping).
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| D1 | [Roster and developer tiers](../../../kyber-squad/architecture.md#the-agents-of-the-roster), [ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md) | extends-component | archived |
+| D2 | [How a tier is chosen](../../../kyber-squad/architecture.md#how-a-tier-is-chosen), [ADR 0085](../../../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md) | extends-component | archived |
+| D3 | [How a tier is chosen](../../../kyber-squad/architecture.md#how-a-tier-is-chosen) | extends-component | archived |
+| D4 | [Roster and developer tiers](../../../kyber-squad/architecture.md#the-agents-of-the-roster), [ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md) | extends-component | archived |
+| D5 | [ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md), [Roster switch](../../../kyber-squad/architecture.md#the-roster-switch) | extends-component | archived |
+| D6 | [Model profiles](../../../kyber-squad/model-profiles.md#the-six-profiles). ADR waiver: the model already came from the agent; this restates it and adds no new contract | extends-component | archived |
+| D7 | [Model profiles](../../../kyber-squad/model-profiles.md#the-six-profiles), [How a tier is chosen](../../../kyber-squad/architecture.md#how-a-tier-is-chosen) | extends-component | archived |
+| D8 | [A technology, role or platform folder](../../../documentation-ontology.md#a-technology-role-or-platform-folder), [Coding standards](../../../standards/README.md) | extends-component | archived |
+| D9 | [A technology, role or platform folder](../../../documentation-ontology.md#a-technology-role-or-platform-folder) | extends-component | archived |
+| D10 | [Where the rules come from](../../../kyber-arbiter/architecture.md#where-the-rules-come-from), [ADR 0087](../../../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md) | extends-component | archived |
+| D11 | [Where the rules come from](../../../kyber-arbiter/architecture.md#where-the-rules-come-from) | extends-component | archived |
+| D12 | [Dispatch delivery path](../../../kyber-arbiter/architecture.md#dispatch-delivery-path), [The inserted task prompt](../../../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt), [ADR 0085](../../../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md) | extends-component | archived |
+| D13 | [Task gates](../../../code-review/architecture.md#task-gates) | extends-component | archived |
+| D14 | [ADR 0086](../../../adr/0086-the-task-file-is-yaml.md), [The inserted task prompt](../../../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt) | extends-component | archived |
+| D15 | [Roster and developer tiers](../../../kyber-squad/architecture.md#the-agents-of-the-roster) | extends-component | archived |
+| D16 | [Coding standards](../../../standards/README.md) | extends-component | archived |
+| D17 | Documentation waiver — process: how a specification is split into phases leaves no lasting architectural, operational or behavioural invariant | waiver (process) | archived |
+| D18 | [ADR 0085](../../../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md), [ADR 0087](../../../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md), [ADR 0086](../../../adr/0086-the-task-file-is-yaml.md) | extends-component | archived |
+| D19 | [Roster and developer tiers](../../../kyber-squad/architecture.md#the-agents-of-the-roster) | extends-component | archived |
+| D20 | [The inserted task prompt](../../../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt), [Task prompt budget](../../../configuration.md#task-prompt-budget) | extends-component | archived |
+| D21 | [The inserted task prompt](../../../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt) | extends-component | archived |
+| D22 | [The inserted task prompt](../../../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt) | extends-component | archived |
+| D23 | [Coding standards](../../../standards/README.md) | extends-component | archived |
+| D24 | Documentation waiver — process: absorbing a closed pull request's plan into a phase is scheduling, and the plan itself is closed | waiver (process) | archived |
+| D25 | [A technology, role or platform folder](../../../documentation-ontology.md#a-technology-role-or-platform-folder) | extends-component | archived |
+| D26 | [A standard is read through the tool](../../../standards/README.md#a-standard-is-read-through-the-tool-not-as-a-file) | extends-component | archived |
+| D27 | [Authority](../../../docgraph/retrieval.md#authority) | extends-component | archived |
+| D28 | [ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md), [Roster and developer tiers](../../../kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers) | extends-component | archived |
+| H1 | [Roster and developer tiers](../../../kyber-squad/architecture.md#the-agents-of-the-roster) | extends-component | archived |
+| H2 | [How a tier is chosen](../../../kyber-squad/architecture.md#how-a-tier-is-chosen) | extends-component | archived |
+| H3 | [Model profiles](../../../kyber-squad/model-profiles.md#the-six-profiles) | extends-component | archived |
+| H4 | [A technology, role or platform folder](../../../documentation-ontology.md#a-technology-role-or-platform-folder), [Coding standards](../../../standards/README.md) | extends-component | archived |
+| H5 | [Initialize](../../../docgraph/onboarding.md#1-initialize) | extends-component | archived |
+| H6 | [The inserted task prompt](../../../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt), [Task prompt budget](../../../configuration.md#task-prompt-budget), [Prompt delivery by harness](../../../kyber-squad/architecture.md#prompt-delivery-by-harness) | extends-component | archived |
+| H7 | [Task gates](../../../code-review/architecture.md#task-gates) | extends-component | archived |
+| H8 | [Where the rules come from](../../../kyber-arbiter/architecture.md#where-the-rules-come-from) | extends-component | archived |
+| H9 | [Roster and developer tiers](../../../kyber-squad/architecture.md#the-agents-of-the-roster) | extends-component | archived |
+| H10 | [ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md), [Roster comparison runbook](../../../kyber-squad/roster-comparison-runbook.md) (superseded, kept for history) | extends-component | archived |
+| H11 | [Task gates](../../../code-review/architecture.md#task-gates), [Configuration](../../../configuration.md) | extends-component | archived |
+| H12 | [ADR 0085](../../../adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md), [ADR 0087](../../../adr/0087-arbiter-rules-live-in-role-and-technology-folders.md), [ADR 0086](../../../adr/0086-the-task-file-is-yaml.md) | extends-component | archived |
+| H13 | [A technology, role or platform folder](../../../documentation-ontology.md#a-technology-role-or-platform-folder) | extends-component | archived |
+| H14 | [Authority](../../../docgraph/retrieval.md#authority), [A standard is read through the tool](../../../standards/README.md#a-standard-is-read-through-the-tool-not-as-a-file) | extends-component | archived |
+| RESIDUAL | none: every follow-up the delivery found is either shipped or recorded in an ADR | — | archived |
 
 ## Open questions
 
@@ -809,6 +860,9 @@ None. The one earlier question, the order against pull request 625, is settled b
 `documentation-impact: extends-component`, `impact-components: [KyberSquad, ReviewCouncil, DocGraph, KyberArbiter]`.
 
 ## Design harvest
+
+Every row below was executed at closeout; the living document that now carries each one is in
+[the closeout mapping](README.md#closeout-mapping).
 
 | ID | Design item (section) | Target component | Target doc type |
 |---|---|---|---|

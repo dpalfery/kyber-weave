@@ -1,8 +1,8 @@
 ---
-id: specs/role-based-worker-agents/tasks
+id: archive/specs/role-based-worker-agents/tasks
 title: Role-based worker agents tasks
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
 last-reviewed: 2026-11-17
 component: KyberSquad
@@ -18,11 +18,11 @@ keywords:
 
 # Implementation Tasks
 
-**Status:** Ready
+**Status:** Archived, 2026-11-17
 
-**Phase status:** Approved
+**Phase status:** Delivered and archived, 2026-11-17
 
-Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): tasks 1.11 to 1.14 carry the standards plan first drafted on pull request 625. Amended 2026-11-17: tasks 1.1 to 5.6 are ticked against the delivered code, task 5.2 is closed by the owner's decision without a comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), and task 3.2's acceptance line records that `dev-hard` carries the `architect` profile's model rows.
+Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): tasks 1.11 to 1.14 carry the standards plan first drafted on pull request 625. Amended 2026-11-17: tasks 1.1 to 5.6 are ticked against the delivered code, task 5.2 is closed by the owner's decision without a comparison ([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), and task 3.2's acceptance line records that `dev-hard` carries the `architect` profile's model rows.
 
 **Development mode:** test-first
 
@@ -49,6 +49,33 @@ phases 1 to 5 are merged on this branch, so what ships now is the one roster.
 Phase 1 has no outside dependency. The standards plan first drafted on
 [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625) is absorbed as tasks 1.11 to
 1.14, and that pull request is closed.
+
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| TQ-1 | Where is this document's lasting record? | Tasks 1.1–6.1, as delivered. The behaviour it delivered is in the component architecture mapped below. | Closed |
+
+## Design harvest
+
+This document declares no harvest rows of its own: the specification's items H1–H14 are declared in [design](design.md#design-harvest) and mapped there. These rows trace this document's own content.
+
+| ID | Design item | Target component | Target doc type | Harvested |
+|---|---|---|---|---|
+| TH-1 | Tasks 1.1–6.1, as delivered. — the Kyber-Squad part | Kyber-Squad | architecture | yes |
+| TH-2 | Tasks 1.1–6.1, as delivered. — the KyberArbiter part | KyberArbiter | architecture | yes |
+| TH-3 | Tasks 1.1–6.1, as delivered. — the ReviewCouncil part | ReviewCouncil | architecture | yes |
+| TH-4 | Tasks 1.1–6.1, as delivered. — the DocGraph part | DocGraph | architecture | yes |
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| TQ-1 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) | extends-component | archived |
+| TH-1 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) | extends-component | archived |
+| TH-2 | [KyberArbiter architecture](../../../kyber-arbiter/architecture.md) | extends-component | archived |
+| TH-3 | [ReviewCouncil architecture](../../../code-review/architecture.md) | extends-component | archived |
+| TH-4 | [DocGraph architecture](../../../documentation-ontology.md) | extends-component | archived |
 
 ## How these tasks are dispatched
 
@@ -622,7 +649,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 ### Phase 5: Comparison and removal
 
 - [x] 5.1 Write the comparison runbook
-  - **Objective:** Define how to run one approved plan once per roster from one base commit on one harness, and what to record. The runbook was retired on 2026-11-17, when the owner removed the old agents without the comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
+  - **Objective:** Define how to run one approved plan once per roster from one base commit on one harness, and what to record. The runbook was retired on 2026-11-17, when the owner removed the old agents without the comparison ([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
   - **Files:**
     - `docs/kyber-squad/roster-comparison-runbook.md` (new; marked superseded), `docs/kyber-squad/README.md`
   - **Acceptance criteria:** The runbook names the three kinds of plan to run, the fixed inputs, and for each measure (tasks completed, attempts and tier per task, task-gate failures, review findings by severity, tokens, wall time) where the number is read from; a measure with no source is marked as such; a later reader sees from its own banner and `status: superseded` that it is history, not a task still to run.
@@ -632,7 +659,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - _Requirements: 12.4, 12.5_
 
 - [x] 5.2 Record the owner's decision on the old agents
-  - **Objective:** Record the owner's decision on removing the old agents. Closed by decision, not by a comparison: on 2026-11-17 the owner removed the fourteen agents without one ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
+  - **Objective:** Record the owner's decision on removing the old agents. Closed by decision, not by a comparison: on 2026-11-17 the owner removed the fourteen agents without one ([ADR 0088](../../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
   - **Files:**
     - `docs/adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md` (new), `docs/adr/README.md`
   - **Acceptance criteria:** The record states that the old agents are removed, that the comparison of task 5.1 was not used to decide, and why — two reduced comparison passes on a scratch project that both failed for product defects that were then fixed, and three acceptance runs on the Hotshot Logistics demo on GitHub Copilot CLI on 2026-11-17 that started, planned and stopped before dispatching any developer, for defects that were also fixed; it carries the owner's approval; no results file exists, because no comparison reached a result. Tasks 5.3 to 5.6 start from it.
@@ -695,7 +722,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 
 ### Closeout
 
-- [ ] 6.1 Closeout
+- [x] 6.1 Closeout
   - **Objective:** Verify each requirement against the delivered code and review evidence, harvest the [Design harvest](design.md#design-harvest) into canonical documents, update the specification index, and archive this specification.
   - **Files:** the canonical documents named by the Design harvest, `docs/specs/README.md`, this folder (moved to `docs/archive/specs/`)
   - **Acceptance criteria:** Every decision and harvest item maps to a live document; `docs validate . --merge-ready` and `docs drift .` report zero findings after the move.
@@ -703,6 +730,9 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready`
   - **Depends on:** 5.6
   - _Requirements: 1.5, 13.1_
+
+Closeout evidence — the Decisions and Design harvest mapping, the deviations as built and the content
+judged obsolete — is in [the specification index](README.md#closeout-mapping).
 
 ## Test contract
 
