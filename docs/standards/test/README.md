@@ -22,8 +22,9 @@ would otherwise have to re-argue in review.
 
 ## Stack
 
-**xUnit**, one project covering all three artifact classes. The suite is fast — the whole
-run stays well under a second — and it should stay that way.
+**xUnit**, one project covering all three artifact classes. The full run must finish in 120
+seconds or less ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)),
+and the speed rules below are how a test keeps it there.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
 
@@ -87,6 +88,27 @@ Tests run concurrently across classes. Never introduce hidden cross-test couplin
 - **Lock-free `AsyncLocal` execution context scopes**: CLI console redirection and durability overrides isolate per async context rather than using process-wide locks or mutable statics. `ProcessConsoleCapture` uses `AsyncLocalTextWriter` and `AsyncLocalAnsiConsole` so parallel CLI test classes never contend on a static lock or bleed console output. `SquadTransaction.UseSyncToDiskScope(bool)` uses an `AsyncLocal<bool?>` scope routing store flushes through `SquadTransaction.SyncToDisk` so durability tests never leak macOS APFS `F_FULLFSYNC` barriers onto concurrent test threads.
 - **Serial collections policy**: xUnit `DisableParallelization = true` (e.g. `ScaleAcceptanceCollection`) is reserved strictly for benchmarks monitoring thread allocations (`GC.GetAllocatedBytesForCurrentThread()`) or hard execution-time ceilings across high-volume iterations (such as 10,000 DocGraph claims). Never use collection serialization to mask shared static mutable state.
 - **Parallel repository-wide scans**: Whole-repository assertion sweeps (such as `UpstreamSeveranceTests`) partition tracked file sets across all available cores using `Parallel.ForEach` with thread-safe collectors (`ConcurrentBag<string>`) to avoid multi-second single-threaded disk I/O bottlenecks.
+
+## The suite stays inside its time budget
+
+Each rule is one sentence a reviewer can check, and the measurement after it is why the rule
+exists. The suite has become slow more than once; these are the causes that made it slow.
+
+- **A class that does heavy work stays small, split by theme** — the runner parallelises across
+  test classes and never inside one, so a class of 513 tests summed to 390 s and pinned the whole
+  run.
+- **Expensive setup — an installed deployment, a git repository, the agent corpus — is built once
+  per class and copied per test, never rebuilt per test** — a real install costs 150–250 ms and a
+  one-target deployment commit about 1.5 s.
+- **A test works only inside the test temp root the test project provides, in its own folder, and
+  removes it** — `TempDirectory` creates `kw-export-<guid>` under that root and deletes it on
+  dispose, and no test writes directly in the system temp folder or lists a shared folder.
+- **No sleeps and no fixed waits — wait on the condition — and no real process unless the test is
+  about that process, with one end-to-end test per behaviour.**
+- **Product code under test must not list a whole directory to find one entry** — a path check
+  that did cost 6.7 ms per call on a temp root of 8,543 entries, and grew as the run added folders.
+- **A single test over one second states why in a comment.**
+- **Whoever adds or changes tests reports the time of the classes they touched.**
 
 ## Release sources and immutable corpus fixtures
 
@@ -326,3 +348,49 @@ When the build used `--artifacts-path <dir>` with `-c Release`, the direct runne
 - **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
 - **Reserve the full suite for the review council and CI**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it on the integrated head in the first full review, and for CI. No dev agent runs it, and a cross-cutting change is no exception. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on), run a targeted set: the classes that reference what changed or, for a change every class depends on, a few representative classes. Name what you did not run; the council and CI cover it.
 - **The failing run is the task's own**: In test-first mode the worker that writes a task's code writes its tests first and runs its task gate with `--red` before implementing, then runs the gate again once the tests pass; the two reports are the proof ([ADR 0076](../../adr/0076-test-first-is-one-worker-per-task.md)). Never stash or revert work to fake a failing run.
+
+The speed rules in [the suite stays inside its time budget](#the-suite-stays-inside-its-time-budget)
+are checked here, in the same order:
+
+- **The classes you touched report their time.** State each one's time from the run in your report.
+- **A class you add or enlarge is small and split by theme**, so it does not hold a large share of
+  the suite's serial time.
+- **Expensive setup is a class fixture the tests copy**, not work each test repeats.
+- **Every test works in its own folder under the test temp root and removes it.**
+- **No sleep, no fixed wait, and no real process the test is not about.**
+- **No test makes product code list a directory to find one entry.**
+- **A test over one second gives its reason in a comment.**
+
+### Where the tests put their files, and the optional RAM disk
+
+Every test writes under one per-process root, `<base>/kw-<checkout-key>/<pid>`, because
+`TestTempRoot` redirects `TMPDIR` for the test process and every child it spawns. On macOS the
+base is the per-user temp directory (`getconf DARWIN_USER_TEMP_DIR`, under `/private/var/folders`),
+the location this machine's endpoint-security software (Microsoft Defender) skips; Linux and the
+rest use `/tmp`, which Defender scans. On 651 tests, `/tmp` took 46.9 s and the macOS user temp
+directory 33.7 s and 34.1 s.
+
+`KW_TEST_TEMP_ROOT=<absolute path>` moves the base while keeping the `kw-<key>/<pid>` shape, so a
+run still cannot see another checkout's or another process's files. A relative path, or one the
+control pipe cannot fit, fails the run instead of silently measuring somewhere else.
+
+**A RAM disk, for a heavy local run.** Guidance, not a script: create the volume, point the root at
+it, run, then eject it. This example is 8 GiB (16,777,216 sectors of 512 bytes):
+
+```bash
+diskutil erasevolume HFS+ KWTestRam "$(hdiutil attach -nomount ram://16777216)"
+export KW_TEST_TEMP_ROOT=/Volumes/KWTestRam
+# ... run the tests ...
+diskutil eject /Volumes/KWTestRam
+```
+
+Measured on 651 tests, a RAM disk is about 26 % faster than `/tmp` and about 7 % faster than the
+default macOS user temp directory. Ejecting discards everything on it, so it needs no cleanup.
+
+**Why the path must stay short.** The test runner puts its control pipe at
+`$TMPDIR/MONITORTOHOST_<32 hex>`, and a Unix domain socket path is limited to 103 bytes, so a root
+that still carries that pipe may be at most 56 characters. The default macOS root is longer, so
+`TestTempRoot` moves the pipe to `/tmp` through `TESTINGPLATFORM_PIPE_DIRECTORY`. An override is
+held to the same limit and fails with the budget in its message unless you set
+`TESTINGPLATFORM_PIPE_DIRECTORY` yourself; `/Volumes/KWTestRam/kw-<16 hex>/<pid>` is about 44
+characters and fits.

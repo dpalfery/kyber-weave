@@ -96,6 +96,10 @@ the slowest test classes and what else was running on the machine, if known. The
 split the slowest classes, re-measure, until it is at or under 120 seconds. Never raise the budget, skip or disable
 tests, or report the task complete while it is over; a change that makes the suite slower than the budget is not mergeable.
 
+What keeps the run there is written down, in [the test standard's speed rules](docs/standards/test/README.md#the-suite-stays-inside-its-time-budget);
+read them before you write a test. Do not add a guard script or a timing check for them: the rules are guidance an
+author reads, and the classes themselves stay performant.
+
 `review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
 so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
 Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `ts-test`, `cargo-test`)
