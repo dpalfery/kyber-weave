@@ -45,7 +45,12 @@ public sealed class ModelProfileOptionalTests
         foreach ((string harness, string value) in devHard.HarnessModels)
         {
             // The step up from dev-medium must change the model, so no row may match `general`'s.
-            Assert.NotEqual(general.HarnessModels[harness], value);
+            // A harness `general` does not name would make the step-up uncheckable there, so say
+            // that in the failure instead of letting the dictionary indexer throw.
+            Assert.True(
+                general.HarnessModels.TryGetValue(harness, out string? generalValue),
+                $"general has no '{harness}' row to compare with dev-hard's '{value}'.");
+            Assert.NotEqual(generalValue, value);
         }
     }
 
