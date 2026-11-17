@@ -9,14 +9,73 @@ namespace KyberWeave.Tests;
 public sealed class TestTempRootTests
 {
     private const string Key = "0123456789abcdef";
+    private const string DarwinUserTemp = "/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn/T";
 
-    /// <summary>Unset means today's behaviour: a short per-checkout, per-process root under /tmp.</summary>
+    /// <summary>macOS defaults to the per-user temp directory an endpoint scanner skips.</summary>
     [Fact]
-    public void NoOverrideKeepsTheDefaultRootUnderTheSystemTempDirectory()
+    public void DefaultBasePathOnMacOSIsTheUserTempDirectory()
     {
-        string root = TestTempRoot.ResolveRoot(null, Key, 4242);
+        Assert.Equal(
+            DarwinUserTemp,
+            TestTempRoot.DefaultBasePath(isMacOS: true, DarwinUserTemp + "/"));
+    }
 
-        Assert.Equal("/tmp/kw-0123456789abcdef/4242", root);
+    /// <summary>Every other Unix keeps the short system temp directory.</summary>
+    [Fact]
+    public void DefaultBasePathOffMacOSIsTheSystemTempDirectory()
+    {
+        Assert.Equal("/tmp", TestTempRoot.DefaultBasePath(isMacOS: false, DarwinUserTemp));
+    }
+
+    /// <summary>The macOS root is the same per-checkout, per-process shape under that base.</summary>
+    [Fact]
+    public void NoOverridePutsTheRootUnderTheMacUserTempDirectory()
+    {
+        string root = TestTempRoot.ResolveRoot(
+            null,
+            Key,
+            4242,
+            socketBudgetApplies: false,
+            defaultBasePath: DarwinUserTemp);
+
+        Assert.Equal($"{DarwinUserTemp}/kw-{Key}/4242", root);
+    }
+
+    /// <summary>Off macOS the unset override keeps today's behaviour: a short root under /tmp.</summary>
+    [Fact]
+    public void NoOverrideKeepsTheRootUnderTheSystemTempDirectoryOffMacOS()
+    {
+        string root = TestTempRoot.ResolveRoot(
+            null,
+            Key,
+            4242,
+            defaultBasePath: TestTempRoot.DefaultBasePath(isMacOS: false, DarwinUserTemp));
+
+        Assert.Equal($"/tmp/kw-{Key}/4242", root);
+    }
+
+    /// <summary>
+    ///     The per-user temp directory cannot carry the platform's control pipe, which is why the
+    ///     redirect moves the pipe to the short directory.
+    /// </summary>
+    [Fact]
+    public void TheMacRootIsTooLongForTheControlPipeSoThePipeMovesToTheShortDirectory()
+    {
+        string root = TestTempRoot.ResolveRoot(
+            null,
+            Key,
+            4242,
+            socketBudgetApplies: false,
+            defaultBasePath: DarwinUserTemp);
+
+        Assert.True(root.Length > TestTempRoot.MaxRootLength);
+        Assert.Equal("/tmp", TestTempRoot.ShortPipeDirectory);
+
+        int pipePathLength =
+            TestTempRoot.ShortPipeDirectory.Length + 1 + TestTempRoot.PipeNameLength;
+        Assert.True(pipePathLength <= TestTempRoot.UnixSocketPathLimit);
+        Assert.Equal(103, TestTempRoot.UnixSocketPathLimit);
+        Assert.Equal(56, TestTempRoot.MaxRootLength);
     }
 
     /// <summary>
@@ -47,10 +106,8 @@ public sealed class TestTempRootTests
     [Fact]
     public void AnOverrideThatCannotCarryTheControlPipeIsRefused()
     {
-        const string darwinUserTemp = "/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn/T";
-
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
-            () => TestTempRoot.ResolveRoot(darwinUserTemp, Key, 4242));
+            () => TestTempRoot.ResolveRoot(DarwinUserTemp, Key, 4242));
 
         Assert.Contains(TestTempRoot.PipeDirectoryVariable, exception.Message, StringComparison.Ordinal);
     }
@@ -62,11 +119,13 @@ public sealed class TestTempRootTests
     [Fact]
     public void ALongUnscannedTempDirectoryIsUsableWhenThePipeLivesElsewhere()
     {
-        const string darwinUserTemp = "/var/folders/gg/jnm7dkgs7w1dhkb3j8wm4gg00000gn/T";
+        string root = TestTempRoot.ResolveRoot(
+            DarwinUserTemp,
+            Key,
+            4242,
+            socketBudgetApplies: false);
 
-        string root = TestTempRoot.ResolveRoot(darwinUserTemp, Key, 4242, socketBudgetApplies: false);
-
-        Assert.Equal($"{darwinUserTemp}/kw-0123456789abcdef/4242", root);
+        Assert.Equal($"{DarwinUserTemp}/kw-0123456789abcdef/4242", root);
     }
 
     /// <summary>A relative path would land the root wherever the test happens to run from.</summary>
@@ -94,5 +153,65 @@ public sealed class TestTempRootTests
 
         Assert.Contains(TestTempRoot.OverrideVariable, exception.Message, StringComparison.Ordinal);
         Assert.Contains(TestTempRoot.PipeDirectoryVariable, exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    ///     The running process actually moved its temp directory to the per-checkout root; this is
+    ///     what proves the module initializer ran, not just that the pure rule is right.
+    /// </summary>
+    [Fact]
+    public void TheRunningProcessTempDirectoryIsItsOwnRoot()
+    {
+        string tmpdir = Environment.GetEnvironmentVariable("TMPDIR")!;
+
+        Assert.EndsWith(
+            $"/kw-{TestTempRoot.CheckoutKey()}/{Environment.ProcessId}",
+            tmpdir,
+            StringComparison.Ordinal);
+
+        if (OperatingSystem.IsMacOS() &&
+            string.IsNullOrEmpty(Environment.GetEnvironmentVariable(TestTempRoot.OverrideVariable)))
+        {
+            Assert.StartsWith("/var/folders/", tmpdir, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    ///     A killed run leaves its PID folder behind; the next run removes only those folders
+    ///     whose process is gone, and never its own or a concurrent run's.
+    /// </summary>
+    [Fact]
+    public void DeadSiblingFoldersAreRemovedAndLiveOnesAreKept()
+    {
+        using TempDirectory temp = new();
+        string parent = Path.Combine(temp.Path, "kw-" + Key);
+        string live = Path.Combine(parent, "111");
+        string dead = Path.Combine(parent, "222");
+        string own = Path.Combine(parent, "999");
+        string notAProcess = Path.Combine(parent, "notes");
+
+        Directory.CreateDirectory(live);
+        Directory.CreateDirectory(dead);
+        Directory.CreateDirectory(own);
+        Directory.CreateDirectory(notAProcess);
+
+        TestTempRoot.RemoveDeadSiblings(parent, ownProcessId: 999, processId => processId == 111);
+
+        Assert.True(Directory.Exists(live));
+        Assert.False(Directory.Exists(dead));
+        Assert.True(Directory.Exists(own));
+        Assert.True(Directory.Exists(notAProcess));
+    }
+
+    /// <summary>Cleanup runs at assembly load, before any test creates the parent: no parent is fine.</summary>
+    [Fact]
+    public void DeadSiblingCleanupAcceptsAMissingParent()
+    {
+        using TempDirectory temp = new();
+
+        TestTempRoot.RemoveDeadSiblings(
+            Path.Combine(temp.Path, "kw-" + Key),
+            ownProcessId: 999,
+            _ => true);
     }
 }

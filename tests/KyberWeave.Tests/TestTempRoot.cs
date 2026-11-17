@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -15,12 +17,14 @@ namespace KyberWeave.Tests;
 /// directory is shared with every other tool on the machine and was measured at ~119k entries,
 /// which made the Squad and Utilities classes several times slower. A per-checkout root is
 /// small by construction and keeps concurrent worktrees from listing each other's leftovers.
-/// The root must stay short: Microsoft.Testing.Platform creates a named pipe at
-/// <c>$TMPDIR/&lt;32 hex&gt;</c> and a Unix domain socket path is limited to 103 bytes, so a root
-/// inside a deep checkout (every AO worktree) crashes <c>dotnet test</c> before any test runs.
-/// The redirect runs when the test assembly loads, which is before the pipe is created in the
-/// <c>dotnet test</c> flow (the pipe path, and so this length limit, follows <c>TMPDIR</c>).
-/// Windows is left alone: it has no <c>TMPDIR</c> and does not canonicalise this way.
+/// <para>
+/// On macOS the default root lives under the per-user temp directory (<c>getconf
+/// DARWIN_USER_TEMP_DIR</c>, under <c>/private/var/folders</c>), the location the owner chose
+/// because this machine's endpoint-security software skips it. That path is longer than a Unix
+/// domain socket can carry, so the platform's control pipe is moved to
+/// <see cref="ShortPipeDirectory" />, whose path is short enough for the 103-byte socket limit.
+/// Linux keeps <c>/tmp</c>; Windows has no <c>TMPDIR</c> and is left alone.
+/// </para>
 /// <para>
 /// <c>KW_TEST_TEMP_ROOT</c> moves the root under an absolute path the caller names, which is how
 /// a measurement puts the suite on a filesystem an endpoint-security scanner does not read or on
@@ -31,15 +35,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 internal static class TestTempRoot
 {
-    /// <summary>The environment variable that moves the root; unset means <c>/tmp</c>.</summary>
+    /// <summary>The environment variable that moves the root; unset means the platform default.</summary>
     internal const string OverrideVariable = "KW_TEST_TEMP_ROOT";
-
-    /// <summary>
-    ///     The longest root a Unix domain socket path can carry the platform's pipe name under:
-    ///     103 bytes, minus the separator and the 46-character <c>MONITORTOHOST_&lt;32 hex&gt;</c>
-    ///     name Microsoft.Testing.Platform creates.
-    /// </summary>
-    internal const int MaxRootLength = 56;
 
     /// <summary>
     ///     The variable Microsoft.Testing.Platform reads to place its control pipe outside the test
@@ -47,8 +44,28 @@ internal static class TestTempRoot
     /// </summary>
     internal const string PipeDirectoryVariable = "TESTINGPLATFORM_PIPE_DIRECTORY";
 
+    /// <summary>
+    ///     The short directory the control pipe moves to when the test root cannot carry it. The
+    ///     pipe name plus this directory is far below the <see cref="UnixSocketPathLimit" />.
+    /// </summary>
+    internal const string ShortPipeDirectory = "/tmp";
+
+    /// <summary>The longest path a Unix domain socket can name.</summary>
+    internal const int UnixSocketPathLimit = 103;
+
+    /// <summary>The length of <c>MONITORTOHOST_&lt;32 hex&gt;</c>, the platform's pipe name.</summary>
+    internal const int PipeNameLength = 46;
+
+    /// <summary>
+    ///     The longest root a Unix domain socket path can carry the platform's pipe name under:
+    ///     the <see cref="UnixSocketPathLimit" />, minus the separator and the
+    ///     <see cref="PipeNameLength" />-character <c>MONITORTOHOST_&lt;32 hex&gt;</c> name.
+    /// </summary>
+    internal const int MaxRootLength = UnixSocketPathLimit - 1 - PipeNameLength;
+
     private const int DefaultKeyLength = 16;
     private const int ShortKeyLength = 8;
+    private const int DarwinUserTempDirectoryName = 65537;
 
     [ModuleInitializer]
     internal static void RedirectTemp()
@@ -58,23 +75,39 @@ internal static class TestTempRoot
             return;
         }
 
+        string? overridePath = Environment.GetEnvironmentVariable(OverrideVariable);
+        bool defaultMacRoot = OperatingSystem.IsMacOS() && string.IsNullOrWhiteSpace(overridePath);
+
+        // The macOS per-user temp directory is where the files should go, but it is longer than
+        // the socket budget. Move the pipe now, before the platform reads its path.
+        if (defaultMacRoot &&
+            string.IsNullOrEmpty(Environment.GetEnvironmentVariable(PipeDirectoryVariable)))
+        {
+            Environment.SetEnvironmentVariable(PipeDirectoryVariable, ShortPipeDirectory);
+        }
+
+        bool pipeConfigured =
+            !string.IsNullOrEmpty(Environment.GetEnvironmentVariable(PipeDirectoryVariable));
+        string defaultBasePath = DefaultBasePath(
+            OperatingSystem.IsMacOS(),
+            OperatingSystem.IsMacOS() ? MacUserTempDirectory() : "/tmp");
+
         string root = ResolveRoot(
-            Environment.GetEnvironmentVariable(OverrideVariable),
+            overridePath,
             CheckoutKey(),
             Environment.ProcessId,
-            socketBudgetApplies: string.IsNullOrEmpty(
-                Environment.GetEnvironmentVariable(PipeDirectoryVariable)));
+            socketBudgetApplies: !pipeConfigured,
+            defaultBasePath);
+
+        // A run that was killed (kill -9 or a timeout) leaves its per-process folder behind.
+        string? parent = Path.GetDirectoryName(root);
+        if (parent is not null)
+        {
+            RemoveDeadSiblings(parent, Environment.ProcessId, IsProcessAlive);
+        }
 
         // A recycled PID may find the previous run's leftovers (kill -9 skips the exit cleanup).
-        try
-        {
-            Directory.Delete(root, recursive: true);
-        }
-        catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
-        {
-            // Nothing to clear, or a leftover we cannot remove: leave it. This runs in a module
-            // initializer, where a throw would fail every test before any of them start.
-        }
+        TryDeleteDirectory(root);
 
         Directory.CreateDirectory(
             root,
@@ -83,17 +116,10 @@ internal static class TestTempRoot
 
         AppDomain.CurrentDomain.ProcessExit += (_, _) =>
         {
-            try
+            TryDeleteDirectory(root);
+            if (parent is not null)
             {
-                Directory.Delete(root, recursive: true);
-            }
-            catch (IOException)
-            {
-                // Best effort: a leftover under /tmp is small and cleared by the OS.
-            }
-            catch (UnauthorizedAccessException)
-            {
-                // Same: never fail a finished test run over cleanup.
+                TryDeleteEmptyDirectory(parent);
             }
         };
     }
@@ -107,8 +133,25 @@ internal static class TestTempRoot
     }
 
     /// <summary>
-    /// The temp root this process should use: <c>/tmp/kw-&lt;key&gt;/&lt;pid&gt;</c> by default,
-    /// or the same shape under <c>KW_TEST_TEMP_ROOT</c> when it is set.
+    ///     The base directory the root sits under when no override is set: the per-user temp
+    ///     directory on macOS, and <c>/tmp</c> everywhere else.
+    /// </summary>
+    /// <param name="isMacOS">Whether the current platform is macOS.</param>
+    /// <param name="darwinUserTempDirectory">
+    ///     What <c>getconf DARWIN_USER_TEMP_DIR</c> returned; ignored off macOS.
+    /// </param>
+    /// <returns>An absolute base path without a trailing separator.</returns>
+    internal static string DefaultBasePath(bool isMacOS, string darwinUserTempDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(darwinUserTempDirectory);
+        return isMacOS
+            ? Path.TrimEndingDirectorySeparator(darwinUserTempDirectory)
+            : "/tmp";
+    }
+
+    /// <summary>
+    /// The temp root this process should use: <c>&lt;base&gt;/kw-&lt;key&gt;/&lt;pid&gt;</c>,
+    /// where the base is the platform default, <c>KW_TEST_TEMP_ROOT</c> when it is set.
     /// </summary>
     /// <param name="overridePath">The configured override, or null when it is unset.</param>
     /// <param name="checkoutKey">The checkout's hex key, as returned by <see cref="CheckoutKey" />.</param>
@@ -116,6 +159,9 @@ internal static class TestTempRoot
     /// <param name="socketBudgetApplies">
     ///     Whether the platform's control pipe still lives under this root. When it does not, the
     ///     socket path limit no longer constrains the root's length.
+    /// </param>
+    /// <param name="defaultBasePath">
+    ///     The base to use when no override is set. Null or blank means <c>/tmp</c>.
     /// </param>
     /// <returns>An absolute path inside the length budget.</returns>
     /// <exception cref="InvalidOperationException">
@@ -125,7 +171,8 @@ internal static class TestTempRoot
         string? overridePath,
         string checkoutKey,
         int processId,
-        bool socketBudgetApplies = true)
+        bool socketBudgetApplies = true,
+        string? defaultBasePath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(checkoutKey);
         string pid = processId.ToString(CultureInfo.InvariantCulture);
@@ -141,6 +188,10 @@ internal static class TestTempRoot
 
             basePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(overridePath));
         }
+        else if (!string.IsNullOrWhiteSpace(defaultBasePath))
+        {
+            basePath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(defaultBasePath));
+        }
 
         foreach (int keyLength in new[] { DefaultKeyLength, ShortKeyLength })
         {
@@ -153,8 +204,115 @@ internal static class TestTempRoot
 
         throw new InvalidOperationException(
             $"{OverrideVariable}='{overridePath}' leaves no temp root under {MaxRootLength} characters: " +
-            $"a Unix socket path must carry the platform's pipe name under 103 bytes. Set " +
+            $"a Unix socket path must carry the platform's pipe name under {UnixSocketPathLimit} bytes. Set " +
             $"{PipeDirectoryVariable} to move the pipe out of the temp root, or choose a shorter path " +
             $"(the base must be at most {MaxRootLength - "/kw-".Length - ShortKeyLength - 1 - pid.Length} characters).");
     }
+
+    /// <summary>
+    ///     Deletes the per-process folders under <paramref name="parentDirectory" /> whose process
+    ///     is gone, so a killed run cannot make the parent grow from run to run.
+    /// </summary>
+    /// <param name="parentDirectory">The checkout's <c>kw-&lt;key&gt;</c> directory.</param>
+    /// <param name="ownProcessId">This process's folder, which is left alone.</param>
+    /// <param name="isProcessAlive">Answers whether a PID still names a running process.</param>
+    internal static void RemoveDeadSiblings(
+        string parentDirectory,
+        int ownProcessId,
+        Func<int, bool> isProcessAlive)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(parentDirectory);
+        ArgumentNullException.ThrowIfNull(isProcessAlive);
+
+        if (!Directory.Exists(parentDirectory))
+        {
+            return;
+        }
+
+        foreach (string sibling in Directory.EnumerateDirectories(parentDirectory))
+        {
+            if (!int.TryParse(
+                    Path.GetFileName(sibling),
+                    NumberStyles.None,
+                    CultureInfo.InvariantCulture,
+                    out int processId))
+            {
+                continue;
+            }
+
+            if (processId == ownProcessId || isProcessAlive(processId))
+            {
+                continue;
+            }
+
+            TryDeleteDirectory(sibling);
+        }
+    }
+
+    private static bool IsProcessAlive(int processId)
+    {
+        try
+        {
+            using Process process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static string MacUserTempDirectory()
+    {
+        nuint length = Confstr(DarwinUserTempDirectoryName, null, 0);
+        if (length > 0 && length <= 4096)
+        {
+            byte[] buffer = new byte[(int)length];
+            if (Confstr(DarwinUserTempDirectoryName, buffer, length) == length)
+            {
+                string path = Encoding.UTF8.GetString(buffer, 0, (int)length - 1);
+                if (Path.IsPathFullyQualified(path))
+                {
+                    return Path.TrimEndingDirectorySeparator(path);
+                }
+            }
+        }
+
+        string? tmpdir = Environment.GetEnvironmentVariable("TMPDIR");
+        return !string.IsNullOrWhiteSpace(tmpdir) && Path.IsPathFullyQualified(tmpdir)
+            ? Path.TrimEndingDirectorySeparator(tmpdir)
+            : "/tmp";
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
+        {
+            // Nothing to clear, or a leftover we cannot remove: leave it. This runs in a module
+            // initializer, where a throw would fail every test before any of them start.
+        }
+    }
+
+    private static void TryDeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            Directory.Delete(path, recursive: false);
+        }
+        catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
+        {
+            // A sibling run still has its folder here, or the directory is already gone.
+        }
+    }
+
+    // The source-generated equivalent needs AllowUnsafeBlocks for one call; plain interop does not.
+#pragma warning disable SYSLIB1054
+    [DllImport("libSystem.dylib", EntryPoint = "confstr")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    private static extern nuint Confstr(int name, byte[]? buffer, nuint length);
+#pragma warning restore SYSLIB1054
 }
