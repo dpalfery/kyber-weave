@@ -86,7 +86,7 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `tauri-dev` | Keep secrets, tokens and credentials in the Rust core, never in frontend-reachable code. | `tauri/tauri.standards.md` | Security and data handling | Moved |
 | `tauri-dev` | Keep `tauri` and plugin crates on the pinned versions and never widen the CSP to make something load. | `tauri/tauri.standards.md` | Security and data handling | Moved |
 | `tauri-dev` | Register every command in a single `tauri::generate_handler!` call; a second `invoke_handler` silently wins. | `tauri/tauri.standards.md` | Coding standards | Moved |
-| `tauri-dev` | Commands in `lib.rs` are not `pub`; commands in separate modules are `pub`; command names are unique across modules. | `tauri/tauri.standards.md` | Naming and layout | Moved |
+| `tauri-dev` | Commands in `lib.rs` are not `pub`; commands in separate modules are `pub`; command names are unique across modules. | `tauri/tauri.standards.md` | Coding standards | Moved |
 | `tauri-dev` | Arguments and returns implement `serde::Deserialize`/`Serialize`; arguments arrive camelCase and use `rename_all = "snake_case"` when the JS side differs. | `tauri/tauri.standards.md` | Coding standards | Moved |
 | `tauri-dev` | A fallible command returns `Result<T, E>` with `E: serde::Serialize`. | `tauri/tauri.standards.md` | Coding standards | Moved |
 | `tauri-dev` | Prefer async commands for I/O; do not take borrowed arguments in an async command; never block the async runtime. | `tauri/tauri.standards.md` | Coding standards | Moved |
