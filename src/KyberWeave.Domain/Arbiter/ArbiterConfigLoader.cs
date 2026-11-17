@@ -695,21 +695,18 @@ public static class ArbiterConfigLoader
                         "Remove the earlier declaration."));
                 }
 
-                foreach (ArbiterRule rule in entryRules)
-                {
-                    foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile([rule], knownRules, path))
-                    {
-                        if (diagnostic.Severity != Severity.Error)
-                            continue;
-
-                        collected.Add(diagnostic);
-                        return false;
-                    }
-                }
-
                 // Replace in place, so a repeated id takes the position of its first declaration and the last
                 // declaration's content, exactly as a later file overrides an earlier one.
                 ReplaceRules(converted, entryRules);
+            }
+
+            foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile(converted, knownRules, path))
+            {
+                if (diagnostic.Severity != Severity.Error)
+                    continue;
+
+                collected.Add(diagnostic);
+                return false;
             }
 
             result = new FolderRulesDocument(

@@ -294,6 +294,35 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     }
 
     [Fact]
+    public void ARuleMayReadTheAnswerOfAnotherNewRuleInTheSameFile()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: host-answer-001
+                trigger: delegate
+                question: Did the first rule answer yes?
+                answers: [yes, no]
+                effects: { yes: allow, no: allow }
+              - id: host-answer-002
+                trigger: delegate
+                question: Does the second rule apply?
+                answers: [yes, no]
+                ask:
+                  type: choice
+                  state: { dispatch: delegation.head }
+                  when: host-answer-001=yes
+                effects: { yes: allow, no: allow }
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Assert.Empty(findings);
+        Assert.Contains(rules, rule => rule.Id == "host-answer-001");
+        Assert.Contains(rules, rule => rule.Id == "host-answer-002");
+    }
+
+    [Fact]
     public void AParentsRulesLoadBeforeItsChildsEvenWhenTheHostListsOnlyTheChild()
     {
         WriteStandard("typescript", buildsOn: null);
