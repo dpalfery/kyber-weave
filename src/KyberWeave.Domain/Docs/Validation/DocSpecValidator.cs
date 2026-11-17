@@ -585,8 +585,8 @@ public sealed class DocSpecValidator
     /// </summary>
     private void ValidateBuildsOn(DocumentSet set, DiagnosticReport report)
     {
-        Dictionary<string, string> declaredParents = new(StringComparer.Ordinal);
-        Dictionary<string, DocumentModel> owners = new(StringComparer.Ordinal);
+        List<(string Technology, string Parent, DocumentModel Doc)> declared = [];
+        Dictionary<string, string> parentsByTechnology = new(StringComparer.Ordinal);
 
         foreach (DocumentModel doc in set.Documents)
         {
@@ -596,14 +596,15 @@ public sealed class DocSpecValidator
             string? technology = doc.Frontmatter.Technology?.Trim();
             if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(technology)) continue;
 
-            declaredParents[technology] = parent;
-            owners[technology] = doc;
+            // Every document is checked on its own: two standards that name one technology are
+            // two claims about its parent, and keeping only the last would drop the first one's
+            // finding. The map exists only for the one-level chain check below.
+            declared.Add((technology, parent, doc));
+            parentsByTechnology.TryAdd(technology, parent);
         }
 
-        foreach ((string technology, string parent) in declaredParents)
+        foreach ((string technology, string parent, DocumentModel doc) in declared)
         {
-            DocumentModel doc = owners[technology];
-
             if (string.Equals(parent, technology, StringComparison.Ordinal))
             {
                 report.Add(new Diagnostic(
@@ -626,7 +627,7 @@ public sealed class DocSpecValidator
                 continue;
             }
 
-            if (declaredParents.TryGetValue(parent, out string? grandParent))
+            if (parentsByTechnology.TryGetValue(parent, out string? grandParent))
             {
                 report.Add(new Diagnostic(
                     InvalidBuildsOn, Severity.Error,

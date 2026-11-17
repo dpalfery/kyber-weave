@@ -117,6 +117,26 @@ public class StandardsBuildsOnTests
             && i.Message.Contains("typescript", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Two standards naming one technology are two claims about its parent. The second one must
+    /// not hide the first: each is checked, so an undeclared parent is reported wherever it sits.
+    /// </summary>
+    [Fact]
+    public void TwoStandardsThatNameOneTechnologyAreEachChecked()
+    {
+        using DocFixture fixture = Folder(new DocFixture().WithCatalog(), "react", "typescript")
+            .Write(
+                "6-Docs/standards/react/react-extra.standards.md",
+                Standard("react", "javascript").Replace(
+                    "id: standards/react", "id: standards/react/extra", StringComparison.Ordinal));
+
+        DiagnosticReport report = fixture.Validate(Declared);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.InvalidBuildsOn
+            && i.Message.Contains("javascript", StringComparison.Ordinal));
+    }
+
     [Fact]
     public void BuildsOnOutsideAStandardIsAnError()
     {
