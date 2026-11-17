@@ -921,7 +921,9 @@ harness in that state, and its row records the shape the check will use.
 | Antigravity | file until the check passes | `overwrite` replaces `toolCall.args` by a **shallow top-level merge**, so the rewrite must resend the whole `Subagents` array, one element per dispatch. `decision` is required; the hook returns `decision: "ask"` so the user's approval prompt still applies, and never `auto_approve` | Not yet: the harness is not installed in this worktree. The check must show the worker received the replaced `Prompt` and the dispatcher's transcript did not; until then this row stays `file` | A project or global `hooks.json` that is absent or disabled means no hook; the worker runs `docs packet` | [AG-HOOK] |
 | Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied | Shipped header strip | A missing or disabled hook file leaves the worker with the header lines; it runs `docs packet` | [FA-HOOK] |
 | Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call | Shipped header strip | A missing hook file leaves the worker with the header lines; it runs `docs packet` | [DV-HOOK] |
-| Warp, ZCode | file | No hook and no rewrite field | Not applicable | Always the file path; the MCP fallback carries the dispatch | — |
+| ZCode | file until the check passes | `hookSpecificOutput.updatedInput` is a full replacement of the tool input, re-validated against the tool schema | Not yet: project hooks are ignored by the harness and no Kyber-Weave hook is rendered; a user-scope hook also needs `hooks.enabled: true`. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The hook is absent or disabled: the worker runs `docs packet` | [ZC-HOOK], read 2026-11-16 |
+| CommandCode | file until the check passes | `hooks.beforeToolCall` returns `input`, which rewrites the tool input the call executes with; rewrites chain across mods | Not yet: project mods are trust-gated and no Kyber-Weave mod is rendered. The check must show the worker received the replaced prompt and the dispatcher's transcript did not | The mod is absent, disabled or the workspace untrusted: the worker runs `docs packet` | [CM-MOD], read 2026-11-16 |
+| Warp | file | No dispatch hook and no rewrite field in the repository's harness notes | Not applicable | Always the file path; the MCP fallback carries the dispatch | [WP-DOC], checked 2026-11-16 |
 
 ### The user-level Claude hook
 
@@ -1015,6 +1017,9 @@ The [dispatch delivery path](#dispatch-delivery-path) rows cite the same pages, 
 - [FA-HOOK] Factory hooks reference: https://docs.factory.com/reference/hooks-reference
 - [DV-HOOK] Devin lifecycle hooks: https://docs.devin.ai/cli/extensibility/hooks/lifecycle-hooks
 - [DV-LOG] Devin CLI changelog: https://docs.devin.ai/cli/changelog
+- [ZC-HOOK] ZCode hooks, including `PreToolUse.updatedInput`: https://zcode.z.ai/en/docs/hooks
+- [CM-MOD] CommandCode mods, including `hooks.beforeToolCall.input`: https://commandcode.ai/docs/mods
+- [WP-DOC] Warp documentation: https://docs.warp.dev
 
 ### Delivery and caller notes
 

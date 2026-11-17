@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Model;
 
@@ -38,7 +39,9 @@ public static class SquadSourceValidator
 
         foreach (SquadAgent agent in agents)
         {
-            if (!models.Profiles.ContainsKey(agent.ModelProfile))
+            ValidateWorkerRoster(agent);
+            if (!string.IsNullOrWhiteSpace(agent.ModelProfile)
+                && !models.Profiles.ContainsKey(agent.ModelProfile))
             {
                 Throw(
                     $"Agent '{agent.Name}' references unknown model profile '{agent.ModelProfile}'.",
@@ -298,6 +301,24 @@ public static class SquadSourceValidator
             startLine,
             relatedLocations));
         throw new SquadSourceValidationException(report);
+    }
+
+    /// <summary>
+    /// A roster key is optional: an agent that declares none serves both rosters. A declared value
+    /// must be one of the two, and the error names both.
+    /// </summary>
+    private static void ValidateWorkerRoster(SquadAgent agent)
+    {
+        if (string.IsNullOrWhiteSpace(agent.WorkerRoster) || WorkerRosters.IsKnown(agent.WorkerRoster))
+        {
+            return;
+        }
+
+        Throw(
+            $"Agent '{agent.Name}' declares worker-roster '{agent.WorkerRoster}', which is not a roster.",
+            agent.Name,
+            agent.SourcePath,
+            "Use 'technology' or 'tiered', or remove the key; an agent with no key serves both rosters.");
     }
 
     private static void ValidateDuplicateAgents(IReadOnlyList<SquadAgent> agents)

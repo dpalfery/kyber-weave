@@ -43,7 +43,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
         Documentation-impact review and closeout for a completed, plan-backed change.
 
         WORKTREE: /work/demo.worktrees/run
-        PLAN: docs/plans/cards.md (Ready; task file .tasks.json beside it)
+        PLAN: docs/plans/cards.md (Ready; task file .tasks.yml beside it)
 
         Completed tasks (committed on the branch):
         - T1 dal-dev: f43ed15

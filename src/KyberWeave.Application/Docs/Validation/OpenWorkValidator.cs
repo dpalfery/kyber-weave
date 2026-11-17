@@ -41,11 +41,14 @@ public sealed class OpenWorkValidator
 
     private const string FolderIndexName = "README.md";
 
-    // The task file a specification folder carries is `tasks.json`; a plan's is
-    // `<plan>.tasks.json` beside the plan. Both names are left behind the same way.
-    private const string FolderTaskFileName = "tasks.json";
-    private const string PlanTaskFileSuffix = ".tasks.json";
-    private const string JsonSearchPattern = "*.json";
+    // The task file a specification folder carries is `tasks.yml`; a plan's is
+    // `<plan>.tasks.yml` beside the plan. The JSON names an older release wrote are left behind
+    // the same way and are still recognised while they are read.
+    private const string FolderTaskFileName = "tasks.yml";
+    private const string LegacyFolderTaskFileName = "tasks.json";
+    private const string PlanTaskFileSuffix = ".tasks.yml";
+    private const string LegacyPlanTaskFileSuffix = ".tasks.json";
+    private static readonly string[] TaskFileSearchPatterns = ["*.json", "*.yml"];
 
     private static readonly (string Property, string Kind, string ArchiveFolder, DocType[] WorkTypes)[] Inventories =
     [
@@ -142,27 +145,30 @@ public sealed class OpenWorkValidator
             if (!_files.DirectoryExists(docsRoot))
                 continue;
 
-            foreach (string file in _files.EnumerateContainedFiles(docsRoot, JsonSearchPattern))
-            {
-                string name = Path.GetFileName(file);
-                if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)
-                    && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+            foreach (string pattern in TaskFileSearchPatterns)
+                foreach (string file in _files.EnumerateContainedFiles(docsRoot, pattern))
                 {
-                    continue;
+                    string name = Path.GetFileName(file);
+                    if (!name.Equals(FolderTaskFileName, StringComparison.OrdinalIgnoreCase)
+                        && !name.Equals(LegacyFolderTaskFileName, StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(PlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+                        && !name.EndsWith(LegacyPlanTaskFileSuffix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
+                    string relativePath = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
+                    if (!seen.Add(relativePath))
+                        continue;
+
+                    report.Add(new Diagnostic(
+                        LeftoverTaskFile, Severity.Error,
+                        $"Task file '{relativePath}' is left behind. A task file lives only as long as the plan or " +
+                        "specification it was written from, and a merge must not carry one.",
+                        relativePath, relativePath,
+                        "Remove it with `git rm` in the same commit that archives the plan. The archived plan keeps " +
+                        "the decisions, tasks and test contract, so nothing durable is lost."));
                 }
-
-                string relativePath = Path.GetRelativePath(_repoRoot, file).Replace('\\', '/');
-                if (!seen.Add(relativePath))
-                    continue;
-
-                report.Add(new Diagnostic(
-                    LeftoverTaskFile, Severity.Error,
-                    $"Task file '{relativePath}' is left behind. A task file lives only as long as the plan or " +
-                    "specification it was written from, and a merge must not carry one.",
-                    relativePath, relativePath,
-                    "Remove it with `git rm` in the same commit that archives the plan. The archived plan keeps " +
-                    "the decisions, tasks and test contract, so nothing durable is lost."));
-            }
         }
 
         return report;

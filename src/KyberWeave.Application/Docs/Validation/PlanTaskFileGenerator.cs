@@ -94,24 +94,27 @@ public sealed partial class PlanTaskFileGenerator
 
         IReadOnlyList<string> planningDirectories = PlanTaskFileRules.PlanningDirectories(
             _config.ConfigReg.Resolve(_config.Ontology));
-        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report);
+        PlanTaskFile? file = Build(artifact, markdown, planningDirectories, report, _config.WorkerRoster);
         if (file is null)
         {
             return new PlanTaskFileOutcome(report, taskFile, null, null, 0, false);
         }
 
         file = WithAgents(file, taskFile, mode);
-        string json = PlanTaskFileJson.Serialize(file);
+        string yaml = PlanTaskFileFormat.Serialize(file);
         int count = file.Tasks?.Count ?? 0;
         bool wrote = false;
 
         switch (mode)
         {
             case PlanTaskFileMode.Check:
-                CompareWithDisk(artifact, taskFile, file, json, report);
+                CompareWithDisk(artifact, taskFile, file, yaml, report);
                 break;
             case PlanTaskFileMode.Write:
-                wrote = WriteIfChanged(artifact, taskFile, json, report);
+                wrote = WriteIfChanged(artifact, taskFile, yaml, report);
+                break;
+            case PlanTaskFileMode.Convert:
+                wrote = ConvertLegacy(artifact, taskFile, yaml, report);
                 break;
             case PlanTaskFileMode.Preview:
                 break;
@@ -119,7 +122,7 @@ public sealed partial class PlanTaskFileGenerator
                 throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown task file mode.");
         }
 
-        return new PlanTaskFileOutcome(report, taskFile, json, file.ExecutionDigest, count, wrote, file);
+        return new PlanTaskFileOutcome(report, taskFile, yaml, file.ExecutionDigest, count, wrote, file);
     }
 
     /// <summary>
@@ -130,11 +133,13 @@ public sealed partial class PlanTaskFileGenerator
     /// <param name="markdown">The plan, or specification task list, as authored.</param>
     /// <param name="planningDirectories">The folders holding plans, which no prompt may send a worker into.</param>
     /// <param name="report">Receives every gap found; all of them are reported in one run.</param>
+    /// <param name="workerRoster">The roster the file records; defaults to <c>technology</c>.</param>
     public static PlanTaskFile? Build(
         string artifactPath,
         string markdown,
         IReadOnlyList<string> planningDirectories,
-        DiagnosticReport report)
+        DiagnosticReport report,
+        string? workerRoster = null)
     {
         ArgumentNullException.ThrowIfNull(markdown);
         ArgumentNullException.ThrowIfNull(planningDirectories);
@@ -187,10 +192,11 @@ public sealed partial class PlanTaskFileGenerator
         return gaps
             ? null
             : new PlanTaskFile(
-                1,
+                PlanTaskFileRules.SchemaVersion,
                 artifactPath,
                 PlanDocumentParser.ExecutionDigest(parsed),
-                entries);
+                entries,
+                workerRoster ?? WorkerRosters.Technology);
     }
 
     private static PlanTaskFileEntry? BuildEntry(
@@ -560,7 +566,13 @@ public sealed partial class PlanTaskFileGenerator
                 && string.Equals(old.Capabilities, task.Capabilities, StringComparison.Ordinal)
                 && string.Equals(old.Prompt, task.Prompt, StringComparison.Ordinal))
             {
-                kept = task with { Agent = old.Agent, AgentConfidence = old.AgentConfidence };
+                kept = task with
+                {
+                    Agent = old.Agent,
+                    AgentConfidence = old.AgentConfidence,
+                    Difficulty = old.Difficulty ?? task.Difficulty,
+                    DifficultySource = old.DifficultySource ?? task.DifficultySource,
+                };
             }
 
             entries.Add(kept);
@@ -578,7 +590,15 @@ public sealed partial class PlanTaskFileGenerator
                     if (entry.Role is null && entry.Agent is null && entry.Id is not null
                         && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice))
                     {
-                        entries[index] = entry with { Agent = choice.Agent, AgentConfidence = choice.Confidence };
+                        entries[index] = entry with
+                        {
+                            Agent = choice.Agent,
+                            AgentConfidence = choice.Confidence,
+                            Difficulty = choice.Difficulty ?? entry.Difficulty,
+                            DifficultySource = choice.Difficulty is null
+                                ? entry.DifficultySource
+                                : "decision-model",
+                        };
                     }
                 }
             }
@@ -590,19 +610,29 @@ public sealed partial class PlanTaskFileGenerator
     private Dictionary<string, PlanTaskFileEntry> ReadExistingEntries(string taskFile)
     {
         Dictionary<string, PlanTaskFileEntry> found = new(StringComparer.Ordinal);
-        string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
         try
         {
-            if (_files.ReadTextIfPresent(full) is not { } text)
+            string path = taskFile;
+            string? text = ReadTaskFile(path);
+            if (text is null && LegacyTaskFilePath(taskFile) is { } legacy)
+            {
+                path = legacy;
+                text = ReadTaskFile(path);
+            }
+
+            if (text is null)
                 return found;
-            PlanTaskFile? existing = JsonSerializer.Deserialize<PlanTaskFile>(text, PlanTaskFileJson.ReadOptions);
+
+            PlanTaskFile? existing = PlanTaskFileFormat.Deserialize(path, text);
             foreach (PlanTaskFileEntry? entry in existing?.Tasks ?? [])
             {
                 if (entry?.Id is { } id)
                     found[id] = entry;
             }
         }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
+        catch (Exception exception) when (FileFailure.Is(exception)
+            || exception is JsonException
+            || exception is YamlDotNet.Core.YamlException)
         {
             // An unreadable file keeps no picks; the check reports the file itself.
         }
@@ -610,7 +640,32 @@ public sealed partial class PlanTaskFileGenerator
         return found;
     }
 
-    private bool WriteIfChanged(string artifact, string taskFile, string json, DiagnosticReport report)
+    private string? ReadTaskFile(string relativePath)
+    {
+        string full = Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        return _files.ReadTextIfPresent(full);
+    }
+
+    /// <summary>The legacy JSON path beside the YAML task file, or null for a name that is not one.</summary>
+    private static string? LegacyTaskFilePath(string taskFile)
+    {
+        if (taskFile.EndsWith(PlanTaskFileRules.LegacyTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(PlanTaskFileRules.FileNameOf(taskFile), PlanTaskFileRules.LegacySpecTaskFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        if (string.Equals(PlanTaskFileRules.FileNameOf(taskFile), PlanTaskFileRules.SpecTaskFileName, StringComparison.OrdinalIgnoreCase))
+        {
+            return taskFile[..(taskFile.LastIndexOf('/') + 1)] + PlanTaskFileRules.LegacySpecTaskFileName;
+        }
+
+        return taskFile.EndsWith(PlanTaskFileRules.TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+            ? taskFile[..^PlanTaskFileRules.TaskFileSuffix.Length] + PlanTaskFileRules.LegacyTaskFileSuffix
+            : null;
+    }
+
+    private bool WriteIfChanged(string artifact, string taskFile, string yaml, DiagnosticReport report)
     {
         string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
         try
@@ -628,12 +683,13 @@ public sealed partial class PlanTaskFileGenerator
                 return false;
             }
 
-            if (string.Equals(_files.ReadTextIfPresent(full), json, StringComparison.Ordinal))
+            if (string.Equals(_files.ReadTextIfPresent(full), yaml, StringComparison.Ordinal))
             {
                 return false;
             }
 
-            _files.WriteAllText(full, json);
+            _files.WriteAllText(full, yaml);
+            RemoveLegacy(taskFile, report);
             return true;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -648,25 +704,67 @@ public sealed partial class PlanTaskFileGenerator
         }
     }
 
-    private void CompareWithDisk(string artifact, string taskFile, PlanTaskFile expected, string expectedJson, DiagnosticReport report)
+    private void CompareWithDisk(
+        string artifact,
+        string taskFile,
+        PlanTaskFile expected,
+        string expectedYaml,
+        DiagnosticReport report)
     {
-        string full = Path.Combine(_repoRoot, taskFile.Replace('/', Path.DirectorySeparatorChar));
         string fix = TaskFileCommand.Write(artifact);
+        string path = taskFile;
         string? diskText;
         try
         {
-            diskText = _files.ReadTextIfPresent(full);
+            diskText = ReadDisk(path);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
             report.Add(new Diagnostic(
                 PlanTaskFileRules.Malformed,
                 Severity.Error,
-                $"The task file '{taskFile}' cannot be read: {exception.Message}",
-                taskFile,
-                taskFile,
+                $"The task file '{path}' cannot be read: {exception.Message}",
+                path,
+                path,
                 Hint: $"Run {fix}."));
             return;
+        }
+
+        // The JSON form an older release wrote is read in the same place, with one warning that
+        // names the convert command. It is compared for plan, digest and task ids only: it does
+        // not carry the fields this release writes, so field-by-field differences would call a
+        // file that is merely old "wrong".
+        bool legacy = false;
+        if (diskText is null && LegacyTaskFilePath(taskFile) is { } legacyPath)
+        {
+            path = legacyPath;
+            try
+            {
+                diskText = ReadDisk(path);
+            }
+            catch (Exception exception) when (FileFailure.Is(exception))
+            {
+                report.Add(new Diagnostic(
+                    PlanTaskFileRules.Malformed,
+                    Severity.Error,
+                    $"The task file '{path}' cannot be read: {exception.Message}",
+                    path,
+                    path,
+                    Hint: $"Run {fix}."));
+                return;
+            }
+
+            if (diskText is not null)
+            {
+                legacy = true;
+                report.Add(new Diagnostic(
+                    PlanTaskFileRules.LegacyJsonTaskFile,
+                    Severity.Warning,
+                    $"The task file '{path}' is in the JSON form an older release wrote.",
+                    path,
+                    path,
+                    Hint: $"Run {TaskFileCommand.Convert(artifact)} to rewrite it as '{taskFile}'."));
+            }
         }
 
         if (diskText is null)
@@ -681,21 +779,21 @@ public sealed partial class PlanTaskFileGenerator
             return;
         }
 
-        string actualText;
         PlanTaskFile? actual;
         try
         {
-            actualText = diskText;
-            actual = JsonSerializer.Deserialize<PlanTaskFile>(actualText, PlanTaskFileJson.ReadOptions);
+            actual = PlanTaskFileFormat.Deserialize(path, diskText);
         }
-        catch (Exception exception) when (FileFailure.Is(exception) || exception is JsonException)
+        catch (Exception exception) when (FileFailure.Is(exception)
+            || exception is JsonException
+            || exception is YamlDotNet.Core.YamlException)
         {
             report.Add(new Diagnostic(
                 PlanTaskFileRules.Malformed,
                 Severity.Error,
-                $"The task file '{taskFile}' cannot be read: {exception.Message}",
-                taskFile,
-                taskFile,
+                $"The task file '{path}' cannot be read: {exception.Message}",
+                path,
+                path,
                 Hint: $"Run {fix}."));
             return;
         }
@@ -705,34 +803,123 @@ public sealed partial class PlanTaskFileGenerator
             report.Add(new Diagnostic(
                 PlanTaskFileRules.Malformed,
                 Severity.Error,
-                $"The task file '{taskFile}' is empty.",
-                taskFile,
-                taskFile,
+                $"The task file '{path}' is empty.",
+                path,
+                path,
                 Hint: $"Run {fix}."));
             return;
         }
 
         int before = report.Items.Count;
-        if (actual.SchemaVersion != expected.SchemaVersion)
+        if (actual.SchemaVersion != expected.SchemaVersion
+            && actual.SchemaVersion != PlanTaskFileRules.LegacySchemaVersion)
         {
-            Differs(report, taskFile, $"schema-version is {actual.SchemaVersion}, the plan produces {expected.SchemaVersion}", fix, PlanTaskFileRules.Malformed);
+            Differs(report, path, $"schema-version is {actual.SchemaVersion}, the plan produces {expected.SchemaVersion}", fix, PlanTaskFileRules.Malformed);
         }
 
         if (!string.Equals(actual.Plan, expected.Plan, StringComparison.Ordinal))
         {
-            Differs(report, taskFile, $"plan is '{actual.Plan}', expected '{expected.Plan}'", fix);
+            Differs(report, path, $"plan is '{actual.Plan}', expected '{expected.Plan}'", fix);
         }
 
         if (!string.Equals(actual.ExecutionDigest, expected.ExecutionDigest, StringComparison.OrdinalIgnoreCase))
         {
-            Differs(report, taskFile, "execution-digest is stale: the plan moved after the file was written", fix, PlanTaskFileRules.StaleDigest);
+            Differs(report, path, "execution-digest is stale: the plan moved after the file was written", fix, PlanTaskFileRules.StaleDigest);
+        }
+
+        if (legacy)
+        {
+            HashSet<string> have = [.. (actual.Tasks ?? []).Select(entry => entry.Id ?? string.Empty)];
+            foreach (PlanTaskFileEntry want in expected.Tasks ?? [])
+            {
+                if (!have.Contains(want.Id!))
+                {
+                    Differs(report, path, $"task '{want.Id}' is missing", fix);
+                }
+            }
+
+            return;
         }
 
         CompareTasks(actual, expected, taskFile, fix, report);
 
-        if (report.Items.Count == before && !string.Equals(actualText, expectedJson, StringComparison.Ordinal))
+        if (report.Items.Count == before && !string.Equals(diskText, expectedYaml, StringComparison.Ordinal))
         {
             Differs(report, taskFile, "the content is the same but the file is not in the form the command writes (formatting)", fix);
+        }
+    }
+
+    private string? ReadDisk(string relativePath)
+    {
+        string full = Path.Combine(_repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        return _files.ReadTextIfPresent(full);
+    }
+
+    /// <summary>
+    /// Rewrites a legacy JSON task file as YAML. Nothing is written when there is no JSON file to
+    /// convert; the write path removes the JSON once the YAML is in place.
+    /// </summary>
+    private bool ConvertLegacy(string artifact, string taskFile, string yaml, DiagnosticReport report)
+    {
+        if (LegacyTaskFilePath(taskFile) is not { } legacy
+            || ReadDisk(legacy) is null)
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.LegacyJsonTaskFile,
+                Severity.Info,
+                $"There is no JSON task file beside '{artifact}', so there is nothing to convert.",
+                taskFile,
+                taskFile));
+            return false;
+        }
+
+        bool wrote = WriteIfChanged(artifact, taskFile, yaml, report);
+        if (!wrote && ReadDisk(taskFile) is null)
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.Malformed,
+                Severity.Error,
+                $"The JSON task file '{legacy}' exists, but writing '{taskFile}' did not produce it.",
+                taskFile,
+                taskFile));
+        }
+
+        return wrote;
+    }
+
+    /// <summary>Removes the JSON file an older release wrote, once its YAML replacement is on disk.</summary>
+    private void RemoveLegacy(string taskFile, DiagnosticReport report)
+    {
+        if (LegacyTaskFilePath(taskFile) is not { } legacy)
+        {
+            return;
+        }
+
+        string full = Path.Combine(_repoRoot, legacy.Replace('/', Path.DirectorySeparatorChar));
+        if (!_files.FileExists(full))
+        {
+            return;
+        }
+
+        try
+        {
+            _files.DeleteFile(full);
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.LegacyJsonTaskFile,
+                Severity.Info,
+                $"Removed the JSON task file '{legacy}', now that '{taskFile}' holds the same entries.",
+                legacy,
+                legacy));
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.Malformed,
+                Severity.Warning,
+                $"'{legacy}' could not be removed: {exception.Message}",
+                legacy,
+                legacy,
+                Hint: $"Delete it by hand; '{taskFile}' replaces it."));
         }
     }
 

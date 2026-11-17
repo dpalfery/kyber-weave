@@ -225,18 +225,27 @@ public sealed class AntigravityRenderer : SquadHarnessRenderer
             throw new SquadRenderValidationException(
                 $"Agent '{agent.Name}' references undeclared capability profile '{agent.CapabilityProfile}'.");
 
-        // Resolve model tier from the profiles/models.yml antigravity column
-        string modelTier = "inherit";
-        if (modelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? modelProfile))
-            if (modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel))
-                modelTier = antigravityModel;
+        // Resolve model tier from the profiles/models.yml antigravity column. An agent with no
+        // profile (the conductor) gets no model key at all: the harness runs it on the session's
+        // model, and writing "inherit" would name a model the agent never declared.
+        string? modelTier = null;
+        if (!string.IsNullOrWhiteSpace(agent.ModelProfile)
+            && modelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? modelProfile))
+        {
+            modelTier = modelProfile.HarnessModels.TryGetValue("antigravity", out string? antigravityModel)
+                ? antigravityModel
+                : "inherit";
+        }
 
         // Key order: name, description, model, tools, enable_write_tools,
         // enable_subagent_tools, reasoning_effort, mainAgent (conductor only), mcpServers
         YamlMappingNode frontmatter = new();
         frontmatter.Add("name", agent.Name);
         frontmatter.Add("description", context.SingleLine(agent.Description));
-        frontmatter.Add("model", modelTier);
+        if (modelTier is not null)
+        {
+            frontmatter.Add("model", modelTier);
+        }
 
         // Build tools list from capability profile with XOR narrowing
         string[] tools = ResolveToolsForAgent(agent, profile);

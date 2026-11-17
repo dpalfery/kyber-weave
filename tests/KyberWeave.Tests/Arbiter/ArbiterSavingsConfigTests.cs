@@ -18,9 +18,9 @@ public sealed class ArbiterSavingsConfigTests
     [
         "architect",
         "deep-planning",
+        "dev-hard",
         "fast",
         "general",
-        "orchestration",
         "reviewer",
     ];
 

@@ -291,7 +291,7 @@ public sealed class PiRendererContractTests : IDisposable
                 "fast" => "opencode-go/muse-spark-1.3-contributor",
                 "general" => "opencode-go/muse-spark-1.3-contributor",
                 "reviewer" => "opencode-go/kimi-k2.7-code",
-                "orchestration" => "inherit",
+                "" => "inherit",
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
             };
 
@@ -1180,9 +1180,9 @@ public sealed class PiRendererContractTests : IDisposable
     }
 
     /// <summary>
-    /// Plan §8 A1 / D2: The orchestration profile has <c>pi: inherit</c> and must omit
-    /// both <c>model</c> and <c>thinking</c> keys. The conductor (primary agent on orchestration)
-    /// lowers to a skill, so verify the lowered skill file omits these keys.
+    /// The conductor has no model profile and must omit both <c>model</c> and <c>thinking</c>.
+    /// The conductor (the primary agent) lowers to a skill, so verify the lowered skill file
+    /// omits these keys.
     /// </summary>
     [Fact]
     public async Task RenderAsync_Pi_OrchestrationProfileOmitsModelAndThinking()
@@ -1190,7 +1190,7 @@ public sealed class PiRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = source.Agents.First(a =>
             a.Invocation == SquadInvocation.Primary &&
-            string.Equals(a.ModelProfile, "orchestration", StringComparison.Ordinal));
+            string.Equals(a.Name, "conductor", StringComparison.Ordinal));
 
         SquadRenderResult result = await RenderPiAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));

@@ -103,7 +103,7 @@ public sealed class ConductorGuardTests
     [InlineData("/repo/6-Docs/plans/README.md")]
     [InlineData("docs/specs/feature/tasks.md")]
     [InlineData("docs/todo/item.md")]
-    [InlineData("docs/plans/2026-11-12-widget.tasks.json")]
+    [InlineData("docs/plans/2026-11-12-widget.tasks.yml")]
     [InlineData("/home/me/.copilot/skills/delivery-execution/SKILL.md")]
     [InlineData("/home/me/.copilot/skills/delivery-execution/references/gate.md")]
     [InlineData(".github/skills/delivery-execution/SKILL.md")]
@@ -134,7 +134,7 @@ public sealed class ConductorGuardTests
     [InlineData("apply_patch")]
     public void WritingAPlanningFile_IsStillDenied(string tool)
     {
-        Assert.Contains(tool, ReasonFor(Event(tool, new { path = "docs/plans/2026-11-12-widget.tasks.json" })), StringComparison.Ordinal);
+        Assert.Contains(tool, ReasonFor(Event(tool, new { path = "docs/plans/2026-11-12-widget.tasks.yml" })), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -148,7 +148,7 @@ public sealed class ConductorGuardTests
                 Path.Combine(repo, ".kyber-weave", "kyber-weave.yml"),
                 "ontology:\n  docs-root: handbook\nconfig-reg:\n  plan-index: handbook/roadmap/README.md\n");
 
-            Assert.Empty(RunIn(repo, "handbook/roadmap/widget.tasks.json"));
+            Assert.Empty(RunIn(repo, "handbook/roadmap/widget.tasks.yml"));
             Assert.Contains("deny", RunIn(repo, "handbook/guide.md"), StringComparison.Ordinal);
         }
         finally
@@ -363,7 +363,7 @@ public sealed class ConductorGuardTests
         Directory.CreateDirectory(Path.Combine(root, "docs", "plans"));
 
         Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.md")));
-        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.tasks.json")));
+        Assert.Empty(RunIn(repo, Path.Combine(root, "docs", "plans", "2026-11-13-widget.tasks.yml")));
         Assert.NotEmpty(RunIn(repo, Path.Combine(root, "src", "App.cs")));
         Assert.NotEmpty(RunIn(repo, Path.Combine(other, "docs", "plans", "x.md")));
     }

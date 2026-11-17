@@ -55,6 +55,9 @@ internal sealed class KyberWeaveYamlDocument
     /// the setting, not a type-conversion failure.
     /// </summary>
     public string? WorktreeIndexHook { get; set; }
+
+    /// <summary>Raw <c>worker-roster:</c> value; absent means <c>technology</c>.</summary>
+    public string? WorkerRoster { get; set; }
 }
 
 /// <summary>

@@ -298,9 +298,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
         string conductorName = RequireScalar(frontmatter, "name");
         Assert.Equal("conductor", conductorName);
 
-        // Must have model (from antigravity profiles)
-        string model = RequireScalar(frontmatter, "model");
-        Assert.Matches("^(inherit|flash|pro)$", model);
+        // The conductor has no model profile, so no model key is written at all.
+        Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("model")));
 
         // Must have enable_write_tools and enable_subagent_tools
         Assert.True(
@@ -728,7 +727,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
     /// <summary>
     ///     Pins rendered Antigravity models by agent identity so planners and reviewers use
-    ///     Pro while workers and orchestration remain on Flash, independently of models.yml.
+    ///     Pro while workers remain on Flash, independently of models.yml.
     /// </summary>
     [Fact]
     public async Task AntigravityPlanningAndReviewAgentsRunOnProAndOtherAgentsOnFlash()
@@ -751,6 +750,12 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
 
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
+            if (string.IsNullOrEmpty(agent.ModelProfile))
+            {
+                Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("model")));
+                continue;
+            }
+
             string model = RequireScalar(frontmatter, "model");
             string expectedModel = agent.Name is "architect" or "product-owner" or
                 "sql-database-architect" or "bug-crusher-investigator" or "code-reviewer" or
@@ -784,7 +789,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             { "reviewer", "high" },
             { "general", "medium" },
             { "fast", "low" },
-            { "orchestration", "minimal" }
+            { "dev-hard", "high" }
         };
 
         foreach (SquadAgent agent in source.Agents)

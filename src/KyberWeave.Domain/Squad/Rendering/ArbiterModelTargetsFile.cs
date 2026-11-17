@@ -71,6 +71,9 @@ public static class ArbiterModelTargetsFile
             Dictionary<string, string> agentProfiles = new(StringComparer.Ordinal);
             foreach (SquadAgent agent in merged.Agents)
             {
+                // Every agent gets a row. One with no profile records an empty profile and a null
+                // token: it runs on its session's model, and the table says so rather than leaving
+                // the agent out of a table that otherwise names the whole roster.
                 agentProfiles[agent.Name] = agent.ModelProfile;
             }
 

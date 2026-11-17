@@ -23,7 +23,14 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
     /// <summary>The question every pick asks.</summary>
     public const string Question = "Which agent should do this task, judged by the abilities it needs and the files it changes?";
 
+    /// <summary>The difficulty question, asked in the same call as the pick (the shipped <c>KW-ARB-DIFFICULTY-001</c> question).</summary>
+    public const string DifficultyQuestion = "How hard is this task: easy, standard or hard?";
+
+    /// <summary>The answer that maps to <c>medium</c>; the shipped rule spells the middle value <c>standard</c>.</summary>
+    public const string StandardAnswer = "standard";
+
     private const string RulePrefix = "KW-DOC-TASKS-PICK-";
+    private const string DifficultyPrefix = "KW-DOC-TASKS-RATE-";
     private const int MaxCapabilityCharacters = 1200;
 
     private readonly IArbiterProvider _provider;
@@ -92,10 +99,13 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
             .With($"{key}.capabilities", Bounded(task.Capabilities ?? "(not stated)"), ArbiterFactLabel.Derived)
             .With($"{key}.files", string.Join(", ", task.Files ?? []), ArbiterFactLabel.Derived);
         string id = RulePrefix + task.Id;
+        string difficultyId = DifficultyPrefix + task.Id;
         ArbiterStep1BatchResult result;
         try
         {
-            result = await _provider.AskStep1Async([RuleFor(task.Id!, key)], facts).ConfigureAwait(false);
+            // One request per task carries both questions, so the rating costs no second round trip.
+            result = await _provider.AskStep1Async(
+                [RuleFor(task.Id!, key), DifficultyRuleFor(task.Id!, key)], facts).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
@@ -107,8 +117,67 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         double? confidence = result.ScoresByRule is not null && result.ScoresByRule.TryGetValue(id, out ArbiterStep1Score? score)
             ? score.Confidence
             : null;
-        return confidence is { } sure && sure >= ConfidenceFloor ? new PlanTaskAgentChoice(answer, Math.Round(sure, 3)) : null;
+        if (confidence is not { } sure || sure < ConfidenceFloor)
+        {
+            return null;
+        }
+
+        string? difficulty = null;
+        double? difficultyConfidence = null;
+        if (result.AnswersByRule.TryGetValue(difficultyId, out string? rated)
+            && result.ScoresByRule is not null
+            && result.ScoresByRule.TryGetValue(difficultyId, out ArbiterStep1Score? difficultyScore)
+            && difficultyScore.Confidence >= ConfidenceFloor
+            && DifficultyOf(rated) is { } ratedDifficulty)
+        {
+            difficulty = ratedDifficulty;
+            difficultyConfidence = Math.Round(difficultyScore.Confidence!.Value, 3);
+        }
+
+        return new PlanTaskAgentChoice(answer, Math.Round(sure, 3), difficulty, difficultyConfidence);
     }
+
+    /// <summary>
+    /// The difficulty to record for an answer, or null when the answer is not one the difficulty
+    /// question offered. A value that is not a legal difficulty is never recorded: the agent's name
+    /// or a model the question did not list would otherwise be written into the task file as a
+    /// difficulty, and the task-file check would refuse the plan.
+    /// </summary>
+    private static string? DifficultyOf(string? answer) => answer switch
+    {
+        "easy" => "easy",
+        StandardAnswer => "medium",
+        "hard" => "hard",
+        _ => null,
+    };
+
+    /// <summary>The difficulty rule, with the shipped rule's question, answers and criteria, asked beside the pick.</summary>
+    private static ArbiterRule DifficultyRuleFor(string taskId, string key) => new(
+        DifficultyPrefix + taskId,
+        "docs.tasks",
+        DifficultyQuestion,
+        ["easy", StandardAnswer, "hard"],
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["easy"] = RuleEffects.Allow,
+            [StandardAnswer] = RuleEffects.Allow,
+            ["hard"] = RuleEffects.Allow,
+        },
+        Ask: new RuleAsk(
+            "choice",
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["title"] = $"{key}.title",
+                ["capabilities"] = $"{key}.capabilities",
+                ["files"] = $"{key}.files",
+            },
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["easy"] = "A small, local change with one obvious path.",
+                [StandardAnswer] = "A change with several files or a non-obvious path, but no cross-cutting risk.",
+                ["hard"] = "A change that spans layers, alters contracts, or needs careful design.",
+            },
+            ConfidenceAtLeast: ConfidenceFloor));
 
     private ArbiterRule RuleFor(string taskId, string key) => new(
         RulePrefix + taskId,

@@ -57,7 +57,8 @@ public sealed record SquadAgent(
     string InstructionBody,
     string BodyDigest,
     string SourcePath,
-    IReadOnlyList<SquadResource> Resources);
+    IReadOnlyList<SquadResource> Resources,
+    string? WorkerRoster = null);
 
 /// <summary>A canonical skill definition discovered from a <c>SKILL.md</c>.</summary>
 public sealed record SquadSkill(

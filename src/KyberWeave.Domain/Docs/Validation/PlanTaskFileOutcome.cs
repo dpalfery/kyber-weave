@@ -12,7 +12,10 @@ public enum PlanTaskFileMode
     Write,
 
     /// <summary>Derive the file and report every way the one on disk differs; touch nothing.</summary>
-    Check
+    Check,
+
+    /// <summary>Rewrite a legacy JSON task file as YAML in the same place, and remove the JSON file.</summary>
+    Convert
 }
 
 /// <summary>The result of one <c>PlanTaskFileGenerator.Run</c>.</summary>

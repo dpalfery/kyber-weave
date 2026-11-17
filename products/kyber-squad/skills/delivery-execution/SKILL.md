@@ -20,7 +20,7 @@ When dispatching concurrent workers up to `review.max-concurrent-workers`, isola
 
 ## Task file and dispatch
 
-A Ready plan or a Ready specification task artifact carries a task file beside it: `<plan>.tasks.json` under the plans directory, or `<spec-folder>/tasks.json` for a specification. It holds the schema version, the artifact path, the execution digest, and one entry per task — id, the abilities it needs, dependencies, file scope, `session` group and the full prompt (and `role` only when the owner assigned an agent).
+A Ready plan or a Ready specification task artifact carries a task file beside it: `<plan>.tasks.yml` under the plans directory, or `<spec-folder>/tasks.yml` for a specification. It holds the schema version, the artifact path, the execution digest, and one entry per task — id, the abilities it needs, dependencies, file scope, `session` group and the full prompt (and `role` only when the owner assigned an agent).
 
 Before dispatching from it, the conductor validates the task file. A file whose tasks, file scopes or dependencies disagree with the artifact, or one whose execution digest is stale, is refused rather than dispatched from: a stale prompt describes work the artifact no longer asks for, and the run reports that finding instead of starting the task.
 

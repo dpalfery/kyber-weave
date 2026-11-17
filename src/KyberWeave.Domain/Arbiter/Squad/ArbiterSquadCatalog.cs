@@ -10,12 +10,14 @@ namespace KyberWeave.Core.Arbiter;
 /// <param name="DelegatesTo">Agents this agent may delegate to.</param>
 /// <param name="CapabilityProfile">The capability profile name.</param>
 /// <param name="TargetClass">The target class derived from the profile.</param>
+/// <param name="WorkerRoster">The roster the agent declares, or null when it serves both.</param>
 public sealed record ArbiterSquadAgent(
     string Name,
     string Description,
     IReadOnlyList<string> DelegatesTo,
     string CapabilityProfile,
-    string TargetClass);
+    string TargetClass,
+    string? WorkerRoster = null);
 
 /// <summary>One review lens as the Arbiter sees it: its Applicability section.</summary>
 /// <param name="Name">The lens name.</param>
@@ -190,7 +192,8 @@ public sealed class ArbiterSquadCatalog
             parsed.Description ?? string.Empty,
             parsed.DelegatesTo is null ? [] : [.. parsed.DelegatesTo],
             parsed.CapabilityProfile ?? string.Empty,
-            TargetClassFor(parsed.CapabilityProfile ?? string.Empty));
+            TargetClassFor(parsed.CapabilityProfile ?? string.Empty),
+            parsed.WorkerRoster);
     }
 
     /// <summary>The agent frontmatter fields the Arbiter reads. Everything else is ignored.</summary>
@@ -203,5 +206,7 @@ public sealed class ArbiterSquadCatalog
         public string? CapabilityProfile { get; set; }
 
         public List<string>? DelegatesTo { get; set; }
+
+        public string? WorkerRoster { get; set; }
     }
 }

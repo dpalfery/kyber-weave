@@ -523,7 +523,7 @@ public sealed class DevinRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = Assert.Single(source.Agents, a => a.Name == "conductor");
-        Assert.Equal("orchestration", conductor.ModelProfile);
+        Assert.True(string.IsNullOrEmpty(conductor.ModelProfile));
 
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));

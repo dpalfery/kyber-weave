@@ -22,7 +22,7 @@ namespace KyberWeave.Tests;
 public sealed class DocsCloseoutCommandTests
 {
     private const string Plan = "6-Docs/plans/2026-10-20-widget.md";
-    private const string TaskFile = "6-Docs/plans/2026-10-20-widget.tasks.json";
+    private const string TaskFile = "6-Docs/plans/2026-10-20-widget.tasks.yml";
     private const string Archived = "6-Docs/archive/plans/2026-10-20-widget.md";
     private const string PlanIndex = "6-Docs/plans/README.md";
     private const string Inventory = "6-Docs/archive/plans/README.md";

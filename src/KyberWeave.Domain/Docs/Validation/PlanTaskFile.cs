@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace KyberWeave.Core.Docs.Validation;
 
 /// <summary>
-/// The task file beside a plan — <c>&lt;plan&gt;.tasks.json</c> — or beside a specification's
-/// <c>tasks.md</c> as <c>tasks.json</c>, as the architect writes it and <c>docs validate</c> reads it.
+/// The task file beside a plan — <c>&lt;plan&gt;.tasks.yml</c> — or beside a specification's
+/// <c>tasks.md</c> as <c>tasks.yml</c>, as the architect writes it and <c>docs validate</c> reads it.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -26,7 +26,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// silently valid, because the version decides which fields exist.
 /// </param>
 /// <param name="Plan">
-/// The plan this file was written from, repository-relative. For a specification's <c>tasks.json</c>,
+/// The plan this file was written from, repository-relative. For a specification's <c>tasks.yml</c>,
 /// the specification's <c>tasks.md</c> path.
 /// </param>
 /// <param name="ExecutionDigest">
@@ -34,11 +34,16 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <c>KyberWeave.Core.Arbiter.Plans.PlanDocumentParser</c>.
 /// </param>
 /// <param name="Tasks">One entry per plan task, in plan order; null when the file declares none.</param>
+/// <param name="WorkerRoster">
+/// The roster the file was written under, <c>technology</c> or <c>tiered</c>; every later reader takes
+/// the run's roster from here, so a file outlives a configuration change.
+/// </param>
 public sealed record PlanTaskFile(
     [property: JsonPropertyName("schema-version")] int SchemaVersion,
     [property: JsonPropertyName("plan")] string? Plan = null,
     [property: JsonPropertyName("execution-digest")] string? ExecutionDigest = null,
-    [property: JsonPropertyName("tasks")] IReadOnlyList<PlanTaskFileEntry>? Tasks = null);
+    [property: JsonPropertyName("tasks")] IReadOnlyList<PlanTaskFileEntry>? Tasks = null,
+    [property: JsonPropertyName("worker-roster")] string? WorkerRoster = null);
 
 /// <summary>
 /// One task of a <see cref="PlanTaskFile" />: what the conductor needs to dispatch it, and the

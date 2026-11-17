@@ -28,7 +28,7 @@ public static partial class PlanTaskFileRules
     /// <summary>How much of a candidate sidecar is read to see whether it holds the task file schema.</summary>
     internal const int SniffLength = 65536;
 
-    /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.json.new</c>.</summary>
+    /// <summary>A copy of a task file left beside it under another name, such as <c>&lt;plan&gt;.tasks.yml.new</c>.</summary>
     public const string SidecarTaskFile = "KW-DOC-TASKS-007";
 
     /// <summary>A task cites a decision or test contract row the plan does not have, or cites more than its packet can carry. A warning.</summary>
@@ -49,22 +49,54 @@ public static partial class PlanTaskFileRules
     /// <summary>A task lists a path under the run's scratch folder as one of its files, so no task file is written.</summary>
     public const string ScratchPathInFiles = "KW-DOC-TASKS-013";
 
+    /// <summary>
+    /// The next free id in this family: a task file in the JSON form an older release wrote. Warning:
+    /// the file is read, and the convert command is named.
+    /// </summary>
+    public const string LegacyJsonTaskFile = "KW-DOC-TASKS-014";
+
+    /// <summary>Error: a task's <c>Difficulty:</c> value is not <c>easy</c>, <c>medium</c> or <c>hard</c>.</summary>
+    public const string InvalidDifficulty = "KW-DOC-TASKS-015";
+
+    /// <summary>Error: a task names a technology the host's <c>ontology.technologies</c> does not declare.</summary>
+    public const string UndeclaredTechnology = "KW-DOC-TASKS-016";
+
+    /// <summary>Error: a task names more than one technology, which no one prompt can fit.</summary>
+    public const string MultipleTechnologies = "KW-DOC-TASKS-017";
+
+    /// <summary>Error: under the tiered roster a developer task names no technology.</summary>
+    public const string MissingTechnologyUnderTiered = "KW-DOC-TASKS-018";
+
+    /// <summary>The three legal difficulty values, in order.</summary>
+    public static IReadOnlyList<string> Difficulties { get; } = ["easy", "medium", "hard"];
+
     /// <summary>The schema version this build reads.</summary>
-    internal const int SchemaVersion = 1;
+    internal const int SchemaVersion = 2;
+
+    /// <summary>The schema version an older release wrote, still read with a warning for two minor releases.</summary>
+    internal const int LegacySchemaVersion = 1;
 
     internal const string PlanExtension = ".md";
-    internal const string TaskFileSuffix = ".tasks.json";
 
-    /// <summary>A specification's task list is the file named <c>tasks.md</c>; its task file is <c>tasks.json</c> beside it.</summary>
+    /// <summary>The YAML task file beside a plan: <c>&lt;plan&gt;.tasks.yml</c>.</summary>
+    internal const string TaskFileSuffix = ".tasks.yml";
+
+    /// <summary>The JSON task file an older release wrote, still read with a warning.</summary>
+    internal const string LegacyTaskFileSuffix = ".tasks.json";
+
+    /// <summary>A specification's task list is the file named <c>tasks.md</c>; its task file is <c>tasks.yml</c> beside it.</summary>
     internal const string SpecTaskListFileName = "tasks.md";
-    internal const string SpecTaskFileName = "tasks.json";
+    internal const string SpecTaskFileName = "tasks.yml";
+
+    /// <summary>A specification's JSON task file, still read with a warning.</summary>
+    internal const string LegacySpecTaskFileName = "tasks.json";
 
     internal const string PlanKind = "plan";
     internal const string SpecTaskListKind = "specification task list";
 
     internal static readonly char[] WhitespaceSeparators = [' ', '\t', '\n', '\r'];
 
-    /// <summary>Whether the document is a specification's <c>tasks.md</c>, the task list its <c>tasks.json</c> is checked against.</summary>
+    /// <summary>Whether the document is a specification's <c>tasks.md</c>, the task list its <c>tasks.yml</c> is checked against.</summary>
     internal static bool IsSpecTaskList(DocumentModel document) =>
         document.DocType == DocType.Spec
         && string.Equals(FileNameOf(document.RelativePath), SpecTaskListFileName, StringComparison.OrdinalIgnoreCase);
@@ -199,8 +231,8 @@ public static partial class PlanTaskFileRules
     }
 
     /// <summary>
-    /// The task file beside an artifact: <c>&lt;plan&gt;.tasks.json</c> for a plan, and the folder's
-    /// <c>tasks.json</c> beside a specification's <c>tasks.md</c>.
+    /// The task file beside an artifact: <c>&lt;plan&gt;.tasks.yml</c> for a plan, and the folder's
+    /// <c>tasks.yml</c> beside a specification's <c>tasks.md</c>.
     /// </summary>
     internal static string TaskFilePath(DocumentModel artifact) =>
         TaskFilePathFor(artifact.RelativePath, IsSpecTaskList(artifact));
@@ -222,6 +254,29 @@ public static partial class PlanTaskFileRules
             ? artifactPath[..^PlanExtension.Length] + TaskFileSuffix
             : artifactPath + TaskFileSuffix;
     }
+
+    /// <summary>
+    /// The JSON task file an older release wrote, in the same position as the YAML one. Null when
+    /// <paramref name="artifactPath"/> is not a plan or specification task list.
+    /// </summary>
+    internal static string? LegacyTaskFilePathFor(string artifactPath, bool isSpecTaskList)
+    {
+        if (isSpecTaskList)
+        {
+            return artifactPath[..(artifactPath.LastIndexOf('/') + 1)] + LegacySpecTaskFileName;
+        }
+
+        return artifactPath.EndsWith(PlanExtension, StringComparison.OrdinalIgnoreCase)
+            ? artifactPath[..^PlanExtension.Length] + LegacyTaskFileSuffix
+            : artifactPath + LegacyTaskFileSuffix;
+    }
+
+    /// <summary>Whether a file name is either form of a task file.</summary>
+    internal static bool IsTaskFileName(string fileName) =>
+        fileName.EndsWith(TaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+        || fileName.EndsWith(LegacyTaskFileSuffix, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(fileName, SpecTaskFileName, StringComparison.OrdinalIgnoreCase)
+        || string.Equals(fileName, LegacySpecTaskFileName, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>Whether a path names a specification's task list, by its file name.</summary>
     internal static bool IsSpecTaskListPath(string relativePath) =>

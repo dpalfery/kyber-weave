@@ -1755,7 +1755,7 @@ Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` a
 ### The tracked task file and the paste-and-fill dispatch
 
 The conductor no longer derives its own prompts from the plan. Each prompt goes into a tracked
-task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.json` beside the plan — and a specification's — `<spec-folder>/tasks.json` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, with a hash in it
+task file at finalization: `kyber-weave docs tasks` derives a plan's — `docs/plans/<plan>.tasks.yml` beside the plan — and a specification's — `<spec-folder>/tasks.yml` inside the specification folder — from the plan or `tasks.md`, each committed with its artifact. No agent writes the file: it is a machine format, with a hash in it
 ([ADR 0063](../adr/0063-the-task-file-is-tracked-and-the-plan-stays-authoritative.md)). Tracking it
 rather than keeping it in `artifacts/` is what lets a push carry it to another machine, which is
 what makes resuming a run somewhere else possible at all.
@@ -1805,7 +1805,7 @@ what makes resuming a run somewhere else possible at all.
 
 ```mermaid
 flowchart TD
-    Architect["conductor finalize tool\nsets plan Ready + writes tasks.json"]
+    Architect["conductor finalize tool\nsets plan Ready + writes tasks.yml"]
     Validate["conductor validates the file\nthrough the docs tools"]
     Paste["conductor dispatches by task id\nworker runs docs packet"]
     Worker["worker dispatches, commits\nTask: id + report"]
@@ -1830,7 +1830,8 @@ here for the Squad's own readers:
 |---|---|
 | Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Factory, Devin | rewrite: the dispatch hook replaces the task-id line with the full prompt |
 | Antigravity | file until its live check passes: the dispatch names `.agent_scratchpad/<task>/prompt.md`, which the worker reads first |
-| Warp, ZCode | file: no dispatch hook exists, so the dispatch names the prompt file |
+| ZCode, CommandCode | file until their live checks pass: each documents a tool-input rewrite field, but no Kyber-Weave hook or mod is rendered for it yet |
+| Warp | file: no dispatch hook exists, so the dispatch names the prompt file |
 
 On every path the conductor dispatches with the task id and the failed-attempt count, never with
 the prompt text. A worker that starts with only the header lines, because a hook was absent or

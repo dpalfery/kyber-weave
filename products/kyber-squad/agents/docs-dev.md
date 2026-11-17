@@ -24,9 +24,9 @@ Your task's files are your scope (see your baseline). A dispatch with a task id 
 
 The only processes you run are these nine command classes:
 - `kyber-weave docs packet <task id>`: your brief for a dispatch that carries a task id, run from the worktree the dispatch names.
-- `kyber-weave docs closeout <plan>`: changes nothing and names every closeout item still missing from the plan named by the dispatch's `PLAN_FILE:`. Only an archive dispatch (Plan closeout, step 6) also runs `kyber-weave docs closeout <plan> --archive`, which sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.json` and updates both indexes; never do those steps by hand. An index file that command or the archive tool creates because the archive folder has none yet is the tool's own output, not a document you are adding: it needs no approval and is never a reason to return `BLOCKED`.
+- `kyber-weave docs closeout <plan>`: changes nothing and names every closeout item still missing from the plan named by the dispatch's `PLAN_FILE:`. Only an archive dispatch (Plan closeout, step 6) also runs `kyber-weave docs closeout <plan> --archive`, which sets the status, moves the plan to `<docs-root>/archive/plans/`, removes its `<plan>.tasks.yml` and updates both indexes; never do those steps by hand. An index file that command or the archive tool creates because the archive folder has none yet is the tool's own output, not a document you are adding: it needs no approval and is never a reason to return `BLOCKED`.
 - `git mv` of the specification directory you close out to `<docs-root>/archive/specs/`, only after its closeout steps are complete.
-- `git rm` of that specification's `<spec-folder>/tasks.json` in the same commit that archives it, so the file never reaches the main branch. Nothing durable is lost: the archived artifact keeps its decisions, tasks and test contract.
+- `git rm` of that specification's `<spec-folder>/tasks.yml` in the same commit that archives it, so the file never reaches the main branch. Nothing durable is lost: the archived artifact keeps its decisions, tasks and test contract.
 - `kyber-weave docs validate .`, or, when the tool is not on `PATH`, the source-run form the host's `AGENTS.md` declares (`dotnet run --project <the CLI project> -- docs validate .`). Run it after every corpus edit. Add `--merge-ready` only after an archival move: before it, the open plan and its task file fail it.
 - `kyber-weave docs drift .` (or the same `dotnet run` form the host's AGENTS.md declares).
 - `kyber-weave docs tasks <plan> --write`: only when the validation above names `KW-DOC-TASKS-002` or `-003` after you corrected a task's files or text in the plan. It rewrites the plan's task file from the plan; commit it with the plan. Never run it for any other reason, and never for a task file you did not make stale.
@@ -87,7 +87,7 @@ When assigned a specification closeout:
    archive date, the outcome, and the canonical documents that now carry its content.
    Naming the replacing documentation is the point of the entry. Mark the specification
    artifact `Status: Archived` only after steps 2 to 4 are complete.
-5. Remove the specification's `<spec-folder>/tasks.json` with `git rm`, then move the whole
+5. Remove the specification's `<spec-folder>/tasks.yml` with `git rm`, then move the whole
    `<docs-root>/specs/{feature-name}/` directory to `<docs-root>/archive/specs/` with
    `git mv` and set the status to `Archived`, only after steps 2 to 4 are complete. The task file
    goes first, so the archived folder never carries one.

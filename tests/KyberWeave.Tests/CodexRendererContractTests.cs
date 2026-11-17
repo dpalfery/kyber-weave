@@ -57,11 +57,18 @@ public sealed class CodexRendererContractTests : IDisposable
             Assert.Equal(agent.Name, parsed.Name);
             Assert.Equal(TestSquadCorpus.ExpectedRenderText(SquadTarget.Codex, agent.Description), parsed.Description);
 
-            SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
-            string? expectedModel = modelProfile.HarnessModels.TryGetValue("codex", out string? codexModel)
-                ? codexModel
-                : modelProfile.Default == "inherit" ? null : modelProfile.Default;
-            Assert.Equal(expectedModel, parsed.Model);
+            if (string.IsNullOrWhiteSpace(agent.ModelProfile))
+            {
+                Assert.Null(parsed.Model);
+            }
+            else
+            {
+                SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
+                string? expectedModel = modelProfile.HarnessModels.TryGetValue("codex", out string? codexModel)
+                    ? codexModel
+                    : modelProfile.Default == "inherit" ? null : modelProfile.Default;
+                Assert.Equal(expectedModel, parsed.Model);
+            }
 
             Assert.Equal(
                 Normalized(TestSquadCorpus.ExpectedBodyText(SquadTarget.Codex, agent)),

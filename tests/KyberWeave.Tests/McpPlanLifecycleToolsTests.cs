@@ -118,8 +118,12 @@ public sealed class McpPlanLifecycleToolsTests
 
         Assert.Contains("result: finalized", response, StringComparison.Ordinal);
         Assert.Contains("| agent=csharp-dev |", response, StringComparison.Ordinal);
-        Assert.Contains("\"agent\": \"csharp-dev\"",
-            File.ReadAllText(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath)), StringComparison.Ordinal);
+        PlanTaskFile written = Assert.IsType<PlanTaskFile>(PlanTaskFileFormat.Deserialize(
+            PlanTaskFileProbe.TaskFilePath,
+            File.ReadAllText(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath))));
+        Assert.Equal(
+            "csharp-dev",
+            Assert.Single(written.Tasks!, task => task.Id == PlanTaskFileProbe.FirstTask).Agent);
     }
 
     private sealed class PickingProvider : KyberWeave.Core.Arbiter.Providers.IArbiterProvider

@@ -368,12 +368,23 @@ public sealed partial class PlanFinalize
     {
         try
         {
-            PlanTaskFile? file = JsonSerializer.Deserialize<PlanTaskFile>(taskFileText, PlanTaskFileJson.ReadOptions);
-            if (file is not { Tasks: { } tasks } || file.SchemaVersion != PlanTaskFileRules.SchemaVersion || tasks.Any(task => task is null))
+            PlanTaskFile? file;
+            try
+            {
+                file = PlanTaskFileFormat.DeserializeJson(taskFileText);
+            }
+            catch (JsonException)
+            {
+                file = PlanTaskFileFormat.Deserialize("tasks.yml", taskFileText);
+            }
+            if (file is not { Tasks: { } tasks }
+                || (file.SchemaVersion != PlanTaskFileRules.SchemaVersion
+                    && file.SchemaVersion != PlanTaskFileRules.LegacySchemaVersion)
+                || tasks.Any(task => task is null))
                 return null;
             return tasks.Count > 0 ? PlanTaskPacket.ReadyQueue(tasks) : "(no tasks)";
         }
-        catch (JsonException)
+        catch (Exception exception) when (exception is JsonException or YamlDotNet.Core.YamlException)
         {
             return null;
         }
