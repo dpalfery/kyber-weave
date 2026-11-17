@@ -291,19 +291,60 @@ public sealed class TaskPromptServiceTests
     }
 
     [Fact]
-    public void PriorResultsFromAFileReachTheTaskPart()
+    public void PriorResultsFromTheRunsScratchAreaReachTheTaskPart()
     {
         using DocFixture fixture = Ready();
-        string results = Path.Combine(fixture.Root, "results.txt");
-        File.WriteAllText(results, "T1 reported: built, four tests green.");
+        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
+        Directory.CreateDirectory(scratch);
+        File.WriteAllText(Path.Combine(scratch, "results.txt"), "T1 reported: built, four tests green.");
         KyberWeaveConfig config = Config();
 
         TaskPromptResult result = Service(fixture, config).Build(
-            new TaskPromptRequest(fixture.Root, TaskId: "T1", PriorResultsPath: results),
+            new TaskPromptRequest(
+                fixture.Root,
+                TaskId: "T1",
+                PriorResultsPath: $"{TaskPromptService.ScratchFolder}/results.txt"),
             config);
 
         Assert.True(result.Built, result.Refusal);
         Assert.Contains("T1 reported: built, four tests green.", Between(result.Prompt, "task"), StringComparison.Ordinal);
+    }
+
+    /// <summary>The dispatch's failed-attempt count reaches the worker inside the prompt, not only the request.</summary>
+    [Fact]
+    public void TheFailedAttemptCountReachesThePrompt()
+    {
+        using DocFixture fixture = Ready();
+        KyberWeaveConfig config = Config();
+
+        TaskPromptResult result = Service(fixture, config).Build(
+            new TaskPromptRequest(fixture.Root, TaskId: "T1", FailedAttempts: 2),
+            config);
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Contains("FAILED_ATTEMPTS: 2", Between(result.Prompt, "task"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The prior-results slot reads only the run's own scratch area: a tracked file, an absolute path outside the
+    /// repository and a path that climbs out with <c>..</c> are refused before anything is read.
+    /// </summary>
+    [Theory]
+    [InlineData("results.txt")]
+    [InlineData("../outside-results.txt")]
+    [InlineData("/etc/hostname")]
+    public void APriorResultsPathOutsideTheScratchAreaIsRefused(string relative)
+    {
+        using DocFixture fixture = Ready();
+        File.WriteAllText(Path.Combine(fixture.Root, "results.txt"), "a tracked file the worker must not receive.");
+        KyberWeaveConfig config = Config();
+
+        TaskPromptResult result = Service(fixture, config).Build(
+            new TaskPromptRequest(fixture.Root, TaskId: "T1", PriorResultsPath: relative),
+            config);
+
+        Assert.False(result.Built);
+        Assert.Contains(TaskPromptService.ScratchFolder, result.Refusal, StringComparison.Ordinal);
     }
 
     [Fact]

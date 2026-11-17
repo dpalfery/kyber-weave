@@ -153,7 +153,9 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
-            HookOutcomeKind.PassThrough => RenderPreAllow(),
+            HookOutcomeKind.PassThrough => inserted
+                ? RenderPreAllowPrompt(toolInput, insertion.Text)
+                : RenderPreAllow(),
             HookOutcomeKind.Allow => inserted
                 ? RenderPreAllowPrompt(toolInput, insertion.Text)
                 : ReadGuard.IsImplementationSpecialist(target)
@@ -161,8 +163,11 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
                     : RenderPreAllow(),
             HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                    "Hook engine returned allow-with-rewrite without rewritten input.")),
+                    "Hook engine returned allow-with-rewrite without rewritten input."),
+                inserted ? insertion.Text : null),
             HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                toolInput,
+                inserted ? insertion.Text : null,
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderPreDenyFor(outcome.Reason),
@@ -318,13 +323,30 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
         return RenderPreDeny(reason, FirstLine(reason));
     }
 
-    private static string RenderPreAllowNote(string note) =>
-        new JsonObject
+    private static string RenderPreAllowNote(JsonElement toolInput, string? insertedPrompt, string note)
+    {
+        JsonObject output = new()
         {
             ["permission"] = "allow",
             ["agent_message"] = note,
             ["user_message"] = FirstLine(note),
-        }.ToJsonString();
+        };
+        if (insertedPrompt is not null)
+        {
+            output["updated_input"] = UpdatedInput(toolInput, insertedPrompt);
+        }
+
+        return output.ToJsonString();
+    }
+
+    private static JsonObject UpdatedInput(JsonElement toolInput, string prompt)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Cursor hook event: tool_input is not a JSON object.");
+        updated["prompt"] = prompt;
+        return updated;
+    }
 
     private static string RenderPreDeny(string agentMessage, string userMessage) =>
         new JsonObject
@@ -353,7 +375,7 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
                 "Malformed Cursor hook event: tool_input is not a JSON object."),
             node => node["prompt"] = prompt);
 
-    private static string RenderPreAllowRaw(string rewrittenInputJson)
+    private static string RenderPreAllowRaw(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -373,7 +395,13 @@ public sealed class CursorHookAdapter : IHarnessHookAdapter
                 "Hook engine rewritten input must be a JSON object.");
         }
 
-        return RenderPreAllowWithInput(updated, _ => { });
+        return RenderPreAllowWithInput(updated, node =>
+        {
+            if (insertedPrompt is not null)
+            {
+                node["prompt"] = insertedPrompt;
+            }
+        });
     }
 
     private static string RenderPreAllowWithInput(JsonObject updatedInput, Action<JsonObject> mutate)

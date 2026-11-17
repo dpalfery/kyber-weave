@@ -237,7 +237,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         IReadOnlyList<string> secondaryNames = _secondaryTriggers(
             trigger, ev with { Target = classification.Target, Prompt = prompt });
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames);
+            classification, prompt, config, ev.ObservesReturns, ev.ModelOverrideField, ev.Model, secondaryNames,
+            ev.PromptInserted);
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = GovernedPathsFacts.Enrich(facts, config.Ontology.DocsRoots);
         facts = _planReader.Enrich(facts, classification);

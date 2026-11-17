@@ -1,3 +1,4 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
@@ -59,11 +60,26 @@ public sealed class DocsPacketCommandTests
         Assert.DoesNotContain("Task T2", output, StringComparison.Ordinal);
     }
 
+    /// <summary>The packet carries the task's resolved test command, so the worker neither fills placeholders nor guesses.</summary>
     [Fact]
-    public void PriorResultsFromAFileFillTheirSection()
+    public void ThePacketPrintsTheTasksResolvedTestCommand()
     {
         using DocFixture fixture = Ready();
-        string results = Path.Combine(fixture.Root, "results.txt");
+
+        (int exit, string output) = Packet(fixture, "T1");
+
+        Assert.True(exit == 0, output);
+        Assert.Contains(PacketTestCommandRenderer.Heading, output, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~PlanTaskFileValidatorTests", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PriorResultsFromAFileInTheScratchAreaFillTheirSection()
+    {
+        using DocFixture fixture = Ready();
+        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
+        Directory.CreateDirectory(scratch);
+        string results = Path.Combine(scratch, "results.txt");
         File.WriteAllText(results, "T1 reported: built, 4 tests green.");
 
         (int exit, string output) = Packet(fixture, "T2", prior: results);

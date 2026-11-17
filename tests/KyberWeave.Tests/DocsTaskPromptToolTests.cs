@@ -178,6 +178,8 @@ public sealed class DocsTaskPromptToolTests
         TaskPromptResult built = Service(fixture).Build(new TaskPromptRequest(fixture.Root, TaskId: "T1"), config);
 
         Assert.True(built.Built, built.Refusal);
-        Assert.Equal(built.Prompt, printed);
+
+        // The packet prints the service's prompt unchanged, then the task's test command after a blank line.
+        Assert.StartsWith(built.Prompt + "\n\n## Test command\n", printed, StringComparison.Ordinal);
     }
 }

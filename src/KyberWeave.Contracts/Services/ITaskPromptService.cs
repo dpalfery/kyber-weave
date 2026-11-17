@@ -19,6 +19,10 @@ namespace KyberWeave.Contracts.Services;
 /// The harness the dispatch runs on. A harness whose hook cannot rewrite the dispatch gets the prompt written to
 /// the run's scratch folder; null (the packet command and the hook) writes no file.
 /// </param>
+/// <param name="RetryText">
+/// The retry's failure report, which the dispatch hook appends after the prompt. It is not part of the prompt, but
+/// the budget leaves room for it so the delivered text does not overshoot.
+/// </param>
 public sealed record TaskPromptRequest(
     string RepoRoot,
     string? TaskId = null,
@@ -27,7 +31,8 @@ public sealed record TaskPromptRequest(
     string? PriorResultsPath = null,
     string? Technology = null,
     int FailedAttempts = 0,
-    string? Harness = null);
+    string? Harness = null,
+    string? RetryText = null);
 
 /// <summary>The task prompt, or why no prompt was built.</summary>
 /// <param name="Built">Whether <paramref name="Prompt"/> holds a prompt.</param>

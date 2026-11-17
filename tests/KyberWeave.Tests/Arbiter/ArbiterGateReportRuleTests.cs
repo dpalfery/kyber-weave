@@ -160,6 +160,36 @@ public sealed class ArbiterGateReportRuleTests
         Assert.Equal(declared, fact.Value);
     }
 
+    /// <summary>
+    /// A host with only technology-keyed gates must not read as having none: the fact resolves through the
+    /// technology the dispatch names, by the same resolver the gate run uses.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp", true)]
+    [InlineData("cobol", false)]
+    public void TheDeclaredTaskGateFactUsesTheDispatchedTechnology(string technology, bool declared)
+    {
+        ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
+        KyberWeaveConfig config = new()
+        {
+            Review = new ReviewConfig
+            {
+                TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+                {
+                    ["csharp"] = [gate]
+                }
+            }
+        };
+
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", "developer",
+            $"KYBER-ARBITER: true\nTECHNOLOGY: {technology}\n\nDo the work.", "conductor",
+            ArbiterCallerSources.Harness, config);
+
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(declared, fact.Value);
+    }
+
     [Fact]
     public void AnAgreeingReportAllowsTheDispatch()
     {

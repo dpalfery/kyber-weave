@@ -81,6 +81,53 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             new(HookOutcomeKind.Allow);
     }
 
+    /// <summary>An engine that asks the adapter to write a model, as the model-targeting path does.</summary>
+    private sealed class ModelAskingEngine : IContextualHookDecisionEngine
+    {
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePreDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null) =>
+            DecidePreDispatch(harness, caller, target, prompt, config, context, toolCallId, sessionId, dispatchModel: null);
+
+        public HookOutcome DecidePreDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel = null) =>
+            context.ConfirmModelWrite?.Invoke("sonnet") == true
+                ? new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet")
+                : new HookOutcome(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null) =>
+            new(HookOutcomeKind.Allow);
+    }
+
     private static KyberWeaveConfig EnabledConfig() => new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static KyberWeaveConfig DisabledConfig() => new() { Arbiter = new ArbiterConfig { Enabled = false } };
@@ -113,20 +160,49 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     }
 
     /// <summary>The dispatch prompt each rewrite harness received, read from the field that harness documents.</summary>
-    private static string InsertedPrompt(string harness, string stdout)
+    private static string InsertedPrompt(string harness, string stdout) =>
+        TryInsertedPrompt(harness, stdout)
+        ?? throw new InvalidOperationException($"The document for '{harness}' carries no inserted prompt: {stdout}");
+
+    /// <summary>The inserted prompt in the field the harness documents, or null when the document carries none.</summary>
+    private static string? TryInsertedPrompt(string harness, string stdout)
     {
         using JsonDocument document = JsonDocument.Parse(stdout);
         JsonElement root = document.RootElement;
-        return harness switch
+        if (harness == "antigravity")
         {
-            "claude" or "copilot-vscode" => root.GetProperty("hookSpecificOutput")
-                .GetProperty("updatedInput").GetProperty("prompt").GetString()!,
-            "copilot-cli" => root.GetProperty("modifiedArgs").GetProperty("prompt").GetString()!,
-            "codex" => root.GetProperty("hookSpecificOutput")
-                .GetProperty("updatedInput").GetProperty("message").GetString()!,
-            "cursor" => root.GetProperty("updated_input").GetProperty("prompt").GetString()!,
-            _ => root.GetProperty("args").GetProperty("prompt").GetString()!,
+            return root.TryGetProperty("overwrite", out JsonElement overwrite)
+                && overwrite.TryGetProperty("Subagents", out JsonElement subagents)
+                && subagents.ValueKind == JsonValueKind.Array
+                && subagents.GetArrayLength() > 0
+                && subagents[0].TryGetProperty("Prompt", out JsonElement prompt)
+                && prompt.ValueKind == JsonValueKind.String
+                    ? prompt.GetString()
+                    : null;
+        }
+
+        string[] path = harness switch
+        {
+            "claude" or "copilot-vscode" or "factory" or "devin" =>
+                ["hookSpecificOutput", "updatedInput", "prompt"],
+            "copilot-cli" => ["modifiedArgs", "prompt"],
+            "codex" => ["hookSpecificOutput", "updatedInput", "message"],
+            "cursor" => ["updated_input", "prompt"],
+            _ => ["args", "prompt"],
         };
+
+        JsonElement current = root;
+        foreach (string name in path)
+        {
+            if (!current.TryGetProperty(name, out JsonElement next))
+            {
+                return null;
+            }
+
+            current = next;
+        }
+
+        return current.ValueKind == JsonValueKind.String ? current.GetString() : null;
     }
 
     /// <summary>One recorded dispatch payload per harness, carrying <paramref name="prompt"/>.</summary>
@@ -171,6 +247,38 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["subagent_type"] = "csharp-dev" },
             ["tool_use_id"] = "toolu-cursor-dispatch-1",
         }.ToJsonString(),
+        "antigravity" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["conversationId"] = "conv-1",
+            ["stepIdx"] = 4,
+            ["workspacePaths"] = new JsonArray("/repo"),
+            ["toolCall"] = new JsonObject
+            {
+                ["name"] = "invoke_subagent",
+                ["args"] = new JsonObject
+                {
+                    ["Subagents"] = new JsonArray(
+                        new JsonObject { ["TypeName"] = "csharp-dev", ["Prompt"] = prompt, ["Model"] = "keep" }),
+                },
+            },
+        }.ToJsonString(),
+        "factory" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["cwd"] = "/repo",
+            ["tool_name"] = "Task",
+            ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["subagent_type"] = "csharp-dev" },
+            ["session_id"] = "session-factory-1",
+        }.ToJsonString(),
+        "devin" => new JsonObject
+        {
+            ["hook_event_name"] = "PreToolUse",
+            ["cwd"] = "/repo",
+            ["tool_name"] = "run_subagent",
+            ["tool_input"] = new JsonObject { ["prompt"] = prompt, ["profile"] = "csharp-dev" },
+            ["session_id"] = "session-devin-1",
+        }.ToJsonString(),
         _ => new JsonObject
         {
             ["schema"] = PluginEnvelope.SchemaV1,
@@ -182,7 +290,7 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         }.ToJsonString(),
     };
 
-    /// <summary>Every harness whose dispatch hook rewrites the call; Antigravity stays a file harness until its check passes.</summary>
+    /// <summary>Every harness whose dispatch hook rewrites the call, as the delivery table records it.</summary>
     public static TheoryData<string> RewriteHarnesses => new()
     {
         "claude",
@@ -193,7 +301,59 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         "opencode",
         "kilo",
         "pi",
+        "antigravity",
+        "factory",
+        "devin",
     };
+
+    /// <summary>
+    /// Every served harness has a path to the prompt: one listed as rewriting must insert it in its adapter, and one
+    /// not listed takes the prompt file instead. A harness listed without an insertion would leave the worker with
+    /// the short dispatch and no prompt at all.
+    /// </summary>
+    /// <summary>
+    /// The reverse of the registry check: every token the insertion records as rewriting must be served by an
+    /// adapter that actually inserts the prompt, including the aliases no adapter serves.
+    /// </summary>
+    [Fact]
+    public void EveryRecordedRewriteHarnessIsServedByAnAdapterThatInsertsThePrompt()
+    {
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(new RecordingEngine());
+        string expected = TaskPrompt + "\n\nImplement the plan parser.";
+
+        foreach (string token in DispatchPromptInsertion.RewriteHarnessTokens)
+        {
+            Assert.True(
+                registry.TryGet(token, out IHarnessHookAdapter? adapter),
+                $"Harness '{token}' is recorded as rewriting the dispatch, but no adapter serves it.");
+            string payload = Payload(token, TaskDispatch);
+            string stdout = adapter!.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+
+            Assert.Equal(expected, TryInsertedPrompt(token, stdout));
+        }
+    }
+
+    [Fact]
+    public void EveryServedHarnessEitherRewritesTheDispatchOrTakesThePromptFile()
+    {
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(new RecordingEngine());
+        string expected = TaskPrompt + "\n\nImplement the plan parser.";
+
+        foreach (string token in registry.Tokens.Order(StringComparer.Ordinal))
+        {
+            Assert.True(registry.TryGet(token, out IHarnessHookAdapter? adapter), $"No adapter for '{token}'.");
+            string payload = Payload(token, TaskDispatch);
+            string stdout = adapter!.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+            string? inserted = stdout.Length == 0 ? null : TryInsertedPrompt(token, stdout);
+
+            bool rewrites = DispatchPromptInsertion.CanRewriteDispatch(token);
+            Assert.True(
+                rewrites ? string.Equals(inserted, expected, StringComparison.Ordinal) : inserted is null,
+                rewrites
+                    ? $"Harness '{token}' is listed as rewriting the dispatch but its adapter inserted no prompt: {stdout}"
+                    : $"Harness '{token}' is not listed as rewriting, so the prompt file must serve it, but its adapter inserted a prompt.");
+        }
+    }
 
     [Theory]
     [MemberData(nameof(RewriteHarnesses))]
@@ -209,6 +369,71 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     }
 
     private static JsonElement json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+
+    /// <summary>
+    /// A rule that also writes the model returns the allow path that writes the model; the prompt inserted for
+    /// the allowed dispatch must still reach the worker.
+    /// </summary>
+    [Fact]
+    public void AModelWriteOnTheAllowPathKeepsTheInsertedPrompt()
+    {
+        (int exit, string stdout) = Run(
+            Host(new ModelAskingEngine(), EnabledConfig(), new ScriptedPrompts()),
+            ClaudeHookAdapter.Token,
+            Payload("claude", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        using JsonDocument document = JsonDocument.Parse(stdout);
+        JsonElement updated = document.RootElement.GetProperty("hookSpecificOutput").GetProperty("updatedInput");
+        Assert.Equal("sonnet", updated.GetProperty("model").GetString());
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", updated.GetProperty("prompt").GetString());
+    }
+
+    /// <summary>
+    /// Every allow path delivers the inserted prompt: a note, a rewritten dispatch and a pass-through would otherwise
+    /// start the worker with the short dispatch and no prompt.
+    /// </summary>
+    [Theory]
+    [InlineData("claude", HookOutcomeKind.AllowWithNote)]
+    [InlineData("claude", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("claude", HookOutcomeKind.PassThrough)]
+    [InlineData("copilot-vscode", HookOutcomeKind.AllowWithNote)]
+    [InlineData("copilot-vscode", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("copilot-vscode", HookOutcomeKind.PassThrough)]
+    [InlineData("copilot-cli", HookOutcomeKind.AllowWithNote)]
+    [InlineData("copilot-cli", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("copilot-cli", HookOutcomeKind.PassThrough)]
+    [InlineData("codex", HookOutcomeKind.AllowWithNote)]
+    [InlineData("codex", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("codex", HookOutcomeKind.PassThrough)]
+    [InlineData("cursor", HookOutcomeKind.AllowWithNote)]
+    [InlineData("cursor", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("cursor", HookOutcomeKind.PassThrough)]
+    [InlineData("opencode", HookOutcomeKind.AllowWithNote)]
+    [InlineData("opencode", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("opencode", HookOutcomeKind.PassThrough)]
+    [InlineData("antigravity", HookOutcomeKind.AllowWithNote)]
+    [InlineData("antigravity", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("antigravity", HookOutcomeKind.PassThrough)]
+    [InlineData("factory", HookOutcomeKind.AllowWithNote)]
+    [InlineData("factory", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("factory", HookOutcomeKind.PassThrough)]
+    [InlineData("devin", HookOutcomeKind.AllowWithNote)]
+    [InlineData("devin", HookOutcomeKind.AllowWithRewrite)]
+    [InlineData("devin", HookOutcomeKind.PassThrough)]
+    public void EveryAllowPathDeliversTheInsertedPrompt(string harness, HookOutcomeKind kind)
+    {
+        RecordingEngine engine = new()
+        {
+            PreResult = new HookOutcome(kind, Reason: "note from the rule", RewrittenInputJson: "{\"marker\":\"kept\"}"),
+        };
+        IHarnessHookAdapter adapter = Adapter(engine, harness);
+        string payload = Payload(harness, TaskDispatch);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", InsertedPrompt(harness, stdout));
+    }
 
     [Fact]
     public void ARetrysFailureReportAndCountersSurviveIntoThePromptAndTheWorker()
@@ -226,7 +451,6 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.Equal("T3", request.TaskId);
         Assert.Equal("docs/plans/plan.md", request.Plan);
         Assert.Equal("results.md", request.PriorResultsPath);
-        Assert.Equal(2, request.FailedAttempts);
 
         string sent = InsertedPrompt("claude", stdout);
         Assert.StartsWith(TaskPrompt, sent, StringComparison.Ordinal);
@@ -335,6 +559,45 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.DoesNotContain("updatedInput", output.ToString(), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// Only the closed task-dispatch headers count, in their canonical spelling, with a task id the task files use.
+    /// An ordinary dispatch that starts with a capitalized word is not a task dispatch and is left untouched.
+    /// </summary>
+    [Theory]
+    [InlineData("Task: find usages of X")]
+    [InlineData("task: T3")]
+    [InlineData("TASK: find usages of X")]
+    [InlineData("STATUS: blocked")]
+    public void ADispatchThatIsNotATaskDispatchPassesThroughUntouched(string dispatch)
+    {
+        ScriptedPrompts prompts = new();
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", dispatch));
+
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Empty(prompts.Requests);
+    }
+
+    [Fact]
+    public void ARetryFailureLineUnderTheHeadersSurvivesInsteadOfBeingReadAsAHeader()
+    {
+        const string dispatch =
+            "TASK: T3\nPLAN_FILE: docs/plans/plan.md\nFAILED_ATTEMPTS: 2\nError: build failed\n\nFix the build.";
+        ScriptedPrompts prompts = new();
+
+        (int exit, string stdout) = Run(
+            Host(new RecordingEngine(), DisabledConfig(), prompts), ClaudeHookAdapter.Token, Payload("claude", dispatch));
+
+        Assert.Equal(0, exit);
+        TaskPromptRequest request = Assert.Single(prompts.Requests);
+        Assert.Equal("T3", request.TaskId);
+        Assert.Equal(2, request.FailedAttempts);
+        string sent = InsertedPrompt("claude", stdout);
+        Assert.EndsWith("Error: build failed\n\nFix the build.", sent, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AFreshHostWithTheArbiterOffInstallsTheDispatchHookOnTheDispatchersOnly()
     {
@@ -412,8 +675,12 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.Contains(report.Lines, line => line.Message.Contains("dispatch hook", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The plan-read exemption follows the hook's own insertion record. A conductor that types the prompt tags
+    /// itself still gets the rule, because the text it controls proves nothing.
+    /// </summary>
     [Fact]
-    public void AnExpandedPromptIsNotJudgedAsTellingAWorkerToReadAPlan()
+    public void ThePlanReadExemptionFollowsTheHooksInsertionNotThePromptsText()
     {
         KyberWeaveConfig config = new()
         {
@@ -423,13 +690,18 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nRead `docs/plans/plan.md` and implement T3.";
 
         ArbiterFactSet shortFacts = TriggerFactBuilder.Build("delegate", "csharp-dev", planRead, "conductor", "harness", config);
-        ArbiterFactSet expandedFacts = TriggerFactBuilder.Build(
+        ArbiterFactSet typedFacts = TriggerFactBuilder.Build(
             "delegate", "csharp-dev", TaskPrompt + "\n\n" + planRead, "conductor", "harness", config);
+        ArbiterFactSet insertedFacts = TriggerFactBuilder.Build(
+            "delegate", "csharp-dev", TaskPrompt + "\n\n" + planRead, "conductor", "harness", config,
+            promptInserted: true);
 
         Assert.True(shortFacts.TryGet("delegation.planning-paths", out ArbiterFact? shortPaths));
-        Assert.True(expandedFacts.TryGet("delegation.planning-paths", out ArbiterFact? expandedPaths));
+        Assert.True(typedFacts.TryGet("delegation.planning-paths", out ArbiterFact? typedPaths));
+        Assert.True(insertedFacts.TryGet("delegation.planning-paths", out ArbiterFact? insertedPaths));
         Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<string>>(shortPaths!.Value!));
-        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(expandedPaths!.Value!));
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<string>>(typedPaths!.Value!));
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(insertedPaths!.Value!));
     }
 
     /// <summary>A host configuration loader that answers one configuration for every root.</summary>

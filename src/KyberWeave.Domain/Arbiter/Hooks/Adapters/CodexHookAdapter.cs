@@ -161,7 +161,9 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
         bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
-            HookOutcomeKind.PassThrough => string.Empty,
+            HookOutcomeKind.PassThrough => inserted
+                ? RenderPreAllowPrompt(toolInput, insertion.Text)
+                : string.Empty,
             HookOutcomeKind.Allow => inserted
                 ? RenderPreAllowPrompt(toolInput, insertion.Text)
                 : ReadGuard.IsImplementationSpecialist(target)
@@ -169,8 +171,11 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
                     : string.Empty,
             HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                 outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                    "Hook engine returned allow-with-rewrite without rewritten input.")),
+                    "Hook engine returned allow-with-rewrite without rewritten input."),
+                inserted ? insertion.Text : null),
             HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                toolInput,
+                inserted ? insertion.Text : null,
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine allowed with a note but wrote none.")),
             HookOutcomeKind.Deny => RenderPreDeny(
@@ -294,16 +299,30 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
     private static bool IsDispatchTool(string? tool) =>
         !string.IsNullOrEmpty(tool) && DispatchRegex().IsMatch(tool);
 
-    private static string RenderPreAllowNote(string note) =>
-        new JsonObject
+    private static string RenderPreAllowNote(JsonElement toolInput, string? insertedPrompt, string note)
+    {
+        JsonObject output = new()
         {
-            ["hookSpecificOutput"] = new JsonObject
-            {
-                ["hookEventName"] = "PreToolUse",
-                ["permissionDecision"] = "allow",
-                ["permissionDecisionReason"] = note,
-            },
-        }.ToJsonString();
+            ["hookEventName"] = "PreToolUse",
+            ["permissionDecision"] = "allow",
+            ["permissionDecisionReason"] = note,
+        };
+        if (insertedPrompt is not null)
+        {
+            output["updatedInput"] = UpdatedInput(toolInput, insertedPrompt);
+        }
+
+        return new JsonObject { ["hookSpecificOutput"] = output }.ToJsonString();
+    }
+
+    private static JsonObject UpdatedInput(JsonElement toolInput, string message)
+    {
+        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Codex hook event: tool_input is not a JSON object.");
+        updated["message"] = message;
+        return updated;
+    }
 
     private static string RenderPreDeny(string reason) =>
         new JsonObject
@@ -329,7 +348,7 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
                 "Malformed Codex hook event: tool_input is not a JSON object."),
             node => node["message"] = message);
 
-    private static string RenderPreAllowRaw(string rewrittenInputJson)
+    private static string RenderPreAllowRaw(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -343,7 +362,13 @@ public sealed partial class CodexHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned invalid rewritten input JSON: {ex.Message}", ex);
         }
 
-        return RenderPreAllow(rewritten, _ => { });
+        return RenderPreAllow(rewritten, node =>
+        {
+            if (insertedPrompt is not null)
+            {
+                node["message"] = insertedPrompt;
+            }
+        });
     }
 
     private static string RenderPreAllow(JsonNode updatedInput, Action<JsonObject> mutate)

@@ -1,5 +1,4 @@
 using KyberWeave.Application.Review;
-using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -90,6 +89,8 @@ public static class TriggerFactBuilder
     /// names none: the value of <c>delegation.model</c>.</param>
     /// <param name="secondaryTriggers">The secondary triggers the primary dispatch carries. Their declared facts
     /// join the bag, because the secondary rules read from the same bag as the primary.</param>
+    /// <param name="promptInserted">Whether the hook inserted the prompt into this dispatch. Only that evidence,
+    /// never the prompt's own text, exempts it from the plan-read rule: a conductor can type the tags itself.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
@@ -97,7 +98,8 @@ public static class TriggerFactBuilder
         bool observesReturns = true,
         string? modelOverrideField = null,
         string? delegationModel = null,
-        IReadOnlyList<string>? secondaryTriggers = null)
+        IReadOnlyList<string>? secondaryTriggers = null,
+        bool promptInserted = false)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -116,7 +118,8 @@ public static class TriggerFactBuilder
             observesReturns,
             modelOverrideField,
             delegationModel,
-            secondaryTriggers);
+            secondaryTriggers,
+            promptInserted);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>
@@ -130,6 +133,7 @@ public static class TriggerFactBuilder
     /// <param name="modelOverrideField">The dispatch field that carries a sub-agent's model, or null when the harness offers no override.</param>
     /// <param name="delegationModel">The model the dispatch input names for its sub-agent, or null.</param>
     /// <param name="secondaryTriggers">Secondary triggers whose declared facts are added to the bag.</param>
+    /// <param name="promptInserted">Whether the hook inserted the prompt into this dispatch.</param>
     /// <exception cref="ArgumentException">Thrown for an unknown trigger, with the known names as hint.</exception>
     public static ArbiterFactSet Build(
         string trigger,
@@ -141,7 +145,8 @@ public static class TriggerFactBuilder
         bool observesReturns = true,
         string? modelOverrideField = null,
         string? delegationModel = null,
-        IReadOnlyList<string>? secondaryTriggers = null)
+        IReadOnlyList<string>? secondaryTriggers = null,
+        bool promptInserted = false)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -176,6 +181,7 @@ public static class TriggerFactBuilder
 
         block.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         block.Headers.TryGetValue("TASK", out string? task);
+        block.Headers.TryGetValue("TECHNOLOGY", out string? technology);
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);
         // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
@@ -215,10 +221,11 @@ public static class TriggerFactBuilder
                 "delegation.paths" => paths,
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling
-                // KW-DOC-TASKS-005 accepts. A dispatch that already carries the hook's
-                // expanded prompt is never a plan read: its host facts name the planning
-                // indexes, and the worker is told to use that prompt, not a plan (Req 9.18).
-                "delegation.planning-paths" => DispatchPromptInsertion.IsExpanded(prompt)
+                // KW-DOC-TASKS-005 accepts. A dispatch the hook expanded is never a plan
+                // read: its host facts name the planning indexes, and the worker is told to
+                // use that prompt, not a plan (Req 9.18). Only the hook's own record of the
+                // insertion exempts it, because a conductor can type the prompt's tags too.
+                "delegation.planning-paths" => promptInserted
                     ? []
                     : PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
                 "delegation.plan-file" => planFile,
@@ -227,10 +234,11 @@ public static class TriggerFactBuilder
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
-                // A machine fact: whether the host's task gates list any gate for the agent that returned, by
-                // its own review.task-gates entry, which is the one this dispatch's agent is keyed on.
+                // A machine fact: whether the host's task gates resolve any gate for the agent that returned and
+                // the technology the dispatch names, by the same resolver the gate run uses. A host whose gates
+                // are keyed only by technology must not read as having none.
                 "config.task-gates-declared" => target is not null
-                                                && TaskGateResolver.Resolve(config.Review, target).Gates.Count > 0,
+                                                && TaskGateResolver.Resolve(config.Review, target, technology).Gates.Count > 0,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,

@@ -32,7 +32,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     [Fact]
     public void AFallbackHarnessWritesThePromptItBuiltToTheRunsScratchFolder()
     {
-        TaskPromptResult result = Build("antigravity");
+        TaskPromptResult result = Build("warp");
 
         Assert.True(result.Built, result.Refusal);
         Assert.Equal(".agent_scratchpad/t1/prompt.md", result.PromptFile);
@@ -56,6 +56,37 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
         Assert.False(File.Exists(PromptPath()), $"'{harness}' rewrites the dispatch, so it must not get a prompt file.");
     }
 
+    /// <summary>
+    /// A dispatch that names only a technology has no task folder, so its fallback file is keyed by the technology.
+    /// Without it the dispatch would claim the hook inserts a prompt that no harness rewrites.
+    /// </summary>
+    [Fact]
+    public void ATechnologyOnlyDispatchOnAFallbackHarnessWritesItsPromptFile()
+    {
+        TaskPromptResult result = DocsTaskPromptToolTests.Service(_fixture).Build(
+            new TaskPromptRequest(_fixture.Root, TaskId: null, Technology: "csharp", Harness: "warp"),
+            Config);
+
+        Assert.True(result.Built, result.Refusal);
+        string expected = $"{TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}";
+        Assert.Equal(expected, result.PromptFile);
+        Assert.Equal(result.Prompt, File.ReadAllText(Path.Combine(_fixture.Root, expected)));
+    }
+
+    [Fact]
+    public void TheToolNamesTheFileForATechnologyOnlyDispatchOnAFallbackHarness()
+    {
+        string reply = DocsTaskPromptToolTests.Tools(_fixture)
+            .BuildTaskPrompt(taskId: null, technology: "csharp", harness: "warp");
+
+        Assert.Contains(
+            $"prompt file: {TaskPromptService.ScratchFolder}/csharp/{TaskPromptService.PromptFileName}",
+            reply,
+            StringComparison.Ordinal);
+        Assert.Contains("read it first", reply, StringComparison.Ordinal);
+        Assert.DoesNotContain("the dispatch hook inserts it", reply, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ACallerThatNamesNoHarnessWritesNoFile()
     {
@@ -70,7 +101,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
     [Fact]
     public void TheToolGivesThePathOnAFallbackHarnessAndHoldsNoPromptText()
     {
-        string reply = DocsTaskPromptToolTests.Tools(_fixture).BuildTaskPrompt(taskId: "T1", harness: "antigravity");
+        string reply = DocsTaskPromptToolTests.Tools(_fixture).BuildTaskPrompt(taskId: "T1", harness: "warp");
 
         Assert.Contains("prompt file: .agent_scratchpad/t1/prompt.md", reply, StringComparison.Ordinal);
         Assert.Contains("read it first", reply, StringComparison.Ordinal);
@@ -96,7 +127,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
         Directory.CreateDirectory(_fixture.Root);
         File.WriteAllText(blocking, "not a folder");
 
-        TaskPromptResult result = Build("antigravity");
+        TaskPromptResult result = Build("warp");
 
         Assert.False(result.Built);
         Assert.Null(result.PromptFile);

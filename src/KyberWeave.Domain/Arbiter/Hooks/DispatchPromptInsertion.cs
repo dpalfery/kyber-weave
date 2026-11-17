@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Arbiter.Facts;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -8,12 +9,14 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="Technology">The <c>TECHNOLOGY</c> header's value, for a dispatch that belongs to no task.</param>
 /// <param name="PriorResultsPath">The <c>PRIOR_RESULTS</c> header's value, the file a retry's earlier results live in.</param>
 /// <param name="FailedAttempts">The <c>FAILED_ATTEMPTS</c> header's value; zero when the header is absent or unreadable.</param>
+/// <param name="RetryText">The lines below the header block, which ride after the prompt; the budget reserves room for them.</param>
 public sealed record DispatchPromptQuery(
     string? TaskId,
     string? PlanFile,
     string? Technology,
     string? PriorResultsPath,
-    int FailedAttempts);
+    int FailedAttempts,
+    string? RetryText = null);
 
 /// <summary>One prompt the hook built, or why it could not be built.</summary>
 /// <param name="Built">Whether <paramref name="Prompt"/> holds a prompt.</param>
@@ -119,11 +122,15 @@ public static partial class DispatchPromptInsertion
         return RewriteHarnesses.Contains(harness.Trim());
     }
 
+    /// <summary>
+    /// Every harness token recorded as rewriting the dispatch. Each one must be served by an adapter that inserts
+    /// the prompt: a token listed here and served by nothing would leave the worker with no prompt and no file.
+    /// </summary>
+    public static IReadOnlySet<string> RewriteHarnessTokens => RewriteHarnesses;
+
     private static readonly IReadOnlySet<string> RewriteHarnesses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "claude",
-        "claude-code",
-        "copilot",
         "copilot-vscode",
         "copilot-cli",
         "codex",
@@ -131,6 +138,7 @@ public static partial class DispatchPromptInsertion
         "opencode",
         "pi",
         "kilo",
+        "antigravity",
         "factory",
         "devin",
     };
@@ -171,7 +179,8 @@ public static partial class DispatchPromptInsertion
                 headers.PlanFile,
                 headers.Technology,
                 headers.PriorResultsPath,
-                headers.FailedAttempts)) ?? new DispatchPromptExpansion(false, string.Empty, Why(headers));
+                headers.FailedAttempts,
+                headers.Body)) ?? new DispatchPromptExpansion(false, string.Empty, Why(headers));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -227,7 +236,7 @@ public static partial class DispatchPromptInsertion
             ArgumentNullException.ThrowIfNull(prompt);
 
             string[] lines = prompt.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
-            Dictionary<string, string> values = new(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, string> values = new(StringComparer.Ordinal);
             int index = 0;
             for (; index < lines.Length; index++)
             {
@@ -237,7 +246,17 @@ public static partial class DispatchPromptInsertion
                     break;
                 }
 
-                values.TryAdd(match.Groups["name"].Value, match.Groups["value"].Value.Trim());
+                string name = match.Groups["name"].Value;
+                string value = match.Groups["value"].Value.Trim();
+
+                // Only a real task dispatch is expanded: a task id the task files cannot have is not one, and
+                // its line stays in the body with everything below it.
+                if (name == TaskHeader && !HeaderBlock.IsTaskId(value))
+                {
+                    break;
+                }
+
+                values.TryAdd(name, value);
             }
 
             string body = string.Join('\n', lines.Skip(index)).TrimStart('\n');
@@ -260,8 +279,11 @@ public static partial class DispatchPromptInsertion
                 : 0;
     }
 
-    // A header line is `NAME: value` with a single token-ish name. The block ends at the first line that is not
-    // one, which is why a failure report below it is never mistaken for a header.
-    [GeneratedRegex(@"^(?<name>[A-Za-z][A-Za-z0-9_-]*)[ \t]*:[ \t]*(?<value>\S.*?)[ \t]*$", RegexOptions.CultureInvariant)]
+    // A task dispatch's header line is one of the closed names — the Arbiter's own set plus the task headers —
+    // spelled exactly as the conductor writes it. The block ends at the first line that is not one, so an
+    // ordinary `Task:` sentence or a retry's `Error: build failed` line below the headers is body text.
+    [GeneratedRegex(
+        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY|PRIOR_RESULTS|FAILED_ATTEMPTS):[ \t]*(?<value>\S.*?)[ \t]*$",
+        RegexOptions.CultureInvariant)]
     private static partial Regex HeaderLineRegex();
 }

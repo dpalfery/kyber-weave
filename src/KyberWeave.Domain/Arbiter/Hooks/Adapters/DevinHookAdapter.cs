@@ -85,6 +85,29 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
     }
 
     /// <inheritdoc/>
+    public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = renderedCaller;
+
+        if (!string.Equals(GetString(payload, "hook_event_name"), "PreToolUse", StringComparison.Ordinal)
+            || !IsDispatchTool(GetString(payload, "tool_name")))
+        {
+            return null;
+        }
+
+        JsonElement toolInput = RequireToolInput(payload);
+        string prompt = GetString(toolInput, "prompt") ?? string.Empty;
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        return insertion.Kind switch
+        {
+            DispatchInsertionKind.Inserted => RenderMergePrompt(insertion.Text),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            _ => null,
+        };
+    }
+
+    /// <inheritdoc/>
     public string Handle(
         JsonElement payload,
         string rawJson,
@@ -145,24 +168,39 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
         }
 
         HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
+
+        // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        if (insertion.Kind == DispatchInsertionKind.Stopped)
+        {
+            return RenderPreDeny(insertion.Reason!);
+        }
+
+        bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
         return outcome.Kind switch
         {
-            HookOutcomeKind.PassThrough => string.Empty,
+            HookOutcomeKind.PassThrough => inserted
+                ? RenderMergePrompt(insertion.Text)
+                : string.Empty,
 
             // The strip exists for Req 25.1 header stripping, so it applies only
             // when a prompt was sent: a promptless dispatch carries no headers,
             // and merging an empty prompt would add a field Devin never sent.
-            HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target) && hasPrompt
-                ? RenderMergeStrip(HeaderBlock.Strip(prompt))
-                : string.Empty,
-            HookOutcomeKind.AllowWithRewrite => RenderMergeStrip(
-                RewrittenPromptOf(outcome.RewrittenInputJson
+            HookOutcomeKind.Allow => inserted
+                ? RenderMergePrompt(insertion.Text)
+                : ReadGuard.IsImplementationSpecialist(target) && hasPrompt
+                    ? RenderMergePrompt(HeaderBlock.Strip(prompt))
+                    : string.Empty,
+            HookOutcomeKind.AllowWithRewrite => RenderMergePrompt(inserted
+                ? insertion.Text
+                : RewrittenPromptOf(outcome.RewrittenInputJson
                     ?? throw new InvalidOperationException(
                         "Hook engine returned allow-with-rewrite without rewritten input."))),
             HookOutcomeKind.Deny => RenderPreDeny(
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine denied without a reason.")),
             HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
+                inserted ? insertion.Text : null,
                 outcome.Reason ?? throw new InvalidOperationException(
                     "Hook engine allowed with a note but wrote none.")),
             _ => throw new InvalidOperationException(
@@ -311,12 +349,24 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
     private static bool IsDispatchTool(string? tool) =>
         string.Equals(tool, DispatchTool, StringComparison.Ordinal);
 
-    private static string RenderPreAllowNote(string note) =>
-        new JsonObject
+    private static string RenderPreAllowNote(string? insertedPrompt, string note)
+    {
+        JsonObject output = new()
         {
             ["decision"] = "allow",
             ["reason"] = note,
-        }.ToJsonString();
+        };
+        if (insertedPrompt is not null)
+        {
+            output["hookSpecificOutput"] = new JsonObject
+            {
+                ["hookEventName"] = "PreToolUse",
+                ["updatedInput"] = new JsonObject { ["prompt"] = insertedPrompt },
+            };
+        }
+
+        return output.ToJsonString();
+    }
 
     private static string RenderPreDeny(string reason) =>
         new JsonObject
@@ -327,7 +377,8 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
             ["reason"] = reason,
         }.ToJsonString();
 
-    private static string RenderMergeStrip(string strippedPrompt) =>
+    /// <summary>The merge that writes <paramref name="prompt"/> into the tool call, every other field left as Devin has it.</summary>
+    private static string RenderMergePrompt(string prompt) =>
         new JsonObject
         {
             ["hookSpecificOutput"] = new JsonObject
@@ -339,7 +390,7 @@ public sealed class DevinHookAdapter : IHarnessHookAdapter
                 // survive without being re-sent.
                 ["updatedInput"] = new JsonObject
                 {
-                    ["prompt"] = strippedPrompt,
+                    ["prompt"] = prompt,
                 },
             },
         }.ToJsonString();
