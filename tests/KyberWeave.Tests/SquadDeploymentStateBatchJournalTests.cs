@@ -269,6 +269,32 @@ public sealed class SquadDeploymentStateBatchJournalTests : SquadDeploymentState
         Assert.Equal("operator notes", Read(root, ForeignPath));
     }
 
+    /// <summary>
+    ///     An operator edit that lands after preflight but before the backup is captured makes the file's claim
+    ///     disagree with the plan's precondition. The transaction must refuse that leaf and still leave a
+    ///     journal recovery can read: the rest of the batch is in flight, and their declarations must survive.
+    /// </summary>
+    [Fact]
+    public void RecoverAfterAnOperatorEditMidBatchLeavesAReadableJournal()
+    {
+        using TempDirectory temp = new();
+        string root = temp.Path;
+        SeedUpdate(root, out SquadReceipt receipt);
+        RaceObserver observer = new(SquadTransactionStepKind.IntentWritten, () =>
+            Write(root, AgentTwoPath, "operator edit"));
+
+        Assert.ThrowsAny<InvalidOperationException>(() =>
+            Transaction(root, observer).Execute(UpdatePlan(root, receipt)));
+
+        // The operator's bytes are the file's prior state now, so the prior tree keeps them.
+        Transaction(root).Recover(root, SquadDeploymentScope.Project);
+        Assert.Equal("one v1", Read(root, AgentOnePath));
+        Assert.Equal("operator edit", Read(root, AgentTwoPath));
+        Assert.Equal("three v1", Read(root, AgentThreePath));
+        Assert.Equal("adopted body", Read(root, AdoptedPath));
+        Assert.False(Directory.Exists(Path.Combine(root, ".kyber-weave", ".squad-transaction")));
+    }
+
     private static void SeedUpdate(string root, out SquadReceipt receipt)
     {
         Write(root, AgentOnePath, "one v1");
@@ -350,6 +376,41 @@ public sealed class SquadDeploymentStateBatchJournalTests : SquadDeploymentState
             Journal = JsonNode.Parse(
                 Encoding.UTF8.GetString(Assert.IsType<byte[]>(Snapshot[journal].Content)));
             throw new InjectedSquadTransactionFailure(value.Sequence);
+        }
+    }
+
+    /// <summary>
+    ///     Runs a filesystem change at one transaction step or checkpoint, modelling an operator or another
+    ///     process touching a deployed path while the apply loop is running.
+    /// </summary>
+    private sealed class RaceObserver : ISquadTransactionCheckpointObserver
+    {
+        private readonly SquadTransactionCheckpointKind? _checkpoint;
+        private readonly Action _race;
+        private readonly SquadTransactionStepKind? _step;
+
+        public RaceObserver(SquadTransactionStepKind step, Action race)
+        {
+            _step = step;
+            _race = race;
+        }
+
+        public RaceObserver(SquadTransactionCheckpointKind checkpoint, Action race)
+        {
+            _checkpoint = checkpoint;
+            _race = race;
+        }
+
+        public void AfterStep(SquadTransactionStep step)
+        {
+            if (_step == step.Kind)
+                _race();
+        }
+
+        public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint)
+        {
+            if (_checkpoint == checkpoint.Kind)
+                _race();
         }
     }
 }
