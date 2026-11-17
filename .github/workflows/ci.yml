@@ -577,7 +577,7 @@ jobs:
           dotnet restore KyberWeave.sln
           dotnet build KyberWeave.sln --configuration Release --no-restore
 
-      # Intentional github/codeql-action v4 pin (v4.39.2)
+      # Intentional github/codeql-action v4 pin (v4.39.3)
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
