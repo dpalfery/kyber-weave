@@ -145,7 +145,10 @@ public sealed class KiloRendererContractTests : IDisposable
             result.Files,
             file => file.RelativePath == $".kilo/agents/{ResourceBearingSquadFixture.AgentName}.md");
         string body = Encoding.UTF8.GetString(principal.Content.Span);
-        Assert.Contains(ResourceBearingSquadFixture.AgentTextOnlyLink, body, StringComparison.Ordinal);
+        Assert.Contains(
+            $"[Payload](.kilo/agents/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt)",
+            body,
+            StringComparison.Ordinal);
 
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
         SquadAgent agent = Assert.Single(

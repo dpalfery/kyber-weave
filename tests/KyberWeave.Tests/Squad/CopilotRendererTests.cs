@@ -323,7 +323,9 @@ public sealed class CopilotRendererTests
 
     [Theory]
     [InlineData("review-triage", "reviewer", "Gemini 3.8 Flash (copilot)")]
-    [InlineData("dev-easy", "fast", "GPT-6.1 Terra (copilot)")]
+    [InlineData("dev-easy", "fast", "Claude Haiku 5.5 (copilot)")]
+    [InlineData("dev-medium", "general", "GPT-6.1 Terra (copilot)")]
+    [InlineData("dev-hard", "dev-hard", "Gemini 4 Hydrogen (copilot)")]
     public async Task RenderAsync_ReviewerAndFastAgentsResolveToTheirProfileCopilotModels(
         string agentName,
         string expectedProfile,

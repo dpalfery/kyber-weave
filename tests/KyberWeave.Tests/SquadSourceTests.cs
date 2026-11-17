@@ -97,7 +97,7 @@ public sealed class SquadSourceTests
     [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
     [InlineData("fast", "claude", "claude-haiku-5-5")]
     [InlineData("fast", "codex", "gpt-6-luna")]
-    [InlineData("fast", "copilot", "GPT-6.1 Terra (copilot)")]
+    [InlineData("fast", "copilot", "Claude Haiku 5.5 (copilot)")]
     [InlineData("fast", "cursor", "composer-2.5[]")]
     [InlineData("fast", "kilo", "opencode-go/muse-spark-1.3-contributor")]
     [InlineData("fast", "opencode", "opencode-go/muse-spark-1.3-contributor")]
@@ -121,7 +121,7 @@ public sealed class SquadSourceTests
     [InlineData("reviewer", "devin", "grok-4-7-high")]
     [InlineData("dev-hard", "claude", "opus")]
     [InlineData("dev-hard", "codex", "gpt-6.1-sol")]
-    [InlineData("dev-hard", "copilot", "Claude Opus 5.5 (copilot)")]
+    [InlineData("dev-hard", "copilot", "Gemini 4 Hydrogen (copilot)")]
     [InlineData("dev-hard", "cursor", "claude-sonnet-5-5[effort=high]")]
     [InlineData("dev-hard", "factory", "glm-5.3[reasoningEffort=high]")]
     [InlineData("dev-hard", "kilo", "zai-coding-plan/glm-5.3")]
@@ -164,7 +164,7 @@ public sealed class SquadSourceTests
     }
 
     [Fact]
-    public void ModelsYmlUsesHaiku55OnlyForClaudeFastAndCopilotGeneralProfiles()
+    public void ModelsYmlUsesHaiku55OnlyForTheFastProfile()
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
 
@@ -177,7 +177,7 @@ public sealed class SquadSourceTests
                 {
                     Assert.True(
                         (profileName == "fast" && harness == "claude" && model == "claude-haiku-5-5") ||
-                        (profileName == "general" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
+                        (profileName == "fast" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
                         $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
                 }
             }

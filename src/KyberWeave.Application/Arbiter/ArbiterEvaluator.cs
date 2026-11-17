@@ -322,7 +322,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // Primary and secondary read one fact set and one candidate map, so their questions
         // can share a single provider call.
         Dictionary<string, ArbiterFact> candidateFacts = new(StringComparer.Ordinal);
-        TriggerPlan primary = PlanTrigger(trigger, facts, eventRules, candidateFacts);
+        TriggerPlan primary = PlanTrigger(trigger, facts, eventRules, candidateFacts, config.WorkerRoster);
 
         // Step 0 of the primary short-circuits: no provider call, and no secondary work.
         List<TriggerPlan> secondaries = [];
@@ -333,7 +333,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
                 if (eventRules.Any(rule => rule.Enabled
                     && string.Equals(rule.Trigger, secondary, StringComparison.Ordinal)))
                 {
-                    secondaries.Add(PlanTrigger(secondary, facts, eventRules, candidateFacts));
+                    secondaries.Add(PlanTrigger(secondary, facts, eventRules, candidateFacts, config.WorkerRoster));
                 }
             }
         }
@@ -386,7 +386,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         {
             ArbiterFactSet findingFacts = TriggerFactBuilder.WithReturnedFinding(baseFacts, returned[index], gateCorroborated);
             Dictionary<string, ArbiterFact> findingCandidates = new(StringComparer.Ordinal);
-            TriggerPlan findingPlan = PlanTrigger(trigger, findingFacts, eventRules, findingCandidates);
+            TriggerPlan findingPlan = PlanTrigger(trigger, findingFacts, eventRules, findingCandidates, config.WorkerRoster);
             ArbiterFactSet findingBatch = findingCandidates.Aggregate(
                 findingFacts, (set, pair) => set.With(pair.Key, pair.Value.Value, pair.Value.Label));
             Step1Call findingCall = await AskAsync(
@@ -558,7 +558,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string trigger,
         ArbiterFactSet facts,
         IReadOnlyList<ArbiterRule> rules,
-        Dictionary<string, ArbiterFact> candidateFacts)
+        Dictionary<string, ArbiterFact> candidateFacts,
+        string? workerRoster)
     {
         ArbiterTriggerFamily family = ArbiterTriggerFamilies.ForTrigger(trigger);
         List<ArbiterRule> step0Rules = rules
@@ -596,7 +597,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
 
         return new TriggerPlan(
             trigger, family, step0, step0Answers, shortCircuits, questions, unanswerable, noCandidates,
-            Step0EvidenceOf(step0Answers, facts));
+            Step0EvidenceOf(step0Answers, facts, workerRoster));
     }
 
     /// <summary>
@@ -1141,30 +1142,48 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// <summary>
     /// The evidence line of the step-0 answers whose fix needs the fact they read. A step-0 answer otherwise
     /// carries no evidence: its rule and answer say enough. <c>KW-ARB-CHECKOUT-001</c> names the stray paths,
-    /// because whoever cleans up the canonical checkout needs the list.
+    /// because whoever cleans up the canonical checkout needs the list; <c>KW-ARB-ROSTER-001</c> names the developer
+    /// tier a tiered run replaced the refused technology developer with, because the conductor's next act is to
+    /// dispatch it.
     /// </summary>
     private static Dictionary<string, string>? Step0EvidenceOf(
         IReadOnlyDictionary<string, string> step0Answers,
-        ArbiterFactSet facts)
+        ArbiterFactSet facts,
+        string? workerRoster)
     {
-        if (!step0Answers.TryGetValue("KW-ARB-CHECKOUT-001", out string? answer)
-            || !string.Equals(answer, "stray", StringComparison.Ordinal)
-            || !facts.TryGet("checkout.stray-paths", out ArbiterFact? fact)
-            || fact.Value is not IEnumerable<string> paths)
+        Dictionary<string, string> evidence = new(StringComparer.Ordinal);
+
+        if (string.Equals(workerRoster, WorkerRosters.Tiered, StringComparison.Ordinal)
+            && step0Answers.TryGetValue(RosterDelegatesTo.RuleId, out string? rosterAnswer)
+            && string.Equals(rosterAnswer, "not-listed", StringComparison.Ordinal)
+            && RosterDelegatesTo.TechnologyDeveloperRefusal(
+                TextOf(facts, "delegation.target"),
+                workerRoster,
+                TextOf(facts, ModelTargetingRules.RecordedDifficultyFact),
+                ArbiterSquadCatalog.LoadEmbedded()) is { } refusal)
         {
-            return null;
+            evidence[RosterDelegatesTo.RuleId] = refusal;
         }
 
-        List<string> all = [.. paths];
-        string named = string.Join(", ", all.Take(MaxStrayPathsNamed));
-        string more = all.Count > MaxStrayPathsNamed ? $" and {all.Count - MaxStrayPathsNamed} more" : string.Empty;
-        return new Dictionary<string, string>(StringComparer.Ordinal)
+        if (step0Answers.TryGetValue("KW-ARB-CHECKOUT-001", out string? answer)
+            && string.Equals(answer, "stray", StringComparison.Ordinal)
+            && facts.TryGet("checkout.stray-paths", out ArbiterFact? fact)
+            && fact.Value is IEnumerable<string> paths)
         {
-            ["KW-ARB-CHECKOUT-001"] =
+            List<string> all = [.. paths];
+            string named = string.Join(", ", all.Take(MaxStrayPathsNamed));
+            string more = all.Count > MaxStrayPathsNamed ? $" and {all.Count - MaxStrayPathsNamed} more" : string.Empty;
+            evidence["KW-ARB-CHECKOUT-001"] =
                 $"written in the canonical checkout instead of the run worktree: {named}{more}. Move each into the run " +
-                "worktree, then restore those paths in the canonical checkout.",
-        };
+                "worktree, then restore those paths in the canonical checkout.";
+        }
+
+        return evidence.Count == 0 ? null : evidence;
     }
+
+    /// <summary>The string value of a fact, or null when the fact is absent or not text.</summary>
+    private static string? TextOf(ArbiterFactSet facts, string name) =>
+        facts.TryGet(name, out ArbiterFact? fact) && fact.Value is string text ? text : null;
 
     /// <summary>The step-0 decision entries of a plan, without the undecidable entry a step-1 question superseded.</summary>
     private static List<ArbiterDecisionRule> Step0Rules(TriggerPlan plan)

@@ -40,8 +40,8 @@ first, and the second is shipped policy.
 |---|---|---|
 | `architect` | Deep architectural and product reasoning | `architect`, `product-owner` |
 | `deep-planning` | Investigative planning and diagnosis | `bug-crusher-investigator` |
-| `fast` | Bounded, checkable work | `bug-crusher`, `dev-easy`, `docs-dev`, `platform-researcher`, `research-agent` |
-| `general` | Standard implementation and support | `dev-medium`, `devops` |
+| `fast` | Bounded, checkable work | `bug-crusher`, `dev-easy`, `platform-researcher`, `research-agent` |
+| `general` | Standard implementation and support | `dev-medium`, `devops`, `docs-dev` |
 | `dev-hard` | The strongest developer tier | `dev-hard` |
 | `orchestration` | Coordination and dispatch | none: the conductor names no profile and runs on its session's model |
 | `reviewer` | Adversarial code reading | `code-reviewer`, `review-lens`, `review-triage` |

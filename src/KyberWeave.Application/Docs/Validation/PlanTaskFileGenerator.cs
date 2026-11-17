@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -563,6 +564,7 @@ public sealed partial class PlanTaskFileGenerator
             if (task.Role is null && task.Id is not null
                 && onDisk.TryGetValue(task.Id, out PlanTaskFileEntry? old)
                 && old.Agent is not null && old.Role is null
+                && ServesConfiguredRoster(old.Agent)
                 && string.Equals(old.Capabilities, task.Capabilities, StringComparison.Ordinal)
                 && string.Equals(old.Prompt, task.Prompt, StringComparison.Ordinal))
             {
@@ -606,6 +608,16 @@ public sealed partial class PlanTaskFileGenerator
 
         return file with { Tasks = entries };
     }
+
+    /// <summary>
+    /// Whether a recorded pick can still run for the roster this write records. A technology developer under
+    /// <c>tiered</c>, or a developer tier under <c>technology</c>, is the previous roster's pick: keeping it would
+    /// write an agent the roster does not offer, so the task is picked again.
+    /// </summary>
+    private bool ServesConfiguredRoster(string agent) =>
+        ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(agent, out ArbiterSquadAgent? recorded)
+        && (recorded.WorkerRoster is null
+            || string.Equals(recorded.WorkerRoster, _config.WorkerRoster, StringComparison.Ordinal));
 
     private Dictionary<string, PlanTaskFileEntry> ReadExistingEntries(string taskFile)
     {
@@ -685,6 +697,9 @@ public sealed partial class PlanTaskFileGenerator
 
             if (string.Equals(_files.ReadTextIfPresent(full), yaml, StringComparison.Ordinal))
             {
+                // The YAML is already current, but a JSON file an older release wrote may still sit
+                // beside it. Leaving it there would keep two task files, so the write removes it.
+                RemoveLegacy(taskFile, report);
                 return false;
             }
 
@@ -945,6 +960,7 @@ public sealed partial class PlanTaskFileGenerator
             foreach ((string field, bool same) in new (string, bool)[]
                      {
                          ("role", got.Role == want.Role),
+                         ("agent", got.Agent == want.Agent),
                          ("capabilities", got.Capabilities == want.Capabilities),
                          ("session", got.Session == want.Session),
                          ("files", (got.Files ?? []).SequenceEqual(want.Files ?? [])),

@@ -375,7 +375,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// </summary>
     [Theory]
     [InlineData("dev-easy")]
-    [InlineData("docs-dev")]
     public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
@@ -427,6 +426,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     [Theory]
     [InlineData("devops")]
     [InlineData("dev-medium")]
+    [InlineData("docs-dev")]
     public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);

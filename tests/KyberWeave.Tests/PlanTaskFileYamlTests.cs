@@ -75,6 +75,53 @@ public sealed class PlanTaskFileYamlTests
         Assert.Equal(PlanTaskFileProbe.ExecutionDigest(PlanTaskFileProbe.PlanMarkdown()), converted.ExecutionDigest);
     }
 
+    /// <summary>
+    /// A current YAML file beside a JSON file an older release wrote leaves two task files. The write
+    /// removes the JSON and names it, even though the YAML itself needed no rewrite.
+    /// </summary>
+    [Fact]
+    public void AWriteRemovesALegacyJsonLeftBesideACurrentYamlAndReportsIt()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        Assert.True(Run(fixture, PlanTaskFileMode.Write).Wrote);
+        File.WriteAllText(
+            FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath),
+            PlanTaskFileProbe.LegacyJsonTaskFile());
+
+        PlanTaskFileOutcome outcome = Run(fixture, PlanTaskFileMode.Write);
+
+        Assert.False(outcome.Wrote);
+        Assert.True(File.Exists(FullPath(fixture, PlanTaskFileProbe.TaskFilePath)));
+        Assert.False(File.Exists(FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath)));
+        Assert.Contains(
+            outcome.Report.Items,
+            item => item.Code == PlanTaskFileRules.LegacyJsonTaskFile
+                    && item.Message.Contains(PlanTaskFileProbe.LegacyTaskFilePath, StringComparison.Ordinal));
+    }
+
+    /// <summary>The validator names a JSON file left beside the YAML one, with the command that removes it.</summary>
+    [Fact]
+    public void ValidateReportsALegacyJsonLeftBesideTheYamlTaskFile()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        Assert.True(Run(fixture, PlanTaskFileMode.Write).Wrote);
+        File.WriteAllText(
+            FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath),
+            PlanTaskFileProbe.LegacyJsonTaskFile());
+
+        DiagnosticReport report = new PlanTaskFileValidator(
+            fixture.Root,
+            KyberWeaveConfig.ProductDefaults,
+            DocsPorts.Files).Validate(fixture.Load());
+
+        Diagnostic leftover = Assert.Single(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.LegacyJsonTaskFile
+                    && item.Severity == Severity.Warning
+                    && item.Message.Contains(PlanTaskFileProbe.LegacyTaskFilePath, StringComparison.Ordinal));
+        Assert.Contains("--convert", leftover.Hint, StringComparison.Ordinal);
+    }
+
     /// <summary>Converting a plan that already stores YAML reports that there is nothing to convert.</summary>
     [Fact]
     public void ConvertWithNoJsonFileWritesNothing()

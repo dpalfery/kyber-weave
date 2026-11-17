@@ -58,6 +58,11 @@ interchangeable.
 - **Executable and argv are unchanged.** `kyber-weave-arbiter serve --repo-root <root>`
   is what a client launches; `kw-arbiter` is what it declares the server as. A change to
   one is not a change to the other.
+- **The serve container is `ArbiterContainer.AddArbiterServe(args, log)`.** It registers the
+  hook host's services plus the `ArbiterServeContext` built from this process's argv. The SDK
+  constructs `ArbiterTools` from that container on each call, so every constructor parameter
+  must be a registered service; `McpCompositionRootTests` constructs every tool type from the
+  same container for both servers.
 
 The three decision tools are `arbiter_evaluate_agent_dispatch_or_return`,
 `arbiter_list_effective_rules_by_trigger`, and

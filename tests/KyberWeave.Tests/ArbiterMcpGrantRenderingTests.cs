@@ -145,6 +145,34 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenCode_EnabledProjectWiring_GrantsTheArbiterServerOnlyToTheAgentsThatAsk()
+    {
+        SquadRenderResult result = await RenderAsync(
+            new OpenCodeRenderer(), SquadTarget.OpenCode, new SquadArbiterWiring(true, 30));
+
+        Assert.Contains($"kw-arbiter_*: allow", ContentOf(result, ".opencode/agents/conductor.md"), StringComparison.Ordinal);
+        Assert.Contains($"kw-arbiter_*: allow", ContentOf(result, ".opencode/agents/code-reviewer.md"), StringComparison.Ordinal);
+        foreach (string agent in new[] { "architect", "product-owner", "csharp-dev", "test-dev", "github-devops", "docs-dev", "research-agent" })
+        {
+            Assert.DoesNotContain(
+                "kw-arbiter_*",
+                ContentOf(result, $".opencode/agents/{agent}.md"),
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task OpenCode_WithoutAnEnabledProjectWiring_GrantsNoArbiterServer()
+    {
+        SquadRenderResult result = await RenderAsync(new OpenCodeRenderer(), SquadTarget.OpenCode);
+
+        Assert.DoesNotContain(
+            "kw-arbiter_*",
+            ContentOf(result, ".opencode/agents/conductor.md"),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Devin_ExcludesTheArbiterServerFromEveryAgent()
     {
         SquadRenderResult result = await RenderAsync(new DevinRenderer(), SquadTarget.Devin);

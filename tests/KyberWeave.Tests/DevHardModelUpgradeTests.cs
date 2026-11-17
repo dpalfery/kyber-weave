@@ -46,7 +46,7 @@ public sealed class DevHardModelUpgradeTests
         ["antigravity"] = "pro",
         ["claude"] = "opus",
         ["codex"] = "gpt-6.1-sol",
-        ["copilot"] = "Claude Opus 5.5 (copilot)",
+        ["copilot"] = "Gemini 4 Hydrogen (copilot)",
         ["cursor"] = "claude-sonnet-5-5[effort=high]",
         ["devin"] = "claude-opus-5-5-high",
         ["factory"] = "glm-5.3[reasoningEffort=high]",
@@ -62,7 +62,7 @@ public sealed class DevHardModelUpgradeTests
         ["antigravity"] = "flash",
         ["claude"] = "claude-haiku-5-5",
         ["codex"] = "gpt-6-luna",
-        ["copilot"] = "GPT-6.1 Terra (copilot)",
+        ["copilot"] = "Claude Haiku 5.5 (copilot)",
         ["cursor"] = "composer-2.5[]",
         ["devin"] = "deepseek-v4-1-flash-high",
         ["factory"] = "deepseek-v4.1-flash[reasoningEffort=high]",
@@ -96,7 +96,7 @@ public sealed class DevHardModelUpgradeTests
     private static readonly Dictionary<SquadTarget, string> RenderedDevHardModels = new()
     {
         [SquadTarget.Claude] = "opus",
-        [SquadTarget.Copilot] = "Claude Opus 5.5 (copilot)",
+        [SquadTarget.Copilot] = "Gemini 4 Hydrogen (copilot)",
         [SquadTarget.Cursor] = "claude-sonnet-5-5[effort=high]",
         [SquadTarget.Codex] = "gpt-6.1-sol",
         [SquadTarget.OpenCode] = "zai-coding-plan/glm-5.3",

@@ -565,7 +565,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             result.Files,
             file => file.RelativePath == ".opencode/agents/bug-crusher-investigator.md");
         string body = Encoding.UTF8.GetString(principal.Content.Span);
-        Assert.Contains(ResourceBearingSquadFixture.AgentTextOnlyLink, body, StringComparison.Ordinal);
+        Assert.Contains(
+            $"[Payload](.opencode/agents/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt)",
+            body,
+            StringComparison.Ordinal);
 
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
         SquadAgent agent = Assert.Single(

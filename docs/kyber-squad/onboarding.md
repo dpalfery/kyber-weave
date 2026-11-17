@@ -397,8 +397,8 @@ frontier model:
 | `architect` | `claude-opus-5-5-high` | architect |
 | `deep-planning` | `claude-opus-5-5-high` | bug-crusher-investigator |
 | `dev-hard` | `claude-opus-5-5-high` | dev-hard |
-| `general` | `swe-2-high` | dev-medium, devops, product-owner |
-| `fast` | `deepseek-v4-1-flash-high` | bug-crusher, dev-easy, docs-dev, platform-researcher, research-agent |
+| `general` | `swe-2-high` | dev-medium, devops, docs-dev, product-owner |
+| `fast` | `deepseek-v4-1-flash-high` | bug-crusher, dev-easy, platform-researcher, research-agent |
 | `reviewer` | `grok-4-7-high` | code-reviewer, review-lens, review-triage |
 
 The `conductor` skill runs on whatever you select in the model picker; Fusion is Devin's

@@ -247,6 +247,56 @@ public sealed class McpPlanLifecycleToolsTests
         Assert.True(Exists(fixture, ArchivedPlan));
     }
 
+    /// <summary>
+    /// The docs tool is the path a conductor archives through, and it must refuse an unticked task exactly as the CLI
+    /// does: a plan archived with an undelivered task reads as finished work that shipped. The second end-to-end
+    /// tiered run archived one because the tool binary it called carried no checkbox gate; this holds the served path
+    /// to the same rule.
+    /// </summary>
+    [Fact]
+    public void ArchiveRefusesAPlanWithAnUncheckedNumberedTaskAndMovesNothing()
+    {
+        string sections = CloseoutCorpus.DecisionsSection("D1")
+            + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
+            + CloseoutCorpus.DesignHarvestSection("H1")
+            + """
+
+              ## Tasks
+
+              - [x] 1.1 Slug rule
+              - [ ] 1.2 Word count
+
+              """;
+        using DocFixture fixture = GitRepository(new DocFixture().WithCatalog()
+            .Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
+            .Write(ClosedPlan, CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready", sections: sections))
+            .Write("6-Docs/plans/README.md", """
+                ---
+                id: plans/index
+                title: Plan Inventory
+                doc-type: index
+                status: current
+                owner: Maintainers
+                last-reviewed: 2026-11-01
+                ---
+
+                # Plan Inventory
+
+                | Plan | Status |
+                |---|---|
+                | [2026-10-20-widget.md](2026-10-20-widget.md) | Ready |
+                """));
+        string plan = Read(fixture, ClosedPlan);
+
+        string response = Tools(fixture.Root).ArchivePlan(fixture.Root, "2026-10-20-widget");
+
+        Assert.Contains("result: refused", response, StringComparison.Ordinal);
+        Assert.Contains("KW-DOC-CLOSEOUT-006", response, StringComparison.Ordinal);
+        Assert.Contains("1.2", response, StringComparison.Ordinal);
+        Assert.Equal(plan, Read(fixture, ClosedPlan));
+        Assert.False(Exists(fixture, ArchivedPlan));
+    }
+
     [Fact]
     public void ArchiveRefusesAPathThatIsNotAPlan()
     {

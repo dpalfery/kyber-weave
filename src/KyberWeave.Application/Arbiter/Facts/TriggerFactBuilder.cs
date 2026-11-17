@@ -179,7 +179,7 @@ public static class TriggerFactBuilder
             : null;
         IReadOnlyList<string> delegatesTo = caller is not null
                                             && catalog.Agents.TryGetValue(caller, out ArbiterSquadAgent? callerAgent)
-            ? callerAgent.DelegatesTo
+            ? RosterDelegatesTo.For(callerAgent, config.WorkerRoster, catalog)
             : [];
         Dictionary<string, string> descriptions = new(StringComparer.Ordinal);
         foreach (KeyValuePair<string, ArbiterSquadAgent> entry in catalog.Agents)
