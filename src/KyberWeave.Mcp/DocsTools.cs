@@ -34,7 +34,8 @@ public sealed partial class DocsTools
     /// <param name="toolingCheck">The tooling check service for that root.</param>
     /// <param name="prompts">Builds one task's prompt, so the conductor learns which agent to dispatch.</param>
     /// <param name="hostConfiguration">Loads that root's configuration, which holds the prompt budget.</param>
-    /// <param name="repositoryRoot">The root these tools answer for.</param>
+    /// <param name="hostRoot">The root these tools answer for. A service type, because the SDK constructs the tools from
+    /// the container and cannot resolve a bare string.</param>
     /// <param name="roots">Resolves a per-call <c>projectPath</c>, or null when this host serves one root only.</param>
     public DocsTools(
         IDocsQueryService query,
@@ -43,7 +44,7 @@ public sealed partial class DocsTools
         IToolingCheckService toolingCheck,
         ITaskPromptService prompts,
         IDocsHostConfiguration hostConfiguration,
-        string repositoryRoot,
+        DocsHostRoot hostRoot,
         DocsRootRegistry? roots = null)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
@@ -52,8 +53,9 @@ public sealed partial class DocsTools
         _toolingCheck = toolingCheck ?? throw new ArgumentNullException(nameof(toolingCheck));
         _prompts = prompts ?? throw new ArgumentNullException(nameof(prompts));
         _hostConfiguration = hostConfiguration ?? throw new ArgumentNullException(nameof(hostConfiguration));
-        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-        _repositoryRoot = Path.GetFullPath(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(hostRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostRoot.Path);
+        _repositoryRoot = Path.GetFullPath(hostRoot.Path);
         _roots = roots;
     }
 
