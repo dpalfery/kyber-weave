@@ -25,9 +25,6 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
-    /// <summary>The forms <c>AZURE-READONLY-001</c> allows, stated in both azure.arbiter-rules.yml and azure.rules.md.</summary>
-    private static readonly string[] AzureReadForms = ["az * list", "az * list-*", "az * show", "az * show-*"];
-
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repository = new();
 
@@ -64,6 +61,43 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         string answer = Guard(harness, Command(harness, "az vm list > resources.txt"));
 
         Assert.StartsWith("AZURE-READONLY-001", Reason(harness, answer), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Every spelling that reaches `az` without putting it first is refused: a compound command, a subshell, an
+    /// absolute path, a quoted program, and a wrapper whose own option stops the form.
+    /// </summary>
+    [Theory]
+    [InlineData("echo hi; az vm delete --name db -g rg")]
+    [InlineData("echo hi\naz vm delete --name db -g rg")]
+    [InlineData("true; az vm delete --name db -g rg")]
+    [InlineData("FOO=1; az vm delete --name db -g rg")]
+    [InlineData("(az vm delete --name db -g rg)")]
+    [InlineData("! az vm delete --name db -g rg")]
+    [InlineData("/usr/bin/az vm delete --name db -g rg")]
+    [InlineData("\"az\" vm delete --name db -g rg")]
+    [InlineData("sudo -u root az vm delete --name db -g rg")]
+    [InlineData("timeout 10 az vm delete --name db -g rg")]
+    [InlineData("az vm list $(az vm delete -g rg)")]
+    [InlineData("az vm list && echo list")]
+    public void AMutatingAzureCommandBehindAShellPrefixOrSubshellIsRefused(string command)
+    {
+        TechnologyRepository(_repository.Path, "azure");
+
+        string answer = Guard("claude", Command("claude", command));
+
+        Assert.StartsWith("AZURE-READONLY-001", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("az vm list")]
+    [InlineData("az vm list -o table")]
+    [InlineData("az group list --query \"[].name\"")]
+    public void AListedAzureReadWithItsArgumentsIsAllowed(string command)
+    {
+        TechnologyRepository(_repository.Path, "azure");
+
+        Assert.Empty(Guard("claude", Command("claude", command)));
     }
 
     [Fact]
@@ -108,8 +142,13 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         Assert.False(WorkerGuard.NeedsDecision("codex-cli", mutating));
         Assert.Empty(Guard("codex-cli", mutating));
 
-        string rules = RulesPartOfTheAzurePrompt();
-        foreach (string form in AzureReadForms)
+        AssertListedInTheRulesPart("azure", ["az * list", "az * list-*", "az * show", "az * show-*"]);
+    }
+
+    private static void AssertListedInTheRulesPart(string technology, string[] forms)
+    {
+        string rules = RulesPartOfThePrompt(technology);
+        foreach (string form in forms)
         {
             Assert.Contains(form, rules, StringComparison.Ordinal);
         }
@@ -189,18 +228,18 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             : root.GetProperty("permissionDecisionReason").GetString()!;
     }
 
-    /// <summary>The <c>technology-rules</c> part of a prompt built for azure from the shipped folder.</summary>
-    private static string RulesPartOfTheAzurePrompt()
+    /// <summary>The <c>technology-rules</c> part of a prompt built for <paramref name="technology"/> from the shipped folder.</summary>
+    private static string RulesPartOfThePrompt(string technology)
     {
         using DocFixture fixture = new();
         fixture.Write("6-Docs/standards/shared-rules.md", ShippedStandardsFile("shared-rules.md"));
-        foreach (string name in new[] { "azure.standards.md", "azure.rules.md", "azure.skills.md" })
+        foreach (string name in new[] { $"{technology}.standards.md", $"{technology}.rules.md", $"{technology}.skills.md" })
         {
-            fixture.Write($"6-Docs/standards/azure/{name}", ShippedStandardsFile($"azure/{name}"));
+            fixture.Write($"6-Docs/standards/{technology}/{name}", ShippedStandardsFile($"{technology}/{name}"));
         }
 
         KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(
-            "ontology:\n  docs-root: 6-Docs\n  technologies: [azure]\n");
+            $"ontology:\n  docs-root: 6-Docs\n  technologies: [{technology}]\n");
         IServiceProvider provider = DocsTestCommands.Services();
         DocumentIndex index = DocumentIndex.Build(
             new DocumentLoader(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
@@ -210,7 +249,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             provider.GetRequiredService<IFileSystem>(),
             index.StandardsFor);
 
-        TaskPromptResult result = service.Build(new TaskPromptRequest(fixture.Root, TaskId: null, Technology: "azure"), config);
+        TaskPromptResult result = service.Build(new TaskPromptRequest(fixture.Root, TaskId: null, Technology: technology), config);
 
         Assert.True(result.Built, result.Refusal);
         const string openTag = "<technology-rules>";

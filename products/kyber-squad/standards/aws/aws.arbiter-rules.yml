@@ -1,10 +1,12 @@
 # Machine rules the Arbiter evaluates for the 'aws' folder.
 #
 # AWS-READONLY-001 is the command allow-list for a dispatch whose capability profile can run
-# commands but not write files (platform-reader, which platform-researcher uses). A command
-# whose form is one of the listed read forms is allowed; any other `aws` command is refused
-# where the worker guard sees the call (Claude Code and Copilot CLI) and is an instruction
-# only on the other harnesses, where the same forms are stated in aws.rules.md.
+# commands but not write files (platform-reader, which platform-researcher uses). One `aws` command
+# whose form ends in a describe, list or get verb, or `s3 ls`, is allowed. Every other command that
+# names `aws` anywhere — a mutating verb, an absolute path, a quoted program, a wrapper, a subshell,
+# a redirect or a compound command — is refused where the worker guard sees the call (Claude Code
+# and Copilot CLI), and is an instruction only on the other harnesses, where the same forms are
+# stated in aws.rules.md.
 #
 # A folder that declares no rule refuses nothing: an event with no matching rule leaves the
 # command alone, and an answer the Arbiter cannot reach allows (ADR 0072).
@@ -15,8 +17,14 @@ rules:
     question: Is this command one of the read-only AWS CLI forms this folder allows?
     answers: [listed-read, outside-list]
     decide:
-      - when: { fact: command.form, matches: ["aws * describe-*", "aws * list-*", "aws * get-*", "aws s3 ls"] }
+      # A command that is not one command has no single form, so this clause can never allow a compound command.
+      - when:
+          all:
+            - { fact: command.single, equals: true }
+            - { fact: command.form, matches: ["aws * describe-*", "aws * list-*", "aws * get-*", "aws s3 ls"] }
         answer: listed-read
-      - when: { all: [{ fact: worker.capability-profile, equals: platform-reader }, { fact: command.program, equals: aws }] }
+      # Every word is read, so the tool is still found behind a wrapper, an absolute path, a quote, a
+      # subshell or a second command in the same line.
+      - when: { all: [{ fact: worker.capability-profile, equals: platform-reader }, { fact: command.words, intersects: [aws] }] }
         answer: outside-list
     effects: { listed-read: allow, outside-list: escalate }

@@ -26,6 +26,12 @@ internal static class WorkerGuardRules
     /// <summary>The fact holding the command's form: its program and leading words, options and their values removed.</summary>
     internal const string CommandFormFact = "command.form";
 
+    /// <summary>The fact that is true when the command is one command, with no join, redirect, subshell or substitution.</summary>
+    internal const string CommandSingleFact = "command.single";
+
+    /// <summary>The fact holding every word of the command, so a rule sees the tool however it was reached.</summary>
+    internal const string CommandWordsFact = "command.words";
+
     /// <summary>The fact holding the command's program, the form's first word.</summary>
     internal const string CommandProgramFact = "command.program";
 
@@ -68,10 +74,12 @@ internal static class WorkerGuardRules
         "sudo", "env", "command", "exec", "nohup",
     };
 
-    /// <summary>The characters that join or redirect commands: a command holding one has no single form.</summary>
-    private static readonly System.Buffers.SearchValues<char> ShellControl = System.Buffers.SearchValues.Create(";&|<>`");
+    /// <summary>The characters that join, redirect, group or negate commands: a command holding one has no single form.</summary>
+    private static readonly System.Buffers.SearchValues<char> ShellControl =
+        System.Buffers.SearchValues.Create(";&|<>`(){}!~\n\r");
 
-    private const string SubstitutionOpener = "$(";
+    /// <summary>The punctuation a word may still carry from the shell around it, removed before a rule reads it.</summary>
+    private static readonly char[] WordWrapping = ['\'', '"', '(', ')', '{', '}', '!', '~', '`', ';', '&', '|', '<', '>'];
 
     /// <summary>
     /// Whether the event can need a refusal at all, decided from the event alone: a root agent, an agent outside the Squad
@@ -135,22 +143,179 @@ internal static class WorkerGuardRules
             .Select(answer => answer.RuleId)
             .Distinct(StringComparer.Ordinal));
         return $"{refusing}: this command is outside the forms this technology allows a read-only agent to run " +
-            $"('{FormOf(command)}'). Nothing ran. Use a listed read form, or report what you could not inspect.";
+            $"('{ShapeOf(command).Form}'). Nothing ran. Use a listed read form, or report what you could not inspect.";
     }
 
     /// <summary>The facts a <c>worker.command</c> rule reads, from the call the harness reported.</summary>
     internal static ArbiterFactSet CommandFacts(ToolCall call, string command)
     {
-        string text = Collapse(command);
-        string form = FormOf(command);
+        CommandShape shape = ShapeOf(command);
         return new ArbiterFactSet()
             .With(WorkerNameFact, call.Agent.Name, ArbiterFactLabel.Derived)
             .With(WorkerProfileFact, call.Agent.CapabilityProfile, ArbiterFactLabel.Derived)
             .With(WorkerHarnessFact, call.Harness, ArbiterFactLabel.Derived)
-            .With(CommandTextFact, text, ArbiterFactLabel.Asserted)
-            .With(CommandFormFact, form, ArbiterFactLabel.Asserted)
-            .With(CommandProgramFact, ProgramOf(form), ArbiterFactLabel.Asserted);
+            .With(CommandTextFact, shape.Text, ArbiterFactLabel.Asserted)
+            .With(CommandFormFact, shape.Form, ArbiterFactLabel.Asserted)
+            .With(CommandSingleFact, shape.Single, ArbiterFactLabel.Derived)
+            .With(CommandProgramFact, shape.Program, ArbiterFactLabel.Asserted)
+            .With(CommandWordsFact, shape.Words, ArbiterFactLabel.Asserted);
     }
+
+    /// <summary>A command's form, whether it is one command, its program, and every word it names, so a rule can judge it.</summary>
+    /// <param name="Text">The command as reported, whitespace collapsed.</param>
+    /// <param name="Form">The single form's program and leading words, or the whole text when there is no single form.</param>
+    /// <param name="Single">Whether the command is one command, with no join, redirect, subshell or substitution.</param>
+    /// <param name="Program">The form's first word, or null when the command has no single form.</param>
+    /// <param name="Words">Every word the command names, with quotes and wrapping punctuation removed and a path's directory stripped.</param>
+    private sealed record CommandShape(
+        string Text,
+        string Form,
+        bool Single,
+        string? Program,
+        IReadOnlyList<string> Words);
+
+    /// <summary>
+    /// Reads one command into the shape a rule judges. A single command yields its form; a compound command, a
+    /// redirect, a subshell, a grouping or a substitution yields its whole text and no program, because it is not
+    /// one form and no listed form may allow it. Its words still name every tool it reaches, which is how a
+    /// technology's rule refuses it.
+    /// </summary>
+    private static CommandShape ShapeOf(string command)
+    {
+        string text = Collapse(command);
+        IReadOnlyList<string> words = WordsOf(text);
+        if (!IsSingleCommand(command))
+        {
+            return new CommandShape(text, text, Single: false, Program: null, words);
+        }
+
+        string[] tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        int start = 0;
+        while (start < tokens.Length
+               && (CommandWrappers.Contains(tokens[start]) || IsAssignment(tokens[start])))
+        {
+            start++;
+        }
+
+        List<string> leading = [];
+        for (int index = start; index < tokens.Length; index++)
+        {
+            if (tokens[index].StartsWith('-'))
+            {
+                break;
+            }
+
+            leading.Add(tokens[index]);
+        }
+
+        string form = leading.Count == 0 ? text : string.Join(' ', leading);
+        return new CommandShape(
+            text,
+            form,
+            Single: true,
+            Program: leading.Count > 0 ? Normalise(leading[0]) : null,
+            words);
+    }
+
+    /// <summary>
+    /// Whether the command is exactly one command: no unquoted character joins, redirects, groups or substitutes,
+    /// and no <c>$(</c> outside single quotes. Quotes are honoured so a query such as <c>--query "{a:b}"</c> is still
+    /// one command.
+    /// </summary>
+    private static bool IsSingleCommand(string command)
+    {
+        bool singleQuoted = false;
+        bool doubleQuoted = false;
+        for (int index = 0; index < command.Length; index++)
+        {
+            char current = command[index];
+            if (singleQuoted)
+            {
+                if (current == '\'')
+                {
+                    singleQuoted = false;
+                }
+
+                continue;
+            }
+
+            if (current == '\'')
+            {
+                singleQuoted = true;
+                continue;
+            }
+
+            if (doubleQuoted)
+            {
+                // A substitution runs inside double quotes, so only the closing quote ends the literal run.
+                if (current == '`'
+                    || (current == '$' && index + 1 < command.Length && command[index + 1] == '('))
+                {
+                    return false;
+                }
+
+                if (current == '"')
+                {
+                    doubleQuoted = false;
+                }
+
+                continue;
+            }
+
+            if (current == '"')
+            {
+                doubleQuoted = true;
+                continue;
+            }
+
+            if (ShellControl.Contains(current)
+                || (current == '$' && index + 1 < command.Length && command[index + 1] == '('))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Every word the command names, for a rule that must see the tool however it was reached: a quoted program, an
+    /// absolute path, a word inside a compound command, or a token still carrying a subshell's bracket.
+    /// </summary>
+    private static IReadOnlyList<string> WordsOf(string text)
+    {
+        List<string> words = [];
+        foreach (string token in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string word = Normalise(token);
+            if (word.Length > 0)
+            {
+                words.Add(word);
+            }
+        }
+
+        return words;
+    }
+
+    /// <summary>
+    /// One word reduced to the name a rule can match: quotes and the shell's wrapping punctuation removed, and a
+    /// path's directory stripped so <c>/usr/bin/az</c> is <c>az</c>.
+    /// </summary>
+    private static string Normalise(string token)
+    {
+        string trimmed = token.Trim(WordWrapping);
+        int slash = trimmed.LastIndexOf('/');
+        return slash >= 0 ? trimmed[(slash + 1)..] : trimmed;
+    }
+
+    private static bool IsAssignment(string token)
+    {
+        int equals = token.IndexOf('=', StringComparison.Ordinal);
+        return equals > 0 && token[..equals].All(c => char.IsLetterOrDigit(c) || c == '_');
+    }
+
+    private static string Collapse(string command) =>
+        string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>
     /// The one-time deny after a call that ran past the per-call limit. The denied call is counted like any other, so
@@ -341,59 +506,6 @@ internal static class WorkerGuardRules
         && scalar.TryGetValue(out string? text) && !string.IsNullOrWhiteSpace(text)
             ? text
             : null;
-
-    /// <summary>
-    /// A command's form: its program and leading words, with a leading wrapper (<c>sudo</c>, <c>env</c>) and every
-    /// option and option value removed, so <c>az vm list -o table</c> and <c>az vm list</c> are one form.
-    /// </summary>
-    /// <remarks>
-    /// A compound command, a redirect or a substitution has no single form, so its whole text is returned and no
-    /// listed form matches it: a redirect that writes a file is exactly what the allow-list must refuse.
-    /// </remarks>
-    private static string FormOf(string command)
-    {
-        string text = Collapse(command);
-        if (command.AsSpan().IndexOfAny(ShellControl) >= 0
-            || command.Contains('\n', StringComparison.Ordinal)
-            || command.Contains('\r', StringComparison.Ordinal)
-            || command.Contains(SubstitutionOpener, StringComparison.Ordinal))
-        {
-            return text;
-        }
-
-        string[] tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        int start = 0;
-        while (start < tokens.Length
-               && (CommandWrappers.Contains(tokens[start]) || IsAssignment(tokens[start])))
-        {
-            start++;
-        }
-
-        List<string> words = [];
-        for (int index = start; index < tokens.Length; index++)
-        {
-            if (tokens[index].StartsWith('-'))
-            {
-                break;
-            }
-
-            words.Add(tokens[index]);
-        }
-
-        return words.Count == 0 ? text : string.Join(' ', words);
-    }
-
-    private static string ProgramOf(string form) =>
-        form.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? form;
-
-    private static bool IsAssignment(string token)
-    {
-        int equals = token.IndexOf('=', StringComparison.Ordinal);
-        return equals > 0 && token[..equals].All(c => char.IsLetterOrDigit(c) || c == '_');
-    }
-
-    private static string Collapse(string command) =>
-        string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     internal static string OneLine(string message) =>
         message.Replace("\r\n", " ", StringComparison.Ordinal).Replace('\n', ' ').Replace('\r', ' ');

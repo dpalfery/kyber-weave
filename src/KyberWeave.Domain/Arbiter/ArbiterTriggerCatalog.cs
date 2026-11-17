@@ -224,7 +224,9 @@ public static class ArbiterTriggerCatalog
                 "worker.harness",
                 "command.text",
                 "command.form",
+                "command.single",
                 "command.program",
+                "command.words",
             },
         };
 

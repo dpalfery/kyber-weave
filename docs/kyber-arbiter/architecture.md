@@ -359,19 +359,22 @@ a Squad subagent. It denies a write into the canonical checkout while a live run
 whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
 `dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
-model, and allows anything it cannot read. A developer's shell command that writes a file is not seen by it; the return
-rule catches that.
+model, and allows anything it cannot read on the write and budget paths. A developer's shell command that writes
+a file is not seen by it; the return rule catches that.
 
 A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
-`worker.command` with the command's text and its *form* — the program and leading words, with a leading
+`worker.command` with the command's text, its *form* — the program and leading words, with a leading
 `sudo` or `env` and every option and its value removed, so `az vm list -o table` and `az vm list` are one
-form — and evaluates step 0 over the `worker.command` rules the technology folders declare. A redirect,
-a pipeline or a compound command has no single form, so its whole text is the form and no listed form
-matches it: that is how `az vm list > resources.txt` is refused. A technology folder that declares no such
-rule refuses nothing, and a rule narrows itself to its own tool's commands, so the Azure list judges `az`
-and no other command. Where no worker guard runs, nothing is refused: on those eleven harnesses the same
-forms are stated in the technology's `rules.md`, which reaches the prompt's `<technology-rules>` part, and
-are an instruction only. See Requirement 8.6 and the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
+form — a fact saying whether it is one command at all, and every word the command names, and evaluates
+step 0 over the `worker.command` rules the technology folders declare. The words are what a rule reads to
+find the tool however it was reached: a quoted program, an absolute path such as `/usr/bin/az`, a wrapper
+such as `timeout 10 az …`, a subshell, or a second command on the same line all still name it, so the
+technology's list refuses them. A redirect, a pipeline or a compound command is not one command, so it has
+no form a listed read may match and its whole text is the form: that is how `az vm list > resources.txt`
+is refused. A technology folder that declares no such rule refuses nothing. Where no worker guard runs,
+nothing is refused: on those eleven harnesses the same forms are stated in the technology's `rules.md`,
+which reaches the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and
+the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
 
 ## Secondary triggers, families and effects
 
