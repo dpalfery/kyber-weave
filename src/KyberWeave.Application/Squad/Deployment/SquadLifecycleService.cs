@@ -947,7 +947,14 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         {
             Dictionary<string, string> agentProfiles = new(StringComparer.Ordinal);
             foreach (SquadAgent agent in source.Agents)
-                agentProfiles[agent.Name] = agent.ModelProfile;
+            {
+                // An agent with no profile runs on its session's model, so there is no category to
+                // record. The preset verbs rewrite a category, and this agent has none to rewrite.
+                if (!string.IsNullOrWhiteSpace(agent.ModelProfile))
+                {
+                    agentProfiles[agent.Name] = agent.ModelProfile;
+                }
+            }
 
             _canonicalProfiles.Write(
                 new SquadCanonicalProfiles(version, source.ModelProfiles, agentProfiles));

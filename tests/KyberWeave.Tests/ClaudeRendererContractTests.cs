@@ -132,6 +132,16 @@ public sealed class ClaudeRendererContractTests : IDisposable
                 string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
                 $"Agent '{agent.Name}' description mismatch.");
 
+            // The conductor names no profile: it runs on whatever model the main session started
+            // with, so its file carries no model key at all.
+            if (string.IsNullOrWhiteSpace(agent.ModelProfile))
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' names no model profile and must omit 'model'.");
+                continue;
+            }
+
             // Model resolution: verify against loaded ModelProfiles. Every assertion names
             // the agent so a failure identifies the offender out of the 21-agent corpus.
             SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
@@ -338,7 +348,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// <c>architect</c>, then reached for the Skill tool where the Agent tool was needed.
     /// </summary>
     [Fact]
-    public async Task RenderAsync_Claude_ConductorRunsOnSonnet()
+    public async Task RenderAsync_Claude_ConductorRunsOnTheSessionModel()
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
@@ -355,7 +365,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
         (YamlMappingNode frontmatter, _) = SplitFrontmatter(
             Encoding.UTF8.GetString(file.Content.Span),
             "conductor");
-        Assert.Equal("sonnet", RequireScalar(frontmatter, "model", "conductor"));
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            "The conductor names no profile, so it must render no model and run on the session's.");
     }
 
     /// <summary>
@@ -477,6 +489,15 @@ public sealed class ClaudeRendererContractTests : IDisposable
             (YamlMappingNode frontmatter, _) = SplitFrontmatter(
                 Encoding.UTF8.GetString(file.Content.Span),
                 file.RelativePath);
+
+            // The conductor is the one agent with no profile, and so the one file with no model
+            // key; it runs on the session's model and cannot be on Haiku.
+            if (!frontmatter.Children.ContainsKey(new YamlScalarNode("model")))
+            {
+                Assert.Equal(".claude/agents/conductor.md", file.RelativePath);
+                continue;
+            }
+
             string model = RequireScalar(frontmatter, "model", file.RelativePath);
             if (fastAgentPaths.Contains(file.RelativePath))
             {
