@@ -15,8 +15,8 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Under the tiered roster the pick chooses the kind of worker and the difficulty chooses the tier:
 /// <c>tier = min(hard, rated difficulty + failed attempts)</c>. A failed attempt moves the task one tier up and
-/// never down, and the task file records the kind rather than a tier. There is one roster, so these are the rules
-/// for every run.
+/// never down, and the task file records the tier the rating in use gives. There is one roster, so these are the
+/// rules for every run.
 /// </summary>
 public sealed class DeveloperTierSelectionTests
 {
@@ -86,6 +86,59 @@ public sealed class DeveloperTierSelectionTests
             """;
     }
 
+    /// <summary>A plan with one developer task per difficulty, and no documentation task.</summary>
+    private static string ThreeTiersPlan() => """
+        ---
+        id: plans/2026-11-17-tiers
+        title: Tiers
+        doc-type: plan
+        status: current
+        component: Tiers
+        owner: Maintainers
+        last-reviewed: 2026-11-17
+        development-mode: test-first
+        ---
+
+        # Tiers
+
+        **Status: Ready.** This plan is approved for execution.
+
+        ## Tasks
+
+        ### T1: Small local change
+
+        - **Files:** `src/App/Small.cs`
+        - **Depends on:** none
+        - **Difficulty:** easy
+        - **Technology:** csharp
+        - **Capabilities:** a small local change with its tests
+
+        Command: `dotnet test --filter SmallTests`
+        Acceptance criteria: the small change passes its test.
+
+        ### T2: Several files and a non-obvious path
+
+        - **Files:** `src/App/Medium.cs`
+        - **Depends on:** none
+        - **Difficulty:** medium
+        - **Technology:** csharp
+        - **Capabilities:** several files with a non-obvious path and tests
+
+        Command: `dotnet test --filter MediumTests`
+        Acceptance criteria: the change passes its tests.
+
+        ### T3: Cross-cutting change
+
+        - **Files:** `src/App/Hard.cs`
+        - **Depends on:** none
+        - **Difficulty:** hard
+        - **Technology:** csharp
+        - **Capabilities:** a change that spans layers and alters a contract
+
+        Command: `dotnet test --filter HardTests`
+        Acceptance criteria: the contract change passes its tests.
+        """;
+
     private static TaskPromptService Service(DocFixture fixture, KyberWeaveConfig config)
     {
         IServiceProvider provider = DocsTestCommands.Services();
@@ -134,6 +187,30 @@ public sealed class DeveloperTierSelectionTests
 
         Assert.True(result.Built, result.Refusal);
         Assert.Equal(expected, result.Agent);
+    }
+
+    /// <summary>
+    /// With no decision model, the architect's rating is the only rating in use, so the task file must name the
+    /// tier it gives. A hard task written as <c>dev-medium</c> dispatches the wrong worker from the file alone.
+    /// </summary>
+    [Fact]
+    public void TheTaskFileRecordsEachTierTheArchitectRatedWithNoDecisionModel()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus(ThreeTiersPlan());
+        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files)
+            .Run(Plan, PlanTaskFileMode.Write);
+
+        Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
+        Assert.Equal(
+            ["dev-easy", "dev-medium", "dev-hard"],
+            outcome.File!.Tasks!.Select(task => task.Agent));
+
+        Assert.Equal("dev-easy", Prompt(fixture, Tiered, taskId: "T1").Agent);
+        Assert.Equal("dev-medium", Prompt(fixture, Tiered, taskId: "T1", failedAttempts: 1).Agent);
+        Assert.Equal("dev-hard", Prompt(fixture, Tiered, taskId: "T2", failedAttempts: 3).Agent);
+        Assert.Equal("dev-hard", Prompt(fixture, Tiered, taskId: "T3").Agent);
     }
 
     [Fact]
@@ -240,8 +317,12 @@ public sealed class DeveloperTierSelectionTests
     }
 
 
+    /// <summary>
+    /// A confident pick names the developer kind; the file records the tier the rating gives, so the pick's
+    /// <c>dev-medium</c> never stands in for an easy task's <c>dev-easy</c>.
+    /// </summary>
     [Fact]
-    public void AConfidentPickUnderTheTieredRosterRecordsTheDeveloperKindAndTheTierFollowsDifficulty()
+    public void AConfidentPickRecordsTheTierTheRatingGives()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
@@ -253,7 +334,7 @@ public sealed class DeveloperTierSelectionTests
             .Run(Plan, PlanTaskFileMode.Write);
 
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
-        Assert.Equal("dev-medium", outcome.File!.Tasks![0].Agent);
+        Assert.Equal("dev-easy", outcome.File!.Tasks![0].Agent);
         Assert.Equal("dev-easy", Prompt(fixture, Tiered).Agent);
         Assert.Equal("dev-medium", Prompt(fixture, Tiered, failedAttempts: 1).Agent);
     }
@@ -284,7 +365,7 @@ public sealed class DeveloperTierSelectionTests
 
         Assert.False(second.Report.HasErrors, string.Join("; ", second.Report.Items.Select(item => item.Message)));
         Assert.Equal(WorkerRosters.Tiered, second.File!.WorkerRoster);
-        Assert.Equal("dev-medium", second.File.Tasks![0].Agent);
+        Assert.Equal("dev-easy", second.File.Tasks![0].Agent);
     }
 
     /// <summary>
@@ -311,7 +392,7 @@ public sealed class DeveloperTierSelectionTests
         string taskPath = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar));
         File.WriteAllText(
             taskPath,
-            File.ReadAllText(taskPath).Replace("agent: dev-medium", "agent: my-wrapper", StringComparison.Ordinal));
+            File.ReadAllText(taskPath).Replace("agent: dev-easy", "agent: my-wrapper", StringComparison.Ordinal));
 
         PlanTaskFileOutcome check = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files)
             .Run(Plan, PlanTaskFileMode.Check);
@@ -331,7 +412,7 @@ public sealed class DeveloperTierSelectionTests
         PlanTaskFileOutcome rewritten = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, repick)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(rewritten.Report.HasErrors, string.Join("; ", rewritten.Report.Items.Select(item => item.Message)));
-        Assert.Equal("dev-medium", rewritten.File!.Tasks![0].Agent);
+        Assert.Equal("dev-easy", rewritten.File!.Tasks![0].Agent);
     }
 
     /// <summary>Every caller of a replaced agent lists its replacement, so the roster rule allows the dispatch.</summary>

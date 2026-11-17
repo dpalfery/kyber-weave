@@ -44,6 +44,9 @@ public static partial class PlanDocumentParser
     /// <summary>A task lists no files; its file-scope checks are skipped and the skip is logged (D30).</summary>
     public const string MissingFilesRule = "KW-ARB-PARSE-002";
 
+    /// <summary>A task's <c>Difficulty:</c> value is not <c>easy</c>, <c>medium</c> or <c>hard</c>.</summary>
+    public const string InvalidDifficultyRule = "KW-ARB-PARSE-003";
+
     private static readonly MarkdownPipeline Pipeline =
         new MarkdownPipelineBuilder().UseYamlFrontMatter().UsePipeTables().Build();
 
@@ -303,6 +306,18 @@ public static partial class PlanDocumentParser
                     Hint: "Declare the task's file scope under a Files/scope label, or as backticked paths in the task body; its file-scope checks are skipped."));
             }
 
+            // The tier ladder uses easy, medium and hard and maps anything else to medium, so an unparseable
+            // value is reported here rather than quietly becoming a medium task.
+            if (build.Difficulty is { } rated && !IsDifficulty(rated))
+            {
+                diagnostics.Add(new Diagnostic(
+                    InvalidDifficultyRule,
+                    Severity.Warning,
+                    $"Task '{build.Id}' names difficulty '{rated}'. Use one of: easy, medium, hard.",
+                    build.Id,
+                    Hint: "Write the line as '- **Difficulty:** hard', with one of the three lowercase values."));
+            }
+
             tasks.Add(new PlanTask(build.Id, build.Title, build.Text, build.Files, dependsOn, build.Skills, build.Checked)
             {
                 Capabilities = build.Capabilities,
@@ -328,6 +343,9 @@ public static partial class PlanDocumentParser
         string developmentMode = frontmatterMode ?? BodyDevelopmentMode(body) ?? "test-first";
         return new PlanDocument(status, developmentMode, hasTasks, tasks, outOfScope, contractRows, diagnostics);
     }
+
+    /// <summary>Whether a <c>Difficulty:</c> value is one of the three the tier ladder reads.</summary>
+    private static bool IsDifficulty(string value) => value.Trim() is "easy" or "medium" or "hard";
 
     private static (string? Status, string? Mode, string Body) ReadFrontmatter(string text)
     {

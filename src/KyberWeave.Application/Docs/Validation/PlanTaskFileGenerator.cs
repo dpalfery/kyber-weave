@@ -606,6 +606,21 @@ public sealed partial class PlanTaskFileGenerator
             }
         }
 
+        // A developer task's rating in use decides its tier, so the file names that tier: a hard task written as
+        // the generic developer kind would dispatch dev-medium from the file alone. A pick for a documentation or
+        // delivery agent is not a developer tier and stays as it is.
+        for (int index = 0; index < entries.Count; index++)
+        {
+            PlanTaskFileEntry entry = entries[index];
+            if (entry.Role is null
+                && entry.Technology is not null
+                && (entry.Agent is null
+                    || string.Equals(entry.Agent, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal)))
+            {
+                entries[index] = entry with { Agent = PlanTaskAgentPick.DeveloperTier(entry.Difficulty, 0) };
+            }
+        }
+
         return file with { Tasks = entries };
     }
 
