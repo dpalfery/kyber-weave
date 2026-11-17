@@ -30,7 +30,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
     /// <summary>The task file is missing or no longer matches its plan, so the packet would hand out stale work.</summary>
     public const string TaskFileStale = "KW-DOC-TASKS-CLI-004";
 
-    /// <summary>The prior-results file could not be read.</summary>
+    /// <summary>The prior-results file could not be read, or lies outside the run's scratch area.</summary>
     public const string PriorResultsUnreadable = "KW-DOC-TASKS-CLI-005";
 
     /// <summary>
@@ -92,11 +92,23 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
 
         if (settings.PriorResults is not null)
         {
-            // Checked here so an unreadable file is reported under the packet's own code, before any
-            // prompt is built; the service reads the same file when it builds the <task> part.
+            // Checked here so a refusal is reported under the packet's own code, before any prompt is built;
+            // the service applies the same rule when it reads the file for the <task> part.
+            if (!TaskPromptService.IsScratchFile(root, settings.PriorResults))
+            {
+                report.Add(new Diagnostic(
+                    PriorResultsUnreadable,
+                    Severity.Error,
+                    $"The prior-results file '{settings.PriorResults}' is outside this run's scratch area. " +
+                    $"Write it under {TaskPromptService.ScratchFolder} in the checkout, name it relative to that folder, or leave it out.",
+                    "docs packet",
+                    Hint: $"Keep the file under {TaskPromptService.ScratchFolder} in this checkout."));
+                return Fail(report);
+            }
+
             try
             {
-                _ = files.ReadAllText(Path.GetFullPath(settings.PriorResults, current));
+                _ = files.ReadAllText(Path.GetFullPath(settings.PriorResults, root));
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {

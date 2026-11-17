@@ -167,6 +167,13 @@ public sealed class TaskPromptService(
     }
 
     /// <summary>
+    /// Whether the path names a file inside the run's scratch area, the only place a prior-results file is read from.
+    /// </summary>
+    /// <param name="root">The repository root.</param>
+    /// <param name="path">The path the dispatch named, relative to the root or absolute.</param>
+    public static bool IsScratchFile(string root, string path) => ScratchFile(root, path, out _);
+
+    /// <summary>
     /// Resolves a prior-results path and reports whether it stays inside the run's scratch area. Only that area is
     /// readable: the dispatch header names a file, and a header must not turn any readable file into prompt text.
     /// </summary>
