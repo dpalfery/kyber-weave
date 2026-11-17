@@ -266,11 +266,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
             {
                 HookOutcomeKind.PassThrough => string.Empty,
                 HookOutcomeKind.Allow when outcome.ModelToken is not null => RenderPreAllowModel(
-                    pending.Input ?? ModelInputOf(toolInput, sentPrompt), outcome.ModelToken, pending.Written, context),
+                    ModelInputOf(pending.Input, toolInput, sentPrompt, inserted), outcome.ModelToken, pending.Written, context),
                 // A write the engine asked for that did not hold falls back to today's model allow: the header is
-                // stripped for every target, as the model path always did for a token it was asked to write.
+                // stripped for every target, as the model path always did for a token it was asked to write. The
+                // prompt inserted for the allowed dispatch still replaces it.
                 HookOutcomeKind.Allow when pending.Written is false => RenderPreAllow(
-                    pending.Input ?? ModelInputOf(toolInput, sentPrompt), _ => { }),
+                    ModelInputOf(pending.Input, toolInput, sentPrompt, inserted), _ => { }),
                 HookOutcomeKind.Allow => inserted
                     ? RenderPreAllowPrompt(toolInput, sentPrompt)
                     : ReadGuard.IsImplementationSpecialist(target)
@@ -664,12 +665,20 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     }
 
     /// <summary>The tool input as a JSON object, with the header stripped from the prompt.</summary>
-    private static JsonObject ModelInputOf(JsonElement toolInput, string prompt)
+    private static JsonObject ModelInputOf(JsonElement toolInput, string prompt) =>
+        ModelInputOf(null, toolInput, prompt, inserted: false);
+
+    /// <summary>
+    /// The tool input the model is written into: the input built while the decision asked for the model, or a
+    /// copy of the dispatch. The prompt is the inserted one when the hook built it, else the header-stripped dispatch.
+    /// </summary>
+    private static JsonObject ModelInputOf(JsonObject? input, JsonElement toolInput, string prompt, bool inserted)
     {
-        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+        JsonObject updated = input
+            ?? JsonNode.Parse(toolInput.GetRawText()) as JsonObject
             ?? throw new InvalidOperationException(
                 "Malformed Claude hook event: tool_input is not a JSON object.");
-        updated["prompt"] = HeaderBlock.Strip(prompt);
+        updated["prompt"] = inserted ? prompt : HeaderBlock.Strip(prompt);
         return updated;
     }
 

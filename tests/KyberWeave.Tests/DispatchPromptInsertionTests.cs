@@ -81,6 +81,53 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             new(HookOutcomeKind.Allow);
     }
 
+    /// <summary>An engine that asks the adapter to write a model, as the model-targeting path does.</summary>
+    private sealed class ModelAskingEngine : IContextualHookDecisionEngine
+    {
+        public HookOutcome DecidePreDispatch(string caller, string? target, string prompt, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
+            new(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePreDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null) =>
+            DecidePreDispatch(harness, caller, target, prompt, config, context, toolCallId, sessionId, dispatchModel: null);
+
+        public HookOutcome DecidePreDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId,
+            string? sessionId,
+            string? dispatchModel = null) =>
+            context.ConfirmModelWrite?.Invoke("sonnet") == true
+                ? new HookOutcome(HookOutcomeKind.Allow, ModelToken: "sonnet")
+                : new HookOutcome(HookOutcomeKind.Allow);
+
+        public HookOutcome DecidePostDispatch(
+            string harness,
+            string caller,
+            string? target,
+            string prompt,
+            string toolOutput,
+            KyberWeaveConfig config,
+            HookContext context,
+            string? toolCallId = null,
+            string? sessionId = null) =>
+            new(HookOutcomeKind.Allow);
+    }
+
     private static KyberWeaveConfig EnabledConfig() => new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static KyberWeaveConfig DisabledConfig() => new() { Arbiter = new ArbiterConfig { Enabled = false } };
@@ -209,6 +256,25 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     }
 
     private static JsonElement json(string text) => JsonDocument.Parse(text).RootElement.Clone();
+
+    /// <summary>
+    /// A rule that also writes the model returns the allow path that writes the model; the prompt inserted for
+    /// the allowed dispatch must still reach the worker.
+    /// </summary>
+    [Fact]
+    public void AModelWriteOnTheAllowPathKeepsTheInsertedPrompt()
+    {
+        (int exit, string stdout) = Run(
+            Host(new ModelAskingEngine(), EnabledConfig(), new ScriptedPrompts()),
+            ClaudeHookAdapter.Token,
+            Payload("claude", TaskDispatch));
+
+        Assert.Equal(0, exit);
+        using JsonDocument document = JsonDocument.Parse(stdout);
+        JsonElement updated = document.RootElement.GetProperty("hookSpecificOutput").GetProperty("updatedInput");
+        Assert.Equal("sonnet", updated.GetProperty("model").GetString());
+        Assert.Equal(TaskPrompt + "\n\nImplement the plan parser.", updated.GetProperty("prompt").GetString());
+    }
 
     [Fact]
     public void ARetrysFailureReportAndCountersSurviveIntoThePromptAndTheWorker()
