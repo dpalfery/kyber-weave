@@ -563,7 +563,7 @@ public sealed class ReviewTaskGatesConfigTests
     [Fact]
     public void SolutionAndBuildConfigChangesRunTheBuildGateButNotTheFormatGates()
     {
-        IReadOnlyList<ReviewTaskGate> gates = RepositoryTaskGates()["csharp-dev"];
+        IReadOnlyList<ReviewTaskGate> gates = RepositoryTechnologyGates()["csharp"];
         string[] buildInputs =
         [
             "KyberWeave.sln",
