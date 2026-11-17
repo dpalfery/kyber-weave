@@ -54,6 +54,13 @@ public sealed class ArbiterConfigTests
         "KW-ARB-OVERRIDE-001",
     ];
 
+    /// <summary>
+    /// The rules are grouped by role folder, so their positions are no longer a global order.
+    /// The shipped set is what matters: every id exactly once.
+    /// </summary>
+    private static string[] Ordered(IEnumerable<string> ids) =>
+        ids.Distinct(StringComparer.Ordinal).OrderBy(id => id, StringComparer.Ordinal).ToArray();
+
     [Fact]
     public void Defaults_DisabledNoneProviderAndAllShippedRulesEnabled()
     {
@@ -65,7 +72,7 @@ public sealed class ArbiterConfigTests
         Assert.Equal("jev-1.14.0", config.Provider.Model);
         Assert.Equal(3000, config.Provider.TimeoutMs);
         // 34 shipped rule ids; ROSTER-001 runs on two triggers, RUN-001 and CHECKOUT-001 on three, so they add five entries.
-        Assert.Equal(ExpectedRuleIds, config.Rules.Select(rule => rule.Id).Distinct());
+        Assert.Equal(Ordered(ExpectedRuleIds), Ordered(config.Rules.Select(rule => rule.Id)));
         Assert.Equal(ExpectedRuleIds.Length + 5, config.Rules.Count);
         // KW-ARB-OWNER-002 ships disabled: it only logged a pick, and a dispatch should make no model call for that.
         Assert.All(config.Rules.Where(rule => rule.Id != "KW-ARB-OWNER-002"), rule => Assert.True(rule.Enabled));
@@ -79,7 +86,7 @@ public sealed class ArbiterConfigTests
 
         Assert.False(config.Arbiter.Enabled);
         Assert.Equal(ArbiterProviderKind.None, config.Arbiter.Provider.Kind);
-        Assert.Equal(ExpectedRuleIds, config.Arbiter.Rules.Select(rule => rule.Id).Distinct());
+        Assert.Equal(Ordered(ExpectedRuleIds), Ordered(config.Arbiter.Rules.Select(rule => rule.Id)));
     }
 
     [Fact]
@@ -100,7 +107,7 @@ public sealed class ArbiterConfigTests
         Assert.Equal("http://localhost:11434/v1", config.Arbiter.Provider.Endpoint);
         Assert.Equal("nimble", config.Arbiter.Provider.Model);
         Assert.Equal(1500, config.Arbiter.Provider.TimeoutMs);
-        Assert.Equal(ExpectedRuleIds, config.Arbiter.Rules.Select(rule => rule.Id).Distinct());
+        Assert.Equal(Ordered(ExpectedRuleIds), Ordered(config.Arbiter.Rules.Select(rule => rule.Id)));
     }
 
     [Fact]
@@ -142,7 +149,7 @@ public sealed class ArbiterConfigTests
                   enabled: false
             """);
 
-        Assert.Equal(ExpectedRuleIds, config.Arbiter.Rules.Select(rule => rule.Id).Distinct());
+        Assert.Equal(Ordered(ExpectedRuleIds), Ordered(config.Arbiter.Rules.Select(rule => rule.Id)));
 
         ArbiterRule scope = config.Arbiter.Rules.Single(rule => rule.Id == "KW-ARB-SCOPE-002");
         Assert.NotNull(scope.Ask);

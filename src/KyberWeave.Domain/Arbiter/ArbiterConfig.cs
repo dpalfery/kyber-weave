@@ -147,8 +147,8 @@ public sealed record ArbiterConfig
     /// shipped rule enabled.
     /// </summary>
     /// <remarks>
-    /// Loaded from the embedded <c>default-rules.yml</c> rather than hardcoded so the
-    /// shipped catalogue has exactly one source of truth: the file the validator and
+    /// Loaded from the embedded role arbiter-rules files rather than hardcoded so the
+    /// shipped catalogue has exactly one source of truth: the files the validator and
     /// the documentation both read.
     /// </remarks>
     public static ArbiterConfig ProductDefaults { get; } = ArbiterConfigLoader.LoadEmbeddedDefaults();

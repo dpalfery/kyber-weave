@@ -241,6 +241,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         facts = _gitFacts.Enrich(facts, classification, ev);
         facts = GovernedPathsFacts.Enrich(facts, config.Ontology.DocsRoots);
         facts = _planReader.Enrich(facts, classification);
+        facts = TriggerFactBuilder.WithTestsOnlyTaskFact(facts, config.Arbiter.TestFilePatterns);
         ArbiterRunScope? runScope = RunScopeOf(ev);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId, runScope);
         facts = AttributedChangeFacts.Enrich(facts, _ledger, _decisionLog, ledgerId);

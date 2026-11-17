@@ -1,10 +1,11 @@
 <Project>
 
   <ItemGroup>
-    <!-- The 18 shipped Arbiter rules plus the test-file patterns and the LENS-001 step-0 path table: the
-         single source of truth for defaults. ArbiterConfigLoader reads it by this logical name, so the
-         reader and the file stay in the same assembly. -->
-    <EmbeddedResource Include="Arbiter\Rules\default-rules.yml" LogicalName="Arbiter.default-rules.yml" />
+    <!-- The shipped Arbiter rules are the three role templates' arbiter-rules files. They are
+         embedded by Docs.props under the Standards.* logical names, because the template
+         installer reads the same files; ArbiterConfigLoader merges those three resources into
+         the one set the evaluator sees, so the product templates and the embedded copies
+         cannot drift. -->
     <!-- Embedded Squad copies the Arbiter reads in host repositories without a canonical tree.
          ArbiterSquadCatalog reads them by these logical names. The names mirror the Standards.* convention
          and avoid the raw-corpus tokens the release test forbids in resource names. -->

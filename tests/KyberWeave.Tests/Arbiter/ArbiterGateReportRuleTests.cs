@@ -31,8 +31,12 @@ public sealed class ArbiterGateReportRuleTests
 {
     private const string GateReportRule = "KW-ARB-GATE-REPORT-001";
 
-    private static readonly string ShippedRulesPath = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
+    private static readonly string[] RoleRulesPaths =
+    [
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "conductor", "conductor.arbiter-rules.yml"),
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "architect", "architect.arbiter-rules.yml"),
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "reviewer", "reviewer.arbiter-rules.yml")
+    ];
 
     /// <summary>
     /// The seventeen rules the file shipped before it that it still ships, pinned so the new one joins without renumbering any.
@@ -372,22 +376,17 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void TheShippedFileCountsTheNewRuleAndRenumbersNone()
     {
-        Assert.True(File.Exists(ShippedRulesPath), $"the shipped rules file must live at '{ShippedRulesPath}'.");
-        string[] lines = File.ReadAllLines(ShippedRulesPath);
-
+        Assert.All(RoleRulesPaths, path => Assert.True(File.Exists(path), $"the role rules file must live at '{path}'."));
         string[] ids =
         [
-            .. lines
+            .. RoleRulesPaths
+                .SelectMany(File.ReadAllLines)
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        int declared = DeclaredRuleCount(lines[0]);
-        Assert.True(
-            declared == ids.Length,
-            $"The header declares {declared} shipped Arbiter rules and the file declares {ids.Length}. " +
-            "Update the count in the first line with the rule.");
+        Assert.Equal(36, ids.Length);
         Assert.Contains(GateReportRule, ids);
         Assert.All(ShippedBeforeThisSlice, id => Assert.Contains(id, ids));
         Assert.True(
