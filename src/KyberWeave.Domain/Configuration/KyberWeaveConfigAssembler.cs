@@ -67,7 +67,7 @@ public static class KyberWeaveConfigAssembler
                 document.Run,
                 document.StopOnToolFailure,
                 document.Onboarding,
-                ParseWorkerRoster(document.WorkerRoster)),
+                document.WorkerRoster is null ? null : ParseWorkerRoster(document.WorkerRoster)),
             Review = ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
@@ -99,7 +99,7 @@ public static class KyberWeaveConfigAssembler
                 document.Run,
                 document.StopOnToolFailure,
                 document.Onboarding,
-                ParseWorkerRoster(document.WorkerRoster)),
+                document.WorkerRoster is null ? null : ParseWorkerRoster(document.WorkerRoster)),
             Review = ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
