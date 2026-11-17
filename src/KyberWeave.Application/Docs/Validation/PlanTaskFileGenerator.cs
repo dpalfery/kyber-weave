@@ -563,7 +563,13 @@ public sealed partial class PlanTaskFileGenerator
                 && string.Equals(old.Capabilities, task.Capabilities, StringComparison.Ordinal)
                 && string.Equals(old.Prompt, task.Prompt, StringComparison.Ordinal))
             {
-                kept = task with { Agent = old.Agent, AgentConfidence = old.AgentConfidence };
+                kept = task with
+                {
+                    Agent = old.Agent,
+                    AgentConfidence = old.AgentConfidence,
+                    Difficulty = old.Difficulty ?? task.Difficulty,
+                    DifficultySource = old.DifficultySource ?? task.DifficultySource,
+                };
             }
 
             entries.Add(kept);
@@ -581,7 +587,15 @@ public sealed partial class PlanTaskFileGenerator
                     if (entry.Role is null && entry.Agent is null && entry.Id is not null
                         && picks.TryGetValue(entry.Id, out PlanTaskAgentChoice? choice))
                     {
-                        entries[index] = entry with { Agent = choice.Agent, AgentConfidence = choice.Confidence };
+                        entries[index] = entry with
+                        {
+                            Agent = choice.Agent,
+                            AgentConfidence = choice.Confidence,
+                            Difficulty = choice.Difficulty ?? entry.Difficulty,
+                            DifficultySource = choice.Difficulty is null
+                                ? entry.DifficultySource
+                                : "decision-model",
+                        };
                     }
                 }
             }

@@ -74,7 +74,9 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         Assert.Equal("dal-dev", picked.Agent);
         Assert.Equal(0.97, picked.AgentConfidence);
         Assert.Null(file.Tasks[1].Agent);
-        Assert.Equal(["KW-DOC-TASKS-PICK-T1"], provider.Asked);
+        Assert.Contains("KW-DOC-TASKS-PICK-T1", provider.Asked);
+        Assert.Contains("KW-DOC-TASKS-RATE-T1", provider.Asked);
+        Assert.Equal(1, provider.Calls);
         Assert.Contains("| agent=dal-dev |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
         Assert.Contains("| role=react-dev |", PlanTaskPacket.ReadyQueue(file.Tasks), StringComparison.Ordinal);
     }
@@ -139,12 +141,15 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     {
         public List<string> Asked { get; } = [];
 
+        public int Calls { get; private set; }
+
         public Task<ArbiterStep1BatchResult> AskStep1Async(
             IReadOnlyList<ArbiterRule> rules,
             ArbiterFactSet facts,
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default)
         {
+            Calls++;
             Asked.AddRange(rules.Select(rule => rule.Id));
             if (fail)
                 throw new HttpRequestException("model unreachable");
