@@ -24,6 +24,8 @@ public static class DocsServerInstructions
         it), docs_get_coding_standard_for_technology (one bundle for a technology: the rule ids, the shared rules,
         the parent's rules and skills, the technology's rules and skills, and the standard's sections,
         before writing or reviewing code in it),
+        docs_build_task_prompt_for_agent_dispatch (which agent to dispatch for a task, its difficulty and its
+        technology, and what the budget left out, without returning the prompt text),
         docs_look_up_glossary_term_definition (what a term means here), docs_find_duplicates_conflicts_ambiguous_terms (duplicated or
         contradictory documentation), docs_validate_governed_document_schema and docs_detect_drift_between_documents_and_code (the same schema and drift
         gates as kyber-weave docs validate and docs drift, without a shell), and docs_get_source_repository_and_revision

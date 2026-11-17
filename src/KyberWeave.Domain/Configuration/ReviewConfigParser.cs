@@ -58,6 +58,9 @@ public static class ReviewConfigParser
             TaskGates = section.TaskGates is null
                 ? defaults.TaskGates
                 : ParseTaskGates(section.TaskGates, repositoryRoot, facts),
+            TechnologyGates = section.TechnologyGates is null
+                ? defaults.TechnologyGates
+                : ParseTechnologyGates(section.TechnologyGates, repositoryRoot, facts),
             TestMap = section.TestMap is null ? defaults.TestMap : ParseTestMap(section.TestMap),
             Coverage = ParseCoverage(section.Coverage, defaults.Coverage),
             Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
@@ -182,7 +185,42 @@ public static class ReviewConfigParser
                     "or remove the agent.");
             }
 
-            parsed[entry.Key] = ParseAgentTaskGates(entry.Key, entry.Value, repositoryRoot, facts);
+            parsed[entry.Key] = ParseGateList($"review.task-gates '{entry.Key}'", entry.Value, repositoryRoot, facts);
+        }
+
+        return new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(parsed);
+    }
+
+    /// <summary>
+    /// Validates <c>review.technology-gates</c>, keyed by the one technology a task names. A gate is refused
+    /// where the operator wrote it, for the same reason a task gate is.
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> ParseTechnologyGates(
+        Dictionary<string, List<ReviewTaskGateYaml>?> technologyGates,
+        string? repositoryRoot,
+        ReviewWorkingDirectoryFacts? facts)
+    {
+        Dictionary<string, IReadOnlyList<ReviewTaskGate>> parsed = new(technologyGates.Count, StringComparer.Ordinal);
+
+        foreach (KeyValuePair<string, List<ReviewTaskGateYaml>?> entry in technologyGates)
+        {
+            if (!ConfigSlug.IsValid(entry.Key))
+            {
+                throw new YamlException(
+                    $"review.technology-gates technology '{entry.Key}' is not a valid lookup name. Use the " +
+                    "technology's name: lowercase alphanumerics separated by single hyphens, e.g. 'csharp' " +
+                    "or 'sql-server'.");
+            }
+
+            if (entry.Value is null || entry.Value.Count == 0)
+            {
+                throw new YamlException(
+                    $"review.technology-gates '{entry.Key}' declares no gates. Give it at least one gate, " +
+                    "or remove the technology.");
+            }
+
+            parsed[entry.Key] = ParseGateList(
+                $"review.technology-gates '{entry.Key}'", entry.Value, repositoryRoot, facts);
         }
 
         return new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(parsed);
@@ -270,8 +308,8 @@ public static class ReviewConfigParser
         return true;
     }
 
-    private static IReadOnlyList<ReviewTaskGate> ParseAgentTaskGates(
-        string agent,
+    private static IReadOnlyList<ReviewTaskGate> ParseGateList(
+        string gatesWhere,
         List<ReviewTaskGateYaml> gates,
         string? repositoryRoot,
         ReviewWorkingDirectoryFacts? facts)
@@ -284,30 +322,30 @@ public static class ReviewConfigParser
             if (gate is null)
             {
                 throw new YamlException(
-                    $"review.task-gates '{agent}' has an empty gate entry. Each entry is a mapping with " +
+                    $"{gatesWhere} has an empty gate entry. Each entry is a mapping with " +
                     "an id and a run command.");
             }
 
             if (gate.Id is not { } id)
             {
                 throw new YamlException(
-                    $"review.task-gates '{agent}' has a gate with no id. Give every gate a lookup-name id " +
+                    $"{gatesWhere} has a gate with no id. Give every gate a lookup-name id " +
                     "such as 'format-whitespace'.");
             }
 
             if (!ConfigSlug.IsValid(id))
             {
                 throw new YamlException(
-                    $"review.task-gates '{agent}' gate id '{id}' is not a valid lookup name. Use lowercase " +
+                    $"{gatesWhere} gate id '{id}' is not a valid lookup name. Use lowercase " +
                     "alphanumerics separated by single hyphens.");
             }
 
-            // Gate ids are unique within an agent only: each agent's gates are reported as that agent's
-            // list, so the same id under two agents is the natural shared shape and is allowed.
+            // Gate ids are unique within one key only: each key's gates are reported as that key's
+            // list, so the same id under two keys is the natural shared shape and is allowed.
             if (!seen.Add(id))
-                throw new YamlException($"review.task-gates '{agent}' declares gate '{id}' more than once.");
+                throw new YamlException($"{gatesWhere} declares gate '{id}' more than once.");
 
-            string gateWhere = $"review.task-gates '{agent}' gate '{id}'";
+            string gateWhere = $"{gatesWhere} gate '{id}'";
 
             IReadOnlyList<string> run = ParseArgv(gate.Run, "run", gateWhere, true);
             IReadOnlyList<string> fix = ParseArgv(gate.Fix, "fix", gateWhere, false);
@@ -571,28 +609,35 @@ public static class ReviewConfigParser
         }
 
         if (ChildOf(review, "task-gates") is YamlMappingNode taskGates)
-        {
-            foreach (KeyValuePair<YamlNode, YamlNode> agentEntry in taskGates.Children)
-            {
-                if (agentEntry.Value is not YamlSequenceNode agentGates)
-                    continue;
+            AddGateKeyWarnings(taskGates, "review.task-gates", warnings);
 
-                string agent = ScalarOf(agentEntry.Key);
-                foreach (YamlNode entry in agentGates.Children)
-                {
-                    if (entry is not YamlMappingNode gate)
-                        continue;
-
-                    string id = ScalarOf(ChildOf(gate, "id"));
-                    string where = id.Length == 0
-                        ? $"review.task-gates '{agent}' gate"
-                        : $"review.task-gates '{agent}' gate '{id}'";
-                    AddUnknownKeys(gate, TaskGateKeys, where, warnings);
-                }
-            }
-        }
+        if (ChildOf(review, "technology-gates") is YamlMappingNode technologyGates)
+            AddGateKeyWarnings(technologyGates, "review.technology-gates", warnings);
 
         return warnings;
+    }
+
+    /// <summary>Reports a key each <c>{section}.&lt;key&gt;</c> gate carries that the typed reader does not map.</summary>
+    private static void AddGateKeyWarnings(YamlMappingNode gatesByKey, string section, List<string> warnings)
+    {
+        foreach (KeyValuePair<YamlNode, YamlNode> entry in gatesByKey.Children)
+        {
+            if (entry.Value is not YamlSequenceNode gates)
+                continue;
+
+            string key = ScalarOf(entry.Key);
+            foreach (YamlNode node in gates.Children)
+            {
+                if (node is not YamlMappingNode gate)
+                    continue;
+
+                string id = ScalarOf(ChildOf(gate, "id"));
+                string where = id.Length == 0
+                    ? $"{section} '{key}' gate"
+                    : $"{section} '{key}' gate '{id}'";
+                AddUnknownKeys(gate, TaskGateKeys, where, warnings);
+            }
+        }
     }
 
     private static void AddUnknownKeys(

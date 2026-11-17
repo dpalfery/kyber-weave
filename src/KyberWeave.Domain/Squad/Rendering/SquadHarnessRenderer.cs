@@ -376,6 +376,19 @@ public sealed class SquadHarnessRenderContext
         Request.Arbiter is { Enabled: true } ? Request.Arbiter : null;
 
     /// <summary>
+    /// Whether this render installs the dispatch hook, which replaces a dispatch's task-id line with the full prompt.
+    /// </summary>
+    /// <remarks>
+    /// Prompt insertion is not an Arbiter action: the hook is installed whenever a wiring is configured, enabled or
+    /// not, because a host with the Arbiter off still dispatches workers and still needs their prompts. The hook
+    /// process reads the host configuration and either judges the short dispatch first or only inserts.
+    /// </remarks>
+    public bool DispatchHooks => Scope == SquadDeploymentScope.Project && Request.Arbiter is not null;
+
+    /// <summary>The timeout a dispatch hook carries, from the wiring this render was given.</summary>
+    public int DispatchHookTimeoutSeconds => Request.Arbiter?.HookTimeoutSeconds ?? 0;
+
+    /// <summary>
     /// The harness's own per-render state, created once on first use: a renderer is shared across
     /// concurrent renders, so state that would otherwise be a field lives on the render instead.
     /// </summary>
@@ -629,10 +642,10 @@ public sealed class SquadHarnessRenderContext
             discoveryGlob);
     }
 
-    /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter.</summary>
+    /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter or installs the dispatch hook.</summary>
     public void AddArbiterPluginShim(string projectRelativePath, string? globalRelativePath = null)
     {
-        if (EnabledArbiter is null)
+        if (EnabledArbiter is null && !DispatchHooks)
         {
             return;
         }
@@ -658,26 +671,36 @@ public sealed class SquadHarnessRenderContext
     /// Only Factory asks for it, because only Factory fires a hook when a background subagent
     /// stops.
     /// </param>
-    public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher, bool includeSubagentStop = false)
+    /// <param name="installWhenDisabled">
+    /// Installs the block even with the Arbiter off, for the harness whose adapter also inserts a dispatch prompt.
+    /// A harness whose adapter cannot rewrite the dispatch keeps its disabled render unchanged and takes the prompt
+    /// file instead.
+    /// </param>
+    public void AddArbiterMatcherGroupBlock(
+        SquadHookBlockFormat format,
+        string matcher,
+        bool includeSubagentStop = false,
+        bool installWhenDisabled = false)
     {
-        if (EnabledArbiter is not { } arbiter)
+        if (EnabledArbiter is null && !(installWhenDisabled && DispatchHooks))
         {
             return;
         }
 
+        int timeoutSeconds = EnabledArbiter?.HookTimeoutSeconds ?? DispatchHookTimeoutSeconds;
         string commandLine = ArbiterHookWiring.HookCommandLine(Token, Scope);
         string projectPath = SquadHookJsonBlock.RelativePath(format);
         string relativePath = Scope == SquadDeploymentScope.Global ? Path.GetFileName(projectPath) : projectPath;
         List<SquadRenderedBlockEntry> entries =
         [
-            new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),
-            new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds))
+            new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, timeoutSeconds)),
+            new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, timeoutSeconds))
         ];
         if (includeSubagentStop)
         {
             entries.Add(new SquadRenderedBlockEntry(
                 "SubagentStop",
-                MatcherGroup(matcher: null, commandLine, arbiter.HookTimeoutSeconds)));
+                MatcherGroup(matcher: null, commandLine, timeoutSeconds)));
         }
 
         Blocks.Add(new SquadRenderedBlock(Token, relativePath, format, entries));

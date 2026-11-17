@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Delivery;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -95,6 +96,13 @@ internal static class DocsToolsComposition
                 Executor = toolingExecutor,
                 McpExecutable = toolingMcpExecutable,
             },
+            new TaskPromptService(
+                provider.GetRequiredService<IPlanTaskService>(),
+                provider.GetRequiredService<IPacketHostFacts>(),
+                provider.GetRequiredService<IFileSystem>(),
+                technology => host.Current().StandardsFor(technology)),
+            hostConfiguration,
+            host.RepositoryRoot,
             roots);
     }
 }

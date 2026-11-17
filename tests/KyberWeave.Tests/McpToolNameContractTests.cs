@@ -67,9 +67,10 @@ public sealed class McpToolNameContractTests
         (DocsServer, "docs_archive_plan_after_closeout_is_complete"),
         (DocsServer, "docs_push_run_branch_and_open_draft_pull_request"),
         (DocsServer, "docs_run_tooling_check_and_repair_code_index"),
+        (DocsServer, "docs_build_task_prompt_for_agent_dispatch"),
     ];
 
-    /// <summary>The docs server exposes exactly its eight renamed and four added tools, and the arbiter server its three renamed and two added.</summary>
+    /// <summary>The docs server exposes exactly its eight renamed and five added tools, and the arbiter server its three renamed and two added.</summary>
     [Fact]
     public void TheDocsAndArbiterToolsDeclareExactlyTheRenamedNames()
     {

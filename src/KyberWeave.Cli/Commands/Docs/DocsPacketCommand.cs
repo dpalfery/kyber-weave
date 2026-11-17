@@ -4,8 +4,11 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;
 using KyberWeave.Core.FileSystem;
@@ -87,12 +90,13 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
             return Fail(report);
         }
 
-        string? prior = null;
         if (settings.PriorResults is not null)
         {
+            // Checked here so an unreadable file is reported under the packet's own code, before any
+            // prompt is built; the service reads the same file when it builds the <task> part.
             try
             {
-                prior = files.ReadAllText(Path.GetFullPath(settings.PriorResults, current));
+                _ = files.ReadAllText(Path.GetFullPath(settings.PriorResults, current));
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
@@ -106,20 +110,28 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
             }
         }
 
-        // The test command and host facts are appended at print time, never written into the task file, so the digest is unaffected.
-        string? agent = string.IsNullOrWhiteSpace(settings.Agent) ? entry.Role : settings.Agent.Trim();
-        Console.Out.WriteLine(PlanTaskPacket.Fill(entry, root, prior));
-        Console.Out.WriteLine();
-        if (PacketTestCommand.Render(root, config, agent, entry, PlanTaskTarget.ContractRow(root, plan, entry.Id), OperatingSystem.IsWindows()) is { } tests)
+        // The prompt is built at print time, never written into the task file, so the digest is unaffected.
+        DocumentIndex index = DocumentIndex.Build(
+            new DocumentLoader(root, config.Ontology).Load(),
+            CodeGraphResolvers.ForRepository(root).Resolver);
+        TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor);
+        TaskPromptResult prompt = prompts.Build(
+            new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),
+            config);
+
+        if (!prompt.Built)
         {
-            Console.Out.WriteLine(tests);
-            Console.Out.WriteLine();
+            report.Add(new Diagnostic(
+                TaskFileStale,
+                Severity.Error,
+                prompt.Refusal ?? $"No packet printed: the prompt for {settings.Task} could not be built.",
+                "docs packet",
+                plan,
+                Hint: $"Run 'kyber-weave docs tasks {plan} --write', then run this command again. If it still fails, report this output unchanged."));
+            return Fail(report);
         }
 
-        List<string> notes = [];
-        Console.Out.WriteLine(hostFacts.Render(root, config, agent, entry.Id, notes));
-        foreach (string note in notes)
-            Console.Error.WriteLine("docs packet: " + note);
+        Console.Out.WriteLine(prompt.Prompt);
         return 0;
     }
 

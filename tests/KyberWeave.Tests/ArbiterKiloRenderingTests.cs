@@ -182,7 +182,6 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
 
     [Theory]
     [InlineData("null")]
-    [InlineData("disabled")]
     public async Task RenderAsync_WhenNotRendered_EmitsNoShim(string mode)
     {
         SquadArbiterWiring? wiring = mode switch
@@ -205,26 +204,36 @@ public sealed class ArbiterKiloRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_DisabledArbiter_RendersByteForByteAsOmittingTheWiring()
+    public async Task RenderAsync_DisabledArbiter_RendersTheDispatchShimAndNothingElse()
     {
+        // Prompt insertion runs with the Arbiter off, so the plugin shim that calls the hook is installed. Every
+        // other file is byte for byte as before.
         SquadRenderResult omitted = await RenderAsync(null, SquadDeploymentScope.Project);
         SquadRenderResult disabled = await RenderAsync(
             new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: HookTimeoutSeconds),
             SquadDeploymentScope.Project);
 
+        SquadDeploymentFile shim = Assert.Single(
+            disabled.Files,
+            file => file.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal));
+        string shimText = System.Text.Encoding.UTF8.GetString(shim.Content.Span);
+        Assert.Contains("kyber-weave-arbiter", shimText, StringComparison.Ordinal);
+        Assert.Contains("\"hook\"", shimText, StringComparison.Ordinal);
         Assert.Equal(
             omitted.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList(),
-            disabled.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList());
-        foreach ((SquadDeploymentFile expected, SquadDeploymentFile actual) in omitted.Files
-            .OrderBy(f => f.Target, StringComparer.Ordinal)
-            .ThenBy(f => f.RelativePath, StringComparer.Ordinal)
-            .Zip(disabled.Files
-                .OrderBy(f => f.Target, StringComparer.Ordinal)
-                .ThenBy(f => f.RelativePath, StringComparer.Ordinal)))
+            disabled.Files
+                .Where(file => file.RelativePath != shim.RelativePath)
+                .Select(f => (f.Target, f.RelativePath))
+                .Order()
+                .ToList());
+        foreach (SquadDeploymentFile file in disabled.Files.Where(file => file.RelativePath != shim.RelativePath))
         {
+            SquadDeploymentFile expected = Assert.Single(
+                omitted.Files,
+                candidate => candidate.Target == file.Target && candidate.RelativePath == file.RelativePath);
             Assert.True(
-                expected.Content.Span.SequenceEqual(actual.Content.Span),
-                $"Rendered bytes differ for {actual.Target}/{actual.RelativePath} when the Arbiter wiring is disabled.");
+                expected.Content.Span.SequenceEqual(file.Content.Span),
+                $"Rendered bytes differ for {file.Target}/{file.RelativePath} when the Arbiter wiring is disabled.");
         }
     }
 

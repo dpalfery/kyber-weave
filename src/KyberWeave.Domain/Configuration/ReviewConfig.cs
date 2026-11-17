@@ -257,6 +257,18 @@ public sealed class ReviewConfig
             new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal));
 
     /// <summary>
+    /// The gates a task runs in a given technology, keyed by technology name, each list in declaration order.
+    /// Empty when the host declares none.
+    /// </summary>
+    /// <remarks>
+    /// A task names one technology, so a host that keys its gates by technology keeps one list per
+    /// technology rather than the same list copied under every agent that works in it.
+    /// </remarks>
+    public IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> TechnologyGates { get; init; } =
+        new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(
+            new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal));
+
+    /// <summary>
     /// The host's mapping from a source glob to the fully qualified test classes that cover it, which the
     /// <c>{tests}</c> task-gate token expands through. Empty when the host declares none.
     /// </summary>
