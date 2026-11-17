@@ -256,7 +256,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["process.execute"]);
-        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(azure-reader, research-agent)"]);
+        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(azure-reader, platform-researcher, research-agent)"]);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);

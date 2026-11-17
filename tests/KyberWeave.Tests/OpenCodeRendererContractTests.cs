@@ -335,6 +335,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["task"] = new Dictionary<string, string>
                 {
                     ["azure-reader"] = "allow",
+                    ["platform-researcher"] = "allow",
                     ["research-agent"] = "allow"
                 }
             });
