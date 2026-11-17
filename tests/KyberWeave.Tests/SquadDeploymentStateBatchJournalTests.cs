@@ -295,6 +295,33 @@ public sealed class SquadDeploymentStateBatchJournalTests : SquadDeploymentState
         Assert.False(Directory.Exists(Path.Combine(root, ".kyber-weave", ".squad-transaction")));
     }
 
+    /// <summary>
+    ///     A file deleted between the batch generation and its own claim is the operator's act, not a corrupt
+    ///     journal. The transaction must roll back what it can and keep a journal whose recovery reports that
+    ///     conflict — not a data error, and not a half-applied tree left behind.
+    /// </summary>
+    [Fact]
+    public void RecoverAfterAnOperatorDeleteMidBatchReportsAConflictNotADataError()
+    {
+        using TempDirectory temp = new();
+        string root = temp.Path;
+        SeedUpdate(root, out SquadReceipt receipt);
+        RaceObserver observer = new(SquadTransactionCheckpointKind.ActiveTransitionWritten, () =>
+            File.Delete(ToPlatformPath(root, AgentTwoPath)));
+
+        // The leaf conflict is this transaction's own control-flow exception, so the run refuses here; what
+        // matters is that its rollback finishes and the journal it keeps is recoverable.
+        Assert.ThrowsAny<InvalidOperationException>(() =>
+            Transaction(root, observer).Execute(UpdatePlan(root, receipt)));
+
+        Assert.Equal("one v1", Read(root, AgentOnePath));
+        Assert.False(File.Exists(ToPlatformPath(root, AgentTwoPath)));
+        Assert.Equal("three v1", Read(root, AgentThreePath));
+
+        Assert.Throws<SquadDeploymentConflictException>(() =>
+            Transaction(root).Recover(root, SquadDeploymentScope.Project));
+    }
+
     private static void SeedUpdate(string root, out SquadReceipt receipt)
     {
         Write(root, AgentOnePath, "one v1");

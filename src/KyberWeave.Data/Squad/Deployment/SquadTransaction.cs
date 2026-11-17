@@ -1543,10 +1543,10 @@ public sealed class SquadTransaction : ISquadTransaction
             OriginalEntryKind targetKind = GetEntryKind(targetPath);
             if (claimKind == OriginalEntryKind.Missing)
             {
-                if (targetKind == OriginalEntryKind.Missing)
-                    throw new InvalidDataException(
-                        $"Squad active claim '{artifact.Path}' lost both transition alternatives.");
-
+                // Nothing was moved aside, so there is nothing to move back. A batch declares its claim slots
+                // before touching any file, so a slot with no node is either one that was never needed or one
+                // whose subject vanished first; the file's own restore decides which, and reports a conflict
+                // rather than this journal claiming to be corrupt.
                 continue;
             }
 
