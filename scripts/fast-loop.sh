@@ -18,14 +18,17 @@
 #
 # THE PARTITION — measured, not guessed
 #
-# A per-test timing run (`-xml`) gives 477s of summed test time across 123 classes and 2655
-# cases; the whole suite takes ~47s wall clock on macOS because xUnit runs classes in
-# parallel. The fast tier keeps the fastest classes up to a 150s summed-time budget.
+# The partition comes from a per-test timing run (`-xml`). The last full one (2026-11-17,
+# 18 cores, load 6.7) gave 5,329s of summed test time across 538 classes and 9,840 cases,
+# and 357s wall clock because xUnit runs classes in parallel. Re-measure with --regenerate
+# when the suite's shape changes; the numbers here describe that run, not a target.
+#
+# The fast tier keeps the fastest classes up to a 150s summed-time budget.
 #
 # The excluded classes are the slow `Squad*` and `Utilities*` lifecycle, CLI, path-safety
-# and pack classes plus SquadDeploymentStateTests, which is the slowest class and has a
-# lease test with a fixed 5-second wait that flakes on a loaded machine; its root cause is
-# not reproduced (docs/todo/squad-lease-contention-cross-process.md).
+# and pack classes, plus the eight `SquadDeploymentState*` classes that used to be one. Two
+# lease tests in them wait on a fixed 5-second deadline that flakes on a loaded machine; the
+# root cause is not reproduced (docs/todo/squad-lease-contention-cross-process.md).
 #
 # WHY EXCLUDE BY CLASS LIST RATHER THAN BY TRAIT
 #
@@ -51,10 +54,13 @@
 #
 # WHAT MAKES THE EXCLUDED CLASSES SLOW
 #
-# Not process spawning: it is filesystem work, chiefly path canonicalisation that lists
-# every ancestor directory (cost scales with how crowded $TMPDIR is) and per-file fsync.
-# Tests now skip fsync (SquadTestDurability) and the lookup is cheaper, which took the
-# full suite from ~14 minutes to ~89s. Keep $TMPDIR clean; a crowded one slows these again.
+# A real install or a real git repository per test, not process spawning in the abstract.
+# The per-test cost is filesystem work: resolving the on-disk spelling of every path
+# segment, per-file writes, and (before SquadTestDurability) fsync. Resolution no longer
+# materialises a whole parent directory per segment and a deployment preflight reuses one
+# listing per parent, which cut the deployment-state classes' longest span from 390s to
+# 114s in a full run. What remains scales with how crowded the temp root is, so keep
+# $TMPDIR clean.
 #
 # EVERY COMMAND RUNS DIRECTLY
 #
@@ -174,7 +180,7 @@ if [[ "${1:-}" == "--regenerate" ]]; then
 import sys, xml.etree.ElementTree as ET
 from collections import defaultdict
 out_path, timings = sys.argv[1], sys.argv[2:]
-budget = 150.0  # summed test seconds; xUnit parallelism makes wall clock ~8x smaller
+budget = 150.0  # summed test seconds; xUnit parallelism makes wall clock ~15x smaller (measured on 18 cores)
 by_class = defaultdict(float)
 for path in timings:
     for case in ET.parse(path).getroot().iter('test'):
