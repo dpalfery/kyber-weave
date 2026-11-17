@@ -3,7 +3,7 @@ schema: kyber-squad.agent/v1
 name: docs-dev
 description: "Provides docs-dev closeout for finished plans and specs by harvesting their design, architecture, features and decisions into the host's canonical docs, and reviews every change for documentation impact. Also writes READMEs, API docs, ADRs, runbooks, and inline docs in Markdown/Mermaid. Use when a plan or spec needs its docs-dev closeout, when a change needs its documentation-impact review, or when the deliverable is a .md file. Do not use when the deliverable is a formal requirements/design/tasks spec to author (product-owner) rather than reference documentation or a closeout."
 invocation: subagent
-model-profile: fast
+model-profile: general
 capability-profile: documentation
 copilot-tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename]
 delegates-to: []
