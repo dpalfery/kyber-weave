@@ -4,11 +4,13 @@ namespace KyberWeave.Core.Docs.Scaffolding;
 
 /// <summary>How one installed standards folder differs from the current template.</summary>
 /// <param name="Name">The folder's technology, role or platform name.</param>
+/// <param name="Root">The docs root the folder was found under.</param>
 /// <param name="Missing">Template files the host folder lacks.</param>
 /// <param name="HostOnly">Files the host folder has that the template does not.</param>
 /// <param name="Changed">Files present in both whose content differs.</param>
 public sealed record StandardsFolderDiff(
     string Name,
+    string Root,
     IReadOnlyList<string> Missing,
     IReadOnlyList<string> HostOnly,
     IReadOnlyList<string> Changed);
@@ -67,16 +69,19 @@ public sealed class StandardsTemplateDiff
         List<StandardsFolderDiff> diffs = [];
         foreach (string scope in scopes)
         {
-            StandardsFolderDiff? diff = Compare(scope);
-            if (diff is not null) diffs.Add(diff);
+            foreach (string docsRoot in _config.DocsRoots)
+            {
+                StandardsFolderDiff? diff = Compare(docsRoot, scope);
+                if (diff is not null) diffs.Add(diff);
+            }
         }
 
         return new StandardsDiffResult(diffs);
     }
 
-    private StandardsFolderDiff? Compare(string scope)
+    private StandardsFolderDiff? Compare(string docsRoot, string scope)
     {
-        string folder = $"{_config.DocsRoot}/{DocsLayout.Standards}/{scope}";
+        string folder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
         if (!Directory.Exists(Absolute(folder))) return null;
 
         List<string> missing = [];
@@ -118,7 +123,7 @@ public sealed class StandardsTemplateDiff
             .OrderBy(file => file, StringComparer.Ordinal)
             .ToList();
 
-        return new StandardsFolderDiff(scope, missing, hostOnly, changed);
+        return new StandardsFolderDiff(scope, docsRoot, missing, hostOnly, changed);
     }
 
     /// <summary>

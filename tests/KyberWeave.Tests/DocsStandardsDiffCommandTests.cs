@@ -100,6 +100,26 @@ public class DocsStandardsDiffCommandTests : IDisposable
         Assert.Contains("csharp.standards.md", Assert.Single(result.Folders).Changed);
     }
 
+    /// <summary>
+    /// The migration walks every declared docs root, so the diff has to as well: a folder that
+    /// exists only under a secondary root is still reported rather than called clean.
+    /// </summary>
+    [Fact]
+    public void AFolderUnderASecondaryDocsRootIsComparedToo()
+    {
+        OntologyConfig twoRoots = new()
+        {
+            Technologies = ["csharp"],
+            DocsRoots = ["docs", "handbook"]
+        };
+        Write("handbook/standards/csharp/csharp.standards.md", "# ours\n");
+
+        StandardsFolderDiff folder = Assert.Single(new StandardsTemplateDiff(_temp.Path, twoRoots).Run().Folders);
+
+        Assert.Equal("handbook", folder.Root);
+        Assert.Contains("csharp.rules.md", folder.Missing);
+    }
+
     [Fact]
     public void ANameThatIsNotDeclaredIsRefusedWithTheNearestMatch()
     {

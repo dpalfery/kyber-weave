@@ -57,9 +57,15 @@ public sealed class DocsStandardsDiffCommand : Command<DocsStandardsDiffSettings
                 && folder.HostOnly.Count == 0
                 && folder.Changed.Count == 0;
 
+            // Two docs roots can both hold a folder of the same name; naming the root keeps
+            // them apart instead of printing the same label twice.
+            string label = result.Folders.Count(other => other.Name == folder.Name) > 1
+                ? $"{folder.Name} in {folder.Root}"
+                : folder.Name;
+
             AnsiConsole.MarkupLine(clean
-                ? $"[green]up to date[/] {Markup.Escape(folder.Name)}"
-                : $"[bold]{Markup.Escape(folder.Name)}[/]");
+                ? $"[green]up to date[/] {Markup.Escape(label)}"
+                : $"[bold]{Markup.Escape(label)}[/]");
 
             foreach (string file in folder.Missing)
             {
