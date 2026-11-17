@@ -99,9 +99,16 @@ public sealed class TaskPromptService(
         string? priorResults = null;
         if (Clean(request.PriorResultsPath) is { } priorPath)
         {
+            if (!ScratchFile(root, priorPath, out string absolute))
+            {
+                return TaskPromptResult.NotBuilt(
+                    $"No prompt: the prior-results file '{priorPath}' is outside this run's scratch area. " +
+                    $"Write it under {ScratchFolder} in the checkout, name it relative to that folder, or leave it out.");
+            }
+
             try
             {
-                priorResults = files.ReadAllText(Path.GetFullPath(priorPath, root));
+                priorResults = files.ReadAllText(absolute);
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
@@ -142,6 +149,23 @@ public sealed class TaskPromptService(
             leftOut,
             null,
             promptFile);
+    }
+
+    /// <summary>
+    /// Resolves a prior-results path and reports whether it stays inside the run's scratch area. Only that area is
+    /// readable: the dispatch header names a file, and a header must not turn any readable file into prompt text.
+    /// </summary>
+    /// <param name="root">The repository root.</param>
+    /// <param name="path">The path the dispatch named, relative to the root or absolute.</param>
+    /// <param name="absolute">The resolved path, when it is inside the scratch area.</param>
+    private static bool ScratchFile(string root, string path, out string absolute)
+    {
+        absolute = Path.GetFullPath(path, root);
+        string scratch = Path.TrimEndingDirectorySeparator(
+            Path.GetFullPath(Path.Combine(root, ScratchFolder)));
+        return string.Equals(absolute, scratch, StringComparison.Ordinal)
+            ? false
+            : absolute.StartsWith(scratch + Path.DirectorySeparatorChar, StringComparison.Ordinal);
     }
 
     /// <summary>

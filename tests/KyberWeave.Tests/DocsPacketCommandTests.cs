@@ -60,10 +60,12 @@ public sealed class DocsPacketCommandTests
     }
 
     [Fact]
-    public void PriorResultsFromAFileFillTheirSection()
+    public void PriorResultsFromAFileInTheScratchAreaFillTheirSection()
     {
         using DocFixture fixture = Ready();
-        string results = Path.Combine(fixture.Root, "results.txt");
+        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
+        Directory.CreateDirectory(scratch);
+        string results = Path.Combine(scratch, "results.txt");
         File.WriteAllText(results, "T1 reported: built, 4 tests green.");
 
         (int exit, string output) = Packet(fixture, "T2", prior: results);
