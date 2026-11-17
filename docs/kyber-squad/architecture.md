@@ -1830,7 +1830,8 @@ here for the Squad's own readers:
 |---|---|
 | Claude, Copilot in VS Code, Copilot CLI, OpenCode, Pi, Codex, Cursor, Kilo, Factory, Devin | rewrite: the dispatch hook replaces the task-id line with the full prompt |
 | Antigravity | file until its live check passes: the dispatch names `.agent_scratchpad/<task>/prompt.md`, which the worker reads first |
-| Warp, ZCode | file: no dispatch hook exists, so the dispatch names the prompt file |
+| ZCode, CommandCode | file until their live checks pass: each documents a tool-input rewrite field, but no Kyber-Weave hook or mod is rendered for it yet |
+| Warp | file: no dispatch hook exists, so the dispatch names the prompt file |
 
 On every path the conductor dispatches with the task id and the failed-attempt count, never with
 the prompt text. A worker that starts with only the header lines, because a hook was absent or
