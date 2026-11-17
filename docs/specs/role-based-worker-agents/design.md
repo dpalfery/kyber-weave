@@ -456,6 +456,13 @@ that adds one folder; the completeness check of Requirement 5.8 runs on it. Onbo
 folders for the technologies and platforms the user names. `kyber-weave docs standards diff
 [technology]` shows how a host folder differs from the current template and writes nothing.
 
+**Where the squad is installed.** Kyber is deployed at the user level — one
+`kyber-weave squad install --global` per harness per machine. A project-level install is a rare
+exception, for a repository that has to pin a different version or a different target set. A
+user-level install serves every project on that machine, which is why it cannot carry a per-project
+choice: with one roster there is nothing per-project left to choose, and the task file records the
+roster a run used.
+
 ### The task prompt
 
 One service builds the prompt for a task. Three callers use it: the dispatch hook, the docs tool and
