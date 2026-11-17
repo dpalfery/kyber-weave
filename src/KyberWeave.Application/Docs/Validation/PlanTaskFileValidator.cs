@@ -326,6 +326,23 @@ public sealed partial class PlanTaskFileValidator
             return;
         }
 
+        // Both forms present is two authorities for one plan. The YAML is the one this build reads,
+        // so the JSON copy is a leftover to report with the command that removes it.
+        if (!legacy
+            && legacyTaskFile is not null
+            && _files.FileExists(Path.Combine(_repoRoot, legacyTaskFile.Replace('/', Path.DirectorySeparatorChar))))
+        {
+            report.Add(new Diagnostic(
+                PlanTaskFileRules.LegacyJsonTaskFile,
+                Severity.Warning,
+                $"A JSON task file '{legacyTaskFile}' is left beside '{taskFile}'. This build reads and writes " +
+                "the YAML file, so the JSON copy is dead weight that the merge would carry.",
+                artifact.RelativePath,
+                legacyTaskFile,
+                Hint: $"Delete '{legacyTaskFile}', or run {TaskFileCommand.Convert(artifact.RelativePath)} once: " +
+                $"it keeps '{taskFile}' and removes the JSON file."));
+        }
+
         if (legacy)
         {
             report.Add(new Diagnostic(

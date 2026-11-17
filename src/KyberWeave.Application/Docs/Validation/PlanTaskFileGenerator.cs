@@ -685,6 +685,9 @@ public sealed partial class PlanTaskFileGenerator
 
             if (string.Equals(_files.ReadTextIfPresent(full), yaml, StringComparison.Ordinal))
             {
+                // The YAML is already current, but a JSON file an older release wrote may still sit
+                // beside it. Leaving it there would keep two task files, so the write removes it.
+                RemoveLegacy(taskFile, report);
                 return false;
             }
 

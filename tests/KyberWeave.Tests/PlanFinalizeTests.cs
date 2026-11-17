@@ -6,6 +6,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
@@ -100,6 +101,25 @@ public sealed class PlanFinalizeTests
         Assert.Contains("| [Ready tasks](2026-11-07-ready-tasks.md) | Ready |", Read(fixture, PlanTaskFileProbe.PlanIndexPath), StringComparison.Ordinal);
         Assert.True(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
         Assert.DoesNotContain("KW-DOC-TASKS", new ReportedFindings(fixture).Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FinalizingWritesExactlyOneYamlTaskFileEvenWhenALegacyJsonSitsBesideIt()
+    {
+        using DocFixture fixture = Repository();
+        PlanTaskFileOutcome seeded = new PlanTaskFileGenerator(
+            fixture.Root, KyberWeaveConfig.ProductDefaults, DocsPorts.Files)
+            .Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Write);
+        Assert.False(seeded.Report.HasErrors, string.Join("; ", seeded.Report.Items.Select(item => item.Message)));
+        File.WriteAllText(
+            Path.Combine(fixture.Root, PlanTaskFileProbe.LegacyTaskFilePath.Replace('/', Path.DirectorySeparatorChar)),
+            PlanTaskFileProbe.LegacyJsonTaskFile());
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.True(exit == 0, output);
+        Assert.True(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.LegacyTaskFilePath));
     }
 
     [Fact]
