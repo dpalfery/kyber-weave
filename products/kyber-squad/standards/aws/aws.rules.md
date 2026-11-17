@@ -20,3 +20,8 @@ last-reviewed: 2026-11-16
 
 - Never run a wildcard command that could delete or stop resources while inspecting.
   Prefer describe, list and get forms.
+- Run only the AWS CLI's read verbs: `describe-*`, `list-*`, `get-*` and `ls`, as
+  `aws <service> <verb>`. Every other command that names `aws` — a mutating verb, an absolute
+  path, a wrapper, a subshell, a redirect or a compound command — is refused by the Arbiter
+  where the worker guard sees the call (Claude Code and Copilot CLI); on every other harness
+  this list is an instruction you are trusted to follow.

@@ -554,7 +554,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 4.1
   - _Requirements: 7.8_
 
-- [ ] 4.4 Enforce a technology's allowed commands
+- [x] 4.4 Enforce a technology's allowed commands
   - **Objective:** Let a technology's Arbiter rules file declare the command forms a research agent may run, and refuse any other command where the Arbiter sees a sub-agent's own tool calls.
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Hooks/WorkerGuardRules.cs`: raise a trigger named worker.command

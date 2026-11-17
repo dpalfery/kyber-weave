@@ -345,8 +345,8 @@ and `KW-ARB-HOOK-001` for a hook or evaluator error, which allows and is logged.
 **Hook guards sit beside the read guard, outside the rules.** `ReadGuard` (the worker plan-read guard) and
 `ConductorGuard` are stateless checks that run in a harness hook and write no ledger event. On Claude,
 `ArchitectShellGuard` (`KW-ARB-SHELL-001`) joins them: it denies an architect `Bash` or `PowerShell` call
-outside the command set `architect.md` documents, before the call runs. It is not a shipped rule, because the
-rule engine evaluates dispatch triggers only, every decision becomes a ledger event, and a shell call has no
+outside the command set `architect.md` documents, before the call runs. It is not a shipped rule, because
+every dispatch decision becomes a ledger event, and a shell call has no
 claim key, so a global and a project hook could both record one call. Hosts cannot tune or disable a guard by id; the only off switch is `arbiter.enabled: false`, which turns the whole
 Arbiter off, and with it the guard. Each `ArchitectShellGuard` decision writes a hook-log line rather than a ledger event. The rule-engine count above is unchanged. See the [runbook](runbook.md#the-architect-shell-guard) and
 [ADR 0071](../adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude.md).
@@ -359,8 +359,24 @@ a Squad subagent. It denies a write into the canonical checkout while a live run
 whose current turn is past `arbiter.dispatch-budget` (`KW-ARB-BUDGET-001`), and denies once the call after one that ran past
 `dispatch-budget.call-minutes`, measured as the gap between the dispatch's consecutive calls. It reads the run records, the checkout's git files and
 one append-only counter file per subagent under `~/.kyber-weave/arbiter/budgets/`, starts no process, calls no
-model, and allows anything it cannot read. A shell command that writes a file is not seen by it; the return
-rule catches that. See the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
+model, and allows anything it cannot read on the write and budget paths. A developer's shell command that writes
+a file is not seen by it; the return rule catches that.
+
+A command from a `platform-reader` dispatch (the `platform-researcher` agent) is seen. The guard raises
+`worker.command` with the command's text, its *form* — the program and leading words, with a leading
+`sudo` or `env` and every option and its value removed, so `az vm list -o table` and `az vm list` are one
+form — a fact saying whether it is one command at all, and every word the command names, and evaluates
+step 0 over the `worker.command` rules the technology folders declare. The words are what a rule reads to
+find the tool however it was reached: a quoted program, an absolute path such as `/usr/bin/az`, a wrapper
+such as `timeout 10 az …`, a subshell, or a second command on the same line all still name it, so the
+technology's list refuses them. A redirect, a pipeline or a compound command is not one command, so it has
+no form a listed read may match and its whole text is the form: that is how `az vm list > resources.txt`
+is refused. A technology folder that declares no such rule refuses nothing. A judged command whose event
+names no working directory is refused too, because the technology's list lives under that directory and
+cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
+refused: on those eleven harnesses the same verbs are stated in the technology's `rules.md`, which reaches
+the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
+[runbook](runbook.md#reading-a-canonical-checkout-refusal).
 
 ## Secondary triggers, families and effects
 
@@ -380,6 +396,11 @@ cannot change any of it.
 | Shortcut | `intake.shortcut`, `triage.shortcut`, `docs-impact.shortcut` | `spawn`, `answer` | `spawn` | `answer` only when every rule answers `answer`, else `spawn` |
 | FailureCluster | `delegate.failure` | `allow`, `same-failure` | `allow` | `same-failure` when any rule answers it, else `allow` |
 | Advice | `sections.select`, `comment.triage` | `keep`, `advise` | `keep` | `advise` only when every rule advises, else `keep` |
+| WorkerCommand | `worker.command` | `allow`, `escalate` | `allow` | `escalate` when any rule escalates |
+
+`worker.command` is the one trigger no dispatch raises: the worker guard raises it on a read-only dispatch's
+own command call, as described above, and its `escalate` is the refusal. The other triggers all arrive on a
+dispatch or a return.
 
 The catalogue also accepts the family names `model.target`, `shortcut`, `failure.cluster` and
 `advice` as trigger names. Phase 1 emits none of them.

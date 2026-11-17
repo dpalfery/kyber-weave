@@ -70,6 +70,15 @@ public sealed class ArbiterSquadCatalogTests
     }
 
     [Fact]
+    public void PlatformReader_ClassifiesAsReadOnly_BecauseItCannotWriteItsWork()
+    {
+        Assert.Equal("read-only", ArbiterSquadCatalog.TargetClassFor("platform-reader"));
+
+        ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
+        Assert.Equal("read-only", catalog.Agents["platform-researcher"].TargetClass);
+    }
+
+    [Fact]
     public void EmbeddedCatalog_HasEveryLensApplicability()
     {
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();

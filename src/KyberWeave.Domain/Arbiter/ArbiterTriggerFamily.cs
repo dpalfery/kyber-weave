@@ -37,6 +37,9 @@ public enum ArbiterTriggerFamily
 
     /// <summary><c>advice</c>: advise only when every rule agrees, undecidable keeps.</summary>
     Advice,
+
+    /// <summary><c>worker.command</c>: escalate wins, undecidable allows.</summary>
+    WorkerCommand,
 }
 
 /// <summary>Family metadata: trigger mapping, effect sets, undecidable mapping and combination.</summary>
@@ -73,6 +76,7 @@ public static class ArbiterTriggerFamilies
             ["sections.select"] = ArbiterTriggerFamily.Advice,
             ["comment.triage"] = ArbiterTriggerFamily.Advice,
             ["review.verdict"] = ArbiterTriggerFamily.Advice,
+            ["worker.command"] = ArbiterTriggerFamily.WorkerCommand,
         };
 
     /// <summary>Every trigger name the Arbiter knows.</summary>
@@ -101,6 +105,10 @@ public static class ArbiterTriggerFamilies
             Rules.RuleEffects.Allow, Rules.RuleEffects.Escalate,
         },
         ArbiterTriggerFamily.Investigate => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Escalate,
+        },
+        ArbiterTriggerFamily.WorkerCommand => new HashSet<string>(StringComparer.Ordinal)
         {
             Rules.RuleEffects.Allow, Rules.RuleEffects.Escalate,
         },
@@ -183,7 +191,8 @@ public static class ArbiterTriggerFamilies
         HashSet<string> seen = new(effects, StringComparer.Ordinal);
         return family switch
         {
-            ArbiterTriggerFamily.Conductor or ArbiterTriggerFamily.Investigate =>
+            ArbiterTriggerFamily.Conductor or ArbiterTriggerFamily.Investigate
+                or ArbiterTriggerFamily.WorkerCommand =>
                 seen.Contains(Rules.RuleEffects.Escalate) ? Rules.RuleEffects.Escalate : Rules.RuleEffects.Allow,
             ArbiterTriggerFamily.LensSpawn =>
                 seen.Contains(Rules.RuleEffects.Skip) ? Rules.RuleEffects.Skip : Rules.RuleEffects.Allow,

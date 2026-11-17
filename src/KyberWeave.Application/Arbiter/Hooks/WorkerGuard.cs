@@ -8,12 +8,15 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <summary>
 /// The guard on a Squad subagent's own tool calls, from machine facts only. It refuses a write into the
 /// repository's canonical checkout while a live run works in a worktree of its own
-/// (<c>KW-ARB-CHECKOUT-001</c>), and it ends a developer dispatch whose current turn has run past its budget of
-/// tool calls or minutes, and tells a developer dispatch once that a tool call ran past its limit (<c>KW-ARB-BUDGET-001</c>).
+/// (<c>KW-ARB-CHECKOUT-001</c>), ends a developer dispatch whose current turn has run past its budget of
+/// tool calls or minutes (<c>KW-ARB-BUDGET-001</c>), and refuses a read-only dispatch's command that its
+/// technology's <c>worker.command</c> rules do not allow.
 /// </summary>
 /// <remarks>
 /// It runs on every tool call a harness reports, so it starts no process and calls no model: the run records,
-/// the checkout's git files and one append-only counter file per subagent are all it reads. A root agent (a
+/// the checkout's git files and one append-only counter file per subagent are all it reads for the write and
+/// budget refusals. The command allow-list is the one place it reads the project's configuration and evaluates
+/// step 0, and only for a capability profile that may run commands and may not write files. A root agent (a
 /// person's own session, or the conductor) is never guarded, and neither is an agent outside the Squad
 /// catalog. Any error allows, and the log says why (ADR 0072).
 /// </remarks>
@@ -90,7 +93,8 @@ public sealed class WorkerGuard(
                                  home,
                                  (now ?? (() => clock.GetUtcNow()))(),
                                  seat ? seatBudgetLoader ?? LoadSeatBudget : budgetLoader ?? LoadBudget)
-                             ?? WriteRefusal(call, home);
+                             ?? WriteRefusal(call, home)
+                             ?? CommandRefusal(call);
             if (reason is not null)
             {
                 stdout.Write(WorkerGuardRules.Deny(harness, reason));
@@ -139,6 +143,38 @@ public sealed class WorkerGuard(
 
         HostConfigLoadResult loaded = hostConfig.TryLoad(workingDirectory);
         return loaded.Success && loaded.Config?.Arbiter.ExplicitlyEnabled == false;
+    }
+
+    /// <summary>
+    /// The refusal a technology's command allow-list makes for a read-only dispatch's command, or null. The
+    /// configuration is read only for a profile the list judges, so an ordinary developer command costs no YAML parse.
+    /// </summary>
+    /// <remarks>
+    /// A judged command with no working directory is refused rather than allowed: the technology's list lives under
+    /// the working directory, so without one the guard cannot read what the command was allowed to run. The event
+    /// naming no directory is itself a machine fact, which is what ADR 0072 permits a refusal on.
+    /// </remarks>
+    private string? CommandRefusal(WorkerGuardRules.ToolCall call)
+    {
+        if (!WorkerGuardRules.IsCommandJudged(call))
+        {
+            return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(call.Cwd))
+        {
+            return "The worker guard refused this command: the event named no working directory, so the " +
+                "technology's allowed command forms could not be read. Nothing ran. Run it again from the " +
+                "repository the list lives in, or report what you could not inspect.";
+        }
+
+        HostConfigLoadResult loaded = hostConfig.TryLoad(call.Cwd);
+        if (!loaded.Success || loaded.Config is null || loaded.Config.Arbiter.ExplicitlyEnabled == false)
+        {
+            return null;
+        }
+
+        return WorkerGuardRules.CommandRefusal(loaded.Config.Arbiter.Rules, call, call.Command!);
     }
 
     /// <summary>
