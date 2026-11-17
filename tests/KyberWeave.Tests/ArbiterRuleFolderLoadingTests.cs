@@ -225,6 +225,75 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     }
 
     [Fact]
+    public void AnUnknownTopLevelKeyIsReportedAndTheFileStillLoadsItsRules()
+    {
+        string path = WriteFolder("conductor", """
+            rule:
+              - id: host-typo-001
+            rules:
+              - id: host-ok-001
+                trigger: delegate
+                question: Is this dispatch a host read?
+                answers: [yes, no]
+                effects: { yes: allow, no: allow }
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.UnknownRuleFolderKey);
+        Assert.Equal(Severity.Warning, finding.Severity);
+        Assert.Equal("rule", finding.Subject);
+        Assert.Equal(path, finding.FilePath);
+        Assert.Contains(rules, rule => rule.Id == "host-ok-001");
+    }
+
+    [Fact]
+    public void AnUnknownRuleKeyIsReportedAndTheRuleStillLoads()
+    {
+        string path = WriteFolder("conductor", """
+            rules:
+              - id: host-unknown-key-001
+                trigger: delegate
+                question: Is this dispatch a host read?
+                answers: [yes, no]
+                sevrity: high
+                effects: { yes: allow, no: allow }
+            """);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: []);
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.UnknownRuleFolderKey);
+        Assert.Equal("sevrity", finding.Subject);
+        Assert.Equal(path, finding.FilePath);
+        Assert.Contains(rules, rule => rule.Id == "host-unknown-key-001");
+    }
+
+    [Fact]
+    public void TestFilePatternsAndLensPathsInAFolderFileAreKept()
+    {
+        WriteFolder("conductor", """
+            test-file-patterns: ["**/*.checks.cs"]
+            lens-paths:
+              - lens: supportability
+                not-applicable-when-all-match: ["docs/**"]
+            rules:
+              - id: host-ok-002
+                trigger: delegate
+                question: Is this dispatch a host read?
+                answers: [yes, no]
+                effects: { yes: allow, no: allow }
+            """);
+
+        ArbiterConfig config = LoadConfig("arbiter:\n  enabled: true\n", technologies: []);
+
+        Assert.Contains("**/*.checks.cs", config.TestFilePatterns);
+        Assert.Contains(config.LensPaths, entry => entry.Lens == "supportability");
+        Assert.DoesNotContain(config.RuleFolderFindings, item => item.Code == RuleValidator.UnknownRuleFolderKey);
+    }
+
+    [Fact]
     public void AParentsRulesLoadBeforeItsChildsEvenWhenTheHostListsOnlyTheChild()
     {
         WriteStandard("typescript", buildsOn: null);
@@ -543,12 +612,20 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         IReadOnlyList<string> technologies,
         Func<string, string?>? readFile = null)
     {
+        ArbiterConfig merged = LoadConfig(yaml, technologies, readFile);
+        return (merged.Rules, merged.RuleFolderFindings);
+    }
+
+    private ArbiterConfig LoadConfig(
+        string yaml,
+        IReadOnlyList<string> technologies,
+        Func<string, string?>? readFile = null)
+    {
         ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
-        ArbiterConfig merged = ArbiterConfigLoader.Merge(
+        return ArbiterConfigLoader.Merge(
             ArbiterConfig.ProductDefaults,
             section,
             new ArbiterConfigLoader.RuleFolderRequest(Root, ["docs"], technologies, readFile ?? ReadTestFile));
-        return (merged.Rules, merged.RuleFolderFindings);
     }
 
     /// <summary>Reads a file for the loader; the domain layer takes this as a delegate so it touches no disk.</summary>
