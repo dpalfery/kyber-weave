@@ -510,10 +510,10 @@ internal static class SquadResourceRenderingContract
         Assert.Equal(
             ResourceBearingSquadFixture.AgentName,
             Assert.IsType<YamlScalarNode>(frontmatter.Children[new YamlScalarNode("name")]).Value);
-        string expectedRewrittenLink = ResourceBearingSquadFixture.AgentLink.Replace(
-            "runbook.md",
-            "runbook.markdown",
-            StringComparison.Ordinal);
+        // The principal's authored link is rewritten to the deployment path as the worker's tools
+        // resolve it: from the project (or harness-root) directory, beside the agent principal.
+        string expectedRewrittenLink =
+            $"[Agent runbook]({agentsDirectory}/{ResourceBearingSquadFixture.AgentName}/references/runbook.markdown)";
         Assert.Contains(expectedRewrittenLink, agentBody, StringComparison.Ordinal);
         Assert.DoesNotContain(ResourceBearingSquadFixture.AgentLink, agentBody, StringComparison.Ordinal);
 

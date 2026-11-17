@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json.Nodes;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Validation;
@@ -109,11 +110,13 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                 : request with { GlobalRoots = new MemoizedSquadGlobalRoots(request.GlobalRoots) };
 
             SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
-                SubstituteHarnessToken(
-                    source,
-                    Spec.Token,
-                    SubagentDispatchAnswer(Spec.Target),
-                    SquadTargetCatalog.GetSubagentDispatchTool(Spec.Target)),
+                RestrictDelegatesToRoster(
+                    SubstituteHarnessToken(
+                        source,
+                        Spec.Token,
+                        SubagentDispatchAnswer(Spec.Target),
+                        SquadTargetCatalog.GetSubagentDispatchTool(Spec.Target)),
+                    request.WorkerRoster),
                 SquadWorkerBaselineInjector.BindSkillsRoot(
                     request.RequireWorkerBaselineBlock(),
                     ResolveSkillsRoot(Spec, request)));
@@ -211,6 +214,45 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             throw new SquadRenderValidationException(
                 $"Resource '{resource.RelativePath}' owned by '{owner}' is not a canonical portable relative path.");
         }
+    }
+
+    /// <summary>
+    /// Leaves out of every rendered <c>delegates-to</c> the agents whose own source declares the
+    /// <c>technology</c> roster, when the host runs the <c>tiered</c> roster.
+    /// </summary>
+    /// <remarks>
+    /// The canonical source ships both rosters side by side, so the conductor that serves both lists the
+    /// technology developers as well. A tiered host cannot dispatch them: the task-prompt tool refuses one and
+    /// names the tier instead. Listing them would offer a choice that always fails, and on a harness whose
+    /// delegation permission is built from <c>delegates-to</c> it would grant the call the rule refuses. The
+    /// filter is one-way by construction: with no roster, or with <c>technology</c>, the source passes through
+    /// untouched, so nothing a technology host renders changes.
+    /// </remarks>
+    private static SquadSource RestrictDelegatesToRoster(SquadSource source, string? workerRoster)
+    {
+        if (!string.Equals(workerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
+        {
+            return source;
+        }
+
+        HashSet<string> technologyAgents = source.Agents
+            .Where(agent => string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+            .Select(agent => agent.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (technologyAgents.Count == 0)
+        {
+            return source;
+        }
+
+        return source with
+        {
+            Agents =
+            [
+                .. source.Agents.Select(agent => agent.DelegatesTo.Any(technologyAgents.Contains)
+                    ? agent with { DelegatesTo = [.. agent.DelegatesTo.Where(name => !technologyAgents.Contains(name))] }
+                    : agent)
+            ]
+        };
     }
 
     /// <summary>
@@ -628,9 +670,12 @@ public sealed class SquadHarnessRenderContext
         SquadYamlEmitter emitter,
         string discoveryGlob)
     {
+        string principalPath = $"{AgentsDirectory}/{agent.Name}.md";
+        int separator = principalPath.LastIndexOf('/');
+        string principalDirectory = separator < 0 ? string.Empty : principalPath[..separator];
         SquadDeploymentFile principal = CreateFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
-            emitter.Compose(frontmatter, SquadAgentResourceDiscoveryGuard.RewriteBody(agent)));
+            principalPath,
+            emitter.Compose(frontmatter, SquadAgentResourceDiscoveryGuard.RewriteBody(agent, principalDirectory)));
         Files.Add(principal);
         SquadAgentResourceDiscoveryGuard.Append(
             Files,

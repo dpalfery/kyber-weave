@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
@@ -81,7 +82,18 @@ public sealed class TaskPromptService(
         if (string.Equals(named, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
             return DeveloperTiers[tier];
 
-        return Raised(named, tier) ?? named;
+        if (Raised(named, tier) is { } raised)
+            return raised;
+
+        // A name that ships nowhere is a hand edit, not a worker: a tiered dispatch falls back to the tier the
+        // task's rating selects rather than handing an unknown agent to the harness.
+        if (ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(named, out ArbiterSquadAgent? known)
+            && !string.Equals(known.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+        {
+            return named;
+        }
+
+        return entry is null || technology is not null ? DeveloperTiers[tier] : null;
     }
 
     /// <summary>The higher of a named tier and the computed one, or null when the name is not a developer tier.</summary>
@@ -89,6 +101,33 @@ public sealed class TaskPromptService(
     {
         int named = TierIndexOf(name);
         return named < 0 ? null : DeveloperTiers[Math.Max(named, computed)];
+    }
+
+    /// <summary>
+    /// The refusal for a dispatch that names a technology developer while the run is on the tiered roster, or
+    /// null when the name belongs to a role both rosters use. The tier the task belongs on is named in the
+    /// message, so the caller can dispatch the right agent from the refusal alone.
+    /// </summary>
+    private static TaskPromptResult? RefusedTechnologyDeveloper(
+        string? named,
+        string? technology,
+        PlanTaskFileEntry? entry,
+        int failedAttempts)
+    {
+        if (named is null || technology is null
+            || !PlanTaskAgentPick.RemovedAgents.TryGetValue(named, out string? replacement)
+            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal)
+            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(named, out ArbiterSquadAgent? agent)
+            || !string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string tier = DeveloperTier(entry?.Difficulty, failedAttempts);
+        return TaskPromptResult.NotBuilt(
+            $"No prompt: '{named}' is a worker-roster: technology agent, and this run is worker-roster: tiered. " +
+            $"This task's developer is '{tier}' (tier = min(hard, rated difficulty + failed attempts)). " +
+            $"Dispatch '{tier}' instead.");
     }
 
     /// <summary>The tier's position on the ladder, or -1 when the name is not a developer tier.</summary>
@@ -188,6 +227,13 @@ public sealed class TaskPromptService(
         RemovedAgentResolution? removed = null;
         if (string.Equals(fileRoster ?? config.WorkerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
         {
+            // Only an explicit dispatch names a worker that must be refused: a stale role in the task file is a
+            // removed name, and resolves to the tier its difficulty selects rather than blocking the prompt.
+            if (RefusedTechnologyDeveloper(Clean(request.Agent), technology, entry, request.FailedAttempts) is { } refusal)
+            {
+                return refusal;
+            }
+
             removed = PlanTaskAgentPick.ResolveRemovedAgent(
                 requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
             agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);

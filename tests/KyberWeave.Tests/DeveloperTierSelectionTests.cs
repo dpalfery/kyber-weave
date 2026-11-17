@@ -213,6 +213,41 @@ public sealed class DeveloperTierSelectionTests
         Assert.Equal("docs-dev", result.Agent);
     }
 
+    /// <summary>
+    /// The recorded failure: a tiered run dispatched task 3.1 to <c>csharp-dev</c>. The dispatch tool must refuse
+    /// the technology developer and name the tier the task belongs on, so the worker choice cannot be bypassed.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp-dev", 0, "dev-easy")]
+    [InlineData("csharp-dev", 1, "dev-medium")]
+    [InlineData("test-dev", 2, "dev-hard")]
+    public void UnderTieredADispatchToATechnologyDeveloperIsRefusedNamingTheTier(
+        string technologyAgent,
+        int failedAttempts,
+        string tier)
+    {
+        using DocFixture fixture = Ready(Tiered, "easy");
+
+        TaskPromptResult result = Prompt(fixture, Tiered, agent: technologyAgent, failedAttempts: failedAttempts);
+
+        Assert.False(result.Built);
+        Assert.Contains(technologyAgent, result.Refusal, StringComparison.Ordinal);
+        Assert.Contains($"'{tier}'", result.Refusal, StringComparison.Ordinal);
+        Assert.Contains("tiered", result.Refusal, StringComparison.Ordinal);
+    }
+
+    /// <summary>The same name is untouched under the technology roster, which is the roster it belongs to.</summary>
+    [Fact]
+    public void UnderTechnologyADispatchToATechnologyDeveloperIsNotRefused()
+    {
+        using DocFixture fixture = Ready(Technology, "easy");
+
+        TaskPromptResult result = Prompt(fixture, Technology, agent: "csharp-dev");
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Equal("csharp-dev", result.Agent);
+    }
+
     [Fact]
     public void UnderTheTechnologyRosterThePickAndTheDispatchAreUnchanged()
     {
@@ -263,6 +298,82 @@ public sealed class DeveloperTierSelectionTests
         Assert.Equal("dev-medium", outcome.File!.Tasks![0].Agent);
         Assert.Equal("dev-easy", Prompt(fixture, Tiered).Agent);
         Assert.Equal("dev-medium", Prompt(fixture, Tiered, failedAttempts: 1).Agent);
+    }
+
+    /// <summary>
+    /// A host that switches roster rewrites the task file rather than deleting it first. The file must follow the
+    /// roster now configured: keeping the previous roster's pick would name <c>csharp-dev</c> beside
+    /// <c>worker-roster: tiered</c>.
+    /// </summary>
+    [Fact]
+    public void ARewriteAfterARosterSwitchPicksEveryAgentForTheRosterNowConfigured()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
+        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using PlanTaskAgentPick technologyPicker = new(
+            new StubProvider("csharp-dev"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Technology));
+        PlanTaskFileOutcome first = new PlanTaskFileGenerator(fixture.Root, Technology, DocsPorts.Files, technologyPicker)
+            .Run(Plan, PlanTaskFileMode.Write);
+        Assert.False(first.Report.HasErrors, string.Join("; ", first.Report.Items.Select(item => item.Message)));
+        Assert.Equal("csharp-dev", first.File!.Tasks![0].Agent);
+
+        using PlanTaskAgentPick tieredPicker = new(
+            new StubProvider("dev-medium"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+        PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, tieredPicker)
+            .Run(Plan, PlanTaskFileMode.Write);
+
+        Assert.False(second.Report.HasErrors, string.Join("; ", second.Report.Items.Select(item => item.Message)));
+        Assert.Equal(WorkerRosters.Tiered, second.File!.WorkerRoster);
+        Assert.Equal("dev-medium", second.File.Tasks![0].Agent);
+    }
+
+    /// <summary>
+    /// A hand-edited task file may name an agent that ships nowhere. The tiered dispatch must not hand that name to
+    /// the harness, and a rewrite must replace it; a check must report it.
+    /// </summary>
+    [Fact]
+    public void AnUnknownAgentNameIsReplacedByTheTierAndReportedByCheck()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
+        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using PlanTaskAgentPick picker = new(
+            new StubProvider("dev-medium"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+        PlanTaskFileOutcome written = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, picker)
+            .Run(Plan, PlanTaskFileMode.Write);
+        Assert.False(written.Report.HasErrors, string.Join("; ", written.Report.Items.Select(item => item.Message)));
+
+        // A dispatch that names a name shipping nowhere falls back to the tier; the file is still valid here.
+        TaskPromptResult dispatched = Prompt(fixture, Tiered, agent: "my-wrapper");
+        Assert.True(dispatched.Built, dispatched.Refusal);
+        Assert.Equal("dev-easy", dispatched.Agent);
+
+        string taskPath = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar));
+        File.WriteAllText(
+            taskPath,
+            File.ReadAllText(taskPath).Replace("agent: dev-medium", "agent: my-wrapper", StringComparison.Ordinal));
+
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files)
+            .Run(Plan, PlanTaskFileMode.Check);
+        Assert.Contains(
+            check.Report.Items,
+            item => item.Code == PlanTaskFileRules.DiffersFromPlan
+                    && item.Message.Contains("differs in agent", StringComparison.Ordinal));
+
+        // The dispatch path checks the file first, so the hand edit is refused rather than handed to a harness.
+        TaskPromptResult refused = Prompt(fixture, Tiered, agent: "my-wrapper");
+        Assert.False(refused.Built);
+        Assert.Contains("does not match the plan", refused.Refusal, StringComparison.Ordinal);
+
+        using PlanTaskAgentPick repick = new(
+            new StubProvider("dev-medium"),
+            PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
+        PlanTaskFileOutcome rewritten = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, repick)
+            .Run(Plan, PlanTaskFileMode.Write);
+        Assert.False(rewritten.Report.HasErrors, string.Join("; ", rewritten.Report.Items.Select(item => item.Message)));
+        Assert.Equal("dev-medium", rewritten.File!.Tasks![0].Agent);
     }
 
     /// <summary>Every caller of a replaced agent lists its replacement, so the roster rule allows the dispatch.</summary>

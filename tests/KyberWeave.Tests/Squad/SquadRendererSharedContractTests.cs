@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
@@ -145,6 +146,76 @@ public sealed class SquadRendererSharedContractTests
         await Assert.ThrowsAsync<ArgumentException>(() => RendererFor(target).RenderAsync(request));
     }
 
+    /// <summary>
+    /// A tiered host cannot dispatch a technology developer, so the rendered conductor must not list one. The
+    /// technology roster is the control: the same corpus still offers its developers there.
+    /// </summary>
+    [Fact]
+    public async Task ATieredRenderDoesNotOfferTheTechnologyAgentsToTheConductor()
+    {
+        SquadRenderRequest request = new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project,
+            WorkerRoster: WorkerRosters.Tiered).Prepared();
+
+        SquadRenderResult result = await new OpenCodeRenderer().RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        IReadOnlyList<string> tiered = ConductorDelegatesTo(result);
+        Assert.DoesNotContain("csharp-dev", tiered);
+        Assert.DoesNotContain("test-dev", tiered);
+        Assert.Contains("dev-easy", tiered);
+        Assert.Contains("docs-dev", tiered);
+
+        SquadRenderResult technology = await new OpenCodeRenderer().RenderAsync(request with { WorkerRoster = WorkerRosters.Technology });
+        Assert.True(technology.Success, string.Join("; ", technology.Errors));
+        IReadOnlyList<string> unchanged = ConductorDelegatesTo(technology);
+        Assert.Contains("csharp-dev", unchanged);
+        Assert.Contains("dev-easy", unchanged);
+    }
+
+    /// <summary>
+    /// The conductor's reference links must resolve from the directory its harness reads them from. A run read
+    /// <c>conductor/references/plan-path.markdown</c> under the repository root, where no such file exists; the
+    /// deployed file sits beside the agent at <c>.opencode/agents/conductor/references/</c>.
+    /// </summary>
+    [Fact]
+    public async Task AnOpenCodeConductorLinkNamesTheDeployedReferencePath()
+    {
+        SquadRenderRequest request = new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project).Prepared();
+
+        SquadRenderResult result = await new OpenCodeRenderer().RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile conductor = Assert.Single(
+            result.Files,
+            file => string.Equals(file.RelativePath, ".opencode/agents/conductor.md", StringComparison.Ordinal));
+        string text = Encoding.UTF8.GetString(conductor.Content.Span);
+        Assert.Contains("](.opencode/agents/conductor/references/plan-path.markdown)", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("](conductor/references/", text, StringComparison.Ordinal);
+        Assert.Contains(
+            result.Files,
+            file => string.Equals(file.RelativePath, ".opencode/agents/conductor/references/plan-path.markdown", StringComparison.Ordinal));
+    }
+
+    private static IReadOnlyList<string> ConductorDelegatesTo(SquadRenderResult result)
+    {
+        SquadDeploymentFile conductor = Assert.Single(
+            result.Files,
+            file => string.Equals(file.RelativePath, ".opencode/agents/conductor.md", StringComparison.Ordinal));
+        string text = Encoding.UTF8.GetString(conductor.Content.Span);
+        int end = text.IndexOf("\n---", 3, StringComparison.Ordinal);
+        YamlStream stream = new();
+        stream.Load(new StringReader(text[3..end]));
+        YamlMappingNode frontmatter = Assert.IsType<YamlMappingNode>(stream.Documents[0].RootNode);
+        YamlMappingNode permission = Assert.IsType<YamlMappingNode>(frontmatter.Children[new YamlScalarNode("permission")]);
+        YamlMappingNode task = Assert.IsType<YamlMappingNode>(permission.Children[new YamlScalarNode("task")]);
+        return [.. task.Children.Keys.Select(node => Assert.IsType<YamlScalarNode>(node).Value ?? string.Empty)];
+    }
     /// <summary>
     /// The second render loads the corpus from disk again rather than reusing the cached source, so
     /// a loader that orders anything by enumeration order fails here too, not only a renderer.

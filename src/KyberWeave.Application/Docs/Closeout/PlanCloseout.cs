@@ -38,6 +38,9 @@ public sealed partial class PlanCloseout
     /// <summary>An index has no table to take the row out of or add it to.</summary>
     public const string IndexNotEditable = "KW-DOC-CLOSEOUT-003";
 
+    /// <summary>The plan's task list still has unchecked tasks, so archiving it would record unfinished work as done.</summary>
+    public const string IncompleteTaskList = "KW-DOC-CLOSEOUT-006";
+
     /// <summary>A step done, or a step a preview would do.</summary>
     public const string Step = "KW-DOC-CLOSEOUT-004";
 
@@ -162,6 +165,20 @@ public sealed partial class PlanCloseout
         string archivedText = WithArchivedStatus(planText, date);
         string taskFile = PlanTaskFileGenerator.TaskFilePathOf(plan);
         bool hasTaskFile = _store.FileExists(_files.Absolute(taskFile));
+
+        // An archived plan is the record a reader checks the work against, so every task it lists as open
+        // would read as unfinished work shipped as done. The tasks are ticked by the documentation developer
+        // while the closeout evidence is written; this gate is what makes that step impossible to skip.
+        List<string> uncheckedTasks = UncheckedTasks(planText);
+        if (uncheckedTasks.Count > 0)
+        {
+            string ids = string.Join(", ", uncheckedTasks.Take(5));
+            report.Add(new Diagnostic(IncompleteTaskList, Severity.Error,
+                $"'{plan}' still lists {uncheckedTasks.Count} task(s) unchecked: {ids}.",
+                plan, plan,
+                Hint: "Tick every task that completed: '- [ ] <id>' becomes '- [x] <id>'. A task that did not " +
+                "complete needs an escalation, and the plan stays open until it has one. Then run the closeout again."));
+        }
 
         // The archive gate reads the plan where it would be archived, so the copy goes there for the check and
         // is gone again before this method returns, whatever the outcome.
@@ -388,6 +405,56 @@ public sealed partial class PlanCloseout
 
         return (string.Join(newline, lines), removed);
     }
+
+    /// <summary>
+    /// The ids of the tasks a plan still lists unchecked, in the order they appear. Only the <c>## Tasks</c>
+    /// section counts, and only outside a fenced block: a prose checklist elsewhere, or the checkbox grammar
+    /// shown as an example, is not a task.
+    /// </summary>
+    private static List<string> UncheckedTasks(string planText)
+    {
+        List<string> ids = [];
+        bool inTasks = false;
+        bool inFence = false;
+        foreach (string line in planText.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
+        {
+            string trimmed = line.TrimStart();
+            if (trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal))
+            {
+                inFence = !inFence;
+                continue;
+            }
+
+            if (inFence)
+            {
+                continue;
+            }
+
+            if (line.StartsWith("## ", StringComparison.Ordinal) || line.StartsWith("# ", StringComparison.Ordinal))
+            {
+                inTasks = line.StartsWith("## ", StringComparison.Ordinal) && IsTasksHeadingLine(line[3..]);
+                continue;
+            }
+
+            if (inTasks && UncheckedTask().Match(line) is { Success: true } match)
+            {
+                ids.Add(match.Groups["id"].Value.TrimEnd('.', ':', ')'));
+            }
+        }
+
+        return ids;
+    }
+
+    private static bool IsTasksHeadingLine(string text)
+    {
+        string normalized = text.Trim().TrimEnd('.', ':').Trim();
+        return normalized.Equals("Tasks", StringComparison.OrdinalIgnoreCase)
+               || normalized.Equals("Implementation Tasks", StringComparison.OrdinalIgnoreCase);
+    }
+
+    [GeneratedRegex(@"^[ \t]*-[ \t]+\[ \][ \t]+(?<id>\d+(?:\.\d+)?)\.?(?:[ \t]|$)",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex UncheckedTask();
 
     [GeneratedRegex(@"^status:[^\r\n]*", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex FrontmatterStatus();

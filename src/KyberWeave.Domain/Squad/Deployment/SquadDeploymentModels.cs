@@ -62,7 +62,8 @@ public sealed record SquadInstallRequest(
     bool DryRun = false,
     string Repository = "dpalfery/kyber-weave",
     IReadOnlyDictionary<SquadTarget, string>? ModelPresets = null,
-    SquadArbiterWiring? Arbiter = null);
+    SquadArbiterWiring? Arbiter = null,
+    string? WorkerRoster = null);
 
 /// <summary>Parameters for a Kyber-Squad update lifecycle operation.</summary>
 public sealed record SquadUpdateRequest(
@@ -77,7 +78,8 @@ public sealed record SquadUpdateRequest(
     bool DryRun = false,
     string Repository = "dpalfery/kyber-weave",
     IReadOnlyDictionary<SquadTarget, string>? ModelPresets = null,
-    SquadArbiterWiring? Arbiter = null);
+    SquadArbiterWiring? Arbiter = null,
+    string? WorkerRoster = null);
 
 /// <summary>Parameters for a Kyber-Squad uninstall lifecycle operation.</summary>
 public sealed record SquadUninstallRequest(
