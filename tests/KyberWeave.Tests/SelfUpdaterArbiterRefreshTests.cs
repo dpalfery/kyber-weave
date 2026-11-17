@@ -417,6 +417,74 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         AssertBlocksMatchTheirFiles(after, roots);
     }
 
+    /// <summary>
+    /// A global receipt records many files for one harness, so a refresh of that harness's hook
+    /// file has to pick the hook entry out by path. Matching the target alone patched whichever
+    /// file the receipt listed first — an agent file — and left the hook entry stale, which the
+    /// next <c>squad status --global</c> reported as drift on a hook file the refresh had just
+    /// rewritten.
+    /// </summary>
+    [Fact]
+    public void Refresh_UpdatesTheHookEntryAndLeavesAnotherFileForTheSameTargetUntouched()
+    {
+        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "home-with-a-sibling-file"));
+        string home = userPaths.HomeDirectory;
+        Directory.CreateDirectory(home);
+        SquadGlobalRoots roots = new(_ => null, home);
+        string root = roots.ResolveGlobalRoot(SquadTarget.Copilot);
+        const string agentRelativePath = "agents/dev.md";
+        const string hookRelativePath = "hooks/kyber-arbiter.json";
+        string agentPath = Path.Combine(root, agentRelativePath);
+        string hookPath = Path.Combine(root, hookRelativePath);
+        Directory.CreateDirectory(Path.GetDirectoryName(agentPath)!);
+        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        File.WriteAllText(agentPath, "agent body");
+        File.WriteAllText(hookPath, "{\"version\":1,\"hooks\":{\"task\":[]}}");
+
+        SquadStateStore store = new(userPaths);
+        SquadOwnedFile agentEntry = new(agentRelativePath, Digest("agent body"), "copilot", false);
+        SquadOwnedFile hookEntry = new(
+            hookRelativePath,
+            Digest("{\"version\":1,\"hooks\":{\"task\":[]}}"),
+            "copilot",
+            false);
+        string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(
+            receiptPath,
+            store.SerializeReceipt(new SquadReceipt(
+                "kyber-squad.receipt/v2",
+                SquadDeploymentScope.Global,
+                ".",
+                GlobalInstalledAt,
+                [],
+                [agentEntry, hookEntry])));
+        new FileUserHostConfigStore().WriteGlobalTargets(home, ["copilot"]);
+
+        Func<string, string?> environment = name => name switch
+        {
+            "HOME" => home,
+            "APPDATA" => userPaths.ApplicationDataDirectory,
+            _ => null,
+        };
+
+        ArbiterHookRefreshResult outcome = UpdateTestServices.Refresher(environment, _ => { }).Refresh([]);
+
+        Assert.Equal(1, outcome.Refreshed);
+        string refreshedHook = File.ReadAllText(hookPath);
+        Assert.NotEqual("{\"version\":1,\"hooks\":{\"task\":[]}}", refreshedHook, StringComparer.Ordinal);
+
+        SquadReceipt after = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
+        Assert.Equal(agentRelativePath, after.Files[0].RelativePath);
+        SquadOwnedFile agentAfter = after.Files.Single(file => file.RelativePath == agentRelativePath);
+        SquadOwnedFile hookAfter = after.Files.Single(file => file.RelativePath == hookRelativePath);
+        Assert.Equal(Digest("agent body"), agentAfter.Sha256);
+        Assert.Equal(Digest(refreshedHook), hookAfter.Sha256);
+    }
+
+    private static string Digest(string text) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
+
     private static string GlobalHookFile(SquadGlobalRoots roots, SquadTarget target) =>
         Path.Combine(roots.ResolveGlobalRoot(target), SharedHooksPath);
 
