@@ -266,7 +266,9 @@ _Nothing specific yet._
 
 This is how a change to a test is proved. Build once, run the classes the change touches, run the
 format check, then report. Run these `dotnet` commands directly from the repository root.
-**No dev agent runs the full test suite**: the review council's `test` gate and CI run it.
+**No dev agent runs the full test suite**: the review council's `test` gate and CI run it. Whoever
+runs it, person or agent, times it and reports the number: it must finish in 120 seconds or less
+([the .NET test budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)).
 
 ```bash
 dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
