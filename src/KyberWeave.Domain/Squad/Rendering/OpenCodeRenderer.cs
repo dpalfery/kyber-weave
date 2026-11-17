@@ -85,6 +85,13 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
 {
     private const string KyberWeaveMcpPermission = $"{McpServerNames.Docs}_*";
 
+    /// <summary>
+    /// The Arbiter MCP server, granted only to an agent whose profile allows <c>decision.query</c> while the
+    /// request carries an enabled, project-scope wiring. OpenCode cannot hook a subagent's own spawns on every
+    /// path, so the conductor and the reviewer ask the Arbiter through this server.
+    /// </summary>
+    private const string ArbiterMcpPermission = $"{McpServerNames.Arbiter}_*";
+
     private static readonly string[] BaseUngovernedPermissions = ["todowrite", "skill", "question"];
 
     /// <summary>
@@ -167,7 +174,8 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
             agent,
             context.CapabilityProfiles,
             context.SuppressedSkillIdentities,
-            context.GetOrCreateState(McpPlan.Create).CodeGraphServerNames);
+            context.GetOrCreateState(McpPlan.Create).CodeGraphServerNames,
+            ArbiterEnforced(context));
 
         context.AddDiscoveryGuardedAgent(agent, frontmatter, SquadYamlEmitter.Default, "{agent,agents}/**/*.md");
         context.Degradations.AddRange(BuildDegradationRecords(agent, context.CapabilityProfiles));
@@ -175,6 +183,14 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
 
     private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
         context.AddArbiterPluginShim(".opencode/plugins/kyber-arbiter.ts", "plugins/kyber-arbiter.ts");
+
+    /// <summary>
+    /// Whether this render carries an enabled, project-scope Arbiter wiring: the only case in which the
+    /// Arbiter's own MCP tools are granted. Global scope installs the hook only, so a grant there would name a
+    /// server the deployment never starts.
+    /// </summary>
+    private static bool ArbiterEnforced(SquadHarnessRenderContext context) =>
+        context.EnabledArbiter is not null && context.Scope == SquadDeploymentScope.Project;
 
 
     /// <summary>
@@ -186,7 +202,8 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
         SquadAgent agent,
         IReadOnlyDictionary<string, SquadCapabilityProfile> capabilityProfiles,
         IReadOnlySet<string> suppressedSkillIdentities,
-        IReadOnlyList<string> codeGraphServerNames)
+        IReadOnlyList<string> codeGraphServerNames,
+        bool arbiterEnforced)
     {
         HashSet<string> granted = new(BaseUngovernedPermissions, StringComparer.Ordinal);
         object? taskPermissionValue = null;
@@ -230,6 +247,14 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
                 {
                     granted.Add($"{serverName}_*");
                 }
+            }
+
+            if (arbiterEnforced
+                && !suppressedSkillIdentities.Contains(agent.Name)
+                && profile.Permissions.TryGetValue("decision.query", out SquadPermissionDecision arbiterDecision)
+                && arbiterDecision == SquadPermissionDecision.Allow)
+            {
+                granted.Add(ArbiterMcpPermission);
             }
 
             if (profile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
@@ -277,6 +302,13 @@ public sealed class OpenCodeRenderer : SquadHarnessRenderer
                     {
                         ordered[codeGraphPermission] = "allow";
                     }
+                }
+
+                // The Arbiter is the same shape: a per-server key emitted only when the enabled wiring and
+                // the profile's decision.query entitlement both grant it.
+                if (granted.Contains(ArbiterMcpPermission))
+                {
+                    ordered[ArbiterMcpPermission] = "allow";
                 }
             }
 

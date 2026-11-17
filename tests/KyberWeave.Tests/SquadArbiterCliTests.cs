@@ -193,6 +193,40 @@ public sealed class SquadArbiterCliTests : IDisposable
     }
 
     [Fact]
+    public void Install_WithArbiterEnabled_NamesTheOpenCodeArbiterServerRegistration()
+    {
+        string targetDir = NewDir("arbiter-install-opencode");
+        WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
+
+        using FakeSquadReleaseSource releaseSource = new();
+        FakeSquadRenderer renderer = new();
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        SquadStateStore stateStore = new(userPaths);
+        SquadInstallCommand command = SquadTestCommands.Install(
+            userPaths: userPaths,
+            stateStore: stateStore,
+            releaseSource: releaseSource,
+            renderer: renderer,
+            isInteractive: false);
+
+        CommandExecution execution = Capture(() => command.Execute(
+            null!,
+            new SquadInstallSettings
+            {
+                Path = targetDir,
+                Targets = ["opencode"],
+                Global = false,
+                DryRun = false,
+                Adopt = false,
+                Yes = true,
+            }));
+
+        Assert.Equal(0, execution.ExitCode);
+        Assert.Contains("Register kw-arbiter in opencode.json", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("kyber-weave-arbiter serve", execution.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Install_PrintsTrustStepsForSelectedTargets()
     {
         string targetDir = NewDir("arbiter-install-trust");

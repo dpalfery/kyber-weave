@@ -224,6 +224,11 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 // Global Warp stays fallback-only: the install still prints the MCP registration
                 // guidance, but it never mutates ~/.warp/.mcp.json.
                 WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
+                if (arbiterWiring.Enabled && decision.Targets.Contains(SquadTarget.OpenCode))
+                {
+                    Console.WriteLine(OpenCodeArbiterRegistrationStep(scope));
+                }
+
                 if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
                 {
                     string targetToken = decision.Targets.Contains(SquadTarget.Warp) ? "warp" : "zcode";
@@ -283,6 +288,17 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     {
         return $"Register kyber-weave-arbiter in {configPath}: kyber-weave-arbiter serve --repo-root <root>";
     }
+
+    /// <summary>
+    /// The OpenCode step that makes the Arbiter's MCP tools reachable. OpenCode takes its servers from
+    /// <c>opencode.json</c>, which this deployment does not own; without the entry the conductor has no
+    /// <c>arbiter_evaluate_agent_dispatch_or_return</c>, and the plugin hook remains the only gate.
+    /// </summary>
+    internal static string OpenCodeArbiterRegistrationStep(SquadDeploymentScope scope) =>
+        "Register kw-arbiter in " +
+        (scope == SquadDeploymentScope.Global ? "~/.config/opencode/opencode.json" : "opencode.json") +
+        ": kyber-weave-arbiter serve --repo-root . — its MCP tools (arbiter_evaluate_agent_dispatch_or_return) are " +
+        "served from it; the plugin hook still gates dispatch without it.";
 
     /// <summary>
     /// Prints the Arbiter trust gate for each selected target that has one.
