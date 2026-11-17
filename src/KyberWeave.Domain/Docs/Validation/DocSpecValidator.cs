@@ -581,11 +581,12 @@ public sealed class DocSpecValidator
     /// Checks each standard's <c>builds-on</c> key: the parent must be declared, must not be
     /// the standard itself, and must not itself build on another technology. One level only,
     /// because a chain would make the set of rules a task receives depend on how deep it
-    /// runs, and the budget is sized for one parent.
+    /// runs, and the budget is sized for one parent. A role-scoped standard is checked the
+    /// same way: it names no technology of its own, but its parent still has to be declared.
     /// </summary>
     private void ValidateBuildsOn(DocumentSet set, DiagnosticReport report)
     {
-        List<(string Technology, string Parent, DocumentModel Doc)> declared = [];
+        List<(string Scope, string Parent, DocumentModel Doc)> declared = [];
         Dictionary<string, string> parentsByTechnology = new(StringComparer.Ordinal);
 
         foreach (DocumentModel doc in set.Documents)
@@ -593,23 +594,29 @@ public sealed class DocSpecValidator
             if (doc.DocType != DocType.CodingStandard) continue;
 
             string? parent = doc.Frontmatter.BuildsOn?.Trim();
+            if (string.IsNullOrWhiteSpace(parent)) continue;
+
             string? technology = doc.Frontmatter.Technology?.Trim();
-            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(technology)) continue;
+            string? role = doc.Frontmatter.Role?.Trim();
+            // A standard with neither key is already a KW-DOC-SPEC-011 finding; there is no
+            // scope name to report a parent against, so its builds-on waits for that repair.
+            if (string.IsNullOrWhiteSpace(technology) && string.IsNullOrWhiteSpace(role)) continue;
 
             // Every document is checked on its own: two standards that name one technology are
             // two claims about its parent, and keeping only the last would drop the first one's
             // finding. The map exists only for the one-level chain check below.
-            declared.Add((technology, parent, doc));
-            parentsByTechnology.TryAdd(technology, parent);
+            declared.Add((string.IsNullOrWhiteSpace(technology) ? role! : technology, parent, doc));
+            if (!string.IsNullOrWhiteSpace(technology))
+                parentsByTechnology.TryAdd(technology, parent);
         }
 
-        foreach ((string technology, string parent, DocumentModel doc) in declared)
+        foreach ((string scope, string parent, DocumentModel doc) in declared)
         {
-            if (string.Equals(parent, technology, StringComparison.Ordinal))
+            if (string.Equals(parent, scope, StringComparison.Ordinal))
             {
                 report.Add(new Diagnostic(
                     InvalidBuildsOn, Severity.Error,
-                    $"the '{technology}' standard builds on itself.",
+                    $"the '{scope}' standard builds on itself.",
                     doc.Subject, doc.RelativePath,
                     "Name a different declared technology, or drop builds-on."));
                 continue;
@@ -619,7 +626,7 @@ public sealed class DocSpecValidator
             {
                 report.Add(new Diagnostic(
                     InvalidBuildsOn, Severity.Error,
-                    $"the '{technology}' standard builds on undeclared technology '{parent}'.",
+                    $"the '{scope}' standard builds on undeclared technology '{parent}'.",
                     doc.Subject, doc.RelativePath,
                     StringDistance.Nearest(parent, _config.Technologies) is { } near
                         ? $"Closest declared technology: '{near}'."
@@ -631,7 +638,7 @@ public sealed class DocSpecValidator
             {
                 report.Add(new Diagnostic(
                     InvalidBuildsOn, Severity.Error,
-                    $"the '{technology}' standard builds on '{parent}', which itself builds on " +
+                    $"the '{scope}' standard builds on '{parent}', which itself builds on " +
                     $"'{grandParent}'.",
                     doc.Subject, doc.RelativePath,
                     "A template names at most one parent, and that parent names none. Flatten " +
