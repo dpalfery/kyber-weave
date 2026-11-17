@@ -41,6 +41,9 @@ public static class ArbiterConfigLoader
         IReadOnlyList<string> Technologies,
         Func<string, string?>? ReadFile = null);
 
+    /// <summary>One folder's rules file: its path, its text, or the reason the reader could not supply it.</summary>
+    private readonly record struct FolderRulesSource(string Path, string? Text, string? ReadError);
+
     /// <summary>The prefix every shipped rule id carries. Host rules must not use it.</summary>
     internal const string ShippedIdPrefix = "KW-ARB-";
 
@@ -371,11 +374,18 @@ public static class ArbiterConfigLoader
         string name,
         List<Diagnostic> findings)
     {
-        (string Path, string Text)? file = FolderRulesFile(request, name);
-        if (file is null)
+        FolderRulesSource? source = FindFolderRulesFile(request, name);
+        if (source is null)
             return;
 
-        if (!TryReadFolderRules(file.Value.Path, file.Value.Text, rules, out List<ArbiterRule>? loaded, out IReadOnlyList<Diagnostic> fileFindings))
+        FolderRulesSource file = source.Value;
+        if (file.Text is null)
+        {
+            findings.Add(UnreadableFolderFile(file.Path, file.ReadError ?? "the file could not be read"));
+            return;
+        }
+
+        if (!TryReadFolderRules(file.Path, file.Text, rules, out List<ArbiterRule>? loaded, out IReadOnlyList<Diagnostic> fileFindings))
         {
             findings.AddRange(fileFindings);
             return;
@@ -388,10 +398,14 @@ public static class ArbiterConfigLoader
     }
 
     /// <summary>
-    /// The first of the docs roots that holds the folder's rules file, with its text. Null when none does, or when
-    /// the caller supplied no reader because it has no repository.
+    /// The first of the docs roots that holds the folder's rules file, with its text or the reason it could not be
+    /// read. Null when none does, or when the caller supplied no reader because it has no repository.
     /// </summary>
-    private static (string Path, string Text)? FolderRulesFile(RuleFolderRequest request, string name)
+    /// <remarks>
+    /// A reader failure is a finding, never an exception: an unreadable file must leave the rest of the configuration
+    /// loading, with the shipped rules still enforced for that folder.
+    /// </remarks>
+    private static FolderRulesSource? FindFolderRulesFile(RuleFolderRequest request, string name)
     {
         if (request.ReadFile is null)
             return null;
@@ -407,9 +421,16 @@ public static class ArbiterConfigLoader
                 DocsLayout.Standards,
                 name,
                 $"{name}{DocsLayout.ArbiterRulesSuffix}");
-            string? text = request.ReadFile(path);
-            if (text is not null)
-                return (path, text);
+            try
+            {
+                string? text = request.ReadFile(path);
+                if (text is not null)
+                    return new FolderRulesSource(path, text, null);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return new FolderRulesSource(path, null, ex.Message);
+            }
         }
 
         return null;
@@ -417,7 +438,8 @@ public static class ArbiterConfigLoader
 
     /// <summary>
     /// Parses one folder's rules file text. Returns false when the file must not be applied, with the findings that say
-    /// why; an empty file returns true with no rules.
+    /// why; an empty file returns true with no rules. Any failure — a parse error, an empty rule entry, or anything
+    /// else the YAML reader raises — is one finding, so one bad file never takes the configuration down with it.
     /// </summary>
     private static bool TryReadFolderRules(
         string path,
@@ -428,69 +450,78 @@ public static class ArbiterConfigLoader
     {
         loaded = null;
         List<Diagnostic> collected = [];
+        findings = collected;
         string folder = Path.GetFileName(Path.GetDirectoryName(path)) ?? path;
 
-        ArbiterDefaultRulesYaml? document;
         try
         {
-            document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(text);
-        }
-        catch (YamlException ex)
-        {
-            collected.Add(new Diagnostic(
-                RuleValidator.RuleFolderInvalid,
-                Severity.Error,
-                $"'{path}' is not a readable Arbiter rules file, so the shipped rules are used for '{folder}': {ex.Message}",
-                folder,
-                path,
-                "Fix the YAML, or remove the file to use the shipped rules for the folder."));
-            findings = collected;
-            return false;
-        }
-
-        if (document?.Rules is null || document.Rules.Count == 0)
-        {
-            loaded = [];
-            findings = collected;
-            return true;
-        }
-
-        List<ArbiterRule> converted = [];
-        foreach (ArbiterRuleYaml entry in document.Rules)
-        {
-            if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? entryRules, out string? error))
+            ArbiterDefaultRulesYaml? document = MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(text);
+            if (document?.Rules is null || document.Rules.Count == 0)
             {
-                collected.Add(new Diagnostic(
-                    RuleValidator.RuleFolderInvalid,
-                    Severity.Error,
-                    $"'{path}' holds an invalid rule, so the shipped rules are used for '{folder}': {error}",
-                    entry.Id?.Trim() ?? folder,
-                    path,
-                    "Fix the rule, or remove the file to use the shipped rules for the folder."));
-                findings = collected;
-                return false;
+                loaded = [];
+                return true;
             }
 
-            foreach (ArbiterRule rule in entryRules)
+            List<ArbiterRule> converted = [];
+            foreach (ArbiterRuleYaml? entry in document.Rules)
             {
-                foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile([rule], knownRules, path))
+                if (entry is null)
                 {
-                    if (diagnostic.Severity != Severity.Error)
-                        continue;
-
-                    collected.Add(diagnostic);
-                    findings = collected;
+                    collected.Add(new Diagnostic(
+                        RuleValidator.RuleFolderInvalid,
+                        Severity.Error,
+                        $"'{path}' has an empty rule entry, so the shipped rules are used for '{folder}'.",
+                        folder,
+                        path,
+                        "Give every entry under 'rules:' an id, or remove the entry."));
                     return false;
                 }
+
+                if (!TryConvertRules(entry, out IReadOnlyList<ArbiterRule>? entryRules, out string? error))
+                {
+                    collected.Add(new Diagnostic(
+                        RuleValidator.RuleFolderInvalid,
+                        Severity.Error,
+                        $"'{path}' holds an invalid rule, so the shipped rules are used for '{folder}': {error}",
+                        entry.Id?.Trim() ?? folder,
+                        path,
+                        "Fix the rule, or remove the file to use the shipped rules for the folder."));
+                    return false;
+                }
+
+                foreach (ArbiterRule rule in entryRules)
+                {
+                    foreach (Diagnostic diagnostic in RuleValidator.ValidateRuleFile([rule], knownRules, path))
+                    {
+                        if (diagnostic.Severity != Severity.Error)
+                            continue;
+
+                        collected.Add(diagnostic);
+                        return false;
+                    }
+                }
+
+                converted.AddRange(entryRules);
             }
 
-            converted.AddRange(entryRules);
+            loaded = converted;
+            return true;
         }
-
-        loaded = converted;
-        findings = collected;
-        return true;
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            collected.Add(UnreadableFolderFile(path, ex.Message));
+            return false;
+        }
     }
+
+    private static Diagnostic UnreadableFolderFile(string path, string cause) =>
+        new(
+            RuleValidator.RuleFolderInvalid,
+            Severity.Error,
+            $"'{path}' could not be read as an Arbiter rules file, so the shipped rules are used for its folder: {cause}",
+            Path.GetFileName(Path.GetDirectoryName(path)) ?? path,
+            path,
+            "Fix the file, or remove it to use the shipped rules for the folder.");
 
     /// <summary>
     /// Replaces every rule of the loaded ids with the loaded rules, keeping the position of the first replaced rule so

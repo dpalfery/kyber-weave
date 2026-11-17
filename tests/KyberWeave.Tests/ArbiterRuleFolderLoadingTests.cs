@@ -109,6 +109,41 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
     }
 
     [Fact]
+    public void AnUnreadableFolderFileIsReportedAndTheShippedRulesAreUsed()
+    {
+        string path = Path.Combine(Root, "docs", "standards", "conductor", "conductor.arbiter-rules.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) = Load(
+            "arbiter:\n  enabled: true\n",
+            technologies: [],
+            candidate => string.Equals(candidate, path, StringComparison.Ordinal)
+                ? throw new UnauthorizedAccessException("permission denied")
+                : ReadTestFile(candidate));
+
+        Diagnostic finding = Assert.Single(findings, item => item.Code == RuleValidator.RuleFolderInvalid);
+        Assert.Equal(Severity.Error, finding.Severity);
+        Assert.Equal(path, finding.FilePath);
+        Assert.Contains("permission denied", finding.Message, StringComparison.Ordinal);
+        AssertShippedRules(rules);
+    }
+
+    [Fact]
+    public void ANullRuleEntryIsReportedAndTheRepositoryConfigurationStillLoads()
+    {
+        string path = WriteFolder("conductor", "rules:\n  -\n");
+        WriteConfig("ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n");
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+
+        Diagnostic finding = Assert.Single(
+            config.Arbiter.RuleFolderFindings,
+            item => item.Code == RuleValidator.RuleFolderInvalid);
+        Assert.Equal(path, finding.FilePath);
+        AssertShippedRules(config.Arbiter.Rules);
+    }
+
+    [Fact]
     public void TheHostsArbiterRulesSettingsApplyAfterTheFolders()
     {
         WriteFolder("conductor", HostScopeRule);
@@ -308,13 +343,14 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
 
     private (IReadOnlyList<ArbiterRule> Rules, IReadOnlyList<Diagnostic> Findings) Load(
         string yaml,
-        IReadOnlyList<string> technologies)
+        IReadOnlyList<string> technologies,
+        Func<string, string?>? readFile = null)
     {
         ArbiterYamlSection? section = KyberWeaveYamlParser.Parse(yaml).Arbiter;
         ArbiterConfig merged = ArbiterConfigLoader.Merge(
             ArbiterConfig.ProductDefaults,
             section,
-            new ArbiterConfigLoader.RuleFolderRequest(Root, ["docs"], technologies, ReadTestFile));
+            new ArbiterConfigLoader.RuleFolderRequest(Root, ["docs"], technologies, readFile ?? ReadTestFile));
         return (merged.Rules, merged.RuleFolderFindings);
     }
 
