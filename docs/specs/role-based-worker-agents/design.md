@@ -22,7 +22,7 @@ keywords:
 
 **Phase status:** Approved
 
-Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed.
+Owner approved 2026-11-16 ('Yes, approve'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): the standards plan first drafted on pull request 625 is absorbed here and that pull request is closed. Amended 2026-11-17 per the owner's decisions: the old agents are removed without a comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), `dev-hard` resolves to each harness's stronger coding model, the task file records the developer tier, `docs standards migrate` reshapes a standard, and the harness table records the delivery path as built.
 
 ## Overview
 
@@ -34,8 +34,11 @@ role and technology folders. `test-dev`, `sql-database-architect`, `azure-reader
 `github-devops` go away; a read-only `platform-researcher` and a platform-neutral `devops` agent
 replace the last two.
 
-The Squad goes from 24 agents to 15. The old agents stay selectable for now; the owner decides
-later when they are removed, with a migration path.
+The Squad went from 24 agents to 15. The fourteen per-technology agents are removed now, on the
+owner's decision of 2026-11-17: the comparison this design planned was not used to decide, and
+anyone who wants the old agents installs an older version
+([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). The
+roster switch is gone, so no run can choose between two sets of workers.
 
 This design covers the [requirements](requirements.md). It absorbs the standards plan first
 drafted on [pull request 625](https://github.com/dpalfery/kyber-weave/pull/625), which is closed,
@@ -261,15 +264,17 @@ Stated so the owner can weigh them. The design follows the owner's direction in 
 | `dev-hard` | new | `worker` | `dev-hard` (new) |
 | `platform-researcher` | new; replaces `azure-reader` | `platform-reader` (new) | `fast` |
 | `devops` | new; replaces `github-devops` | `publishing-worker` | `general` |
-| Ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`, `github-devops` | stay for now; removed in phase 5 | | |
+| Ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`, `github-devops` | removed 2026-11-17 | | |
 
 The three developer agents are one body rendered three times. The body states the workflow and the
 rules that hold for every technology, and names no technology. `docs-dev` keeps its own rules
 because they follow the documentation ontology and the Config Reg, which a host already customises
 through its configuration.
 
-An agent may declare its roster with a `worker-roster` key. The five new agents declare `tiered`,
-the fourteen to be removed declare `technology`, and an agent with no key serves both.
+One roster ships, so an agent's `worker-roster` key is optional and means nothing more than "this
+agent serves the one roster": the five new agents declare `tiered`, and an agent with no key is
+dispatchable the same way. `worker-roster: technology` names the roster the removal deleted.
+
 
 `devops` does what `github-devops` does today (run start, push, pull request, pipeline files) and
 names no platform. Six source files name `github-devops` for run start and delivery
@@ -294,8 +299,8 @@ Nothing checks whether a rating is right. A wrong rating costs one attempt, beca
 
 ### Choosing the agent and stepping up
 
-Under the tiered roster the pick of ADR 0082 chooses the kind of worker (developer, `docs-dev` or
-`devops`), and difficulty chooses the tier:
+The pick of ADR 0082 chooses the kind of worker (developer, `docs-dev` or `devops`), and difficulty
+chooses the tier:
 
 ```text
 tier = min(hard, rated difficulty + failed attempts at this task)
@@ -311,14 +316,13 @@ limit the architect mediates as today.
 `dev-medium`, `dev-hard`. When the conductor has already dispatched the next tier, the rule's
 target equals the rendered profile and it writes nothing.
 
-One rating is used per task. Under the tiered roster the model-targeting step takes the task
-file's difficulty as its answer and makes no second model call, so the agent and the model cannot
-disagree.
+One rating is used per task. The model-targeting step takes the task file's difficulty as its
+answer and makes no second model call, so the agent and the model cannot disagree.
 
 `KW-ARB-OWNER-001` is unaffected: a current plan answers `no-mapping`. The `delegates-to` lists of
-`conductor` and `bug-crusher` gain the three developer agents, and those of `conductor`,
-`architect` and `code-reviewer` gain `platform-researcher`, so `KW-ARB-ROSTER-001` allows them. The old
-names leave those lists in phase 5.
+`conductor` and `bug-crusher` name the three developer agents, and those of `conductor`,
+`architect` and `code-reviewer` name `platform-researcher`, so `KW-ARB-ROSTER-001` allows them. The
+removal took the old names out of those lists.
 
 A dispatch with no task, such as a fix `bug-crusher` hands on, starts at `dev-medium` and moves to
 `dev-hard` on its second attempt, inside the two attempts that flow already allows.
@@ -413,15 +417,15 @@ Role folders are declared in a new `ontology.roles` list, so validation tells a 
 technology. A platform folder is a technology folder; the `devops` agent's task names it the way a
 developer task names `csharp`.
 
-Content moves, all additive until phase 5:
+Content moves, all of it now that the old agents are gone:
 
 - Every technology rule in the eleven technology agents, `test-dev` and `azure-reader` goes to the
   matching template, tracked by the inventory of Requirement 5.5.
 - The `test` template's cross-technology rules are copied to `shared-rules.md`; the rest is copied
-  to each technology's Testing section. The `test` technology and the `testing` skill stay until
-  phase 5, so the old roster keeps working.
-- A `sql-server` template is added and takes the rules `sql-database-architect` holds. The `sql`
-  template stays until phase 5.
+  to each technology's Testing section. The `test` technology and the `testing` skill go with the
+  old agents, so those two places are their only home.
+- A `sql-server` template takes the rules `sql-database-architect` holds. The `sql` template goes
+  with the old agents.
 - `azure` gains the skills and rules `azure-reader` holds. An `aws` template is added.
 - A `github` platform template takes the `github-actions` standard and the `github-devops` skill.
   `azure-devops`, `gitlab` and `jira` templates are new.
@@ -601,17 +605,24 @@ new trigger, `worker.command`, raised by the existing worker guard.
 
 ### Roster switch and comparison
 
-A host configuration key `worker-roster` takes `technology` (default until removal) or `tiered`. It
-is given again when a task file is written and recorded there; every later reader takes it from the
-task file. Under `technology`, a run behaves as today apart from the task prompt.
+The roster switch is gone. `worker-roster: technology` is not a value any more: in host
+configuration it is a configuration error whose message names the change, and a task file written
+before the removal that records it is read as the one roster with `KW-DOC-TASKS-019`, so its
+developer tasks owe a `Technology:` line like any other. `tiered` is the only roster and what an
+absent key means, and a task file still records the roster it was written under.
 
-A runbook defines the comparison: three approved plans, each run once per roster from one base
-commit on one harness. It records tasks completed, attempts per task and the tier of each, task
-gate failures, review findings by severity, tokens and wall time.
+The comparison the two-roster design planned is retired with the runbook that described it
+([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). It was
+not used to decide the removal.
 
 ### Removal
 
-Not scheduled. The old agents stay until the owner decides, after the comparison:
+Carried out on 2026-11-17 on the owner's decision
+([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)). The
+comparison was not used to decide: two reduced comparison passes on a scratch project both failed
+for product defects that were then fixed, and three acceptance runs on the Hotshot Logistics demo
+on GitHub Copilot CLI on 2026-11-17 started, planned and stopped before dispatching any developer,
+for defects that were also fixed. Anyone who wants the old agents installs an older version.
 
 - The fourteen agents are deleted from the Squad source; a Squad update removes their rendered
   files only where the lock shows the Squad wrote them unedited.
@@ -619,8 +630,10 @@ Not scheduled. The old agents stay until the owner decides, after the comparison
   `docs validate` warns and names `kyber-weave review migrate-task-gates`, which rewrites them as
   `review.technology-gates` and shows the change first.
 - A plan or task file naming a removed agent resolves to the developer agent for the task's
-  difficulty and reports the substitution.
-- `worker-roster` defaults to `tiered`; `technology` becomes an error that names the change.
+  difficulty, or to `architect`, `platform-researcher` or `devops`, and reports the substitution.
+- `worker-roster` is no longer a switch: `tiered` is the only roster and the default, a host that
+  sets `technology` fails with a configuration error that names the change, and a task file that
+  records it is read as the one roster with a warning.
 
 ### File formats
 
@@ -643,21 +656,21 @@ Each phase ships on its own and leaves a working product.
 |---|---|---|
 | 1. Technology folders | The skill document type and scoping, the stitched standards bundle and its search weight, six-heading templates with four files each, the rule inventory, `shared-rules.md` testing rules, role and platform folder templates, onboarding by chosen technology, `docs standards diff`, migration of existing folders. Additive: nothing the old roster reads is deleted | none |
 | 2. Task fields and the task prompt | `Difficulty:` and `Technology:`, the task file change, `TaskGateResolver`, the prompt service, the dispatch hook's prompt insertion with the file fallback, the docs tool | Phase 1 |
-| 3. Agents | The three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the conductor without a profile, the roster switch, the step-up | Phase 2 |
+| 3. Agents | The three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the conductor without a profile, the step-up | Phase 2 |
 | 4. Arbiter rules from folders | The split of the 36 rules, folder loading, the `MODE-002` change, the command allow-list | Phases 1 and 3 |
-| 5. Comparison and removal | The comparison runbook and runs, the owner's decision, removal of the fourteen agents, the `test` technology, the `testing` skill and the `sql` template, and migration | Phases 1 to 4 |
+| 5. Removal | The comparison runbook, retired without a completed comparison, the owner's decision, removal of the fourteen agents, the `test` technology, the `testing` skill and the `sql` template, and migration | Phases 1 to 4 |
 
 ## Data models
 
 | Model | Change |
 |---|---|
-| Agent frontmatter | `model-profile` becomes optional (the conductor has none); optional `worker-roster: technology \| tiered`. |
+| Agent frontmatter | `model-profile` becomes optional (the conductor has none); optional `worker-roster`, whose only value is `tiered`. |
 | Model profiles | New `dev-hard`; `orchestration` removed. |
 | Capability profiles | New `platform-reader`. |
-| Host configuration | `worker-roster`; `review.technology-gates`; `ontology.roles`; a task prompt budget. |
+| Host configuration | `worker-roster`, whose only value is `tiered`; `review.technology-gates`; `ontology.roles`; a task prompt budget. |
 | Plan and specification task text | Optional `Difficulty:` and `Technology:` lines. |
 | Standard frontmatter | Optional `builds-on: <technology>`. |
-| Task file | Schema version plus one; YAML; top-level `worker-roster`; per entry `difficulty`, `difficulty-source`, `technology`. |
+| Task file | Schema version plus one; YAML; top-level `worker-roster` recording the roster it was written under; per entry `agent` (the developer tier the rating gives), `difficulty`, `difficulty-source`, `technology`. |
 | Technology, role and platform folders | The standard is `<name>.standards.md`; new `<name>.arbiter-rules.yml`. |
 | Arbiter | Trigger `worker.command`; fact `plan.task.files-all-tests`. |
 | Docs tool server | New tool `docs_build_task_prompt_for_agent_dispatch`. |
@@ -673,6 +686,8 @@ Each phase ships on its own and leaves a working product.
 | Unknown technology on a task | `docs validate` error naming the task, the value and the declared list. |
 | Tiered roster, developer task without a technology | `docs validate` error naming the task. |
 | Host folder still using `README.md` | Read, with a warning naming the migrate command, for two minor releases. |
+| Host configuration sets `worker-roster: technology` | Configuration error whose message names the removal. |
+| Task file records `worker-roster: technology` | Read as the one roster, with `KW-DOC-TASKS-019` naming it. |
 | Worker starts with only a task id | It prints its own prompt with `docs packet`, or stops and reports. |
 | `Technology:` names two | `docs validate` error telling the author to split the task. |
 | Technology named, folder missing | The prompt says so in that technology's section; the rest is returned. |
@@ -683,7 +698,7 @@ Each phase ships on its own and leaves a working product.
 | Technology folder missing a file, or a standard missing a heading | `docs validate` error naming the folder and what is missing. |
 | Command outside a technology's allow-list | Refused where the worker guard runs; an instruction elsewhere. |
 | JSON task file | Read, with a warning, for two minor releases. |
-| Removed agent named in a plan or task file | Resolved to a developer agent by difficulty; substitution reported. |
+| Removed agent named in a plan or task file | Resolved to a developer agent by difficulty, or to `architect`, `platform-researcher` or `devops`; substitution reported. |
 
 ## Testing strategy
 
@@ -711,7 +726,7 @@ Estimates, for planning only.
 | 2. Task fields and the task prompt | 18 to 24 files | 8 new classes, 14 to 20 changed | 4 prompt files, 4 docs; the JSON task list name appears in 7 source, 10 test, 8 product and 9 live doc files |
 | 3. Agents | 6 to 9 files | 3 new classes, 8 to 12 changed | 5 new agents, 13 rendered sets, 4 docs |
 | 4. Arbiter rules from folders | 8 to 12 files | 4 new classes, 6 to 10 changed | 3 rule files, 3 docs |
-| 5. Comparison and removal | 10 to 15 files | 40 to 60 changed | 14 agents deleted, 1 runbook, 39 live docs, 84 product files |
+| 5. Removal | 10 to 15 files | 40 to 60 changed | 14 agents deleted, 1 retired runbook, 39 live docs, 84 product files |
 
 ## Decisions
 
@@ -721,7 +736,7 @@ Estimates, for planning only.
 | D2 | Who rates difficulty? | The architect; the decision model instead when the Arbiter runs with one. No gate checks the rating. | The decision model is asked when the task file is written, in the call that already picks the agent, so the rating is recorded once. | user: explicit approval 2026-11-16 |
 | D3 | What happens when a task fails? | The next attempt goes one tier up; the three-dispatch limit stays. | The owner chose the existing one-step rule over a jump to `dev-hard` on the third try. | user: explicit decision 2026-11-16 |
 | D4 | Which agents are removed? | The ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader`, `github-devops`. | `docs-dev` stays: it follows the documentation settings a host already customises. | user: explicit decision 2026-11-16 |
-| D5 | Are the old agents deleted at once? | No. They stay selectable for now; removal waits for the owner's decision after a comparison. | Keeps every earlier phase additive. | user: explicit approval 2026-11-16 |
+| D5 | Are the old agents deleted at once? | Yes, on the owner's decision of 2026-11-17: the fourteen agents are removed now, without a completed comparison. | The owner decided that keeping both cost too much; anyone who wants them installs an older version. D28 records why the comparison did not decide it. | user: explicit decision 2026-11-17, replacing the 2026-11-16 answer |
 | D6 | How is the model assigned? | By the agent: each agent names a model profile, as today. Nothing assigns a model at dispatch. The conductor has no profile. | Run-time assignment was drafted and removed by the owner. Choosing an agent works on all thirteen harnesses. | user: explicit decision 2026-11-16 |
 | D7 | Which model profiles change? | `dev-hard` is added, separate from the planning profiles. `orchestration` is removed. Nothing is renamed. | `dev-easy` uses `fast` and `dev-medium` uses `general`, so no preset breaks. | user: explicit approval 2026-11-16 |
 | D8 | What does a technology or role folder hold? | `<name>.standards.md`, `<name>.rules.md`, `<name>.skills.md`, `<name>.arbiter-rules.yml`. | The plan on pull request 625 named the first three `README.md`, `rules.md` and `skills.md`; the owner renamed them with the folder prefix. | user: explicit decision 2026-11-16 |
@@ -744,6 +759,7 @@ Estimates, for planning only.
 | D25 | How is a skills file typed and scoped? | A new `skill` document type; rules and skills may name a technology or role only inside that folder. | Carried from the plan on pull request 625, where it was a recommendation. Reusing an existing type would blur rules and procedures. | carried from pull request 625; owner directed the fold 2026-11-16 |
 | D26 | When is the bundle stitched? | When asked, from one index lookup shared by the standards tool and the task prompt. | Carried from the plan on pull request 625. Always current; no second stored copy. | carried from pull request 625; owner directed the fold 2026-11-16 |
 | D27 | How do standards rank in search? | Standards, skills and technology rules at 0.55; the shared rules file at 1.0. | Carried from the plan on pull request 625. Matches the weight plans and specifications already have. | carried from pull request 625; owner directed the fold 2026-11-16 |
+| D28 | Was the comparison used to decide the removal? | No. The owner decided on 2026-11-17 to remove the fourteen agents, and the comparison D5 named is retired with its runbook. | Two reduced comparison passes on a scratch project both failed for product defects that were then fixed; three acceptance runs on the Hotshot Logistics demo on GitHub Copilot CLI on 2026-11-17 started, planned and stopped before dispatching any developer, for defects that were also fixed. Kept both rosters cost too much. | user: explicit decision 2026-11-17, recorded in [ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md) |
 
 ## Open questions
 
@@ -766,7 +782,7 @@ None. The one earlier question, the order against pull request 625, is settled b
 | H7 | Technology-resolved task gates and `review.technology-gates` (Task gates by technology) | ReviewCouncil | architecture |
 | H8 | Rules by folder, loading order and overrides (Arbiter rules from folders) | KyberArbiter | architecture |
 | H9 | The platform research agent, the `devops` agent and platform folders (The platform research agent; Roster) | KyberSquad | runbook |
-| H10 | The roster switch and the comparison procedure (Roster switch and comparison) | KyberSquad | runbook |
+| H10 | The roster that is left and why the comparison did not decide the removal (Roster switch and comparison; Removal) | KyberSquad | adr |
 | H11 | Migration from agent-keyed gates and removed agent names (Removal) | ReviewCouncil | runbook |
 | H12 | Tiers and the task prompt; rules by folder; the task file format (Decisions D1, D10, D12, D14, D18) | KyberSquad | adr |
 | H13 | The skill document type and where rules and skills may name a technology or role (Document types, scoping and the standards bundle) | DocGraph | reference |

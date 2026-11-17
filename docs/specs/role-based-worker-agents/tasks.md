@@ -22,7 +22,7 @@ keywords:
 
 **Phase status:** Approved
 
-Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): tasks 1.11 to 1.14 carry the standards plan first drafted on pull request 625.
+Owner approved 2026-11-16 ('Approve tasks'), given directly in the authoring session. Amended 2026-11-16 per owner direction ('fold 625 into phase 1 and close 625'): tasks 1.11 to 1.14 carry the standards plan first drafted on pull request 625. Amended 2026-11-17: tasks 1.1 to 5.6 are ticked against the delivered code, task 5.2 is closed by the owner's decision without a comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)), and task 3.2's acceptance line records that `dev-hard` carries the `architect` profile's model rows.
 
 **Development mode:** test-first
 
@@ -33,16 +33,16 @@ owner approved all three on 2026-11-16. The owner gave the final approval on 202
 the condition that no build starts yet. The machine task list `tasks.json` beside this file was
 generated from it; regenerate it after any edit here.
 
-These tasks deliver five phases. Each phase is its own pull request and leaves the product working
-with today's agents as the default, so any phase can ship without the next.
+These tasks deliver five phases. Each phase was its own pull request and leaves the product working;
+phases 1 to 5 are merged on this branch, so what ships now is the one roster.
 
 | Phase | Delivers | Tasks | Shippable because |
 |---|---|---|---|
 | 1. Technology folders | Four prefixed files per folder, six headings, templates, role and platform folders, onboarding by choice, migration of existing folders, the skill document type, the stitched standards bundle | 1.1 to 1.14 | Additive: nothing today's agents read is removed |
 | 2. Task fields and the task prompt | Difficulty and technology on tasks, the YAML task list file, gates by technology, the prompt service, hook insertion with the file fallback | 2.1 to 2.12 | Optional fields; today's agents receive the richer prompt |
-| 3. Agents | Three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the roster switch, the step-up | 3.1 to 3.9 | The default roster stays `technology` |
+| 3. Agents | Three developer agents, `platform-researcher`, `devops`, the `dev-hard` profile, the step-up | 3.1 to 3.9 | The one roster ships |
 | 4. Arbiter rules from folders | The 36 rules split into role folders, folder loading, the command allow-list | 4.1 to 4.6 | Rule ids and effects are unchanged |
-| 5. Comparison and removal | The comparison, the owner's decision, migration, removal of the old agents | 5.1 to 5.6 | Removal starts only after the owner's recorded decision |
+| 5. Removal | The retired comparison runbook, the owner's decision without a completed comparison, migration, removal of the old agents | 5.1 to 5.6 | Removal rests on the owner's recorded decision |
 | Closeout | Harvest and archive | 6.1 | After 5.6 |
 
 Phase 1 has no outside dependency. The standards plan first drafted on
@@ -404,17 +404,18 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 
 ### Phase 3: Agents
 
-- [ ] 3.1 Add the roster switch
-  - **Objective:** Accept a `worker-roster` value of `technology` or `tiered` in the host configuration and on an agent, record it when the machine task list is written, and require a technology on file-changing tasks under `tiered`.
+- [x] 3.1 Add the roster switch
+  - **Objective:** Accept a `worker-roster` value in the host configuration and on an agent, record it when the machine task list is written, and require a technology on file-changing tasks. The removal left `tiered` as the only value.
   - **Files:**
-    - `src/KyberWeave.Domain/Configuration/KyberWeaveConfig.cs`: the key, default `technology`
+    - `src/KyberWeave.Domain/Configuration/KyberWeaveConfig.cs`: the key
     - `src/KyberWeave.Domain/Squad/Validation/SquadSourceValidator.cs`, `src/KyberWeave.Domain/Arbiter/Squad/ArbiterSquadCatalog.cs`: the optional agent key
-    - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileGenerator.cs`, `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: record it; the tiered check
+    - `src/KyberWeave.Application/Docs/Validation/PlanTaskFileGenerator.cs`, `src/KyberWeave.Application/Docs/Validation/PlanTaskFileValidator.cs`: record it; the technology check; the retired value's warning
     - `src/KyberWeave.Domain/Docs/Scaffolding/ConfigRegMarkdown.cs`: the `<worker-roster>` property
-    - `products/kyber-squad/agents/`: `worker-roster: technology` on the fourteen agents to be removed
+    - `products/kyber-squad/agents/`: the key on the five new agents
     - `tests/KyberWeave.Tests/WorkerRosterTests.cs` (new): `KyberWeave.Tests.WorkerRosterTests`
-  - **Acceptance criteria:** An agent with no key serves both rosters; the fourteen agents to be removed declare `technology` and are otherwise unchanged; no host key means `technology`; another value is a configuration error listing the two; the written task list records the roster and later readers take it from there; under `tiered` a task a developer agent will do with no technology is an error, and a documentation or delivery task needs none; under `technology` a run behaves as it does today.
+  - **Acceptance criteria:** An agent with no key serves the roster; the written task list records the roster and later readers take it from there; `tiered` is the only value and what an absent host key means, `technology` is a configuration error naming the removal, and a task file that records `technology` is read as `tiered` with a warning; a task a developer agent will do with no technology is an error, and a documentation or delivery task needs none.
   - **Capabilities:** C# configuration, squad source validation and documentation-engine work, with xUnit tests
+  - **Technology:** csharp
   - **Command:** `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~WorkerRosterTests"`
   - **Depends on:** none
   - _Requirements: 4.4, 12.1, 12.2, 12.3, 12.6_
@@ -592,26 +593,25 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 
 ### Phase 5: Comparison and removal
 
-- [ ] 5.1 Write the comparison runbook
-  - **Objective:** Define how to run one approved plan once per roster from one base commit on one harness, and what to record.
+- [x] 5.1 Write the comparison runbook
+  - **Objective:** Define how to run one approved plan once per roster from one base commit on one harness, and what to record. The runbook was retired on 2026-11-17, when the owner removed the old agents without the comparison ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
   - **Files:**
-    - `docs/kyber-squad/roster-comparison-runbook.md` (new), `docs/kyber-squad/README.md`
-  - **Acceptance criteria:** The runbook names the three kinds of plan to run, the fixed inputs, and for each measure (tasks completed, attempts and tier per task, task-gate failures, review findings by severity, tokens, wall time) where the number is read from; a measure with no source is marked as such.
+    - `docs/kyber-squad/roster-comparison-runbook.md` (new; marked superseded), `docs/kyber-squad/README.md`
+  - **Acceptance criteria:** The runbook names the three kinds of plan to run, the fixed inputs, and for each measure (tasks completed, attempts and tier per task, task-gate failures, review findings by severity, tokens, wall time) where the number is read from; a measure with no source is marked as such; a later reader sees from its own banner and `status: superseded` that it is history, not a task still to run.
   - **Capabilities:** Documentation: a measurement runbook in governed Markdown
   - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate .`
   - **Depends on:** none
   - _Requirements: 12.4, 12.5_
 
-- [ ] 5.2 Run the comparison and record the owner's decision
-  - **Objective:** Run the runbook, write the results, and record the owner's decision on removing the old agents as a decision record.
+- [x] 5.2 Record the owner's decision on the old agents
+  - **Objective:** Record the owner's decision on removing the old agents. Closed by decision, not by a comparison: on 2026-11-17 the owner removed the fourteen agents without one ([ADR 0088](../../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).
   - **Files:**
-    - `docs/kyber-squad/roster-comparison-results.md` (new)
-    - `docs/adr/` (new record), `docs/adr/README.md`
-  - **Acceptance criteria:** Every measure of the runbook has a value per run; the record states remove, keep, or keep for named technologies, and carries the owner's approval; tasks 5.3 to 5.6 do not start without it.
-  - **Capabilities:** Running delivery plans on a coding-agent harness, collecting measurements, and writing a decision record
+    - `docs/adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md` (new), `docs/adr/README.md`
+  - **Acceptance criteria:** The record states that the old agents are removed, that the comparison of task 5.1 was not used to decide, and why — two reduced comparison passes on a scratch project that both failed for product defects that were then fixed, and three acceptance runs on the Hotshot Logistics demo on GitHub Copilot CLI on 2026-11-17 that started, planned and stopped before dispatching any developer, for defects that were also fixed; it carries the owner's approval; no results file exists, because no comparison reached a result. Tasks 5.3 to 5.6 start from it.
+  - **Capabilities:** Writing a decision record in governed Markdown
   - **Command:** `dotnet run --project src/KyberWeave.Cli -- docs validate .`
   - **Depends on:** 5.1
-  - _Requirements: 13.1_
+  - _Requirements: 12.4, 12.5, 13.1_
 
 - [x] 5.3 Migrate agent-keyed task gates
   - **Objective:** Add `kyber-weave review migrate-task-gates`, which rewrites a host's agent-keyed task gates as technology-keyed gates, and warn about entries for removed agents.
@@ -718,7 +718,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
 | 4.4 | `tests/KyberWeave.Tests`: `ArbiterCommandAllowListTests` | task's Command | A command outside the list is refused | The trigger does not exist | New class passes |
 | 4.5 | `tests/KyberWeave.Tests`: `ModelTargetingTieredTests` | task's Command | One rating per task; no double step | A second call is made | New class passes |
 | 4.6 | none: documentation | docs gates | Decision record and documents | not applicable | Zero findings |
-| 5.1, 5.2, 5.6 | none: documentation and measured runs | docs gates | Runbook, results, decision record, swept documents | not applicable | Zero findings; owner approval of the record |
+| 5.1, 5.2, 5.6 | none: documentation | docs gates | Retired runbook, decision record, swept documents | not applicable | Zero findings; owner approval of the record |
 | 5.3 | `tests/KyberWeave.Tests`: `ReviewMigrateTaskGatesTests` | task's Command | Gates are rewritten by technology | The command does not exist | New class passes |
 | 5.4 | `tests/KyberWeave.Tests`: `RemovedAgentResolutionTests` | task's Command | A removed name resolves; edited files survive | No substitution exists | New class passes |
 | 5.5 | `tests/KyberWeave.Tests`: `SquadCanonicalContentTests`, `SquadSourceTests`, `SquadPackAndReleaseTests`, `WorkerRosterTests` | task's Command | Fifteen agents; `tiered` is the default | The classes still expect the old agents | All four classes pass |
