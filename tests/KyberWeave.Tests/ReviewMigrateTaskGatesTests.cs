@@ -292,6 +292,47 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     }
 
     /// <summary>
+    /// A conflict only appears once a third entry arrives: the first two were equal, so the second folded into the
+    /// first, and then a third claimed the same technology with different gates. All three have to come back, because
+    /// the fold is no longer true — leaving it in place would report gates that moved when none did.
+    /// </summary>
+    [Fact]
+    public void AConflictAfterAFoldKeepsEveryEntryAndFinishes()
+    {
+        WriteConfig("""
+            review:
+              task-gates:
+                csharp-dev:
+                  - id: build
+                    run: [dotnet, build]
+                dal-dev:
+                  - id: build
+                    run: [dotnet, build]
+                maui-dev:
+                  - id: build
+                    run: [dotnet, build]
+                  - id: test
+                    run: [dotnet, test]
+                go-dev:
+                  - id: go-build
+                    run: [go, build, ./...]
+            """);
+
+        CliRun run = Migrate("--write");
+
+        Assert.Equal(0, run.ExitCode);
+        Assert.DoesNotContain("does not hold", run.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("folded", run.Output, StringComparison.OrdinalIgnoreCase);
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        Assert.Equal(["build"], config.Review.TaskGates["csharp-dev"].Select(gate => gate.Id));
+        Assert.Equal(["build"], config.Review.TaskGates["dal-dev"].Select(gate => gate.Id));
+        Assert.Equal(["build", "test"], config.Review.TaskGates["maui-dev"].Select(gate => gate.Id));
+        Assert.Equal(["go-build"], config.Review.TechnologyGates["go"].Select(gate => gate.Id));
+        Assert.DoesNotContain("csharp", config.Review.TechnologyGates.Keys);
+    }
+
+    /// <summary>
     /// A file whose configuration does not load is refused before anything is written: a rewrite based on a
     /// configuration nobody can read is a rewrite nobody can check.
     /// </summary>

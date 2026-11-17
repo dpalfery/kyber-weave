@@ -178,6 +178,7 @@ public static class ReviewTaskGateMigration
     {
         Decision[] decisions = new Decision[block.Chunks.Count];
         Dictionary<string, int> representatives = new(StringComparer.Ordinal);
+        Dictionary<string, List<int>> foldedInto = new(StringComparer.Ordinal);
         HashSet<string> conflicted = new(StringComparer.Ordinal);
 
         for (int i = 0; i < block.Chunks.Count; i++)
@@ -218,6 +219,13 @@ public static class ReviewTaskGateMigration
                 {
                     decisions[i] = Decision.Drop;
                     folded.Add(new TaskGateMove(agent, technology));
+                    if (!foldedInto.TryGetValue(technology, out List<int>? into))
+                    {
+                        into = [];
+                        foldedInto[technology] = into;
+                    }
+
+                    into.Add(i);
                     continue;
                 }
 
@@ -232,6 +240,24 @@ public static class ReviewTaskGateMigration
                     other, $"its gates differ from '{agent}', and both map to technology '{technology}'; reconcile them"));
                 kept.Add(new TaskGateKeep(
                     agent, $"its gates differ from '{other}', and both map to technology '{technology}'; reconcile them"));
+
+                // The entries that folded into the demoted one folded into a gate list that is no longer moving, so
+                // each of them keeps its own entry too. Left as folds, they would report gates that went nowhere — and
+                // the check before the write refuses a fold whose technology key does not hold the gates.
+                if (foldedInto.Remove(technology, out List<int>? demoted))
+                {
+                    foreach (int index in demoted)
+                    {
+                        string foldedAgent = block.Chunks[index].Key;
+                        decisions[index] = Decision.Keep;
+                        _ = folded.RemoveAll(move => move.Agent == foldedAgent);
+                        kept.Add(new TaskGateKeep(
+                            foldedAgent,
+                            $"its gates are equal to '{other}' and it no longer moves to technology " +
+                            $"'{technology}'; reconcile them"));
+                    }
+                }
+
                 continue;
             }
 
