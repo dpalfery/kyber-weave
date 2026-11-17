@@ -2055,7 +2055,9 @@ required before archival), and the host pull-request template carries a Document
 impact section so the skill has a host heading to fill. The always-on change-scoped
 merge gate `KW-DOC-LIFECYCLE-004` (`ArchiveCloseoutValidator`, diffed against `--base`
 via `ChangedFiles.ResolveSinceMergeBase` per-path change kinds) requires that an archive
-touching governed documents names its closeout evidence; the harvest declaration binds
+touching governed documents names its closeout evidence, and that every numbered task the
+plan's `## Tasks` section lists is ticked: an unticked task is undelivered work, so the
+archived copy is refused however it was moved there; the harvest declaration binds
 off the document model (`documentation-impact`, `impact-components`). Portable contract
 files never embed a literal `docs/` path: every documentation location resolves through
 Config Reg properties such as `<docs-root>`, so a host that mounts documentation

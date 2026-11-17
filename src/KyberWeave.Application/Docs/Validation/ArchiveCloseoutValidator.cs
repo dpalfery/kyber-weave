@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
@@ -25,7 +26,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <para>
 /// This validator (D4) closes that gap with <c>KW-DOC-LIFECYCLE-004</c>: an archive entry
 /// the change touches must name its closeout evidence. Each entry reports at most one
-/// finding, naming every condition it fails (C1–C9), so a plan that is both open and
+/// finding, naming every condition it fails (C1–C10), so a plan that is both open and
 /// unevidenced reads as one piece of unfinished work rather than a list.
 /// </para>
 /// </remarks>
@@ -46,6 +47,9 @@ public sealed partial class ArchiveCloseoutValidator
     private const string ResidualMarker = "RESIDUAL";
 
     private const string InventoryFileName = "README.md";
+
+    /// <summary>The most unchecked task ids the C10 message names before it counts the rest.</summary>
+    private const int MaxUncheckedTasksNamed = 5;
 
     // The one archive kind that keeps an inventory of its entries directly in its folder. Another
     // kind's README.md at that depth is an ordinary archived entry and still needs its closeout
@@ -267,7 +271,7 @@ public sealed partial class ArchiveCloseoutValidator
         }
     }
 
-    /// <summary>One failed closeout condition: its tag (C1–C9), what is wrong and how to fix it, and an example of the fix.</summary>
+    /// <summary>One failed closeout condition: its tag (C1–C10), what is wrong and how to fix it, and an example of the fix.</summary>
     private sealed record Failure(string Condition, string Message, string Example);
 
     private static Failure Fail(string text, string example) =>
@@ -277,7 +281,7 @@ public sealed partial class ArchiveCloseoutValidator
 
     private static string WaiverExample(string ids) => $"| {ids} | Documentation waiver — <why no lasting record is needed> |";
 
-    /// <summary>Every failed closeout condition for one archived entry, each tagged C1–C9.</summary>
+    /// <summary>Every failed closeout condition for one archived entry, each tagged C1–C10.</summary>
     private static List<Failure> CheckCloseout(
         DocumentModel archived,
         DocumentSet live,
@@ -292,6 +296,19 @@ public sealed partial class ArchiveCloseoutValidator
 
         if (CheckBodyStatus(archived) is { } liveBody)
             failures.Add(Fail(liveBody, "**Status:** Archived, <yyyy-MM-dd>"));
+
+        // A plan whose Tasks section still lists a numbered task unchecked did not finish that work, whatever its
+        // harvest says. The archive gate refuses one, but a build older than that gate can still move it, so the
+        // merge gate reads the archived copy too and names the ids whoever archived it has to resolve.
+        if (archived.DocType == DocType.Plan
+            && PlanTaskCheckboxes.Unchecked(archived.Body) is { Count: > 0 } uncheckedTasks)
+        {
+            string ids = string.Join(", ", uncheckedTasks.Take(MaxUncheckedTasksNamed));
+            failures.Add(Fail(
+                $"C10: the plan still lists {uncheckedTasks.Count} task(s) unchecked: {ids}",
+                "- [x] 1.2 Word count  (every task ticked; a task that did not complete needs an escalation, " +
+                "and the plan stays open until it has one)"));
+        }
 
         List<string>? decisions = DecisionIds(archived, raw);
         foreach (string text in raw)

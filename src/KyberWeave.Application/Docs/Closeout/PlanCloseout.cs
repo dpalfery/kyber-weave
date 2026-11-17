@@ -169,7 +169,7 @@ public sealed partial class PlanCloseout
         // An archived plan is the record a reader checks the work against, so every task it lists as open
         // would read as unfinished work shipped as done. The tasks are ticked by the documentation developer
         // while the closeout evidence is written; this gate is what makes that step impossible to skip.
-        List<string> uncheckedTasks = UncheckedTasks(planText);
+        List<string> uncheckedTasks = [.. PlanTaskCheckboxes.Unchecked(planText)];
         if (uncheckedTasks.Count > 0)
         {
             string ids = string.Join(", ", uncheckedTasks.Take(5));
@@ -405,56 +405,6 @@ public sealed partial class PlanCloseout
 
         return (string.Join(newline, lines), removed);
     }
-
-    /// <summary>
-    /// The ids of the tasks a plan still lists unchecked, in the order they appear. Only the <c>## Tasks</c>
-    /// section counts, and only outside a fenced block: a prose checklist elsewhere, or the checkbox grammar
-    /// shown as an example, is not a task.
-    /// </summary>
-    private static List<string> UncheckedTasks(string planText)
-    {
-        List<string> ids = [];
-        bool inTasks = false;
-        bool inFence = false;
-        foreach (string line in planText.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n'))
-        {
-            string trimmed = line.TrimStart();
-            if (trimmed.StartsWith("```", StringComparison.Ordinal) || trimmed.StartsWith("~~~", StringComparison.Ordinal))
-            {
-                inFence = !inFence;
-                continue;
-            }
-
-            if (inFence)
-            {
-                continue;
-            }
-
-            if (line.StartsWith("## ", StringComparison.Ordinal) || line.StartsWith("# ", StringComparison.Ordinal))
-            {
-                inTasks = line.StartsWith("## ", StringComparison.Ordinal) && IsTasksHeadingLine(line[3..]);
-                continue;
-            }
-
-            if (inTasks && UncheckedTask().Match(line) is { Success: true } match)
-            {
-                ids.Add(match.Groups["id"].Value.TrimEnd('.', ':', ')'));
-            }
-        }
-
-        return ids;
-    }
-
-    private static bool IsTasksHeadingLine(string text)
-    {
-        string normalized = text.Trim().TrimEnd('.', ':').Trim();
-        return normalized.Equals("Tasks", StringComparison.OrdinalIgnoreCase)
-               || normalized.Equals("Implementation Tasks", StringComparison.OrdinalIgnoreCase);
-    }
-
-    [GeneratedRegex(@"^[ \t]*-[ \t]+\[ \][ \t]+(?<id>\d+(?:\.\d+)?)\.?(?:[ \t]|$)",
-        RegexOptions.CultureInvariant)]
-    private static partial Regex UncheckedTask();
 
     [GeneratedRegex(@"^status:[^\r\n]*", RegexOptions.Multiline | RegexOptions.CultureInvariant)]
     private static partial Regex FrontmatterStatus();

@@ -90,7 +90,7 @@ Every Error refuses before anything leaves the machine and changes nothing, exce
 | `KW-DELIVER-007` | Error | `gh` could not list, create, update or read back the pull request, or an open pull request from the branch targets a different base (left for a person) |
 | `KW-DELIVER-008` | Info / Warning | A step taken. Warning: the pull request read back with a different title or description than was sent |
 
-A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C9`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem.
+A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C10`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem. `C10` is the archived plan's own `## Tasks` section: a numbered task still unticked means the plan records undelivered work, and the merge gate reads the archived copy so an archive moved by an older build is still caught.
 
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
@@ -351,7 +351,7 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-PLAN-001` | `delegate` | 0, then 1 | The dispatch names the plan or specification its work comes from. Step 0 allows a plan read with tasks; only a confident model `no-plan` escalates |
 | `KW-ARB-SCOPE-001` | `delegate` | 0, then 1 | The work is one of the plan's tasks. Step 0 answers the file-scope answers, all allow; only a confident model `not-in-plan` escalates. The question is given the target's capability profile and reads a documentation closeout or impact review sent to a documentation-profile target as the plan's own closeout (`in-plan`) |
 | `KW-ARB-SCOPE-002` | `delegate` | 0, then 1 | Delegation asks only for work the task describes, writing and running the task's own tests included; not asked when no plan task was found |
-| `KW-ARB-READY-001` | `delegate` | 0, then 1 | Dependencies complete; files clear of work in flight. The in-flight overlap escalates at step 0; only a confident model `waiting` escalates for dependencies |
+| `KW-ARB-READY-001` | `delegate` | 0, then 1 | Dependencies complete; files clear of work in flight. The in-flight overlap escalates at step 0, and an earlier attempt at the same plan task is never counted as overlap; only a confident model `waiting` escalates for dependencies |
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 | Target is the specialist the task names in an older plan's Skills line; only a confident model `not-owner` escalates. A current plan names capabilities, so it answers `no-mapping` and allows ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)) |
 | `KW-ARB-OWNER-002` | `delegate` | 1 | Roster specialist owning this task; shipped disabled, never blocks (the conductor chooses the agent, ADR 0080) |
 | `KW-ARB-MODE-001` | Retired | — | Formerly: failing tests exist before an implementation dispatch in test-first mode. Retired 2026-11-13 with the RED/GREEN task split; see `KW-ARB-MODE-002` ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)) |

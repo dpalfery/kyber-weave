@@ -63,6 +63,12 @@ public static class ArbiterLedgerQueries
     /// A dispatch whose return never arrives (a harness that crashed, or a background agent whose turn-end event
     /// was not delivered) stops holding its files <see cref="UnreturnedDispatchHorizon"/> after it started,
     /// measured against the dispatch being gated, or the newest event when that one is not recorded.
+    /// <para>
+    /// An earlier attempt at the same plan task is not in flight for that task's next attempt. A pre event is
+    /// written for every evaluation, and a conductor can be allowed a dispatch and then spend the turn elsewhere
+    /// without running the worker; its own task's files then intersected its retry and the retry answered
+    /// <c>overlaps-in-flight</c> forever, which is how a three-task run lost one task to three refusals.
+    /// </para>
     /// </remarks>
     /// <param name="events">The events a ledger read returned, in append order.</param>
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
@@ -80,11 +86,17 @@ public static class ArbiterLedgerQueries
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)
             .ToHashSet(StringComparer.Ordinal);
-        DateTimeOffset? now = (events.FirstOrDefault(e => e.Id == excludeEventId) ?? (events.Count > 0 ? events[^1] : null))?.At;
+        ArbiterLedgerEvent? gated = excludeEventId is null
+            ? null
+            : events.FirstOrDefault(e => e.Id == excludeEventId);
+        string? gatedTask = gated?.Headers?.Task;
+        string? gatedPlan = gated?.Headers?.PlanFile;
+        DateTimeOffset? now = (gated ?? (events.Count > 0 ? events[^1] : null))?.At;
         return [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != excludeEventId
                 && !paired.Contains(e.Id)
+                && !SameTask(e, gatedTask, gatedPlan)
                 && (now is null || now.Value - e.At <= UnreturnedDispatchHorizon)
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
@@ -93,6 +105,23 @@ public static class ArbiterLedgerQueries
             .SelectMany(e => e.TaskFiles ?? [])
             .Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Whether <paramref name="e"/> is another attempt at the same plan task the gated dispatch names: same task id,
+    /// and the same plan file (or both naming none).
+    /// </summary>
+    private static bool SameTask(ArbiterLedgerEvent e, string? task, string? planFile)
+    {
+        if (string.IsNullOrWhiteSpace(task)
+            || !string.Equals(e.Headers?.Task, task, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string? otherPlan = e.Headers?.PlanFile;
+        return string.IsNullOrWhiteSpace(planFile) && string.IsNullOrWhiteSpace(otherPlan)
+            || string.Equals(otherPlan, planFile, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
