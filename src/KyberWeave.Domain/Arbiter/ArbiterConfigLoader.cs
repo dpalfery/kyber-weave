@@ -478,6 +478,18 @@ public static class ArbiterConfigLoader
             if (parent is null)
                 break;
 
+            if (!ConfigSlug.IsValid(parent))
+            {
+                findings.Add(new Diagnostic(
+                    RuleValidator.MissingRuleFolderParent,
+                    Severity.Warning,
+                    $"'{Path.GetFileName(standard.Value.Path)}' names '{parent}' as its builds-on parent, but that is not a technology folder name, so its Arbiter rules are not read.",
+                    parent,
+                    standard.Value.Path,
+                    "Name a declared technology, or remove the builds-on key."));
+                break;
+            }
+
             if (FindStandardFile(request, parent) is null)
             {
                 findings.Add(new Diagnostic(
@@ -501,7 +513,7 @@ public static class ArbiterConfigLoader
     /// <summary>The first docs root that holds a scope folder's standard, with its text, or null.</summary>
     private static (string Path, string Text)? FindStandardFile(RuleFolderRequest request, string name)
     {
-        if (request.ReadFile is null)
+        if (request.ReadFile is null || !ConfigSlug.IsValid(name))
             return null;
 
         foreach (string docsRoot in request.DocsRoots)
@@ -620,7 +632,7 @@ public static class ArbiterConfigLoader
     /// </remarks>
     private static FolderRulesSource? FindFolderRulesFile(RuleFolderRequest request, string name)
     {
-        if (request.ReadFile is null)
+        if (request.ReadFile is null || !ConfigSlug.IsValid(name))
             return null;
 
         foreach (string docsRoot in request.DocsRoots)

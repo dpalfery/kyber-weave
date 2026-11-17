@@ -167,8 +167,23 @@ public sealed class SquadResponsePreferencesInjectorTests
 
         SquadRenderResult injected = SquadResponsePreferencesInjector.Inject(render, "new");
 
+        Assert.Equal(
+            "<response-preferences>new</response-preferences>",
+            Encoding.UTF8.GetString(injected.Files[0].Content.ToArray()));
         Assert.Equal(standard, Encoding.UTF8.GetString(injected.Files[1].Content.ToArray()));
         Assert.Equal("rules", Encoding.UTF8.GetString(injected.Files[2].Content.ToArray()));
+    }
+
+    [Fact]
+    public void Inject_RefusesAnEntryFileUnderANestedStandardsFolder()
+    {
+        // Only the leading standards/ folder holds standards. A file like agents/standards/conductor.md is still an
+        // agent entry: skipping it would ship it with no preferences and no diagnostic.
+        SquadRenderResult render = RenderResult(
+            ("agents/conductor.md", "<response-preferences>old</response-preferences>"),
+            ("agents/standards/conductor.md", "# nested"));
+
+        Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(render, "new"));
     }
 
     [Fact]

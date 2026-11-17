@@ -625,13 +625,12 @@ public static class ReviewConfigParser
     }
 
     /// <summary>
-    /// Reports each agent-keyed task gate whose agent the removal phase deletes, under the roster where that agent
-    /// is a thing of the past.
+    /// Reports each agent-keyed task gate whose agent the removal phase deletes.
     /// </summary>
     /// <remarks>
-    /// The technology roster is today's default and one a host keeps on purpose, so its agent keys are the normal
-    /// shape there and are not reported. A host that has chosen the tiered roster is the one holding a migration it
-    /// has not run yet, and its warning names the command that runs it.
+    /// The warning fires only for a host that wrote <c>worker-roster: tiered</c>: that is a host holding a migration
+    /// it has not run yet, and the warning names the command that runs it. A host that never wrote the key is not
+    /// mid-migration, so its agent keys are read without a warning.
     /// </remarks>
     private static void AddRemovalWarnings(YamlMappingNode root, YamlMappingNode taskGates, List<string> warnings)
     {

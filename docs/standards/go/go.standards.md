@@ -83,7 +83,7 @@ Parsers fail closed (KW-STD-INPUT-001). Code that parses or converts a value fro
 
 ### Tests
 
-Test authorship follows the [test coding standard](../test/README.md) and belongs to the developer
+Test authorship follows the [test coding standard](../test/test.standards.md) and belongs to the developer
 tier that owns the task. Go tests are `_test.go` files beside the code they exercise, run by `go test`.
 
 ## Commands

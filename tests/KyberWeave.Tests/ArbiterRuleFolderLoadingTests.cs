@@ -468,6 +468,29 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         Assert.Contains(rules, rule => rule.Id == "react-read-001");
     }
 
+    /// <summary>
+    /// A standard may name any text as its <c>builds-on</c> parent, and the loader builds a standards path out of
+    /// that name. A parent that is not a technology slug is reported and never reaches the file system.
+    /// </summary>
+    [Fact]
+    public void ABuildsOnParentThatIsNotASlugIsReportedAndNeverTurnedIntoAPath()
+    {
+        WriteStandard("react", buildsOn: "../../outside");
+        WriteFolder("react", ChildReadRule);
+        List<string> asked = [];
+
+        (IReadOnlyList<ArbiterRule> rules, IReadOnlyList<Diagnostic> findings) =
+            Load("arbiter:\n  enabled: true\n", technologies: ["react"], readFile: path =>
+            {
+                asked.Add(path);
+                return ReadTestFile(path);
+            });
+
+        Assert.DoesNotContain(asked, path => path.Contains("outside", StringComparison.Ordinal));
+        Assert.Contains(findings, item => item.Code == RuleValidator.MissingRuleFolderParent);
+        Assert.Contains(rules, rule => rule.Id == "react-read-001");
+    }
+
     [Fact]
     public void ACycleInBuildsOnIsAFindingAndEachFolderLoadsOnce()
     {

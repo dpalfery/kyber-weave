@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
+using YamlDotNet.Core;
 
 namespace KyberWeave.Tests;
 
@@ -33,6 +34,22 @@ public sealed class TaskPromptBudgetTests
             "{budget}",
             (budget ?? KyberWeaveConfig.DefaultTaskPromptBudget).ToString(System.Globalization.CultureInfo.InvariantCulture),
             StringComparison.Ordinal));
+
+    /// <summary>
+    /// A budget that is not a positive whole number of characters is refused with the key and the shipped value,
+    /// rather than accepted as zero (no prompt) or silently replaced.
+    /// </summary>
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    [InlineData("abc")]
+    [InlineData("1.5")]
+    public void ABudgetThatIsNotAPositiveWholeNumberIsRefused(string budget)
+    {
+        string yaml = ConfigYaml.Replace("{budget}", budget, StringComparison.Ordinal);
+
+        Assert.Throws<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+    }
 
     /// <summary>A corpus whose rules are small and whose skills and standard sections are large.</summary>
     private static DocFixture Ready()

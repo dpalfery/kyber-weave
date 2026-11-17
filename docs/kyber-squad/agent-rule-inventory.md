@@ -86,7 +86,7 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `tauri-dev` | Keep secrets, tokens and credentials in the Rust core, never in frontend-reachable code. | `tauri/tauri.standards.md` | Security and data handling | Moved |
 | `tauri-dev` | Keep `tauri` and plugin crates on the pinned versions and never widen the CSP to make something load. | `tauri/tauri.standards.md` | Security and data handling | Moved |
 | `tauri-dev` | Register every command in a single `tauri::generate_handler!` call; a second `invoke_handler` silently wins. | `tauri/tauri.standards.md` | Coding standards | Moved |
-| `tauri-dev` | Commands in `lib.rs` are not `pub`; commands in separate modules are `pub`; command names are unique across modules. | `tauri/tauri.standards.md` | Naming and layout | Moved |
+| `tauri-dev` | Commands in `lib.rs` are not `pub`; commands in separate modules are `pub`; command names are unique across modules. | `tauri/tauri.standards.md` | Coding standards | Moved |
 | `tauri-dev` | Arguments and returns implement `serde::Deserialize`/`Serialize`; arguments arrive camelCase and use `rename_all = "snake_case"` when the JS side differs. | `tauri/tauri.standards.md` | Coding standards | Moved |
 | `tauri-dev` | A fallible command returns `Result<T, E>` with `E: serde::Serialize`. | `tauri/tauri.standards.md` | Coding standards | Moved |
 | `tauri-dev` | Prefer async commands for I/O; do not take borrowed arguments in an async command; never block the async runtime. | `tauri/tauri.standards.md` | Coding standards | Moved |
@@ -120,7 +120,7 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `sql-database-architect` | A primary key creates a clustered unique index by default. | `sql-server/sql-server.standards.md` | Coding standards | Moved |
 | `sql-database-architect` | Wrapping a column in a function makes the predicate non-sargable; inspect plans and existing indexes before tuning. | `sql-server/sql-server.standards.md` | Coding standards | Moved |
 | `sql-database-architect` | Never run unreviewed DDL against production; back-port a hotfix into source control immediately. | `sql-server/sql-server.rules.md` | Whole file | Moved |
-| `sql-database-architect` | Schema changes reach an environment by the standard's delivery path, not ad-hoc hand-run `ALTER` statements. | `sql-server/sql-server.standards.md` | Commands | Stated |
+| `sql-database-architect` | Schema changes reach an environment by the standard's delivery path, not ad-hoc hand-run `ALTER` statements. | `sql-server/sql-server.standards.md` | Commands | Moved |
 | `sql-database-architect` | Return the approved column names, types and constraints as the explicit contract the data-access layer consumes. | `data-access-layer/data-access-layer.rules.md` | Whole file | Moved |
 | `sql-database-architect` | Flag a migration that diverges from the approved schema and provide corrected DDL rather than accepting drift. | `data-access-layer/data-access-layer.rules.md` | Whole file | Moved |
 | `test-dev` | Test-only work follows the test standard for runners, isolation, naming, mocking and what to assert; C# tests also follow the C# standard. | `test/test.standards.md` | Testing | Stated |
@@ -131,6 +131,6 @@ Paths are relative to `products/kyber-squad/standards/`.
 | `test-dev` | Report coverage gaps rather than skipping them silently. | `test/test.rules.md` | Whole file | Moved |
 | `azure-reader` | Reads live Azure resource configuration, topology, health and runtime state through Azure MCP Server, Azure Resources and Microsoft Docs tools. | `azure/azure.skills.md` | Whole file | Moved |
 | `azure-reader` | Cross-check Azure observations against Microsoft documentation. | `azure/azure.skills.md` | Whole file | Moved |
-| `azure-reader` | Changes nothing: no resource modification, no deployment or provisioning, no repository edit. | `azure/azure.rules.md` | Security and data handling | Moved |
+| `azure-reader` | Changes nothing: no resource modification, no deployment or provisioning, no repository edit. | `azure/azure.rules.md` | Read-only | Moved |
 | `azure-reader` | Prints no secret. | `azure/azure.rules.md` | Security and data handling | Moved |
 | `azure-reader` | Report concisely, with uncertainties called out. | `azure/azure.skills.md` | Whole file | Moved |

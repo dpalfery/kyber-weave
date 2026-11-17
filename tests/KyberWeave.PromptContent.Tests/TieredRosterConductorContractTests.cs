@@ -132,10 +132,10 @@ public sealed class TieredRosterConductorContractTests
         List<string> missing = [];
         foreach (string caller in callers)
         {
-            string delegatesTo = FrontmatterLine(Read(caller), "delegates-to:");
+            HashSet<string> delegatesTo = DelegatesTo(Read(caller));
             missing.AddRange(
                 expected
-                    .Where(agent => !delegatesTo.Contains(agent, StringComparison.Ordinal))
+                    .Where(agent => !delegatesTo.Contains(agent))
                     .Select(agent => $"{caller} does not list '{agent}'"));
         }
 
@@ -221,8 +221,7 @@ public sealed class TieredRosterConductorContractTests
 
         string[] missing =
         [
-            .. callers.Where(caller => !FrontmatterLine(Read(caller), "delegates-to:")
-                    .Contains("platform-researcher", StringComparison.Ordinal))
+            .. callers.Where(caller => !DelegatesTo(Read(caller)).Contains("platform-researcher"))
         ];
 
         Assert.True(
@@ -383,6 +382,25 @@ public sealed class TieredRosterConductorContractTests
     /// <summary>The frontmatter line that starts with <paramref name="name"/>, or an empty string.</summary>
     private static string FrontmatterLine(string text, string name) =>
         text.Split('\n').FirstOrDefault(line => line.StartsWith(name, StringComparison.Ordinal)) ?? string.Empty;
+
+    /// <summary>
+    /// The agents a caller's <c>delegates-to</c> frontmatter lists, as a set. Parsed rather than substring-matched:
+    /// a substring test would accept <c>dev-easy-extra</c> for <c>dev-easy</c> and would survive a missing comma.
+    /// </summary>
+    private static HashSet<string> DelegatesTo(string text)
+    {
+        string line = FrontmatterLine(text, "delegates-to:");
+        int open = line.IndexOf('[', StringComparison.Ordinal);
+        int close = line.LastIndexOf(']');
+        if (open < 0 || close <= open)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        return line[(open + 1)..close]
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.Ordinal);
+    }
 
     /// <summary>The first line holding <paramref name="phrase"/>, or an empty string.</summary>
     private static string LineContaining(string text, string phrase) =>

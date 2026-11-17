@@ -618,10 +618,9 @@ public sealed class ConfigRegValidatorTests : IDisposable
     }
 
     /// <summary>
-    /// The roster is a mode property too, and the second end-to-end tiered run flipped it in the configuration
-    /// without re-running <c>docs init</c>: the generated block still published <c>technology</c>, the conductor
-    /// read the contradiction, and it stopped before its first dispatch. The finding must name the property and
-    /// the command that fixes it, because the block is generated output.
+    /// The roster is a published mode property. This block was generated before the host chose the tiered roster,
+    /// so it carries no <c>worker-roster</c> line while the configuration now publishes one. The finding must name
+    /// the property and the command that fixes it, because the block is generated output.
     /// </summary>
     [Fact]
     public void AChangedWorkerRosterMakesTheScaffoldedBlockStaleAndNamesDocsInit()

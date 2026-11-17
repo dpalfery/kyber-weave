@@ -119,7 +119,7 @@ code, and a change that touches one brings it to the rule where that is reasonab
 - Code is testable by construction: collaborators (spawner, clock, fetcher, sink, opener)
   are passed in, and the tray's runtime takes them as trait objects, so a test substitutes a
   fake for every system effect.
-- Test authorship follows the [test coding standard](../test/README.md) and belongs to the
+- Test authorship follows the [test coding standard](../test/test.standards.md) and belongs to the
   developer tier that owns the task.
 
 ## Commands

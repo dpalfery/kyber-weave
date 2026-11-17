@@ -195,6 +195,19 @@ public sealed class TaskGateResolverTests : IDisposable
         Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, "../escape"));
     }
 
+    /// <summary>
+    /// Gate resolution runs while a plan is being read, so a standard it cannot parse must name no parent rather
+    /// than crash the resolution: the mapped agent's entry is the fallback, as it is for a technology with no
+    /// standard.
+    /// </summary>
+    [Fact]
+    public void AStandardWhoseFrontmatterIsMalformedNamesNoParentInsteadOfCrashing()
+    {
+        Standard("react", "builds-on: [unclosed");
+        KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
+
+        Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
+    }
     [Fact]
     public void TechnologyGatesAreKeyedByTechnologyAndReadInDeclarationOrder()
     {

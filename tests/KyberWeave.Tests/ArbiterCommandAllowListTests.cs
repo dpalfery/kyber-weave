@@ -141,6 +141,23 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         Assert.Contains("working directory", Reason("claude", answer), StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// An unreadable configuration is refused for the reason the missing directory is: a list the guard cannot read
+    /// is one it cannot apply, so the load failure must not widen what a read-only dispatch may run.
+    /// </summary>
+    [Fact]
+    public void ACommandInARepositoryWhoseConfigurationCannotBeReadIsRefused()
+    {
+        TechnologyRepository(_repository.Path, "azure");
+        File.WriteAllText(
+            Path.Combine(_repository.Path, ".kyber-weave", "kyber-weave.yml"),
+            "ontology: [unclosed\n");
+
+        string answer = Guard("claude", Command("claude", "az vm delete --name db -g rg"));
+
+        Assert.Contains("configuration", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ACommandOutsideTheTechnologysToolIsNotJudgedByItsList()
     {
