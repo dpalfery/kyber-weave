@@ -61,7 +61,7 @@ for a reviewer ("check that…") rather than for an author ("do this"). Since
 declared standard; every rule they held lives here.
 
 The seven templates that match the seven review references are `csharp`, `react`, `python`,
-`sql`, `azure`, `pulumi`, and `github-actions`. `maui`, `data-access-layer`, `test`, and
+`sql-server`, `azure`, `pulumi`, and `github-actions`. `maui`, `data-access-layer`, and
 `tauri` are additional templates rewritten from agents rather than from a review reference. `rust` and `go`
 were written with the `rust-dev` and `go-dev` agents
 ([#287](https://github.com/dpalfery/kyber-weave/issues/287)), which only name
@@ -71,15 +71,12 @@ follows `tauri` instead. `typescript` was written with the `typescript-dev` agen
 **<typescript-coding-standard>**; React UI TypeScript follows `react` instead. `pulumi` and
 `python` were then rewritten from their agents so stack, packaging, environment, and
 quality-gate policy live in the template — those agents only name **<pulumi-coding-standard>**
-and **<python-coding-standard>**. `github-actions` and `sql` also carry the defaults the
-`github-devops` and `sql-database-architect` agents used to embed. `test` was
-rewritten from the `test-dev` agent so runners,
-isolation, naming, and assertion policy live in the template — the agent only names
-**<test-coding-standard>**. Kyber-Weave's own
+and **<python-coding-standard>**. `github-actions` and `sql-server` also carry the defaults the
+delivery and SQL-planning agents the removal deleted used to embed, and testing lives in every
+standard's Testing section and in `shared-rules.md` rather than in a `test` template. Kyber-Weave's own
 [`docs/standards/csharp/`](../../../docs/standards/csharp/csharp.standards.md) is not a substitute for
 the `csharp` template here — it records this repository's decisions, including ones a host
-may reasonably reverse. The same is true of
-[`docs/standards/test/`](../../../docs/standards/test/test.standards.md) versus the `test` template.
+may reasonably reverse.
 
 **A template is a guess about a repository it has never seen.** Every one of these carries
 decisions a host may reasonably reverse — a line length, a state-management library, a naming

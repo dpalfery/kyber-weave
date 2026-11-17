@@ -13,10 +13,9 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// Squad the host deployed: a second end-to-end tiered run was judged by a <c>kyber-weave-arbiter</c> built before
 /// the developer tiers existed, and it refused <c>dev-medium</c> although the deployed conductor listed it. The
 /// roster, unlike the snapshot, is always current: it is the host's <c>worker-roster</c> setting. So under
-/// <c>tiered</c> this projection applies the one roster rule the renderer applies to the deployed files — a
-/// technology agent is replaced by the agent the removal map names (<c>csharp-dev</c> by a developer tier,
-/// <c>azure-reader</c> by <c>platform-researcher</c>, <c>github-devops</c> by <c>devops</c>) — and it completes the
-/// developer ladder, so a task's difficulty and failed attempts can choose any of the three tiers.
+/// <c>tiered</c> this projection applies the one roster rule the renderer applies to the deployed files — a name
+/// the removal map lists is replaced by the agent it names, and a technology developer by a developer tier — and it
+/// completes the developer ladder, so a task's difficulty and failed attempts can choose any of the three tiers.
 /// Under <c>technology</c> the list is returned untouched.
 /// </remarks>
 public static class RosterDelegatesTo
@@ -93,9 +92,9 @@ public static class RosterDelegatesTo
     }
 
     /// <summary>
-    /// Whether <paramref name="name"/> is a technology developer: an implementation agent the catalog declares on the
-    /// technology roster, or a name the removal map replaces with a developer tier (which is how an older catalog's
-    /// snapshot, written before agents declared a roster, is read).
+    /// Whether <paramref name="name"/> is a technology developer: an implementation agent an older catalog still
+    /// declares on the retired <c>technology</c> roster, or a name the removal map replaces with a developer tier
+    /// (which is how a catalog written before agents declared a roster is read).
     /// </summary>
     private static bool IsTechnologyDeveloper(string name, ArbiterSquadCatalog catalog)
     {

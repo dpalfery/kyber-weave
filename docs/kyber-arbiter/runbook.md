@@ -313,14 +313,14 @@ project files (capability profile `worker` or `documentation`, or a planner: `ar
 `product-planning`) any work while no run is live for the repository. Without it, a conductor that skipped
 run start sent every developer to edit the canonical checkout on the default branch, and a conductor that
 planned first left the plan and its task file untracked there. `NEXT` names the fix: run
-`kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `github-devops` with
+`kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `devops` with
 `RUN-START: true` and that command, then send the dispatch again.
 
 A run is live when a record under `~/.kyber-weave/runs/` names this repository's common git directory and
 its recorded worktree still has the run's branch checked out. `run start` writes that record. The check
 reads only those facts:
 
-- Read-only and `github-devops` dispatches are never refused, nor is the run-start dispatch itself.
+- Read-only and `devops` dispatches are never refused, nor is the run-start dispatch itself.
 - A caller that is not a Squad orchestrator is never refused: a developer agent a person invokes directly
   has no `delegates-to` list.
 - When git cannot name the repository or the records cannot be read, the dispatch is allowed and the
@@ -372,7 +372,7 @@ minutes, or for a minute after it was stopped; the resumed dispatch starts a fre
 `review-triage`, the `review-seat` profile) has its own `arbiter.seat-budget` (default 3 minutes or 30 tool
 calls, 2 minutes for one call): past it every read is denied with the instruction to return the findings it has
 and a `Budget reached, not examined: …` line, and the write of its seat file is still allowed. Reviewers,
-planners and `github-devops` are not budgeted, because a full test run or a CI wait is long by design.
+planners and `devops` are not budgeted, because a full test run or a CI wait is long by design.
 
 A single hung call is caught sooner. The guard sees only the start of each call, so when the gap since the
 dispatch's previous call is past `dispatch-budget.call-minutes` (default 5; the gap includes the model's own

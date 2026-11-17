@@ -14,14 +14,14 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class ArbiterRosterRuleTests
 {
     [Theory]
-    [InlineData("conductor", "csharp-dev", "listed")]
+    [InlineData("conductor", "dev-medium", "listed")]
     [InlineData("architect", "research-agent", "listed")]
-    [InlineData("architect", "csharp-dev", "not-listed")]
+    [InlineData("architect", "dev-medium", "not-listed")]
     [InlineData("conductor", "general-purpose", "not-listed")]
-    [InlineData("general-purpose", "csharp-dev", "no-roster")]
+    [InlineData("general-purpose", "dev-medium", "no-roster")]
     [InlineData("Explore", "research-agent", "no-roster")]
-    [InlineData("unidentified", "csharp-dev", "no-roster")]
-    [InlineData("csharp-dev", "research-agent", "no-roster")]
+    [InlineData("unidentified", "dev-medium", "no-roster")]
+    [InlineData("dev-medium", "research-agent", "no-roster")]
     public void AnswersFromTheCatalogRoster(string caller, string target, string expected)
     {
         ArbiterRule rule = ArbiterConfig.ProductDefaults.Rules.First(

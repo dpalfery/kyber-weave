@@ -97,7 +97,7 @@ public sealed class KiloHookAdapterTests
         const string body = "Implement the plan parser.";
         string prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 16.1\n\n" + body;
         (int exit, string stdout) = Run(
-            Envelope("before", "task", TaskArgs("csharp-dev", prompt)), "conductor", new ScriptedEngine());
+            Envelope("before", "task", TaskArgs("dev-medium", prompt)), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -105,7 +105,7 @@ public sealed class KiloHookAdapterTests
         Assert.False(doc.RootElement.TryGetProperty("reason", out _), "Allow must carry no reason.");
         JsonElement args = doc.RootElement.GetProperty("args");
         Assert.Equal("Implement T16", args.GetProperty("description").GetString());
-        Assert.Equal("csharp-dev", args.GetProperty("subagent_type").GetString());
+        Assert.Equal("dev-medium", args.GetProperty("subagent_type").GetString());
         string stripped = args.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal(body, stripped);
         Assert.DoesNotContain("KYBER-ARBITER", stripped, StringComparison.Ordinal);
@@ -119,7 +119,7 @@ public sealed class KiloHookAdapterTests
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
         (int exit, string stdout) = Run(
-            Envelope("before", "task", TaskArgs("csharp-dev", "Implement the parser.")),
+            Envelope("before", "task", TaskArgs("dev-medium", "Implement the parser.")),
             "conductor",
             engine);
 
@@ -127,13 +127,13 @@ public sealed class KiloHookAdapterTests
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
         Assert.Equal(envelope, doc.RootElement.GetProperty("reason").GetString());
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
     }
 
     [Fact]
     public void After_Allow_WritesAllow()
     {
-        JsonObject args = TaskArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
         (int exit, string stdout) = Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "conductor",
@@ -151,7 +151,7 @@ public sealed class KiloHookAdapterTests
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
-        JsonObject args = TaskArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
@@ -169,7 +169,7 @@ public sealed class KiloHookAdapterTests
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
-        JsonObject args = TaskArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),

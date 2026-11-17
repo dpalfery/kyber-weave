@@ -221,12 +221,12 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
     /// <c>technology</c> roster, when the host runs the <c>tiered</c> roster.
     /// </summary>
     /// <remarks>
-    /// The canonical source ships both rosters side by side, so the conductor that serves both lists the
-    /// technology developers as well. A tiered host cannot dispatch them: the task-prompt tool refuses one and
-    /// names the tier instead. Listing them would offer a choice that always fails, and on a harness whose
-    /// delegation permission is built from <c>delegates-to</c> it would grant the call the rule refuses. The
-    /// filter is one-way by construction: with no roster, or with <c>technology</c>, the source passes through
-    /// untouched, so nothing a technology host renders changes.
+    /// The shipped source lists no technology developer any more, so this filter is usually a no-op. It still runs
+    /// because a host can render from a Squad source an older release deployed, which lists them: a tiered run cannot
+    /// dispatch one — the task-prompt tool refuses it and names the tier instead — and listing it would offer a choice
+    /// that always fails, while on a harness whose delegation permission is built from <c>delegates-to</c> it would
+    /// grant the call the rule refuses. The filter is one-way by construction: with no roster, or with the retired
+    /// <c>technology</c> value, the source passes through untouched.
     /// </remarks>
     private static SquadSource RestrictDelegatesToRoster(SquadSource source, string? workerRoster)
     {

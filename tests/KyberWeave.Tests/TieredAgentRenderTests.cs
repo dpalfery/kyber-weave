@@ -23,33 +23,22 @@ public sealed class TieredAgentRenderTests
         "devops"
     ];
 
-    /// <summary>The roster as it stood before the tiered agents were added.</summary>
+    /// <summary>
+    /// The agents that served before the tiered roster and still ship: the removal deleted the per-technology
+    /// workers and their planning, testing and delivery predecessors, and this list is what remains.
+    /// </summary>
     private static readonly string[] ExistingAgents =
     [
         "architect",
-        "azure-reader",
         "bug-crusher",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
-        "csharp-dev",
-        "dal-dev",
         "docs-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
         "product-owner",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
         "research-agent",
         "review-lens",
-        "review-triage",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev"
+        "review-triage"
     ];
 
     [Theory]

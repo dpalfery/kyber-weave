@@ -443,7 +443,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     /// Each refuter return records its outcome against its finding id in the review store.
     /// RED: production has no path that does this. A REFUTE return keeps the <c>refute.spawn</c> trigger
     /// (<c>TriggerClassifier.ToReturned</c> maps only <c>lens.spawn</c>), and the store is written for
-    /// <c>lens.returned</c> only, as new finding items. GREEN needs csharp-dev to add a refutation-outcome
+    /// <c>lens.returned</c> only, as new finding items. GREEN needs dev-medium to add a refutation-outcome
     /// write to <c>ArbiterRunStore</c> plus an evaluator call on the refute return, keyed by the finding slug.
     /// </summary>
     [Fact]

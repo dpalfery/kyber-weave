@@ -32,38 +32,24 @@ products/kyber-squad/
 │   ├── models.yml                      # Model tiers, aliases, and temperature parameters
 │   ├── capabilities.yml                # Capability taxonomy and permission assignments
 │   └── fallbacks.yml                   # Lowering rules and collision resolution for fallback harnesses
-├── agents/                             # 29 canonical agent definition files plus owned references
+├── agents/                             # 15 canonical agent definition files plus owned references
 │   ├── architect.md
 │   ├── architect/                      # Progressive-disclosure references (Markdown)
-│   ├── azure-reader.md
 │   ├── bug-crusher-investigator.md
 │   ├── bug-crusher.md
 │   ├── code-reviewer.md
 │   ├── conductor.md
 │   ├── conductor/                      # Progressive-disclosure references (Markdown)
-│   ├── csharp-dev.md
-│   ├── dal-dev.md
 │   ├── dev-easy.md
 │   ├── dev-hard.md
 │   ├── dev-medium.md
 │   ├── devops.md
 │   ├── docs-dev.md
-│   ├── github-devops.md
-│   ├── go-dev.md
-│   ├── maui-dev.md
 │   ├── platform-researcher.md
 │   ├── product-owner.md
-│   ├── pulumi-dev.md
-│   ├── python-dev.md
-│   ├── react-dev.md
 │   ├── research-agent.md
 │   ├── review-lens.md
-│   ├── review-triage.md
-│   ├── rust-dev.md
-│   ├── sql-database-architect.md
-│   ├── tauri-dev.md
-│   ├── test-dev.md
-│   └── typescript-dev.md
+│   └── review-triage.md
 └── skills/                             # canonical skill directories and their resources
     ├── app-docs-standard/
     ├── architecture-decision-record/
@@ -92,7 +78,6 @@ products/kyber-squad/
     ├── security-review/
     ├── setup-dev-environment/
     ├── task-gate/
-    ├── testing/
     └── typescript-dev/
 ```
 
@@ -100,7 +85,7 @@ products/kyber-squad/
 
 ## Canonical Components
 
-### 1. Agents (29 Canonical Roles)
+### 1. Agents (15 Canonical Roles)
 
 Each agent in `agents/<name>.md` contains LF-normalized UTF-8 Markdown with strict YAML frontmatter conforming to `schemas/agent.schema.json`:
 
@@ -115,7 +100,7 @@ capability-profile: architect
 copilot-capability-profile: architect-copilot
 devin-capability-profile: architect-devin
 copilot-tools: [vscode, execute, read, agent, edit, search, web, todo]
-delegates-to: [azure-reader, research-agent]
+delegates-to: [platform-researcher, research-agent]
 fallback: role-skill
 aliases: []
 ---
@@ -189,13 +174,11 @@ them beside the canonical skills, so every Squad deployment carries them. They a
 
 ### 4. Namespace Collision and Fallback Lowering
 
-Agent and skill namespaces intersect at exactly eleven names. Two — `product-owner` and
-`bug-crusher` — are primary shared identities: root agents whose body is a thin pointer at the
-same-name canonical skill, which carries the role. The remaining nine are distinct-body collisions:
-`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `test-dev`, and `typescript-dev`. On fallback
-harnesses, each distinct-body collision's canonical skill retains `<name>` and the agent projects
-to `role-<name>`, while a primary shared identity reuses its canonical skill as the entry point.
-`role-` is reserved exclusively for generated projections.
+Agent and skill namespaces intersect at exactly two names: `product-owner` and `bug-crusher`. Both are
+primary shared identities — root agents whose body is a thin pointer at the same-name canonical skill,
+which carries the role — so a fallback target reuses that canonical skill as the entry point. `role-` is
+reserved exclusively for generated projections, and with no distinct-body collision left none is generated
+from a shipped agent.
 
 `conductor` has no canonical skill, so fallback targets
 lower it through the unoccupied-identity rule to a same-name role skill. `conductor` is the single
@@ -215,19 +198,19 @@ deployment without link rewriting.
 
 ### 6. Worker Rosters
 
-Two worker rosters ship side by side, and the host chooses one with the `worker-roster` setting:
-`technology` (the default) keeps the per-technology developer agents, `test-dev` and
-`github-devops`; `tiered` replaces them with `dev-easy`, `dev-medium`, `dev-hard`, `devops` and
-`platform-researcher`. `docs-dev`, the planners, the reviewers and both workflows are the same
-agents on either roster. An agent declares its roster in frontmatter with the same key, and an
-agent with no key serves both.
+One worker roster ships: the three developer tiers `dev-easy`, `dev-medium` and `dev-hard`, beside
+`docs-dev`, `devops` and `platform-researcher` for documentation, delivery and live-platform work. The
+per-technology developer agents and the planning, testing and GitHub-delivery agents they replaced no
+longer ship; a plan or task file that still names one resolves to its replacement and reports the
+substitution. `worker-roster` defaults to `tiered`, and the removed value `technology` is a
+configuration error that names the change. An agent declares its roster in frontmatter with the same
+key, and an agent with no key serves the roster anyway.
 
-Under `tiered` the task file records the kind of worker and the task's difficulty, and the dispatch
-tool turns them into the attempt's tier with
-`tier = min(hard, rated difficulty + failed attempts)`: `easy` starts on `dev-easy`, `medium` and an
-unrated task on `dev-medium`, `hard` on `dev-hard`, and a failed attempt moves one tier up and never
-down. The roster, the switch and the tier table are documented in the
-[Squad architecture §12](../../docs/kyber-squad/architecture.md#12-worker-rosters-and-developer-tiers)
+The task file records the kind of worker and the task's difficulty, and the dispatch tool turns them
+into the attempt's tier with `tier = min(hard, rated difficulty + failed attempts)`: `easy` starts on
+`dev-easy`, `medium` and an unrated task on `dev-medium`, `hard` on `dev-hard`, and a failed attempt
+moves one tier up and never down. The roster and the tier table are documented in the
+[Squad architecture §12](../../docs/kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers)
 and the [`worker-roster` setting](../../docs/configuration.md).
 
 ---

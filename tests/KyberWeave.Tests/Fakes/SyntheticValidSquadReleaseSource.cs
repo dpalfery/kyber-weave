@@ -113,7 +113,7 @@ public sealed class SyntheticValidSquadReleaseSource : ISquadReleaseSource
               - architect
             skills:
               - task-gate
-              - testing
+              - code-review
             """);
 
         // 5. Agents: conductor & architect with bounded delegates-to matching the synthetic bundle
@@ -136,15 +136,15 @@ public sealed class SyntheticValidSquadReleaseSource : ISquadReleaseSource
             "delegates-to: []");
         File.WriteAllText(Path.Combine(agentsDir, "architect.md"), architectAdjusted);
 
-        // 6. Skills: task-gate, testing
+        // 6. Skills: task-gate, code-review
         string skillsDir = Path.Combine(templateRoot, "skills");
         Directory.CreateDirectory(skillsDir);
         CopyDirectorySafe(
             Path.Combine(productRoot, "skills", "task-gate"),
             Path.Combine(skillsDir, "task-gate"));
         CopyDirectorySafe(
-            Path.Combine(productRoot, "skills", "testing"),
-            Path.Combine(skillsDir, "testing"));
+            Path.Combine(productRoot, "skills", "code-review"),
+            Path.Combine(skillsDir, "code-review"));
 
         return templateRoot;
     }

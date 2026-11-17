@@ -35,7 +35,7 @@ public sealed class SquadWorkerBaselineInjectionTests
     private const string BaselineOpenTag = "<worker-baseline";
 
     /// <summary>The worker whose rendered body every harness carries, as an agent file or a role skill.</summary>
-    private const string SampleWorker = "csharp-dev";
+    private const string SampleWorker = "dev-medium";
 
     private static readonly string ProductRoot =
         Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");

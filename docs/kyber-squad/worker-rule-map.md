@@ -29,6 +29,13 @@ was removed from and what its one home now is. This page was written with every 
 sentence still in place, so the removal task could be checked against it row by row; the rows
 marked deferred keep their text, for the reason given beside them.
 
+**The per-technology and planning agents this map names no longer ship.** The removal deleted the
+ten technology developers, `sql-database-architect`, `test-dev`, `azure-reader` and `github-devops`;
+every row that names one of them is a record of where its sentence was removed from and where the
+sentence lives now, in a template, the shared baseline or the `task-gate` and `delivery-execution`
+skills. A plan or task file that still names one resolves to a developer tier and reports the
+substitution, and `worker-roster: technology` is now a configuration error.
+
 Two parts of this page have different lifetimes. The page itself is a permanent reference
 (decision D36 of the plan that created it): it says what enforces each rule, which stays true and
 is what stops the text growing back. The per-row inventory is a snapshot taken in the tree before
@@ -50,17 +57,20 @@ search disagrees with the plan, both numbers are given below and the search wins
   `agents/code-reviewer.md` ("a full gate suite"), which states a different rule — one council per
   run, not the full-suite ban — so 26 is the count of files carrying *this* rule.
 - **The standard templates.** The plan says "the 5 standard templates keep their line". Search
-  finds 9 of the 14 templates under `products/kyber-squad/standards/` carrying a test-runner or
-  ban statement: three state the ban verbatim (`go`, `rust`, `typescript`) and six state the
-  filtered-run rule in their `## Completion` section (`csharp`, `data-access-layer`, `maui`,
-  `pulumi`, `sql`, `test`). Every template keeps its line either way, for the reason in
+  found 9 of the then-14 templates under `products/kyber-squad/standards/` carrying a test-runner
+  or ban statement: three state the ban verbatim (`go`, `rust`, `typescript`) and six state the
+  filtered-run rule in their `## Commands` section (`csharp`, `data-access-layer`, `maui`,
+  `pulumi`, `sql-server`, `typescript`). `sql` and `test` were the old names of two of those
+  folders; the removal retires both, and `sql-server` and each technology's `## Testing` heading
+  carry their rules today. Every template keeps its line either way, for the reason in
   [what stays duplicated](#what-stays-duplicated-and-why).
 - **The Discovery order.** 21 agent bodies and one skill carry a `## Discovery order` heading; 20
   of those agents are `invocation: subagent`, which is the only invocation the baseline injector
   reaches.
-- **The completion-gate block.** Six agent bodies carry the same "Completion gate — diagnostics"
+- **The completion-gate block.** Six agent bodies carried the same "Completion gate — diagnostics"
   block, bullet for bullet, with the stray database-specific and worktree bullets beside it:
-  `csharp-dev`, `test-dev`, `dal-dev`, `maui-dev`, `pulumi-dev`, `react-dev`.
+  `csharp-dev`, `test-dev`, `dal-dev`, `maui-dev`, `pulumi-dev`, `react-dev`. The removal deleted
+  all six; the block's surviving home is the shared worker baseline.
 
 ```mermaid
 flowchart LR
@@ -228,9 +238,9 @@ alone.
 | "No worker runs the full suite, and the conductor never dispatches a full run" in `agents/conductor.md` and in `skills/delivery-execution/SKILL.md` | Catalog rule `conductor-never-dispatches-full-run` lists both as homes. This is the dispatcher's rule; the baseline reaches only `invocation: subagent` bodies. |
 | The six-field block and the `TASK_GATE:` line in `skills/delivery-execution/SKILL.md` alongside its new home in `skills/task-gate/SKILL.md` | Two audiences: the conductor requires the digest, the worker emits it. Both are pinned (`ConductorSurfacesSpecifyExplicitSixFieldWorkerDigestSchema`, `SharedExecutionSkill_DeclaresDeterministicTaskGate_AndConductorOffloadsIt`, `TheTaskGateSkillSpecifiesTheExplicitSixFieldCompletionDigestSchema`). |
 | The closed `CIRCUIT_BREAKER_TRIGGER` token set in `skills/task-gate/SKILL.md` alongside its procedure in `references/rework.md` | The skill raises the escalation the reference explains; `SquadCanonicalContentTests.TaskGateSkillDefinesTheDeterministicReviewGateContract` asserts the closed set on the skill file itself. |
-| Each developer agent's own agent-specific completion, plus its `TASK_GATE:` line | The shared contract's phased rollout keeps those: only `csharp-dev` and `test-dev` must return the full six-field block, and the conductor rejects a missing or `FAIL` `TASK_GATE` line from every developer worker. Catalog rule `six-field-phased-rollout` grades the rollout; `SquadCanonicalContentTests.NonDeveloperAgentBodiesNeverEmitTaskGateDigest` keeps the line out of the non-developer bodies. |
+| Each developer agent's own agent-specific completion, plus its `TASK_GATE:` line | Every developer worker returns the full six-field block, and the conductor rejects a missing or `FAIL` `TASK_GATE` line from any of them. The three tiered developer bodies carry their own completion digest; `SquadCanonicalContentTests.NonDeveloperAgentBodiesNeverEmitTaskGateDigest` keeps the line out of the non-developer bodies. |
 | `review-lens` and `review-triage`'s `## Discovery order`, with its seat-specific `Discovery:` placement | A seat's closing lines are read by the verdict engine, so they report discovery directly above the attestation line rather than before a digest; `SquadCanonicalContentTests` asserts the `Discovery: codegraph N, docs N, direct reads N` line for them, and `KW-REVIEW-044` flags a findings or `NO FINDINGS` seat that omits it. |
-| The worktree-isolation text in `agents/test-dev.md`, `agents/conductor.md` and the two .NET agent bodies | Each file is a home of catalog rule `F2` (worktree isolation) or `E4` (artifact and baseline paths in the message body), so the grader expects the text there. |
+| The worktree-isolation text in `agents/conductor.md` and in `skills/delivery-execution/SKILL.md` | Each file is a home of catalog rule `F2` (worktree isolation) or `E4` (artifact and baseline paths in the message body), so the grader expects the text there. The developer bodies the rule was trimmed into were the per-technology ones the removal deleted; the rule's surviving homes are these two and the shared baseline. |
 | The test-runner statement in the 9 standard templates that carry one | Same reason as the first row. |
 
 ## Rows still deferred, and why

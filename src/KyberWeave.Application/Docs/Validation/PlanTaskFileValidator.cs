@@ -408,14 +408,25 @@ public sealed partial class PlanTaskFileValidator
                 Hint: $"A task file belongs to the {kind} it sits beside. Run {TaskFileCommand.Write(artifact.RelativePath)} to rewrite it for this {kind}."));
         }
 
+        CheckWorkerRoster(file, taskFile, artifact.RelativePath, report);
         CheckTasks(parsed, file, taskFile, artifact.RelativePath, report);
         CheckDigest(parsed, artifact.RelativePath, kind, file, taskFile, report);
+
+        // The two forms this build no longer writes keep validating, because they are read with a conversion
+        // warning and may predate the Technology field: the legacy JSON file and the version-1 schema. A file that
+        // claims the tiered roster is not one of them — it was written under this roster, so its developer tasks
+        // owe a technology line even at the old version — and neither is a current file that records the retired
+        // roster, which is read as tiered with a warning and needs the line like any other.
+        bool claimsTiered = string.Equals(
+            file.WorkerRoster?.Trim(), WorkerRosters.Tiered, StringComparison.Ordinal);
+        bool predatesTiered = !claimsTiered
+            && (legacy || file.SchemaVersion == PlanTaskFileRules.LegacySchemaVersion);
 
         foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
             if (entry is not null)
             {
-                CheckTaskScope(entry, taskFile, artifact.RelativePath, file.WorkerRoster, report);
+                CheckTaskScope(entry, taskFile, artifact.RelativePath, predatesTiered, report);
                 CheckPrompt(entry, taskFile, artifact.RelativePath, planningDirectories, report);
             }
         }
@@ -603,6 +614,43 @@ public sealed partial class PlanTaskFileValidator
             "so a status or decisions-row edit is not what moved it."));
     }
 
+    /// <summary>
+    /// Reports a task file whose recorded roster is not <c>tiered</c>. The file is still read, as <c>tiered</c>,
+    /// because there is no other roster to dispatch from; the warning names the value and the change.
+    /// </summary>
+    /// <remarks>
+    /// An unknown value is reported for the same reason as the retired <c>technology</c> one: a value this build
+    /// does not know must not select a dispatch path, so it is read as the one roster there is and the author is
+    /// told. An absent value is the tiered roster and says nothing.
+    /// </remarks>
+    private static void CheckWorkerRoster(
+        PlanTaskFile file,
+        string taskFile,
+        string artifactPath,
+        DiagnosticReport report)
+    {
+        string recorded = file.WorkerRoster?.Trim() ?? string.Empty;
+        if (recorded.Length == 0 || string.Equals(recorded, WorkerRosters.Tiered, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string message = string.Equals(recorded, WorkerRosters.Technology, StringComparison.Ordinal)
+            ? $"Task file '{taskFile}' records worker-roster 'technology'. The removal deleted that roster's worker " +
+              "agents, so the file is read as 'tiered'."
+            : $"Task file '{taskFile}' records worker-roster '{recorded}', which is not a roster. The only roster " +
+              "is 'tiered', so the file is read as that.";
+
+        report.Add(new Diagnostic(
+            RetiredTechnologyRoster,
+            Severity.Warning,
+            message,
+            artifactPath,
+            taskFile,
+            Hint: $"Run {TaskFileCommand.Write(artifactPath)}: it rewrites the file under the roster now in use, " +
+            "and state a 'Technology:' line on every task a developer agent will do."));
+    }
+
     /// <summary>Reports a prompt with no command, no acceptance criteria, or a plan read in it.</summary>
     /// <summary>
     /// Checks the task's difficulty and technology: the three legal difficulty values, one declared
@@ -612,10 +660,10 @@ public sealed partial class PlanTaskFileValidator
         PlanTaskFileEntry entry,
         string taskFile,
         string artifactPath,
-        string? workerRoster,
+        bool predatesTiered,
         DiagnosticReport report)
     {
-        if (string.Equals(workerRoster, WorkerRosters.Tiered, StringComparison.Ordinal)
+        if (!predatesTiered
             && string.IsNullOrWhiteSpace(entry.Technology)
             && NeedsTechnology(entry))
         {
@@ -677,13 +725,22 @@ public sealed partial class PlanTaskFileValidator
     /// documentation or delivery task is named by its role or its capabilities; everything else is
     /// developer work the conductor will hand to a developer agent.
     /// </summary>
+    /// <remarks>
+    /// The worker name a task file records is read as the agent it dispatches to: a removed developer name
+    /// resolves to a developer tier, and a removed planning, research or delivery name resolves to its
+    /// replacement. Only a task whose worker is a developer tier needs a technology line, because only that
+    /// dispatch resolves a technology's rules, skills, standard and gates. A name that resolves to a planner,
+    /// a reviewer, `docs-dev`, `devops` or `platform-researcher` needs none.
+    /// </remarks>
     private static bool NeedsTechnology(PlanTaskFileEntry entry)
     {
         string role = entry.Role?.Trim() ?? string.Empty;
         string agent = entry.Agent?.Trim() ?? string.Empty;
-        if (role is "docs-dev" or "github-devops" or "devops" || agent is "docs-dev" or "github-devops" or "devops")
+        string recorded = role.Length > 0 ? role : agent;
+        string dispatched = PlanTaskAgentPick.ResolveRemovedAgent(recorded, entry.Difficulty)?.Resolved ?? recorded;
+        if (dispatched.Length > 0)
         {
-            return false;
+            return PlanTaskAgentPick.DeveloperTiers.Contains(dispatched, StringComparer.Ordinal);
         }
 
         string capabilities = entry.Capabilities ?? string.Empty;

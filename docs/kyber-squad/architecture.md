@@ -294,8 +294,7 @@ flowchart TD
     Intersection{"Agent & Skill Name\nIntersection Check"}
 
     Intersection -->|"Two Primary Shared Identities\n(product-owner, bug-crusher)"| SharedPath["Thin Wrapper: Canonical Skill\nIs the Entry Point"]
-    Intersection -->|"Nine Distinct-Body Collisions\n(csharp-dev, dal-dev, etc.)"| CollisionPath["Distinct Workflows & Roles"]
-    Intersection -->|"No Skill Collision\n(conductor)"| UnoccupiedPath["Unoccupied Identity"]
+    Intersection -->|"No Skill Collision\n(conductor and the developer tiers)"| UnoccupiedPath["Unoccupied Identity"]
 
     SharedPath --> SharedCheck{"Target Native\nAgent Support?"}
     SharedCheck -->|"Yes"| SharedNative["Emit Native Agent + Canonical Skill\n(Entry Point; No Duplicate)"]
@@ -321,9 +320,12 @@ flowchart TD
      canonical skill and no duplicate; a target that lowers a primary onto a skill or command
      (Cursor, Pi, ZCode, Devin, Warp) reuses the canonical skill and emits no projection of its own.
    - No `role-<name>` projection is generated, and no skill projection is suppressed.
-2. **Distinct-Body Collisions (`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `test-dev`, `typescript-dev`)**:
-   - The canonical skill and agent serve distinct functions.
-   - On fallback targets, the canonical skill stays at `<name>`, and the agent instruction body is projected to `role-<name>`.
+2. **Distinct-Body Collisions**:
+   - None ships. The removal deleted every per-technology agent that shared its name with a skill, so the
+     only identities both namespaces carry are the two primary shared identities above.
+   - The rule stays in the renderer and the validator because a host may add its own agent beside a
+     skill of the same name: on fallback targets the canonical skill stays at `<name>`, and the agent
+     instruction body is projected to `role-<name>`.
    - `role-` is reserved exclusively for generated projections; no canonical source file may use the `role-` prefix.
 3. **Unoccupied Identities**:
    - Agents with no matching skill name lower directly to `<name>` as a skill on fallback targets.
@@ -1151,7 +1153,7 @@ and validates.
   carry their own fallback: the conductor loads the `review-council` skill, which starts
   `code-reviewer`'s council seats from the main session, as on every harness whose sub-agents
   cannot dispatch ([ADR 0079](../adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch.md)); `architect` gathers its own sweeps and returns a live
-  Azure question as `STATUS: BLOCKED`, which the conductor puts to `azure-reader` and answers.
+  platform question as `STATUS: BLOCKED`, which the conductor puts to `platform-researcher` and answers.
   Agents use Devin's directory layout so each resource closure stays inside its own agent's
   directory and authored links resolve verbatim; see the `DevinRenderer` class remarks for the
   full evidence.
@@ -1218,8 +1220,8 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 162 files — 29 agents, 29 skills, plus projected
-  closures — with authored relative links resolving in the output; every skill resource
+  the principal. A fresh Copilot render is one agent file per agent, one `SKILL.md` per skill, plus
+  every file their authored relative links reach, resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
   contract in [requirements](requirements.md) (KS-001 and the render requirement). The
@@ -1650,7 +1652,7 @@ the approved task design, the worker halts production-code churn and trips
 
 ### JEV checkpoints (Q4)
 
-Every developer subagent (`csharp-dev`, `test-dev`, `github-devops`) runs these checks
+Every developer subagent (`dev-easy`, `dev-medium`, `dev-hard`, `devops`) runs these checks
 before and after each fix attempt:
 
 1. **Blast radius** — touched files stay inside authorized task scope. Out-of-scope work
@@ -1728,29 +1730,28 @@ A test-first task is one unit of behaviour owned by one specialist, who writes i
 task gate with `--red` (the failing run), implements, and runs the task gate again (the passing run),
 all in one dispatch ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)). The two reports
 in the task's scratch folder, failing run first, are the proof; `KW-ARB-MODE-002` records on
-each return whether they show it. `test-dev` takes only tasks whose deliverable is tests. The split this replaces —
-`test-dev` writing RED tests in one task and a developer making them pass in another — deadlocked
-compiled test projects and stopped headless runs on stub and evidence rules. What it gave up, an
-independent test author, is covered by the council's `test-adequacy` lens, which reads every added
-test as an outsider; its findings per run are how the decision is monitored.
+each return whether they show it. A task whose deliverable is only tests goes to a developer tier
+like any other. The split this replaces — one agent writing RED tests in one task and another making
+them pass in another — deadlocked compiled test projects and stopped headless runs on stub and
+evidence rules. What it gave up, an independent test author, is covered by the council's
+`test-adequacy` lens, which reads every added test as an outsider; its findings per run are how the
+decision is monitored.
 
 Both runs are one command, `kyber-weave review gates . --agent <name> --task <id>` (with `--red`
 for the failing run), which the packet prints filled in: it takes the task's files and declared
 test classes from the plan, writes each report where the Arbiter reads it, and prints failures in
 a few lines with the full log beside the report. How to write the tests — the test-first sequence,
-what to assert, unit or integration, test data and parallel safety — is one shared skill,
-`testing`, that every developer agent names instead of carrying its own copy; how tests work in a
-given repository is that repository's test standard, which the skill reads first through
-`docs_get_coding_standard_for_technology`.
+what to assert, unit or integration, test data and parallel safety — lives once in the shared rules
+file and in each technology standard's `## Testing` heading, which reach the worker in its task
+prompt. The `testing` skill the removal retired held the same rules.
 
 Operational contracts remain in
 `products/kyber-squad/agents/conductor.md`,
 `products/kyber-squad/agents/conductor/references/{plan-path,spec-path,intake-path,autonomy}.md`,
 `products/kyber-squad/skills/delivery-execution/SKILL.md` (the worker execution contract both
 `conductor` and `bug-crusher` load),
-`products/kyber-squad/agents/csharp-dev.md`,
-`products/kyber-squad/agents/test-dev.md`, and
-`products/kyber-squad/agents/github-devops.md`.
+`products/kyber-squad/agents/dev-medium.md` and
+`products/kyber-squad/agents/devops.md`.
 Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
 `tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
 
@@ -1996,7 +1997,7 @@ What follows is why it is shaped that way
   because that is the state the defect was observed in. The run record carries them, and every later
   dispatch of the run works in the location the step printed.
 - **The conductor runs it or dispatches it, never skips it.** Where the harness gives the conductor
-  a shell it runs the command itself. Where it gives none, it dispatches `github-devops` with the
+  a shell it runs the command itself. Where it gives none, it dispatches `devops` with the
   exact command and a `RUN-START: true` marker. `KW-ARB-PLAN-001` escalates a `delegate` dispatch
   that names no `PLAN_FILE`, which would refuse the very route the marker exists for, so
   `TriggerClassifier` classifies the marker as `investigate` and the roster check and
@@ -2028,7 +2029,7 @@ also exit `1`), and the `codegraph` binary must resolve on `PATH`
 
 Delivery is the same in both modes. The conductor commits to a feature branch, pushes it, and opens
 a draft pull request before the whole-change council runs, so the council reviews a pull request that
-already exists. `github-devops` then waits for required CI, for at most 60 minutes, and marks the pull
+already exists. `devops` then waits for required CI, for at most 60 minutes, and marks the pull
 request ready once every required check passes. The council verdict is written into the pull request
 description and does not gate readiness. Review that follows is ordinary post-ready pull request review,
 not a conductor gate. The conductor never merges. Unresolved circuit-breakers are listed as pending human review, not held back
@@ -2370,30 +2371,36 @@ are shipped in shadow until enforced (see the [Arbiter architecture](../kyber-ar
 - **Known gap.** The fixing-commit check for summary rows (Requirement 20.5) is not delivered. An
   `already-fixed` answer for a summary row rests on the model alone.
 
-## 12. Worker rosters and developer tiers
+## 12. The worker roster and developer tiers
 
-Kyber-Squad ships two worker rosters side by side. One is the roster of per-technology agents the
-product has always shipped; the other replaces the developer agents with three tiers that name no
-technology. The host chooses one with `worker-roster`, so the same approved plan can be run once on
-each roster for comparison.
+Kyber-Squad ships one worker roster: three developer agents that differ only in model strength and
+name no technology, beside `docs-dev`, `devops` and `platform-researcher` for documentation,
+delivery and live-platform work. The per-technology roster ran beside it until the removal phase
+deleted it. The procedure that informed the owner's decision is [the roster comparison
+runbook](roster-comparison-runbook.md).
 
-### The agents of each roster
+### The agents of the roster
 
-| Role | `technology` roster | `tiered` roster |
-|---|---|---|
-| Developer work | `csharp-dev`, `dal-dev`, `go-dev`, `maui-dev`, `pulumi-dev`, `python-dev`, `react-dev`, `rust-dev`, `tauri-dev`, `typescript-dev`, and `sql-database-architect` for schema work | `dev-easy`, `dev-medium`, `dev-hard` |
-| Test-only work | `test-dev` | none: the developer tier writes the task's tests |
-| Documentation | `docs-dev` | `docs-dev` |
-| Delivery | `github-devops` | `devops` |
-| Live platform state | `azure-reader` | `platform-researcher` |
-| Everything else | `conductor`, `architect`, `product-owner`, `code-reviewer`, `review-lens`, `review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent` | the same agents |
+| Role | Agent |
+|---|---|
+| Developer work | `dev-easy`, `dev-medium`, `dev-hard` |
+| Test-only work | none: the developer tier that owns the task writes its tests |
+| Documentation | `docs-dev` |
+| Delivery | `devops` |
+| Live platform state | `platform-researcher` |
+| Planning, review and diagnosis | `conductor`, `architect`, `product-owner`, `code-reviewer`, `review-lens`, `review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent` |
 
-Twenty-nine agent files ship while both rosters exist: the twenty-four the product had, plus the
-three developer tiers, `platform-researcher` and `devops`. An agent declares its roster with a
-`worker-roster` frontmatter key: the five new agents declare `tiered`, the fourteen agents the
-tiered roster replaces declare `technology` — `azure-reader`, the ten technology developers,
-`sql-database-architect`, `test-dev` and `github-devops` — and an agent with no key serves both. That
-is why `docs-dev`, the two planners and the review seats are dispatchable on either roster.
+Fifteen agent files ship. An agent declares the roster it serves with a `worker-roster` frontmatter
+key: the five agents the tiered roster added declare `tiered`, and an agent with no key serves the
+roster anyway. `worker-roster: technology` is no longer a selectable value.
+
+A plan or task file that still names one of the fourteen deleted agents — the ten technology
+developers, `sql-database-architect`, `test-dev`, `azure-reader` or `github-devops` — resolves to its
+replacement and reports the substitution: a removed developer becomes the tier its task's difficulty
+gives, `sql-database-architect` becomes `architect`, `azure-reader` becomes `platform-researcher` and
+`github-devops` becomes `devops`. A host's agent-keyed `review.task-gates` entries keep resolving
+through the shipped technology map, and `kyber-weave review migrate-task-gates` rewrites them as
+`review.technology-gates`.
 
 The three developer agents are one body rendered three times. They differ only in name, description
 and model profile (`fast`, `general`, `dev-hard`), use the `worker` capability profile, and name no
@@ -2402,9 +2409,9 @@ and the agent reads them there.
 
 `platform-researcher` uses the `platform-reader` capability profile: it reads files and live state
 and runs commands, and can neither write files, publish nor delegate. `devops` uses
-`publishing-worker`, does what `github-devops` does — run start, push, pull request, pipeline files —
-and names no platform: the task or the host configuration names the one platform, and its folder's
-rules and skills reach it through the prompt.
+`publishing-worker`, does what the delivery work needs — run start, push, pull request, pipeline
+files — and names no platform: the task or the host configuration names the one platform, and its
+folder's rules and skills reach it through the prompt.
 
 ### The roster switch
 
@@ -2414,24 +2421,23 @@ rules and skills reach it through the prompt.
 worker-roster: tiered
 ```
 
-`technology` is the default and what an absent key means. Any other value is the configuration error
-`KW-CONFIG-001`, naming both. The setting is read when the task file is written and recorded in the
-file (`worker-roster`), and every later reader takes the run's roster from there, so a configuration
-change mid-run cannot move a half-executed run onto the other roster. A dispatch that belongs to no
-task file — the bug flow's fix, a research request — reads the host setting instead.
+`tiered` is the default and what an absent key means. `technology` is the configuration error
+`KW-CONFIG-001`, whose message names the change: the per-technology agents it selected no longer
+ship. Any other value is the same error. The setting is read when the task file is written and
+recorded in the file (`worker-roster`), and every later reader takes the run's roster from there. A
+task file written before the removal still records `technology`; it is read as `tiered` with
+`KW-DOC-TASKS-019`, and its developer tasks then owe a `Technology:` line like any other, because the
+dispatch still has to find a technology's rules, skills, standard and gates. The two forms this build
+no longer writes — the legacy JSON file and the version-1 schema — keep validating with their
+conversion warning, unless they claim the tiered roster.
 
-The switch changes which developer, test, delivery and platform agents a run dispatches to. It does
-not change the workflow: `docs-dev` and the planners are the same agents on both rosters, and
-`bug-crusher` and `delivery-execution` carry both paths.
-
-The value is not published in the `AGENTS.md` Config Reg block, unlike the paths an agent looks up
+The setting is not published in the `AGENTS.md` Config Reg block, unlike the paths an agent looks up
 there: the task file is the record a run reads, and the CLI and the MCP server read the host setting
 for themselves.
 
-Under `tiered` a task a developer agent will do must name the one technology it is written in. A
-developer task without a `Technology:` line is `KW-DOC-TASKS-018`; a documentation or delivery task
-names its role instead and needs none. Under `technology` a task needs no technology line and a run
-behaves as it did before the roster existed, apart from the task prompt.
+A task a developer agent will do must name the one technology it is written in. A developer task
+without a `Technology:` line is `KW-DOC-TASKS-018`; a documentation or delivery task names its role
+instead and needs none.
 
 ### How a tier is chosen
 
@@ -2501,12 +2507,12 @@ the harness-by-harness delivery path are in
   exists (`ConfigRegConfig.WorkerRosterProperty`), but the generated `AGENTS.md` block does not
   publish a line for it and no agent instruction resolves one. Nothing depends on the line: the task
   file is the record, and a dispatch with no task reads the host setting.
-- The design says `platform-researcher` replaces `azure-reader`. Both agents ship and both are legal
-  target agents, because the technology roster still needs `azure-reader` until phase 5 removes it;
-  the conductor's, architect's and code-reviewer's `delegates-to` lists carry both, and the
-  instructions that send a run to one of them name the other beside it for the `tiered` roster. A
-  tiered run therefore reaches `platform-researcher` and its read-only `platform-reader` profile,
-  and a technology-roster run keeps `azure-reader`.
+- The design says `platform-researcher` replaces `azure-reader`, and the removal finished the
+  replacement: `azure-reader` is deleted, and the conductor's, architect's and code-reviewer's
+  `delegates-to` lists name `platform-researcher` alone, with its read-only `platform-reader`
+  profile.
+- The design kept the `worker-roster` switch until the removal. It is now `tiered` only, and the
+  value `technology` is the configuration error `KW-CONFIG-001`.
 
 ## Related
 

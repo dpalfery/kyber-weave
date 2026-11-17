@@ -667,10 +667,10 @@ public sealed class DevinRendererContractTests : IDisposable
 internal sealed class DevinModelOverrideFixture : IDisposable
 {
     internal const string OverriddenProfile = "general";
-    internal const string OverriddenAgentName = "go-dev";
+    internal const string OverriddenAgentName = "dev-medium";
     internal const string OverrideModel = "swe-1-6";
     internal const string InheritProfile = "fast";
-    internal const string InheritAgentName = "csharp-dev";
+    internal const string InheritAgentName = "dev-easy";
 
     private readonly TempDirectory _temp = new();
 

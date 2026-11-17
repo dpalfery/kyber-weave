@@ -110,10 +110,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         Stopwatch elapsed = Stopwatch.StartNew();
         // Under the tiered roster the model-targeting block and the two rules follow the developer tiers; the
         // configuration a host loads keeps the shipped block, and this is the run's effective one.
-        ArbiterModelTargetingConfig targeting = ModelTargetingRules.Targeting(
-            config.Arbiter.ModelTargeting, config.WorkerRoster);
-        IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(
-            config.Arbiter.Rules, targeting.Mode, config.WorkerRoster);
+        ArbiterModelTargetingConfig targeting = ModelTargetingRules.Targeting(config.Arbiter.ModelTargeting);
+        IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(config.Arbiter.Rules, targeting.Mode);
         ArbiterModelTargets? table = _modelTargets.TryRead(_ledger.DirectoryPath, ev.Harness);
 
         // Allocated outside the try so the error result can name the ledger entry that

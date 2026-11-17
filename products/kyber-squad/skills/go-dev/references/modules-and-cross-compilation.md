@@ -43,6 +43,6 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o dist/app-windows-a
   pure-Go dependencies (for example `modernc.org/sqlite` over `mattn/go-sqlite3`) when the
   standard allows, so this stays true.
 - If cgo is unavoidable, cross-compiling needs a C cross-compiler per target (`zig cc` is a
-  common choice); say so when handing the build to `github-devops`.
+  common choice); say so when handing the build to `devops`.
 - `-trimpath` and `-ldflags "-s -w -X main.version=…"` make builds reproducible and stamp the
-  version. Release automation is `github-devops`; hand them the target list and the command.
+  version. Release automation is `devops`; hand them the target list and the command.

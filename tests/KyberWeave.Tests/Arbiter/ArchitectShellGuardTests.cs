@@ -519,7 +519,7 @@ public sealed class ArchitectShellGuardTests
     }
 
     [Theory]
-    [InlineData("csharp-dev")]
+    [InlineData("dev-medium")]
     [InlineData("conductor")]
     public void IsShellGuarded_OtherAgents_AreNotGuarded(string agent)
     {

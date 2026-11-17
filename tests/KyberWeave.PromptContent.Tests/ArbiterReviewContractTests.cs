@@ -45,11 +45,11 @@ public sealed class ArbiterReviewContractTests
     }
 
     [Fact]
-    public void AzureReaderDispatches_CarryTheMarkerWithoutALens()
+    public void PlatformResearcherDispatches_CarryTheMarkerWithoutALens()
     {
         string contract = ReviewerContract;
 
-        Assert.Contains("azure-reader", contract, StringComparison.Ordinal);
+        Assert.Contains("platform-researcher", contract, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -127,7 +127,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         {
             Harness = "claude",
             Phase = "pre",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Prompt = prompt,
             HarnessCaller = "conductor",
             IsDispatch = true,
@@ -500,8 +500,8 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             IsDispatch = true,
             Dispatches =
             [
-                new ArbiterDispatch("csharp-dev", "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement A."),
-                new ArbiterDispatch("csharp-dev", "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement B."),
+                new ArbiterDispatch("dev-medium", "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement A."),
+                new ArbiterDispatch("dev-medium", "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement B."),
             ],
         };
         CountingProvider provider = new(ArbiterDirectory)

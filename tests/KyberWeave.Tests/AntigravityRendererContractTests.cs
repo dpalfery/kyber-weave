@@ -98,7 +98,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
             new SquadRenderRequest(ProductRoot, [SquadTarget.Antigravity], SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.NotEmpty(DeriveCollisions(source));
+        // The removal left no distinct-body collision: every shared name is a declared shared identity, so no
+        // agent lowers to a role-prefixed skill here.
+        Assert.Empty(DeriveCollisions(source));
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");

@@ -30,29 +30,29 @@ public sealed class DeveloperAgentContentTests
     private static readonly string[] ExistingAgents =
     [
         "architect",
-        "azure-reader",
+        "platform-researcher",
         "bug-crusher",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
-        "csharp-dev",
-        "dal-dev",
+        "dev-medium",
+        "dev-medium",
         "docs-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
+        "devops",
+        "dev-medium",
+        "dev-medium",
         "product-owner",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
+        "dev-medium",
+        "dev-medium",
+        "dev-medium",
         "research-agent",
         "review-lens",
         "review-triage",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev"
+        "dev-medium",
+        "architect",
+        "dev-medium",
+        "dev-medium",
+        "dev-medium"
     ];
 
     private static readonly Regex TechnologyWord = new(
@@ -92,7 +92,6 @@ public sealed class DeveloperAgentContentTests
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "testing",
         "typescript-dev"
     ];
 
@@ -107,7 +106,7 @@ public sealed class DeveloperAgentContentTests
     {
         SquadSource source = Source.Value;
         SquadAgent agent = Agent(name);
-        SquadAgent csharpDev = Agent("csharp-dev");
+        SquadAgent csharpDev = Agent("dev-medium");
 
         Assert.Equal("worker", agent.CapabilityProfile);
         Assert.Equal(csharpDev.CopilotTools, agent.CopilotTools);

@@ -23,7 +23,7 @@ public sealed class DocsPacketSettings : CommandSettings
 
     /// <summary>The worker's own agent name, so the Host facts list that agent's task gates.</summary>
     [CommandOption("--agent <NAME>")]
-    [Description("Your own agent name, for example csharp-dev. The Host facts then list your task gates. Defaults to the agent the plan assigned the task to, when it assigned one.")]
+    [Description("Your own agent name, for example dev-medium. The Host facts then list your task gates. Defaults to the agent the plan assigned the task to, when it assigned one.")]
     public string? Agent { get; set; }
 
     /// <summary>The configuration file; defaults to the repository's own.</summary>

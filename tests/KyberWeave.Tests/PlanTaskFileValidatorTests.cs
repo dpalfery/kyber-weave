@@ -89,18 +89,38 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     /// <summary>The difficulty and technology a task file carries are checked before dispatch.</summary>
+    /// <summary>
+    /// The probe's task file with the first task's difficulty and technology replaced, so exactly one field
+    /// differs from the plan the file was written from.
+    /// </summary>
     private static DocFixture CorpusWithTaskFields(string? difficulty, string? technology)
     {
         DocFixture fixture = PlanTaskFileProbe.Corpus();
         string[] lines = PlanTaskFileProbe.TaskFile().Split('\n');
         List<string> edited = [];
+        bool firstTask = false;
         foreach (string line in lines)
         {
-            edited.Add(line);
             if (line.TrimStart().StartsWith("- id: " + PlanTaskFileProbe.FirstTask, StringComparison.Ordinal))
             {
-                if (difficulty is not null) edited.Add("    difficulty: " + difficulty);
-                if (technology is not null) edited.Add("    technology: " + technology);
+                firstTask = true;
+            }
+            else if (line.TrimStart().StartsWith("- id: ", StringComparison.Ordinal))
+            {
+                firstTask = false;
+            }
+
+            if (firstTask && technology is not null && line.TrimStart().StartsWith("technology: ", StringComparison.Ordinal))
+            {
+                edited.Add("    technology: " + technology);
+                continue;
+            }
+
+            edited.Add(line);
+            if (firstTask && difficulty is not null
+                && line.TrimStart().StartsWith("- id: " + PlanTaskFileProbe.FirstTask, StringComparison.Ordinal))
+            {
+                edited.Add("    difficulty: " + difficulty);
             }
         }
 
@@ -1089,6 +1109,13 @@ internal static class PlanTaskFileProbe
     {
         return new DocFixture().WithCatalog()
             .Write(
+                ".kyber-weave/kyber-weave.yml",
+                """
+                ontology:
+                  technologies:
+                    - csharp
+                """)
+            .Write(
                 PlanIndexPath,
                 """
                 ---
@@ -1150,12 +1177,14 @@ internal static class PlanTaskFileProbe
 
         - **Files:** {{Backticked(FirstTaskFiles)}}
         - **Depends on:** none
+        - **Technology:** csharp
         - **Required skills:** `csharp-dev`
 
         ### {{SecondTask}}: The drift and prompt rules
 
         - **Files:** {{Backticked(SecondTaskFiles)}}
         - **Depends on:** {{FirstTask}}
+        - **Technology:** csharp
         - **Required skills:** `test-dev`
 
         ## Out of scope
@@ -1344,7 +1373,8 @@ internal static class PlanTaskFileProbe
             ["depends-on"] = dependsOn,
             ["files"] = files,
             ["session"] = id,
-            ["prompt"] = prompt
+            ["prompt"] = prompt,
+            ["technology"] = "csharp"
         };
 
     private static string Prompt(string taskId, string? missingPromptPart, string? promptPrefix)
@@ -1409,6 +1439,13 @@ internal static class SpecTaskFileProbe
     internal static DocFixture Corpus(string? tasksMarkdown = null)
     {
         return new DocFixture().WithCatalog()
+            .Write(
+                ".kyber-weave/kyber-weave.yml",
+                """
+                ontology:
+                  technologies:
+                    - csharp
+                """)
             .Write(
                 SpecIndexPath,
                 """
@@ -1491,6 +1528,7 @@ internal static class SpecTaskFileProbe
             - `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs`
           - **Acceptance:**
             - `Widget.Flag` is reported when the digest is stale.
+          - **Technology:** csharp
           - **Skills:** `test-dev`
           - **Depends on:** none
           - _Requirements: 1.1, 1.2_
@@ -1500,6 +1538,7 @@ internal static class SpecTaskFileProbe
             - `src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs`
           - **Acceptance:**
             - `Widget.Flag` is reported when a task is missing.
+          - **Technology:** csharp
           - **Skills:** `csharp-dev`
           - **Depends on:** 1.1
           - _Requirements: 1.1, 1.2_
@@ -1634,6 +1673,7 @@ internal static class SpecTaskFileProbe
             ["depends-on"] = dependsOn,
             ["files"] = files,
             ["session"] = id,
-            ["prompt"] = prompt
+            ["prompt"] = prompt,
+            ["technology"] = "csharp"
         };
 }

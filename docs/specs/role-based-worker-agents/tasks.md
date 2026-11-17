@@ -638,7 +638,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 5.2
   - _Requirements: 13.5, 13.6_
 
-- [ ] 5.5 Remove the old agents
+- [x] 5.5 Remove the old agents
   - **Objective:** Delete the ten technology agents, `sql-database-architect`, `test-dev`, `azure-reader` and `github-devops`, with the `test` technology, the `testing` skill and the `sql` template, and make `tiered` the default roster.
   - **Files:**
     - `products/kyber-squad/agents/`: the fourteen files
@@ -652,7 +652,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 5.3, 5.4
   - _Requirements: 1.6, 13.7_
 
-- [ ] 5.6 Sweep the documents after removal
+- [x] 5.6 Sweep the documents after removal
   - **Objective:** Remove or rewrite every live document that names a removed agent.
   - **Files:**
     - the live documents under `docs/` and `products/kyber-squad/` that name a removed agent

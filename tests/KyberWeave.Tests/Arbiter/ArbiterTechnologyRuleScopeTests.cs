@@ -190,7 +190,7 @@ public sealed class ArbiterTechnologyRuleScopeTests : IDisposable
         {
             Harness = "claude",
             Phase = "pre",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Prompt = prompt,
             HarnessCaller = "conductor",
             IsDispatch = true,

@@ -151,7 +151,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         HookOutcome outcome = Engine(new UniformProvider("names-plan", 0.95, 0.8)).DecidePreDispatch(
             "copilot-cli",
             "conductor",
-            "csharp-dev",
+            "dev-medium",
             "PLAN_FILE: docs/plans/cards.md\nTASK: T1\n\nOpen docs/plans/cards.md and implement task 2 from it.",
             ConfigWith([Enforced("KW-ARB-PLANREAD-001"), difficulty]),
             Context());

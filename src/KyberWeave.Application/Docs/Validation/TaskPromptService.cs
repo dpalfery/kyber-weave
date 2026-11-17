@@ -104,9 +104,9 @@ public sealed class TaskPromptService(
     }
 
     /// <summary>
-    /// The refusal for a dispatch that names a technology developer while the run is on the tiered roster, or
-    /// null when the name belongs to a role both rosters use. The tier the task belongs on is named in the
-    /// message, so the caller can dispatch the right agent from the refusal alone.
+    /// The refusal for a dispatch that names a technology developer, or null when the name belongs to another role.
+    /// The tier the task belongs on is named in the message, so the caller can dispatch the right agent from the
+    /// refusal alone.
     /// </summary>
     private static TaskPromptResult? RefusedTechnologyDeveloper(
         string? named,
@@ -116,9 +116,7 @@ public sealed class TaskPromptService(
     {
         if (named is null || technology is null
             || !PlanTaskAgentPick.RemovedAgents.TryGetValue(named, out string? replacement)
-            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal)
-            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(named, out ArbiterSquadAgent? agent)
-            || !string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
         {
             return null;
         }
@@ -150,7 +148,6 @@ public sealed class TaskPromptService(
         string? taskId = Clean(request.TaskId);
 
         PlanTaskFileEntry? entry = null;
-        string? fileRoster = null;
         if (taskId is not null)
         {
             string? plan = Clean(request.Plan);
@@ -185,8 +182,8 @@ public sealed class TaskPromptService(
                     $"No prompt: '{taskId}' names no one task in {plan}. Its tasks are: {ids}.");
             }
 
-            // The roster is taken from the task file, so a file outlives a configuration change (Requirement 12.2).
-            fileRoster = outcome.File.WorkerRoster;
+            // There is one roster, so the file's recorded value selects nothing here: the validator reports a
+            // value that is not `tiered` and reads the file as tiered, and this service does the same.
         }
 
         string? technology = Clean(entry?.Technology) ?? Clean(request.Technology);
@@ -220,21 +217,17 @@ public sealed class TaskPromptService(
 
         string? requested = Clean(request.Agent) ?? Clean(entry?.Role);
         string? recorded = Clean(entry?.Agent);
-        string? agent = requested ?? recorded;
-        RemovedAgentResolution? removed = null;
-        if (string.Equals(fileRoster ?? config.WorkerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
-        {
-            // Only an explicit dispatch names a worker that must be refused: a stale role in the task file is a
-            // removed name, and resolves to the tier its difficulty selects rather than blocking the prompt.
-            if (RefusedTechnologyDeveloper(Clean(request.Agent), technology, entry, request.FailedAttempts) is { } refusal)
-            {
-                return refusal;
-            }
 
-            removed = PlanTaskAgentPick.ResolveRemovedAgent(
-                requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
-            agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);
+        // Only an explicit dispatch names a worker that must be refused: a stale role in the task file is a
+        // removed name, and resolves to the tier its difficulty selects rather than blocking the prompt.
+        if (RefusedTechnologyDeveloper(Clean(request.Agent), technology, entry, request.FailedAttempts) is { } refusal)
+        {
+            return refusal;
         }
+
+        RemovedAgentResolution? removed = PlanTaskAgentPick.ResolveRemovedAgent(
+            requested ?? recorded, entry?.Difficulty, request.FailedAttempts);
+        string? agent = TieredAgent(requested, recorded, entry, technology, request.FailedAttempts, removed);
         string? taskText = entry is null ? null : PlanTaskPacket.Fill(entry, root, priorResults);
         // The dispatch header is routing metadata, so the count is put back where the worker reads it: a retry
         // starts knowing how many attempts already failed.

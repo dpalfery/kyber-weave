@@ -10,7 +10,7 @@
   "tool_input": {
     "description": "Implement T4 in the background",
     "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T4\n\nImplement the next task.",
-    "subagent_type": "csharp-dev",
+    "subagent_type": "dev-medium",
     "run_in_background": true
   },
   "tool_use_id": "toolu-launch-1",

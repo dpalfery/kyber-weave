@@ -69,15 +69,20 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
         }
     }
 
+    /// <summary>
+    /// The plan facts the evaluator reads, with the rating the task file records: under the one remaining roster
+    /// the difficulty rule takes that rating as its answer and asks no model.
+    /// </summary>
     private sealed class PlanStub : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
             facts
                 .With("plan.exists", true, ArbiterFactLabel.Derived)
+                .With("plan.task.difficulty", "hard", ArbiterFactLabel.Derived)
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
                 .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
-                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "dev-medium" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);
@@ -97,9 +102,9 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
                 {
                     ["easy"] = "fast",
                     ["standard"] = "general",
-                    ["hard"] = "deep-planning",
+                    ["hard"] = "dev-hard",
                 },
-                ["fast", "general", "deep-planning"]),
+                ["fast", "general", "dev-hard"]),
         },
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
@@ -133,11 +138,11 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
             {
                 ["fast"] = "haiku",
                 ["general"] = "sonnet",
-                ["deep-planning"] = "opus",
+                ["dev-hard"] = "opus",
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
             {
-                ["csharp-dev"] = new("general", "sonnet"),
+                ["dev-medium"] = new("general", "sonnet"),
             });
         File.WriteAllText(
             Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
@@ -157,7 +162,7 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
         KyberWeaveConfig config = EnforcedConfig();
 
         HookOutcome first = Engine(provider).DecidePreDispatch(
-            "claude", "conductor", "csharp-dev", Rework, config, Context(),
+            "claude", "conductor", "dev-medium", Rework, config, Context(),
             toolCallId: "tool-27", sessionId: "s1", dispatchModel: null);
         Assert.True(
             first.Kind == HookOutcomeKind.Allow,
@@ -165,11 +170,11 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
 
         // The worker returned, which closes the first rework's in-flight entry; without this the repeat overlaps it.
         Engine(provider).DecidePostDispatch(
-            "claude", "conductor", "csharp-dev", Rework, FirstReturn, config, Context(),
+            "claude", "conductor", "dev-medium", Rework, FirstReturn, config, Context(),
             toolCallId: "tool-27", sessionId: "s1");
 
         HookOutcome repeat = Engine(provider).DecidePreDispatch(
-            "claude", "conductor", "csharp-dev", Rework, config, Context(),
+            "claude", "conductor", "dev-medium", Rework, config, Context(),
             toolCallId: "tool-28", sessionId: "s1", dispatchModel: null);
 
         Assert.True(

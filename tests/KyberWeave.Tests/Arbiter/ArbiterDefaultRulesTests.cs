@@ -163,7 +163,7 @@ public sealed class ArbiterDefaultRulesTests
         Assert.DoesNotContain("ledger.red-evidence", ArbiterTriggerCatalog.FactsByTrigger["delegate"]);
 
         ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
-        // The one step-0 owner answer is the target named among the task's skills; test-dev is not owner of every test-first task.
+        // The one step-0 owner answer is the target named among the task's skills; dev-medium is not owner of every test-first task.
         Assert.Single(owner.Decide!, clause => clause.Answer == "owner");
     }
 

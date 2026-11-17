@@ -117,12 +117,12 @@ public sealed class McpPlanLifecycleToolsTests
             "AUTONOMOUS_APPROVAL: approve-and-execute");
 
         Assert.Contains("result: finalized", response, StringComparison.Ordinal);
-        Assert.Contains("| agent=csharp-dev |", response, StringComparison.Ordinal);
+        Assert.Contains("| agent=dev-medium |", response, StringComparison.Ordinal);
         PlanTaskFile written = Assert.IsType<PlanTaskFile>(PlanTaskFileFormat.Deserialize(
             PlanTaskFileProbe.TaskFilePath,
             File.ReadAllText(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath))));
         Assert.Equal(
-            "csharp-dev",
+            "dev-medium",
             Assert.Single(written.Tasks!, task => task.Id == PlanTaskFileProbe.FirstTask).Agent);
     }
 
@@ -134,7 +134,7 @@ public sealed class McpPlanLifecycleToolsTests
             IReadOnlyDictionary<string, string>? step0Answers = null,
             CancellationToken cancellationToken = default) =>
             Task.FromResult(new KyberWeave.Core.Arbiter.Providers.ArbiterStep1BatchResult(
-                rules.ToDictionary(rule => rule.Id, _ => "csharp-dev"),
+                rules.ToDictionary(rule => rule.Id, _ => "dev-medium"),
                 "stub",
                 null,
                 true,

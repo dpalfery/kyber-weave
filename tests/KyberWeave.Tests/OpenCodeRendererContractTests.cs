@@ -334,7 +334,6 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["kw-docs_*"] = "allow",
                 ["task"] = new Dictionary<string, string>
                 {
-                    ["azure-reader"] = "allow",
                     ["platform-researcher"] = "allow",
                     ["research-agent"] = "allow"
                 }
@@ -407,7 +406,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             .ToArray();
 
         Assert.NotEmpty(expectedPublishDegraded);
-        Assert.Contains("github-devops", expectedPublishDegraded);
+        Assert.Contains("devops", expectedPublishDegraded);
 
         foreach (string agentName in expectedPublishDegraded)
         {

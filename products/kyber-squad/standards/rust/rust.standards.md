@@ -66,7 +66,7 @@ The shipped binaries build for:
 - Paths use `Path` / `PathBuf`, never string concatenation.
 - Unix-only APIs sit behind `#[cfg(unix)]` with a `#[cfg(windows)]` counterpart, so clippy on
   one OS cannot hide a build break on another.
-- Release automation belongs to `github-devops`.
+- Release automation belongs to `devops`.
 
 ## Coding standards
 
@@ -100,7 +100,7 @@ The shipped binaries build for:
 
 Test authorship follows `<test-coding-standard>`. This standard requires that the code be
 testable: dependencies passed in, behaviour behind traits where a test must substitute it, no
-global state. Test authorship belongs to `test-dev`.
+global state. A task whose deliverable is tests goes to a developer tier like any other.
 
 ## Commands
 

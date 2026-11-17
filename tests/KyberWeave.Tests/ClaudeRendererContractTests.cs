@@ -256,7 +256,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
         SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
         Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["process.execute"]);
-        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(azure-reader, platform-researcher, research-agent)"]);
+        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(platform-researcher, research-agent)"]);
 
         SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
         Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
@@ -374,8 +374,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// Pins the operator-selected Haiku 5.5 model for Claude's fast authoring workers.
     /// </summary>
     [Theory]
-    [InlineData("test-dev")]
-    [InlineData("dal-dev")]
+    [InlineData("dev-easy")]
     public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
@@ -425,10 +424,9 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// Pins Sonnet 5.5 for Claude's general workers without changing planning membership.
     /// </summary>
     [Theory]
+    [InlineData("devops")]
+    [InlineData("dev-medium")]
     [InlineData("docs-dev")]
-    [InlineData("github-devops")]
-    [InlineData("pulumi-dev")]
-    [InlineData("tauri-dev")]
     public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer()]);
@@ -466,17 +464,10 @@ public sealed class ClaudeRendererContractTests : IDisposable
         Assert.True(result.Success, string.Join("; ", result.Errors));
         HashSet<string> fastAgentPaths = new(StringComparer.Ordinal)
         {
-            ".claude/agents/azure-reader.md",
             ".claude/agents/bug-crusher.md",
-            ".claude/agents/csharp-dev.md",
-            ".claude/agents/dal-dev.md",
             ".claude/agents/dev-easy.md",
-            ".claude/agents/maui-dev.md",
             ".claude/agents/platform-researcher.md",
-            ".claude/agents/python-dev.md",
-            ".claude/agents/react-dev.md",
-            ".claude/agents/research-agent.md",
-            ".claude/agents/test-dev.md"
+            ".claude/agents/research-agent.md"
         };
         SquadDeploymentFile[] agentFiles = result.Files
             .Where(f => f.RelativePath.StartsWith(".claude/agents/", StringComparison.Ordinal)

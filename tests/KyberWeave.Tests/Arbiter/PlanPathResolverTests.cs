@@ -269,7 +269,7 @@ public sealed class PlanPathResolverTests : IDisposable
             "delegate",
             "conductor",
             ArbiterCallerSources.Header,
-            "csharp-dev",
+            "dev-medium",
             "agent",
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {

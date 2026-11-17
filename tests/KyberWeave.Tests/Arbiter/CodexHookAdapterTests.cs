@@ -160,7 +160,7 @@ public sealed class CodexHookAdapterTests
 
         // updatedInput is the complete tool_input: every original field survives.
         JsonElement updated = output.GetProperty("updatedInput");
-        Assert.Equal("csharp-dev", updated.GetProperty("agent_type").GetString());
+        Assert.Equal("dev-medium", updated.GetProperty("agent_type").GetString());
         Assert.Equal("Implement T12.3", updated.GetProperty("task_name").GetString());
         string message = updated.GetProperty("message").GetString() ?? string.Empty;
         Assert.Equal("Implement the adapter.", message);
@@ -172,7 +172,7 @@ public sealed class CodexHookAdapterTests
     public void PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
     {
         string stdin = Fixture("pre-spawn-dispatch.json").Replace(
-            "\"agent_type\": \"csharp-dev\"", "\"agent_type\": \"docs-dev\"", StringComparison.Ordinal);
+            "\"agent_type\": \"dev-medium\"", "\"agent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
         (int exit, string stdout, _) = Run(stdin, null, new ScriptedEngine());
 
@@ -217,7 +217,7 @@ public sealed class CodexHookAdapterTests
         (int exit, _, _) = Run(Fixture("pre-spawn-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
         Assert.StartsWith("KYBER-ARBITER: true", engine.SeenPrePrompt, StringComparison.Ordinal);
         Assert.Contains("Implement the adapter.", engine.SeenPrePrompt, StringComparison.Ordinal);
     }

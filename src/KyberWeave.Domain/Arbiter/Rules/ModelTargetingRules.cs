@@ -9,10 +9,9 @@ namespace KyberWeave.Core.Arbiter.Rules;
 /// <remarks>
 /// The mode mapping runs in two places: when the configuration is loaded, so the rules a host reads are the
 /// rules that will run, and when an evaluation starts, so a configuration built in code with a mode
-/// the shipped rules were not loaded under still behaves as its mode says. The roster mapping runs where the
-/// roster is known, at evaluation, because a loaded configuration does not carry the run's roster.
+/// the shipped rules were not loaded under still behaves as its mode says.
 /// <para>
-/// Under the tiered roster the two rules follow the three developer tiers. The difficulty question is
+/// The two rules follow the three developer tiers, the one roster that ships. The difficulty question is
 /// answered from the rating the task file records instead of a second model call, because that one rating
 /// already chose the agent and the agent already chose the model (Requirement 2.10). The ladder climbs
 /// the tiers' model profiles, so a dispatch the conductor already put on the next tier targets the token it
@@ -49,19 +48,11 @@ internal static class ModelTargetingRules
     /// <param name="rules">The effective rule set.</param>
     /// <param name="mode"><c>off</c> disables both rules, <c>shadow</c> records them without effect, and <c>enforce</c> lets them gate.
     /// Any other mode is treated as shadow, so an unrecognised mode never gates a dispatch.</param>
-    /// <param name="roster">
-    /// The run's worker roster. Under <c>tiered</c> the difficulty rule answers from the recorded rating and makes
-    /// no second model call; under <c>technology</c>, and when no roster is given, both rules are as they ship.
-    /// </param>
-    public static IReadOnlyList<ArbiterRule> Apply(
-        IReadOnlyList<ArbiterRule> rules,
-        string mode,
-        string? roster = WorkerRosters.Technology)
+    public static IReadOnlyList<ArbiterRule> Apply(IReadOnlyList<ArbiterRule> rules, string mode)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(mode);
 
-        bool tiered = string.Equals(roster, WorkerRosters.Tiered, StringComparison.Ordinal);
         List<ArbiterRule> applied = new(rules.Count);
         foreach (ArbiterRule rule in rules)
         {
@@ -71,7 +62,7 @@ internal static class ModelTargetingRules
                 continue;
             }
 
-            ArbiterRule targeted = tiered && string.Equals(rule.Id, DifficultyRuleId, StringComparison.Ordinal)
+            ArbiterRule targeted = string.Equals(rule.Id, DifficultyRuleId, StringComparison.Ordinal)
                 ? FromRecordedDifficulty(rule)
                 : rule;
             applied.Add(mode switch
@@ -86,20 +77,14 @@ internal static class ModelTargetingRules
     }
 
     /// <summary>
-    /// The model-targeting block in use: under the tiered roster its difficulty map and ladder name the three
-    /// developer tiers' profiles, and they do so whether or not the host set its own. Under the technology
-    /// roster, and when no roster is given, the host's block is returned unchanged.
+    /// The model-targeting block in use: its difficulty map and ladder name the three developer tiers' profiles,
+    /// and they do so whether or not the host set its own. The removal left one roster, so this is the block for
+    /// every run.
     /// </summary>
     /// <param name="targeting">The host's model-targeting block.</param>
-    /// <param name="roster">The run's worker roster.</param>
-    public static ArbiterModelTargetingConfig Targeting(ArbiterModelTargetingConfig targeting, string? roster)
+    public static ArbiterModelTargetingConfig Targeting(ArbiterModelTargetingConfig targeting)
     {
         ArgumentNullException.ThrowIfNull(targeting);
-        if (!string.Equals(roster, WorkerRosters.Tiered, StringComparison.Ordinal))
-        {
-            return targeting;
-        }
-
         return targeting with
         {
             DifficultyProfiles = new Dictionary<string, string>(StringComparer.Ordinal)

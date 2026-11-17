@@ -158,7 +158,7 @@ internal static class CliApplication
                     .WithDescription(
                         "Print one task's packet for the worker dispatched on it: the plan is found from the repository, " +
                         "the task file is checked against it, and {worktree} is filled in (KW-DOC-TASKS-CLI-*).")
-                    .WithExample("docs", "packet", "T1", "--agent", "csharp-dev")
+                    .WithExample("docs", "packet", "T1", "--agent", "dev-medium")
                     .WithExample("docs", "packet", "T2", "--prior-results", "results.txt");
 
                 docs.AddCommand<DocsCloseoutCommand>("closeout")

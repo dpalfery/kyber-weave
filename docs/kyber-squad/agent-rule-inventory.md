@@ -4,7 +4,7 @@ title: Technology agent rule inventory
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-16
+last-reviewed: 2026-11-17
 keywords:
   - rule inventory
   - technology agents
@@ -19,6 +19,10 @@ Every technology-specific rule carried in the body of the eleven technology agen
 inventory exists so that removing those agents takes no knowledge with it: a row marked
 **Moved** was stated only in an agent body and was added to the template by task 1.4; a row
 marked **Stated** was already in the shipped template.
+
+**The agents in the Agent column no longer ship.** The removal deleted all fourteen; this table is
+the record that each of their technology rules has a home in a shipped template, which is why the
+deletion took no knowledge with it. The template paths and headings below are current.
 
 The shared worker baseline (task scope, task gate, build isolation, diagnostics, discovery
 order, completion digest) is not technology-specific and is not listed. It moves to

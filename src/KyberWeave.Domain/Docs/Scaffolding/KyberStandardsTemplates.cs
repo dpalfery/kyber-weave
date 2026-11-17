@@ -57,10 +57,8 @@ public static class KyberStandardsTemplates
         "python",
         "react",
         "rust",
-        "sql",
         "sql-server",
         "tauri",
-        "test",
         "typescript"
     ];
 

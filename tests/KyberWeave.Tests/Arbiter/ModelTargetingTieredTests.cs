@@ -13,10 +13,9 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// Under the tiered roster the model-targeting rules follow the three developer tiers. The difficulty comes from
-/// the rating the task file records, so the Arbiter never asks a second time; the ladder climbs the tiers; and a
-/// dispatch the conductor already put on the next tier is left as it is. Under the technology roster both rules
-/// ask and climb as they do today.
+/// The model-targeting rules follow the three developer tiers. The difficulty comes from the rating the task file
+/// records, so the Arbiter never asks a second time; the ladder climbs the tiers; and a dispatch the conductor
+/// already put on the next tier is left as it is. There is one roster, so these are the rules for every run.
 /// </summary>
 public sealed class ModelTargetingTieredTests : IDisposable
 {
@@ -323,47 +322,6 @@ public sealed class ModelTargetingTieredTests : IDisposable
         Assert.Equal(RuleEffects.Keep, RuleOf(record, LadderRule).Effect);
     }
 
-    // 3. The technology roster asks and climbs as it does today.
-
-    [Fact]
-    public async Task TheTechnologyRosterStillAsksTheDifficultyQuestion()
-    {
-        WritePlan("hard");
-        WriteModelTargetsTable();
-        ScriptedProvider provider = new()
-        {
-            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [DifficultyRule] = "standard" },
-            Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.05, 0.9, 0.05], 0.9, 0.8),
-            },
-        };
-
-        ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(
-            provider, WorkerRosters.Technology, target: "csharp-dev");
-
-        Assert.Contains(DifficultyRule, provider.AskedRuleIds);
-        Assert.Equal("standard", RuleOf(record, DifficultyRule).Answer);
-        Assert.NotNull(record.Model);
-        Assert.Equal("general", record.Model!.Profile);
-        Assert.Equal("difficulty", record.Model.Source);
-    }
-
-    [Fact]
-    public async Task TheTechnologyRosterKeepsItsShippingLadder()
-    {
-        WriteModelTargetsTable();
-        await SeedAttemptAsync("fast", "FAIL", "csharp-dev");
-
-        ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(
-            new ScriptedProvider(), WorkerRosters.Technology, target: "csharp-dev");
-
-        Assert.Equal("step-up", RuleOf(record, LadderRule).Answer);
-        Assert.NotNull(record.Model);
-        Assert.Equal("general", record.Model!.Profile);
-        Assert.Equal("ladder", record.Model.Source);
-    }
-
     /// <summary>The plan reader publishes the rating the task file records, which is what the rules read.</summary>
     [Fact]
     public void ThePlanReaderPublishesTheRecordedDifficulty()
@@ -377,7 +335,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
                 "delegate",
                 "conductor",
                 ArbiterCallerSources.Harness,
-                "csharp-dev",
+                "dev-medium",
                 "implementation",
                 new Dictionary<string, string>(StringComparer.Ordinal)
                 {

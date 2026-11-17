@@ -62,7 +62,7 @@ public sealed class PlanTaskDifficultyRatingTests : IDisposable
     [Fact]
     public void AConfidentRatingReplacesTheArchitectsRating()
     {
-        PlanTaskFileEntry task = Write(new RateProvider("dal-dev", 0.95, "hard", 0.9)).Tasks![0];
+        PlanTaskFileEntry task = Write(new RateProvider("dev-medium", 0.95, "hard", 0.9)).Tasks![0];
 
         Assert.Equal("hard", task.Difficulty);
         Assert.Equal("decision-model", task.DifficultySource);
@@ -71,7 +71,7 @@ public sealed class PlanTaskDifficultyRatingTests : IDisposable
     [Fact]
     public void TheShippedStandardAnswerMapsToMedium()
     {
-        PlanTaskFileEntry task = Write(new RateProvider("dal-dev", 0.95, "standard", 0.9)).Tasks![0];
+        PlanTaskFileEntry task = Write(new RateProvider("dev-medium", 0.95, "standard", 0.9)).Tasks![0];
 
         Assert.Equal("medium", task.Difficulty);
         Assert.Equal("decision-model", task.DifficultySource);
@@ -80,7 +80,7 @@ public sealed class PlanTaskDifficultyRatingTests : IDisposable
     [Fact]
     public void ARatingBelowTheFloorKeepsTheArchitectsRating()
     {
-        PlanTaskFileEntry task = Write(new RateProvider("dal-dev", 0.95, "hard", 0.6)).Tasks![0];
+        PlanTaskFileEntry task = Write(new RateProvider("dev-medium", 0.95, "hard", 0.6)).Tasks![0];
 
         Assert.Equal("easy", task.Difficulty);
         Assert.Equal("architect", task.DifficultySource);
@@ -89,7 +89,7 @@ public sealed class PlanTaskDifficultyRatingTests : IDisposable
     [Fact]
     public void AModelFaultKeepsTheArchitectsRating()
     {
-        PlanTaskFileEntry task = Write(new RateProvider("dal-dev", 0.95, "hard", 0.9, fail: true)).Tasks![0];
+        PlanTaskFileEntry task = Write(new RateProvider("dev-medium", 0.95, "hard", 0.9, fail: true)).Tasks![0];
 
         Assert.Equal("easy", task.Difficulty);
         Assert.Equal("architect", task.DifficultySource);
@@ -98,7 +98,7 @@ public sealed class PlanTaskDifficultyRatingTests : IDisposable
     [Fact]
     public void OneCallPerTaskCarriesBothQuestions()
     {
-        RateProvider provider = new("dal-dev", 0.95, "hard", 0.9);
+        RateProvider provider = new("dev-medium", 0.95, "hard", 0.9);
 
         Write(provider);
 

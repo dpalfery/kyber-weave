@@ -53,23 +53,10 @@ public sealed class SquadDeliveryExecutionSkillTests
     [
         "architect",
         "code-reviewer",
-        "csharp-dev",
-        "dal-dev",
         "dev-easy",
         "dev-hard",
         "dev-medium",
-        "devops",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev"
+        "devops"
     ];
 
     /// <summary>The four delegates the roster already carried, which the widening keeps.</summary>
@@ -84,7 +71,7 @@ public sealed class SquadDeliveryExecutionSkillTests
     ///     three stay off the roster. Naming them would widen what an unreviewed escalation can start,
     ///     which is the risk the narrow list was defending against in the first place.
     /// </summary>
-    private static readonly string[] ExcludedDelegates = ["azure-reader", "product-owner", "research-agent"];
+    private static readonly string[] ExcludedDelegates = ["platform-researcher", "product-owner", "research-agent"];
 
     /// <summary>
     ///     The sections the conductor's removed reference carried. The contract moves rather than being
@@ -258,7 +245,7 @@ public sealed class SquadDeliveryExecutionSkillTests
         Assert.False(
             skill.Contains("escalated rather than run on its own", StringComparison.OrdinalIgnoreCase),
             $"'{BugCrusherSkillPath}' still says the run-start dispatch is escalated rather than run; the widened " +
-            "roster carries github-devops, so that dispatch runs.");
+            "roster carries devops, so that dispatch runs.");
     }
 
     private static SquadAgent LoadAgent(string name)

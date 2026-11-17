@@ -31,28 +31,20 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     private static readonly string[] CanonicalAgents =
     [
         "architect",
-        "azure-reader",
+        "bug-crusher",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
-        "csharp-dev",
-        "dal-dev",
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops",
         "docs-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
+        "platform-researcher",
         "product-owner",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
         "research-agent",
         "review-lens",
-        "review-triage",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev"
+        "review-triage"
     ];
 
     private static readonly string[] CanonicalSkills =
@@ -79,11 +71,11 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         "pr-review-fix-comments",
         "product-owner",
         "python-dev",
+        "review-council",
         "rust-dev",
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "testing",
         "typescript-dev"
     ];
 
@@ -153,8 +145,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains(entryNames, name => name == "profiles/fallbacks.yml");
         Assert.Contains(entryNames, name => name == "mcp.json");
 
-        // Presence of all 23 canonical agents
-        Assert.Equal(23, CanonicalAgents.Length);
+        // Presence of all 15 canonical agents
+        Assert.Equal(15, CanonicalAgents.Length);
         foreach (string agent in CanonicalAgents)
         {
             Assert.Contains(entryNames, name => name == $"agents/{agent}.md");
@@ -327,7 +319,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        // Portable components only: contains all 25 canonical skills
+        // Portable components only: contains all 28 canonical skills
         foreach (string skill in CanonicalSkills)
         {
             Assert.Contains(entryNames, name => name == $"skills/{skill}/SKILL.md" || name.StartsWith($"skills/{skill}/", StringComparison.Ordinal));
@@ -341,7 +333,10 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         foreach (string agent in CanonicalAgents)
         {
-            Assert.DoesNotContain(entryNames, name => name.EndsWith($"{agent}.md", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(entryNames, name => string.Equals(
+                name,
+                $"agents/{agent}.md",
+                StringComparison.OrdinalIgnoreCase));
         }
 
         // If plugin.json is present, validate Agent Plugins v1.0.0 schema conformance
@@ -372,9 +367,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     {
         using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateStub();
         const string agentResource = "agents/conductor/references/plan-path.md";
-        const string skillResource = "skills/testing/references/unit-test-patterns.md";
+        const string skillResource = "skills/code-review/references/configuration.md";
         const string agentContent = "# Plan path\n\nExecute a Ready plan.\n";
-        const string skillContent = "# Unit test patterns\n\nPin observable behaviour.\n";
+        const string skillContent = "# Review configuration\n\nThe host's review keys.\n";
         repo.AddResourceClosure(agentResource, agentContent, skillResource, skillContent);
         string outDirectory = Path.Combine(_temp.Path, "resource-pack");
         SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
@@ -888,16 +883,13 @@ public sealed class SquadPackAndReleaseTests : IDisposable
                 new UTF8Encoding(false));
             Write($"products/kyber-squad/{agentResource}", agentContent);
 
+            string[] segments = skillResource.Split('/');
             string skillPath = System.IO.Path.Combine(
-                Path,
-                "products",
-                "kyber-squad",
-                "skills",
-                "testing",
-                "SKILL.md");
+                [Path, "products", "kyber-squad", "skills", segments[1], "SKILL.md"]);
+            string resource = string.Join('/', segments[2..]);
             File.AppendAllText(
                 skillPath,
-                "\n[Unit test patterns](references/unit-test-patterns.md)\n",
+                $"\n[Resource]({resource})\n",
                 new UTF8Encoding(false));
             Write($"products/kyber-squad/{skillResource}", skillContent);
         }

@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
@@ -147,8 +148,8 @@ public sealed class SquadRendererSharedContractTests
     }
 
     /// <summary>
-    /// A tiered host cannot dispatch a technology developer, so the rendered conductor must not list one. The
-    /// technology roster is the control: the same corpus still offers its developers there.
+    /// A tiered host cannot dispatch a technology developer, so neither the shipped source nor the rendered conductor
+    /// may offer one: the conductor lists the tiered roster and nothing the removal deleted.
     /// </summary>
     [Fact]
     public async Task ATieredRenderDoesNotOfferTheTechnologyAgentsToTheConductor()
@@ -163,16 +164,14 @@ public sealed class SquadRendererSharedContractTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         IReadOnlyList<string> tiered = ConductorDelegatesTo(result);
-        Assert.DoesNotContain("csharp-dev", tiered);
-        Assert.DoesNotContain("test-dev", tiered);
-        Assert.Contains("dev-easy", tiered);
+        Assert.Contains("dev-medium", tiered);
         Assert.Contains("docs-dev", tiered);
-
-        SquadRenderResult technology = await new OpenCodeRenderer().RenderAsync(request with { WorkerRoster = WorkerRosters.Technology });
-        Assert.True(technology.Success, string.Join("; ", technology.Errors));
-        IReadOnlyList<string> unchanged = ConductorDelegatesTo(technology);
-        Assert.Contains("csharp-dev", unchanged);
-        Assert.Contains("dev-easy", unchanged);
+        Assert.DoesNotContain(
+            tiered,
+            name => PlanTaskAgentPick.RemovedAgents.ContainsKey(name));
+        Assert.DoesNotContain(
+            TestSquadCorpus.CanonicalSource.Agents,
+            agent => string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal));
     }
 
     /// <summary>

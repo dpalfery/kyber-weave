@@ -15,7 +15,7 @@ Two decisions in the conductor run-speed work describe a command that no canonic
 [--failing-version <version>] [--json]`, which fetches origin, branches from the remote base
 branch without checking out `main`, reports its own exit codes (`0` ready, `1` tool failure under
 the stop rule, `2` refused input, `3` the CodeGraph binary missing) and, where the conductor has no
-shell, is dispatched to `github-devops` with the exact command and a `RUN-START: true` marker.
+shell, is dispatched to `devops` with the exact command and a `RUN-START: true` marker.
 
 The command is delivered by the run-start slice, whose pull request is still open. This branch
 carries none of it: `src/KyberWeave.Core/RunStart/` does not exist here and

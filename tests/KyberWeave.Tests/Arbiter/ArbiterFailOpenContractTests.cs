@@ -100,7 +100,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(
             path,
-            "# Plan\n\n## Tasks\n\n### T3 — Add the parser\nFiles: src/a.cs\nRequired skills: csharp-dev\n");
+            "# Plan\n\n## Tasks\n\n### T3 — Add the parser\nFiles: src/a.cs\nRequired skills: dev-medium\n");
     }
 
     public static TheoryData<string, string> GarbledDispatches => new()
@@ -120,7 +120,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     public async Task AGarbledDispatchWithNoModel_AllowsEveryDelegateAndReturnRule(string phase, string prompt)
     {
         ArbiterEvaluationResult result = await Evaluator(new NoneProvider()).EvaluateAsync(
-            Event(phase, "csharp-dev", prompt, phase == "post" ? "Done. All tests pass." : null),
+            Event(phase, "dev-medium", prompt, phase == "post" ? "Done. All tests pass." : null),
             ShippedConfig(),
             null,
             TestContext.Current.CancellationToken);
@@ -140,7 +140,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/my plan.md\nTASK: T3\n\nImplement the parser.";
 
         ArbiterEvaluationResult result = await Evaluator(new NoneProvider()).EvaluateAsync(
-            Event("pre", "csharp-dev", Prompt), ShippedConfig(), null, TestContext.Current.CancellationToken);
+            Event("pre", "dev-medium", Prompt), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
         ArbiterDecisionRecord record = ArbiterEvaluatorFixtures.Records(_root).First(decision => decision.Trigger == "delegate");
@@ -155,7 +155,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     public async Task ALowConfidenceViolatingAnswer_Allows()
     {
         ArbiterEvaluationResult result = await Evaluator(new ConfidentProvider(0.5, ("KW-ARB-PLAN-001", "no-plan")))
-            .EvaluateAsync(Event("pre", "csharp-dev", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
+            .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
         ArbiterDecisionRecord record = ArbiterEvaluatorFixtures.Records(_root).First(decision => decision.Trigger == "delegate");
@@ -168,7 +168,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     public async Task AConfidentViolatingAnswer_StillEscalates()
     {
         ArbiterEvaluationResult result = await Evaluator(new ConfidentProvider(0.95, ("KW-ARB-PLAN-001", "no-plan")))
-            .EvaluateAsync(Event("pre", "csharp-dev", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
+            .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Escalate, result.Outcome);
         ArbiterDecisionRecord record = ArbiterEvaluatorFixtures.Records(_root).First(decision => decision.Trigger == "delegate");

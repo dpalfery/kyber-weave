@@ -26,9 +26,6 @@ public sealed class RemovedAgentResolutionTests
         .WithOntology(new OntologyConfig { Technologies = ["csharp"] })
         .WithWorkerRoster(WorkerRosters.Tiered);
 
-    private static KyberWeaveConfig Technology => KyberWeaveConfig.ProductDefaults
-        .WithOntology(new OntologyConfig { Technologies = ["csharp"] });
-
     [Theory]
     [InlineData("csharp-dev", "easy", 0, "dev-easy")]
     [InlineData("csharp-dev", "medium", 0, "dev-medium")]
@@ -128,6 +125,27 @@ public sealed class RemovedAgentResolutionTests
     }
 
     /// <summary>
+    /// A task file records the roster it was written under, and a value that is not exactly <c>tiered</c> — padded,
+    /// cased, or one this build does not know — must not decide whether the removed-agent substitution runs. There
+    /// is one roster, so a dispatch that names a deleted agent resolves to its tier whatever the file records.
+    /// </summary>
+    /// <param name="recorded">The roster value the task file is written with.</param>
+    [Theory]
+    [InlineData(" Tiered ")]
+    [InlineData("side-by-side")]
+    public void ARecordedRosterValueThatIsNotExactlyTieredStillResolvesTheRemovedName(string recorded)
+    {
+        KyberWeaveConfig config = Tiered.WithWorkerRoster(recorded);
+        using DocFixture fixture = Ready(config);
+
+        TaskPromptResult result = Prompt(fixture, config);
+
+        Assert.True(result.Built, result.Refusal);
+        Assert.Equal("dev-hard", result.Agent);
+        Assert.NotNull(result.Substitution);
+    }
+
+    /// <summary>
     /// A plan author writes the role by hand, so a capitalised or space-padded removed name reaches the task file
     /// unchanged; it still resolves rather than dispatching a name no installed agent answers to.
     /// </summary>
@@ -146,17 +164,6 @@ public sealed class RemovedAgentResolutionTests
         Assert.Contains("dev-hard", result.Substitution, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void UnderTheTechnologyRosterTheAgentStillExistsSoTheNameIsLeftAlone()
-    {
-        using DocFixture fixture = Ready(Technology);
-
-        TaskPromptResult result = Prompt(fixture, Technology);
-
-        Assert.True(result.Built, result.Refusal);
-        Assert.Equal("csharp-dev", result.Agent);
-        Assert.Null(result.Substitution);
-    }
 
     /// <summary>
     ///     The retirement of the fourteen agents the removal phase deletes, on a global deployment of two
