@@ -1,6 +1,7 @@
 using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Plans;
@@ -114,6 +115,16 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths) : IPlanFacts
             facts = facts.With("plan.task.files", task.Files.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.depends-on", task.DependsOn.ToList(), ArbiterFactLabel.Derived);
             facts = facts.With("plan.task.skills", task.Skills.ToList(), ArbiterFactLabel.Derived);
+            if (!string.IsNullOrWhiteSpace(task.Difficulty))
+            {
+                // The one rating in use, which the model-targeting difficulty rule reads under the tiered
+                // roster instead of asking a model again. The constant belongs to the rule that reads it.
+                facts = facts.With(
+                    ModelTargetingRules.RecordedDifficultyFact,
+                    task.Difficulty.Trim(),
+                    ArbiterFactLabel.Derived);
+            }
+
             facts = facts.With(
                 "plan.test-contract.row",
                 document.RedEvidenceRequirement(task.Id),

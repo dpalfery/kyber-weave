@@ -108,7 +108,12 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArgumentNullException.ThrowIfNull(config);
         ArbiterEvaluatorOptions effective = options ?? new ArbiterEvaluatorOptions();
         Stopwatch elapsed = Stopwatch.StartNew();
-        IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(config.Arbiter.Rules, config.Arbiter.ModelTargeting.Mode);
+        // Under the tiered roster the model-targeting block and the two rules follow the developer tiers; the
+        // configuration a host loads keeps the shipped block, and this is the run's effective one.
+        ArbiterModelTargetingConfig targeting = ModelTargetingRules.Targeting(
+            config.Arbiter.ModelTargeting, config.WorkerRoster);
+        IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(
+            config.Arbiter.Rules, targeting.Mode, config.WorkerRoster);
         ArbiterModelTargets? table = _modelTargets.TryRead(_ledger.DirectoryPath, ev.Harness);
 
         // Allocated outside the try so the error result can name the ledger entry that
@@ -153,7 +158,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
                 TriggerClassification classification = classifications[index];
                 string prompt = prompts[index];
                 ArbiterDispatchEvaluation evaluated = await EvaluateDispatchAsync(
-                    classification, prompt, ev, config, rules, table, effective, ledgerId, elapsed, cancellationToken)
+                    classification, prompt, ev, config, rules, targeting, table, effective, ledgerId, elapsed,
+                    cancellationToken)
                     .ConfigureAwait(false);
                 dispatches.Add(evaluated);
             }
@@ -216,6 +222,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArbiterEvent ev,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> rules,
+        ArbiterModelTargetingConfig targeting,
         ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
@@ -246,7 +253,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArbiterRunScope? runScope = RunScopeOf(ev);
         facts = LedgerFacts.Enrich(facts, _ledger, _decisionLog, ev, ledgerId, runScope);
         facts = AttributedChangeFacts.Enrich(facts, _ledger, _decisionLog, ledgerId);
-        facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, config.Arbiter.ModelTargeting);
+        facts = ModelTargetFacts.Enrich(facts, _ledger, _decisionLog, ledgerId, targeting);
         // D29: a return's TASK_GATE: line is checked against the report it names. Absent
         // evidence answers absent, and the rule asks the model about the raw report instead;
         // an unexpected failure here reaches the catch in EvaluateAsync, which allows and logs.
@@ -445,8 +452,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         foreach (TriggerPlan plan in secondaries)
         {
             ArbiterSecondaryEvaluation evaluated = await RecordSecondaryAsync(
-                classification, ev, plan, secondaryCall, primaryOutcome, config, rules, facts, table, effective,
-                ledgerId, planDigest, priorDecisionId, elapsed, cancellationToken).ConfigureAwait(false);
+                classification, ev, plan, secondaryCall, primaryOutcome, config, rules, targeting, facts, table,
+                effective, ledgerId, planDigest, priorDecisionId, elapsed, cancellationToken).ConfigureAwait(false);
             secondaryResults.Add(evaluated);
         }
 
@@ -982,6 +989,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string primaryOutcome,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> effectiveRules,
+        ArbiterModelTargetingConfig targeting,
         ArbiterFactSet facts,
         ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
@@ -1048,9 +1056,9 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string outcome = CombineGating(plan.Family, effects);
         ArbiterModelBlock? model = string.Equals(plan.Trigger, ModelTargetTrigger, StringComparison.Ordinal)
             ? ModelTargetResolver.Resolve(
-                rules, facts, config.Arbiter.ModelTargeting, table,
+                rules, facts, targeting, table,
                 ev with { RenderedModelToken = RenderedTokenOf(ev, classification.Target, table) },
-                config.Arbiter.ModelTargeting.Mode)
+                targeting.Mode)
             : null;
         if (model is { Delivered: true, Token: { } delivered }
             && effective.ConfirmModelWrite is { } confirm

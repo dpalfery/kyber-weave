@@ -568,7 +568,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 4.2, 3.5
   - _Requirements: 8.5, 8.6_
 
-- [ ] 4.5 Make the model rules follow the tiers
+- [x] 4.5 Make the model rules follow the tiers
   - **Objective:** Set the ladder to `dev-easy`, `dev-medium`, `dev-hard`, and have the model-targeting step take the recorded difficulty instead of asking again.
   - **Files:**
     - `src/KyberWeave.Domain/Arbiter/Rules/ModelTargetingRules.cs`
