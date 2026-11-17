@@ -104,9 +104,9 @@ public sealed class TaskPromptService(
     }
 
     /// <summary>
-    /// The refusal for a dispatch that names a technology developer while the run is on the tiered roster, or
-    /// null when the name belongs to a role both rosters use. The tier the task belongs on is named in the
-    /// message, so the caller can dispatch the right agent from the refusal alone.
+    /// The refusal for a dispatch that names a technology developer, or null when the name belongs to another role.
+    /// The tier the task belongs on is named in the message, so the caller can dispatch the right agent from the
+    /// refusal alone.
     /// </summary>
     private static TaskPromptResult? RefusedTechnologyDeveloper(
         string? named,
@@ -116,9 +116,7 @@ public sealed class TaskPromptService(
     {
         if (named is null || technology is null
             || !PlanTaskAgentPick.RemovedAgents.TryGetValue(named, out string? replacement)
-            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal)
-            || !ArbiterSquadCatalog.LoadEmbedded().Agents.TryGetValue(named, out ArbiterSquadAgent? agent)
-            || !string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+            || !string.Equals(replacement, PlanTaskAgentPick.DeveloperKind, StringComparison.Ordinal))
         {
             return null;
         }

@@ -49,8 +49,8 @@ an agent's shell `PATH` while its folder holds recent files is still likely in u
 
 **Leftovers.** A skill folder under a harness home's `skills/` that `kyber-weave squad status
 --global` does not list, and whose name an older squad shipped, is left behind by an update. Known
-case: `skills/test-dev/` (the test-writing skill became `testing`). The `test-dev` *agent* is still
-current; only the skill folder is a leftover. Note it for the step-8 cleanup, asked with this
+case: `skills/test-dev/`, a test-writing skill an older release shipped and this one does not.
+Note it for the step-8 cleanup, asked with this
 context: the harness still loads the old skill, which can give agents outdated testing steps;
 options are move it out of the skills folder or leave it; recommend moving it. Per platform:
 

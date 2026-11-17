@@ -317,10 +317,6 @@ public static class SquadSourceValidator
     }
 
     /// <summary>
-    /// A roster key is optional: an agent that declares none serves both rosters. A declared value
-    /// must be one of the two, and the error names both.
-    /// </summary>
-    /// <summary>
     /// A roster key is optional: an agent that declares none serves the one roster that ships. The retired
     /// <c>technology</c> value is refused by name, because a host may still carry it and needs to be told the
     /// roster it selected was deleted rather than that it misspelled one.

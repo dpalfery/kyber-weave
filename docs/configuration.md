@@ -474,14 +474,14 @@ dispatch that belongs to no task file — a fix the bug flow hands on, a researc
 setting instead.
 
 An agent declares the roster it belongs to with a `worker-roster` key in its frontmatter. The three
-developer agents, `devops` and `platform-researcher` declare `tiered`; the fourteen agents the
-tiered roster replaces declare `technology`; an agent that declares none serves both rosters, which
-is why `architect`, `docs-dev`, `code-reviewer` and the review seats are dispatchable either way.
+developer agents, `devops` and `platform-researcher` declare `tiered`; an agent that declares none
+serves the one roster, which is why `architect`, `docs-dev`, `code-reviewer` and the review seats are
+dispatchable. No shipped agent declares `technology`: the value is read only to recognise a task
+file written before the removal, which is read as `tiered` with a warning.
 
-Under `tiered` a file-changing developer task must name the one technology it is written in: a
+A file-changing developer task must name the one technology it is written in: a
 developer task without a `Technology:` line is `KW-DOC-TASKS-018`, whose hint says that a
-documentation or delivery task names its role instead and needs none. Under `technology` a task needs
-no technology line.
+documentation or delivery task names its role instead and needs none.
 
 The tier for each attempt comes from the task file's difficulty and the attempts that already failed:
 `tier = min(hard, rated difficulty + failed attempts)`, so an `easy` task starts on `dev-easy`,
