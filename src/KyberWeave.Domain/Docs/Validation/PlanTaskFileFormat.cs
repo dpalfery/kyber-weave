@@ -80,7 +80,8 @@ internal static partial class PlanTaskFileFormat
                 "schema-version" when value is string version
                     && int.TryParse(version, System.Globalization.CultureInfo.InvariantCulture, out int number) => number,
                 "agent-confidence" when value is string confidence
-                    && double.TryParse(confidence, System.Globalization.CultureInfo.InvariantCulture, out double score) => score,
+                    && double.TryParse(confidence, System.Globalization.CultureInfo.InvariantCulture, out double score)
+                    && double.IsFinite(score) => score,
                 _ => value is Dictionary<object, object> or List<object> ? NormalizeNumbers(value) : value
             };
         }
