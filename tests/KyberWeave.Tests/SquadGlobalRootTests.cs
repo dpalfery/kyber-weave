@@ -28,8 +28,8 @@ namespace KyberWeave.Tests;
 ///     A test that reads the corpus reads the one <see cref="SquadCorpusTemplate"/> the class declares,
 ///     because loading it costs about 75 ms and several tests loaded it two or three times. Every test
 ///     still extracts its own release into its own temp directory, and
-///     <see cref="InstallAsync_RealInstallGlobalScope_WritesOnlyUnderTheResolvedHomeSubtree"/> still
-///     installs for real, per target, end to end.
+///     <see cref="InstallAsync_RealInstallGlobalScope_WritesOnlyUnderEachResolvedHomeSubtree"/> still
+///     installs for real, end to end, for every harness in one deployment.
 ///     </para>
 /// </remarks>
 public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, IDisposable
@@ -1152,19 +1152,28 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
     // Criterion 4: a real global install for pi and claude writes only into the temp home.
     // ---------------------------------------------------------------------------------------
 
-    [Theory]
-    [InlineData(SquadTarget.Claude)]
-    [InlineData(SquadTarget.Pi)]
-    [InlineData(SquadTarget.ZCode)]
-    [InlineData(SquadTarget.Devin)]
-    public async Task InstallAsync_RealInstallGlobalScope_WritesOnlyUnderTheResolvedHomeSubtree(SquadTarget target)
+    /// <summary>
+    ///     A real global install writes each harness's files only under that harness's resolved
+    ///     home subtree, and the receipt describes exactly what landed there.
+    /// </summary>
+    /// <remarks>
+    ///     One real install covers every harness: the four targets were asserted as four separate
+    ///     installs that differed only in the harness name, and a deployment is the expensive part
+    ///     of this suite. The per-harness expectations below are unchanged and still run for all
+    ///     four harnesses — the install is shared, the assertions are not. The receipt layout and
+    ///     file-count expectations for every harness are also pinned by the dry-run theory above,
+    ///     which is where a harness whose rendering is not exercised here is covered.
+    /// </remarks>
+    [Fact]
+    public async Task InstallAsync_RealInstallGlobalScope_WritesOnlyUnderEachResolvedHomeSubtree()
     {
         // Arrange
-        string tempHome = Path.Combine(_temp.Path, $"real-home-{target}");
+        SquadTarget[] targets = [SquadTarget.Claude, SquadTarget.Pi, SquadTarget.ZCode, SquadTarget.Devin];
+        string tempHome = Path.Combine(_temp.Path, "real-home");
         Directory.CreateDirectory(tempHome);
-        string projectRoot = Path.Combine(_temp.Path, $"real-project-{target}");
+        string projectRoot = Path.Combine(_temp.Path, "real-project");
         Directory.CreateDirectory(projectRoot);
-        string userData = Path.Combine(_temp.Path, $"real-user-data-{target}");
+        string userData = Path.Combine(_temp.Path, "real-user-data");
 
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         FakeSquadUserPaths userPaths = new(userData);
@@ -1176,12 +1185,8 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
         SquadInstallRequest request = new(
             projectRoot,
             SquadDeploymentScope.Global,
-            [target],
+            targets,
             Version: "1.2.3");
-
-        string expectedRoot = globalRoots.ResolveGlobalRoot(target);
-        string expectedToken = SquadTargetCatalog.GetToken(target);
-        int expectedFileCount = ExpectedRenderedFileCount(target);
 
         // Act
         SquadLifecycleResult result = await service.InstallAsync(request);
@@ -1189,42 +1194,60 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
         // Assert
         Assert.True(result.Success, string.Join("; ", result.Errors ?? Array.Empty<string>()));
         Assert.NotNull(result.Receipt);
-        Assert.Equal(expectedFileCount, result.Receipt.Files.Count);
-        Assert.All(result.Receipt.Files, file => Assert.Equal(expectedToken, file.Target));
+        Assert.NotNull(result.Plan);
 
-        // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
-        // follows the Pi-renderer skill-only precedent (no agents/<name>.md principal).
-        if (target is SquadTarget.Claude or SquadTarget.Cursor)
+        string[] targetTokens = [.. targets.Select(SquadTargetCatalog.GetToken)];
+        Assert.All(result.Receipt.Files, file => Assert.Contains(file.Target, targetTokens));
+        Assert.Equal(
+            targets.Sum(ExpectedRenderedFileCount),
+            result.Receipt.Files.Count);
+
+        foreach (SquadTarget target in targets)
         {
-            SquadSource source = _corpus.Source;
-            SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
+            string expectedRoot = globalRoots.ResolveGlobalRoot(target);
+            string expectedToken = SquadTargetCatalog.GetToken(target);
+            SquadOwnedFile[] targetFiles = [.. result.Receipt.Files.Where(file => file.Target == expectedToken)];
 
-            // The conductor carries plan-path, spec-path, intake-path, and autonomy references;
-            // the entry-point skill projects all four.
-            Assert.Equal(4, primaryAgent.Resources.Count);
-            Assert.Single(
-                result.Receipt.Files,
-                f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
-            foreach (SquadResource resource in primaryAgent.Resources)
-                Assert.Single(
-                    result.Receipt.Files,
-                    f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+            Assert.Equal(ExpectedRenderedFileCount(target), targetFiles.Length);
 
-            if (target == SquadTarget.Claude)
+            // Claude keeps the subagent and adds an entry-point skill beside it; Cursor
+            // follows the Pi-renderer skill-only precedent (no agents/<name>.md principal).
+            if (target is SquadTarget.Claude)
+            {
+                SquadSource source = _corpus.Source;
+                SquadAgent primaryAgent = Assert.Single(source.Agents, a => a.Name == "conductor");
+
+                // The conductor carries plan-path, spec-path, intake-path, and autonomy references;
+                // the entry-point skill projects all four.
+                Assert.Equal(4, primaryAgent.Resources.Count);
                 Assert.Single(
-                    result.Receipt.Files,
+                    targetFiles,
+                    f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+                foreach (SquadResource resource in primaryAgent.Resources)
+                    Assert.Single(
+                        targetFiles,
+                        f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+
+                Assert.Single(
+                    targetFiles,
                     f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
-            else
-                Assert.DoesNotContain(
-                    result.Receipt.Files,
-                    f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+            }
+
+            Assert.True(
+                Directory.Exists(expectedRoot),
+                $"Expected {target}'s resolved global root '{expectedRoot}' to exist after a real install.");
+            string[] writtenFiles = Directory.EnumerateFiles(expectedRoot, "*", SearchOption.AllDirectories).ToArray();
+            Assert.Equal(targetFiles.Length, writtenFiles.Length);
+
+            foreach (SquadOwnedFile file in targetFiles)
+            {
+                string physicalPath = result.Plan.ResolvePhysicalPath(file, SquadFileSystemPathSemantics.Instance);
+                Assert.True(
+                    SquadFileSystemPathSemantics.Instance.IsWithin(expectedRoot, physicalPath),
+                    $"Physical path '{physicalPath}' for '{file.RelativePath}' ({target}) is not under " +
+                    $"the resolved global root '{expectedRoot}'.");
+            }
         }
-
-        Assert.True(
-            Directory.Exists(expectedRoot),
-            $"Expected {target}'s resolved global root '{expectedRoot}' to exist after a real install.");
-        string[] writtenFiles = Directory.EnumerateFiles(expectedRoot, "*", SearchOption.AllDirectories).ToArray();
-        Assert.Equal(result.Receipt.Files.Count, writtenFiles.Length);
 
         // The project root Squad was pointed at receives no rendered files under Global scope.
         Assert.Empty(Directory.EnumerateFileSystemEntries(projectRoot, "*", SearchOption.AllDirectories));

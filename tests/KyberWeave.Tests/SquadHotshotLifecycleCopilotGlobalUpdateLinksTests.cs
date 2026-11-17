@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -35,16 +37,17 @@ public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDispos
     [Fact]
     public async Task GlobalCopilotUpdateRewritesAbsoluteReferenceLinksAndReceiptDigestMatchesWrittenBytes()
     {
+        // The install is only the starting point here: the update's own rendering is what this test
+        // asserts. Copy the run-wide prepared Copilot install into this test's home instead of
+        // installing again, and use that home as the target root the copy's receipt names.
         string home = Path.Combine(_temp.Path, "links-update-home");
         Directory.CreateDirectory(home);
-
-        // A per-test target root keeps the transaction work directory off the shared tool root,
-        // which concurrently running lifecycle fixtures also deploy against.
-        string targetRoot = Path.Combine(_temp.Path, "links-update-target");
-        Directory.CreateDirectory(targetRoot);
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, "links-update-user"));
+        using InstalledSquadHome template = InstalledSquadHome.Build([SquadTarget.Copilot]);
+        SquadReceipt? copied = template.CopyInto(home);
+        Assert.NotNull(copied);
+        string targetRoot = home;
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = new(new SquadHostDefaults.CliSquadUserPaths(home, home));
         using CorpusSquadReleaseSource releaseSource = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
@@ -52,24 +55,18 @@ public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDispos
             stateStore,
             globalRoots: globalRoots);
 
-        SquadLifecycleResult install = await service.InstallAsync(new SquadInstallRequest(
-            TargetRoot: targetRoot,
-            Scope: SquadDeploymentScope.Global,
-            Targets: [SquadTarget.Copilot],
-            Version: "1.2.3"));
-        Assert.True(install.Success);
-
         string root = globalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
         string rootForwardSlashed = root.Replace('\\', '/').TrimEnd('/');
         string conductorFile = Path.Combine(root, "agents", "conductor.agent.md");
 
         // Drift the deployment to an older, unanchored rendering that the receipt still owns,
-        // so the update has genuine managed bytes to replace.
+        // so the update has genuine managed bytes to replace. The copied bytes still name the
+        // template's root, so match whatever absolute root they carry rather than the copy's.
         string installed = await File.ReadAllTextAsync(conductorFile);
-        string older = installed.Replace(
-            $"]({rootForwardSlashed}/agents/conductor/references/",
-            "](conductor/references/",
-            StringComparison.Ordinal);
+        string older = Regex.Replace(
+            installed,
+            @"\]\([^)]*/agents/conductor/references/",
+            "](conductor/references/");
         Assert.Contains("](conductor/references/", older, StringComparison.Ordinal);
         await File.WriteAllTextAsync(conductorFile, older);
         SquadReceipt installReceipt = Assert.IsType<SquadReceipt>(
@@ -113,12 +110,5 @@ public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDispos
         string writtenDigest = Convert.ToHexStringLower(
             SHA256.HashData(await File.ReadAllBytesAsync(conductorFile)));
         Assert.Equal(writtenDigest, owned.Sha256);
-    }
-
-    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = appDataDirectory;
-
-        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 }
