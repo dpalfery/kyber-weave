@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -30,6 +32,7 @@ public sealed class ArbiterDoctorService(
     IArbiterRepositoryLocator locator,
     IArbiterHarnessGating gating,
     IGitCommandRunner git,
+    ISquadStateStore stateStore,
     IWritableFileSystem files,
     IFileStatReader fileStats,
     IArbiterBinaryProbe probe) : IArbiterDoctorService
@@ -39,9 +42,10 @@ public sealed class ArbiterDoctorService(
     private const string SquadUpdateHint = "Run kyber-weave squad update to rewrite the model targets.";
 
     /// <summary>
-    /// How much older than the global Squad lock a model targets file may be before it counts as stale. A
-    /// deployment writes its files and then its lock, so the table that same deployment wrote is always a
-    /// moment older than the lock; only a table a later deployment did not rewrite is older than this.
+    /// How much older than the global Squad lock a model targets file may be before it counts as stale. This
+    /// is the fallback for a table no deployment recorded, judged by write time alone. A recorded table is
+    /// judged by the digest the receipt holds: an update rewrites only changed content, so a table whose
+    /// bytes did not change keeps the write time of the deployment that first wrote it.
     /// </summary>
     private static readonly TimeSpan SameDeploymentWindow = TimeSpan.FromMinutes(10);
 
@@ -104,8 +108,10 @@ public sealed class ArbiterDoctorService(
     /// <summary>
     /// Warns when model targeting is on and a hooked global target has no current model targets file.
     /// The file lives under each harness's own global root, where the user-scope Squad install writes it
-    /// and where the harness's global hook reads it. It must be at least as new as the global Squad lock,
-    /// because an older one was written before the last squad update.
+    /// and where the harness's global hook reads it. It must be the table the last Squad update wrote:
+    /// the deployment receipt records the digest of every file it owns, so a byte-identical table is
+    /// current no matter how old its write time is. An update rewrites only changed content, which is why
+    /// a write-time comparison would flag an unchanged table forever while the lock moved on.
     /// </summary>
     private void CheckModelTargets(
         KyberWeaveConfig config,
@@ -119,6 +125,7 @@ public sealed class ArbiterDoctorService(
             return;
         }
 
+        SquadReceipt? receipt = TryReadGlobalReceipt(home);
         string lockPath = Path.Combine(home, ".kyber-weave", "squad", "global", "squad.lock.yml");
         foreach (string token in globalTargets)
         {
@@ -128,17 +135,15 @@ public sealed class ArbiterDoctorService(
             }
 
             string targetsPath = Path.Combine(arbiterDirectory, $"model-targets.{token}.json");
-            DateTime targetsWritten = default;
-            bool readable = modelTargets.TryRead(arbiterDirectory, token) is not null
-                && TryGetWriteTimeUtc(targetsPath, out targetsWritten);
-            bool stale = readable && TryGetWriteTimeUtc(lockPath, out DateTime lockWritten)
-                && targetsWritten < lockWritten - SameDeploymentWindow;
-            if (readable && !stale)
+            bool readable = modelTargets.TryRead(arbiterDirectory, token) is not null;
+            if (readable && IsCurrentModelTargets(targetsPath, token, receipt, lockPath))
             {
                 continue;
             }
 
-            string reason = readable ? "is older than the Squad lock" : "is missing or unreadable";
+            string reason = readable
+                ? "does not match the table the last Squad update wrote"
+                : "is missing or unreadable";
             lines.Add(new ArbiterDoctorLine(
                 ArbiterDoctorStatus.Warn,
                 "Model targets",
@@ -150,6 +155,63 @@ public sealed class ArbiterDoctorService(
                 $"Model targeting is '{config.Arbiter.ModelTargeting.Mode}' but the {TargetDisplayName(token)} model targets file {reason}.",
                 targetsPath,
                 Hint: SquadUpdateHint));
+        }
+    }
+
+    /// <summary>
+    /// Whether the table on disk is the one the last update wrote. When the global receipt records the file,
+    /// the recorded digest is the answer: comparing it catches a table an older update left behind and one a
+    /// person edited, and it does not care that an unchanged table was never rewritten. A table no receipt
+    /// records, such as a hand-made one or one from a state that predates the record, falls back to the write
+    /// time the earlier check used.
+    /// </summary>
+    /// <param name="targetsPath">The table's full path.</param>
+    /// <param name="token">The harness token the table is for.</param>
+    /// <param name="receipt">The global receipt, or null when none could be read.</param>
+    /// <param name="lockPath">The global Squad lock's path, used only by the write-time fallback.</param>
+    /// <returns>True when the table is the one the last update wrote, or is judged current by write time.</returns>
+    private bool IsCurrentModelTargets(string targetsPath, string token, SquadReceipt? receipt, string lockPath)
+    {
+        SquadOwnedFile? owned = receipt?.Files.FirstOrDefault(file =>
+            string.Equals(file.Target, token, StringComparison.Ordinal)
+            && string.Equals(file.RelativePath, ArbiterModelTargetsFile.GlobalRelativePath(token), StringComparison.Ordinal));
+        if (owned is null)
+        {
+            return !(TryGetWriteTimeUtc(targetsPath, out DateTime targetsWritten)
+                && TryGetWriteTimeUtc(lockPath, out DateTime lockWritten)
+                && targetsWritten < lockWritten - SameDeploymentWindow);
+        }
+
+        string? digest = DigestOf(targetsPath);
+        return digest is not null && string.Equals(digest, owned.Sha256, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private SquadReceipt? TryReadGlobalReceipt(string home)
+    {
+        try
+        {
+            return stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
+        }
+        catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidDataException)
+        {
+            // No usable receipt means the write-time fallback decides, not a failed doctor run.
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The SHA-256 of a table's bytes, as the receipt records it, or null when the file cannot be read. The
+    /// render writes the table as UTF-8 JSON, so the text re-encodes to the bytes that were written.
+    /// </summary>
+    private string? DigestOf(string path)
+    {
+        try
+        {
+            return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(files.ReadAllText(path))));
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            return null;
         }
     }
 

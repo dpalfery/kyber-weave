@@ -127,8 +127,8 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
     }
 
     /// <summary>
-    /// A targets file older than the Squad lock was written before the last squad update, so it
-    /// may name models the lock no longer does.
+    /// A table with no recorded digest, such as one no deployment owns, falls back to write time: older
+    /// than the Squad lock means it was written before the last squad update.
     /// </summary>
     [Fact]
     public void Doctor_WarnsModelStaleWhenTheTargetsFileIsOlderThanTheSquadLock()
