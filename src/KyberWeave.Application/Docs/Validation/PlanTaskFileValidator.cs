@@ -7,7 +7,6 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.FileSystem;
-using KyberWeave.Core.Review.Catalogue;
 using KyberWeave.Core.Text;
 using static KyberWeave.Core.Docs.Validation.PlanTaskFileRules;
 
@@ -696,32 +695,24 @@ public sealed partial class PlanTaskFileValidator
     /// developer work the conductor will hand to a developer agent.
     /// </summary>
     /// <remarks>
-    /// A task file written before the removal names its worker by an agent the removal deleted. That name
-    /// resolves to a developer tier at dispatch time, so the file keeps validating without a technology line:
-    /// the requirement lands on a task that names a worker which still ships, not on one the resolution rewrites.
+    /// The worker name a task file records is read as the agent it dispatches to: a removed developer name
+    /// resolves to a developer tier, and a removed planning, research or delivery name resolves to its
+    /// replacement. Only a task whose worker is a developer tier needs a technology line, because only that
+    /// dispatch resolves a technology's rules, skills, standard and gates. A name that resolves to a planner,
+    /// a reviewer, `docs-dev`, `devops` or `platform-researcher` needs none.
     /// </remarks>
     private static bool NeedsTechnology(PlanTaskFileEntry entry)
     {
         string role = entry.Role?.Trim() ?? string.Empty;
         string agent = entry.Agent?.Trim() ?? string.Empty;
-        if (role is "docs-dev" or "github-devops" or "devops" || agent is "docs-dev" or "github-devops" or "devops")
+        string recorded = role.Length > 0 ? role : agent;
+        string dispatched = PlanTaskAgentPick.ResolveRemovedAgent(recorded, entry.Difficulty)?.Resolved ?? recorded;
+        if (dispatched.Length > 0)
         {
-            return false;
-        }
-
-        if (RemovedAgentMap.IsRemoved(role) || RemovedAgentMap.IsRemoved(agent))
-        {
-            return false;
+            return PlanTaskAgentPick.DeveloperTiers.Contains(dispatched, StringComparer.Ordinal);
         }
 
         string capabilities = entry.Capabilities ?? string.Empty;
-        if (capabilities
-            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Any(RemovedAgentMap.IsRemoved))
-        {
-            return false;
-        }
-
         return !capabilities.Contains("documentation", StringComparison.OrdinalIgnoreCase)
                && !capabilities.Contains("delivery", StringComparison.OrdinalIgnoreCase);
     }

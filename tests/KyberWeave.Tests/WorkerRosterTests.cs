@@ -103,13 +103,69 @@ public sealed class WorkerRosterTests
     public void UnderTieredADeveloperTaskWithoutTechnologyIsAnError()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        string text = NamedDeveloper(PlanTaskFileProbe.TaskFile())
+        string text = WithoutTechnology(NamedDeveloper(PlanTaskFileProbe.TaskFile()))
             .Replace("schema-version:", "worker-roster: tiered\nschema-version:", StringComparison.Ordinal);
         fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
 
         DiagnosticReport report = ValidateTiered(fixture);
 
         Assert.Contains(report.Items, item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+    }
+
+    /// <summary>
+    /// A task file written today that names a removed developer agent still states its technology. The removed
+    /// name resolves to a developer tier at dispatch, so a file without a technology line would hand its worker a
+    /// prompt with no technology rules and no technology gate.
+    /// </summary>
+    [Fact]
+    public void UnderTieredADeveloperTaskThatNamesARemovedAgentStillNeedsTechnology()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string text = WithoutTechnology(PlanTaskFileProbe.TaskFile())
+            .Replace("schema-version:", "worker-roster: tiered\nschema-version:", StringComparison.Ordinal);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
+
+        DiagnosticReport report = ValidateTiered(fixture);
+
+        Assert.Contains(report.Items, item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+    }
+
+    /// <summary>
+    /// A task whose only worker name is a removed agent in its capabilities line is developer work too: the
+    /// capabilities line is where an older plan's <c>Skills:</c> names land.
+    /// </summary>
+    [Fact]
+    public void UnderTieredADeveloperTaskWhoseCapabilitiesNameARemovedAgentStillNeedsTechnology()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string text = WithoutTechnology(PlanTaskFileProbe.TaskFile())
+            .Replace("  - id: T1\n    role: csharp-dev\n", "  - id: T1\n    capabilities: csharp-dev\n", StringComparison.Ordinal)
+            .Replace("  - id: T2\n    role: test-dev\n", "  - id: T2\n    capabilities: csharp-dev\n", StringComparison.Ordinal)
+            .Replace("schema-version:", "worker-roster: tiered\nschema-version:", StringComparison.Ordinal);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
+
+        DiagnosticReport report = ValidateTiered(fixture);
+
+        Assert.Contains(report.Items, item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+    }
+
+    /// <summary>
+    /// Delivery work is named by the role it resolves to, so a task that still names the removed delivery agent
+    /// needs no technology line: it resolves to <c>devops</c>.
+    /// </summary>
+    [Fact]
+    public void UnderTieredADeliveryTaskNamingTheRemovedDeliveryAgentNeedsNoTechnology()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string text = PlanTaskFileProbe.TaskFile()
+            .Replace("role: csharp-dev", "role: github-devops", StringComparison.Ordinal)
+            .Replace("role: test-dev", "role: github-devops", StringComparison.Ordinal)
+            .Replace("schema-version:", "worker-roster: tiered\nschema-version:", StringComparison.Ordinal);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
+
+        DiagnosticReport report = ValidateTiered(fixture);
+
+        Assert.DoesNotContain(report.Items, item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
     }
 
     [Fact]
@@ -165,6 +221,10 @@ public sealed class WorkerRosterTests
             report.Items,
             item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
     }
+
+    /// <summary>The probe's task file with every task's technology line removed, so a rule can report it missing.</summary>
+    private static string WithoutTechnology(string yaml) =>
+        yaml.Replace("    technology: csharp\n", string.Empty, StringComparison.Ordinal);
 
     /// <summary>
     /// The probe's task file with each task's worker named as the shipped developer tier it would dispatch to.
