@@ -107,6 +107,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults)
             .Ontology.WithDocsRoot(resolvedDocsRoot);
 
+        // The two choices add to each other rather than replace each other: an operator may ask
+        // for every shipped technology and one role folder in the same run.
         if (kyberStandards)
         {
             IReadOnlyList<string> mergedTechnologies = ontology.Technologies
@@ -114,7 +116,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 .ToList();
             ontology = ontology.Clone(technologies: mergedTechnologies);
         }
-        else if (standards is { Count: > 0 })
+
+        if (standards is { Count: > 0 })
         {
             ontology = WithChosenStandards(ontology, standards);
         }

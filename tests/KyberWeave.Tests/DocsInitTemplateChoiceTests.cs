@@ -125,6 +125,22 @@ public class DocsInitTemplateChoiceTests : IDisposable
         Assert.Empty(config.Ontology.Technologies);
     }
 
+    /// <summary>
+    /// Asking for every shipped technology and for one role folder in the same run has to do
+    /// both: the second choice is not a replacement for the first.
+    /// </summary>
+    [Fact]
+    public void NamingARoleBesideKyberStandardsInstallsBoth()
+    {
+        Scaffolding.Scaffold(_temp.Path, kyberStandards: true, standards: ["reviewer"]);
+
+        Assert.True(File.Exists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
+        Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.standards.md")));
+
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        Assert.Contains("reviewer", config.Ontology.Roles);
+    }
+
     [Fact]
     public void AnUnknownNameIsRefusedWithTheNearestMatch()
     {
