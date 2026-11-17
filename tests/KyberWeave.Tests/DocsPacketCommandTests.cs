@@ -51,7 +51,7 @@ public sealed class DocsPacketCommandTests
         (int exit, string output) = Packet(fixture, typed);
 
         Assert.True(exit == 0, output);
-        Assert.StartsWith("Task T1", output, StringComparison.Ordinal);
+        Assert.StartsWith("<task>\nTask T1", output, StringComparison.Ordinal);
         Assert.Contains("Worktree: " + fixture.Root, output, StringComparison.Ordinal);
         Assert.DoesNotContain("{worktree}", output, StringComparison.Ordinal);
         Assert.DoesNotContain("{prior_results}", output, StringComparison.Ordinal);

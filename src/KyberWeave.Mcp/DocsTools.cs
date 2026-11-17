@@ -1,5 +1,9 @@
 using System.ComponentModel;
+using System.Text;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Search;
 using ModelContextProtocol.Server;
 
@@ -18,6 +22,9 @@ public sealed partial class DocsTools
     private readonly IPlanLifecycleService _planLifecycle;
     private readonly IRunDeliveryService _delivery;
     private readonly IToolingCheckService _toolingCheck;
+    private readonly ITaskPromptService _prompts;
+    private readonly IDocsHostConfiguration _hostConfiguration;
+    private readonly string _repositoryRoot;
     private readonly DocsRootRegistry? _roots;
 
     /// <summary>Tools over <paramref name="query"/> that also answer for other worktrees through <paramref name="roots"/>.</summary>
@@ -25,18 +32,28 @@ public sealed partial class DocsTools
     /// <param name="planLifecycle">The plan lifecycle service for that root.</param>
     /// <param name="delivery">The run delivery service for that root.</param>
     /// <param name="toolingCheck">The tooling check service for that root.</param>
+    /// <param name="prompts">Builds one task's prompt, so the conductor learns which agent to dispatch.</param>
+    /// <param name="hostConfiguration">Loads that root's configuration, which holds the prompt budget.</param>
+    /// <param name="repositoryRoot">The root these tools answer for.</param>
     /// <param name="roots">Resolves a per-call <c>projectPath</c>, or null when this host serves one root only.</param>
     public DocsTools(
         IDocsQueryService query,
         IPlanLifecycleService planLifecycle,
         IRunDeliveryService delivery,
         IToolingCheckService toolingCheck,
+        ITaskPromptService prompts,
+        IDocsHostConfiguration hostConfiguration,
+        string repositoryRoot,
         DocsRootRegistry? roots = null)
     {
         _query = query ?? throw new ArgumentNullException(nameof(query));
         _planLifecycle = planLifecycle ?? throw new ArgumentNullException(nameof(planLifecycle));
         _delivery = delivery ?? throw new ArgumentNullException(nameof(delivery));
         _toolingCheck = toolingCheck ?? throw new ArgumentNullException(nameof(toolingCheck));
+        _prompts = prompts ?? throw new ArgumentNullException(nameof(prompts));
+        _hostConfiguration = hostConfiguration ?? throw new ArgumentNullException(nameof(hostConfiguration));
+        ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        _repositoryRoot = Path.GetFullPath(repositoryRoot);
         _roots = roots;
     }
 
@@ -258,6 +275,77 @@ public sealed partial class DocsTools
     {
         if (Redirect(projectPath, tools => tools.AgentCodingStandards(technology, topic, charBudget)) is { } redirected) return redirected;
         return _query.AgentCodingStandards(technology, topic, charBudget);
+    }
+
+    /// <summary>
+    /// Tells the conductor which agent to dispatch for one task, without returning the prompt text.
+    /// </summary>
+    /// <remarks>
+    /// The conductor dispatches a task id and a few header lines; a hook on that dispatch replaces the
+    /// task-id line with the whole prompt before the worker starts. The conductor therefore needs the
+    /// agent's name, not the prompt, and this tool answers with exactly that: who to dispatch, the
+    /// difficulty in use and who rated it, the technology, and anything the prompt budget left out.
+    /// </remarks>
+    [McpServerTool(Name = "docs_build_task_prompt_for_agent_dispatch", ReadOnly = true, OpenWorld = false)]
+    [Description("""
+        Use when you are the conductor about to dispatch a worker for a task: call it with the task id
+        and it names the agent to dispatch. Answers with the agent, the difficulty in use and its
+        source, the technology the task is written in, and anything the prompt budget left out. It
+        never returns the prompt text: dispatch the task id, and the dispatch hook expands it into the
+        full prompt for the worker. A prompt that cannot be built is refused with the command that
+        repairs its task file, so no worker starts with only a task id.
+
+        Name a technology instead of a task id for a dispatch that belongs to no task, such as a
+        research request.
+        """)]
+    public string BuildTaskPrompt(
+        [Description("""
+            The task id from the plan or specification, written any natural way: T1, t1, task 1, 1.
+            Omit it only when you name a technology for a dispatch that belongs to no task.
+            """)] string? taskId = null,
+        [Description("The technology a dispatch with no task names, such as 'csharp'. Ignored when a task id is given.")] string? technology = null,
+        [Description("The plan or specification the task is in, when the checkout has more than one active plan.")] string? plan = null,
+        [Description("A file holding the results earlier tasks reported, when this is a retry.")] string? priorResults = null,
+        [Description("How many attempts at this task already failed; the retry's step-up reads it.")] int failedAttempts = 0,
+        [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
+    {
+        if (Redirect(projectPath, tools => tools.BuildTaskPrompt(taskId, technology, plan, priorResults, failedAttempts)) is { } redirected)
+            return redirected;
+
+        DiagnosticReport report = new();
+        if (!_hostConfiguration.TryLoad(_repositoryRoot, report, out KyberWeaveConfig config))
+        {
+            return _query.Provenance()
+                   + "\nprompt: none\nreason: this checkout's configuration could not be loaded. Run 'kyber-weave docs validate .' in it.";
+        }
+
+        TaskPromptResult prompt = _prompts.Build(
+            new TaskPromptRequest(_repositoryRoot, taskId, plan, PriorResultsPath: priorResults, Technology: technology, FailedAttempts: failedAttempts),
+            config);
+
+        return FormatTaskPrompt(prompt);
+    }
+
+    private string FormatTaskPrompt(TaskPromptResult prompt)
+    {
+        StringBuilder text = new();
+        text.Append(_query.Provenance()).Append('\n');
+        if (!prompt.Built)
+        {
+            text.Append("prompt: none\nreason: ").Append(prompt.Refusal);
+            return text.ToString();
+        }
+
+        text.Append("prompt: built\n");
+        text.Append("agent: ").Append(prompt.Agent ?? "none").Append('\n');
+        text.Append("difficulty: ").Append(prompt.Difficulty ?? "none");
+        if (prompt.DifficultySource is not null)
+            text.Append(" (source: ").Append(prompt.DifficultySource).Append(')');
+        text.Append('\n');
+        text.Append("technology: ").Append(prompt.Technology ?? "none").Append('\n');
+        text.Append("left out: ").Append(prompt.LeftOut.Count == 0 ? "none" : string.Join("; ", prompt.LeftOut)).Append('\n');
+        text.Append("\nThe prompt text is not returned. Dispatch the agent above with the task id and the dispatch hook inserts it; a worker that starts without it runs 'kyber-weave docs packet <task id>'.");
+        return text.ToString();
     }
 
     /// <summary>

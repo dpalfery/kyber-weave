@@ -1166,7 +1166,7 @@ call is answered from the server's root, as before.
 - **The index is the worktree's own.** The CodeGraph joins and the freshness refresh use the
   `.codegraph/` of the named worktree, never the server root's.
 
-All twelve but the deliver tool are declared `OpenWorld = false`, and all but the two plan lifecycle tools,
+All thirteen but the deliver tool are declared `OpenWorld = false`, and all but the two plan lifecycle tools,
 the deliver tool and the tooling-check tool are declared `ReadOnly`; the SDK maps those to the protocol's `openWorldHint` and `readOnlyHint`. A client can act on an annotation; it cannot
 act on a sentence claiming the same thing, which is why that claim is no longer prose.
 
@@ -1189,7 +1189,7 @@ logs` puts those nouns in permanently resident text held back only by a negation
 negation is the first thing to degrade when a model scans many tools at once. Read out of
 context it becomes a prohibition on reading tests. Only
 `docs_answer_question_from_repo_documentation` carries an exclusion, because it is the broadest of
-the twelve; the narrower eleven state their territory positively so no request falls between them.
+the thirteen; the narrower twelve state their territory positively so no request falls between them.
 
 Where a constraint can live on a parameter it goes there instead — for example how
 `charBudget` caps **`docs_get_coding_standard_for_technology`** prose sits on that parameter,
@@ -1509,6 +1509,26 @@ the provenance line above — nothing else — so an empty corpus is not a failu
 still reports the root, a count of `0`, and unavailable revision markers when Git cannot be
 read. It is also the one tool that always answers: under the stop rule every other tool can
 return `STATUS: TOOL_FAILURE`, and this one cannot, so a failure can be diagnosed.
+
+### `docs_build_task_prompt_for_agent_dispatch(taskId = null, technology = null, plan = null, priorResults = null, failedAttempts = 0, projectPath = null)`
+
+The conductor's dispatch question: for this task, which agent do I dispatch, and is its prompt
+whole? It builds the same prompt `kyber-weave docs packet <task id>` prints, through the same
+service, and answers with the facts the dispatch needs and **never the prompt text**: the agent,
+the difficulty in use and who rated it (`architect`, `default` or `decision-model`), the one
+technology the task names, and what the prompt budget left out. The prompt itself reaches the
+worker through the dispatch hook, which replaces the task-id line of the dispatch before the
+worker starts, so the conductor never reads or retypes it.
+
+`taskId` is written any natural way (`T1`, `t1`, `task 1`, `1`) and is resolved in the one plan
+that is Ready or In progress, or the one `plan` names. `priorResults` is the file a retry names,
+and `failedAttempts` is how many attempts already failed, so a retry's reply describes the same
+prompt the hook builds. Name `technology` instead of a task id for a dispatch that belongs to no
+task, such as a research request: the reply then describes the parts from the shared rules on.
+
+A task file that is missing or no longer matches its plan builds no prompt: the reply is
+`prompt: none` and a `reason:` line naming `kyber-weave docs tasks <plan> --write`, so no worker
+starts with only a task id. The reply leads with the provenance line, like every other tool.
 
 ### `docs_finalize_approved_plan_and_write_task_file(projectPath, planFile, approvalMode, approval)`
 
