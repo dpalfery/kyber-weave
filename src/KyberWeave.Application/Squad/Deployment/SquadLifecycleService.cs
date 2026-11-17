@@ -886,6 +886,16 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 $"Kept the locally edited deployed file '{previous.RelativePath}' ({previous.Target}). " +
                 "Squad did not overwrite it during this update.");
         }
+
+        // A shared hook file is kept entry by entry, so the plan reports each drifted entry here
+        // rather than as a whole-file change. The operator needs the same notice a kept file gets:
+        // these hooks stop receiving updates until the entry is re-deployed.
+        foreach (SquadOwnedBlockDrift drift in plan.BlockDrifts)
+        {
+            warnings.Add(
+                $"Kept the locally edited hook entry '{drift.Location}' in '{drift.RelativePath}' ({drift.Target}). " +
+                "Squad did not overwrite it during this update.");
+        }
     }
 
     /// <summary>

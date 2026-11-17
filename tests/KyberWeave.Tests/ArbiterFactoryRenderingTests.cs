@@ -674,6 +674,36 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         Assert.Contains("user-own-stop-notifier", remaining, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A locally edited entry inside a shared hook file is kept by update exactly as a locally
+    /// edited whole file is, so it gets the same preserved-edit warning. Without it the operator
+    /// learns about a hook that stopped receiving updates only from the next status run.
+    /// </summary>
+    [Fact]
+    public async Task Update_KeptLocallyEditedHookEntry_IsReportedAsAPreservedEdit()
+    {
+        using TempDirectory fixture = new();
+        string targetRoot = Path.Combine(fixture.Path, "project");
+        Directory.CreateDirectory(targetRoot);
+        SquadLifecycleResult installed = await InstallAsync(targetRoot, fixture.Path);
+        Assert.True(installed.Success, string.Join("; ", installed.Errors ?? []));
+
+        string hooksPath = Path.Combine(targetRoot, ".factory/hooks.json");
+        string edited = (await File.ReadAllTextAsync(hooksPath))
+            .Replace(ExpectedCommand, "user-own-task-hook", StringComparison.Ordinal);
+        await File.WriteAllTextAsync(hooksPath, edited);
+
+        SquadLifecycleResult update = await UpdateAsync(targetRoot, fixture.Path);
+
+        Assert.True(update.Success, string.Join("; ", update.Errors ?? []));
+        Assert.Contains("user-own-task-hook", await File.ReadAllTextAsync(hooksPath), StringComparison.Ordinal);
+        Assert.Contains(
+            update.Warnings ?? [],
+            warning => warning.Contains("Kept the locally edited", StringComparison.Ordinal)
+                       && warning.Contains(".factory/hooks.json", StringComparison.Ordinal)
+                       && warning.Contains("/PreToolUse/0", StringComparison.Ordinal));
+    }
+
     private static int CountOccurrences(string text, string needle) =>
         text.Split(needle, StringSplitOptions.None).Length - 1;
 
