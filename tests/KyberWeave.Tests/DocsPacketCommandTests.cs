@@ -1,3 +1,4 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
@@ -57,6 +58,19 @@ public sealed class DocsPacketCommandTests
         Assert.DoesNotContain("{prior_results}", output, StringComparison.Ordinal);
         Assert.Contains(PlanTaskPacket.NoPriorResults, output, StringComparison.Ordinal);
         Assert.DoesNotContain("Task T2", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>The packet carries the task's resolved test command, so the worker neither fills placeholders nor guesses.</summary>
+    [Fact]
+    public void ThePacketPrintsTheTasksResolvedTestCommand()
+    {
+        using DocFixture fixture = Ready();
+
+        (int exit, string output) = Packet(fixture, "T1");
+
+        Assert.True(exit == 0, output);
+        Assert.Contains(PacketTestCommandRenderer.Heading, output, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~PlanTaskFileValidatorTests", output, StringComparison.Ordinal);
     }
 
     [Fact]

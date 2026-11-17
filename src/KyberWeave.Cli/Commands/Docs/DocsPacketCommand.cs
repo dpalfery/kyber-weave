@@ -34,9 +34,9 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
     public const string PriorResultsUnreadable = "KW-DOC-TASKS-CLI-005";
 
     /// <summary>
-    /// Prints the packet of the named task: the task file's prompt with <c>{worktree}</c> filled in and the
-    /// prior-results slot filled from <c>--prior-results</c>, or labelled as empty, then the host facts section
-    /// (<see cref="PacketHostFacts" />) and nothing else. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
+    /// Prints the packet of the named task: the built prompt, then the task's resolved test command
+    /// (<see cref="PacketTestCommand" />). The prompt has <c>{worktree}</c> filled in and the prior-results slot
+    /// filled from <c>--prior-results</c>, or labelled as empty. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
     /// folders. When this checkout has none, the repository's other git worktrees are searched for the one active
     /// plan that has the task, so a worker whose shell is not in its worktree still gets its packet. The task file is checked against the plan first, so a stale file is refused with the fix.
     /// Exits 0 after printing; exits 1 with the reason and the next command otherwise.
@@ -132,6 +132,20 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
         }
 
         Console.Out.WriteLine(prompt.Prompt);
+
+        // The test command is a packet extra, not part of the prompt the hook inserts, so it is printed here.
+        if (PacketTestCommand.Render(
+                root,
+                config,
+                prompt.Agent,
+                entry,
+                PlanTaskTarget.ContractRow(root, plan, entry.Id),
+                OperatingSystem.IsWindows()) is { } tests)
+        {
+            Console.Out.WriteLine();
+            Console.Out.WriteLine(tests);
+        }
+
         return 0;
     }
 
