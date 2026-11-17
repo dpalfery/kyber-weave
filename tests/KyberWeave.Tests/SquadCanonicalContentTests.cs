@@ -629,7 +629,9 @@ public sealed class SquadCanonicalContentTests
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
-        Assert.Equal("orchestration", conductor.ModelProfile);
+        Assert.True(string.IsNullOrEmpty(conductor.ModelProfile));
+        Assert.Contains("dev-hard", source.ModelProfiles.Profiles.Keys);
+        Assert.DoesNotContain("orchestration", source.ModelProfiles.Profiles.Keys);
         Assert.Equal("architect", architect.ModelProfile);
         Assert.Contains("architect", conductor.DelegatesTo);
         Assert.Contains("product-owner", conductor.DelegatesTo);

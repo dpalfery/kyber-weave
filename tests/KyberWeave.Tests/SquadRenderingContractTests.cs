@@ -151,18 +151,13 @@ public sealed class SquadRenderingContractTests
             Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
         }
 
-        // Model resolution: the orchestration profile names a copilot model, so the conductor's
-        // agent file carries it instead of deferring to the picker.
-        foreach (string orchestrator in new[] { "conductor" })
-        {
-            SquadDeploymentFile file = Assert.Single(
-                result.Files,
-                f => f.RelativePath == $".github/agents/{orchestrator}.agent.md");
-            YamlMappingNode frontmatter = ReadFrontmatter(file);
-            Assert.Equal(
-                "GPT-6.1 Terra (copilot)",
-                ((YamlScalarNode)frontmatter.Children[new YamlScalarNode("model")]).Value);
-        }
+        // The conductor has no model profile: its agent file names no model and the picker runs
+        // it on the session's model.
+        SquadDeploymentFile conductorFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/conductor.agent.md");
+        YamlMappingNode conductorFrontmatter = ReadFrontmatter(conductorFile);
+        Assert.False(conductorFrontmatter.Children.ContainsKey(new YamlScalarNode("model")));
 
         // Every other agent's profile does carry a copilot-specific model — resolved from
         // the real profiles/models.yml, not a hardcoded expectation here.
