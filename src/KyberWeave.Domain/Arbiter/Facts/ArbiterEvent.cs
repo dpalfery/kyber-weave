@@ -47,6 +47,12 @@ public sealed record ArbiterEvent
     /// <summary>The dispatch prompt, header block included.</summary>
     public string Prompt { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Whether the hook inserted the task prompt into this dispatch. Only the hook can set it, and only after it
+    /// built the prompt, so the plan-read rule's exemption never depends on text the conductor wrote.
+    /// </summary>
+    public bool PromptInserted { get; init; }
+
     /// <summary>The harness tool-call id, where the payload carries one.</summary>
     public string? ToolCallId { get; init; }
 

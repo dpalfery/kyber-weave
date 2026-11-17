@@ -645,8 +645,12 @@ public sealed class DispatchPromptInsertionTests : IDisposable
         Assert.Contains(report.Lines, line => line.Message.Contains("dispatch hook", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The plan-read exemption follows the hook's own insertion record. A conductor that types the prompt tags
+    /// itself still gets the rule, because the text it controls proves nothing.
+    /// </summary>
     [Fact]
-    public void AnExpandedPromptIsNotJudgedAsTellingAWorkerToReadAPlan()
+    public void ThePlanReadExemptionFollowsTheHooksInsertionNotThePromptsText()
     {
         KyberWeaveConfig config = new()
         {
@@ -656,13 +660,18 @@ public sealed class DispatchPromptInsertionTests : IDisposable
             "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nRead `docs/plans/plan.md` and implement T3.";
 
         ArbiterFactSet shortFacts = TriggerFactBuilder.Build("delegate", "csharp-dev", planRead, "conductor", "harness", config);
-        ArbiterFactSet expandedFacts = TriggerFactBuilder.Build(
+        ArbiterFactSet typedFacts = TriggerFactBuilder.Build(
             "delegate", "csharp-dev", TaskPrompt + "\n\n" + planRead, "conductor", "harness", config);
+        ArbiterFactSet insertedFacts = TriggerFactBuilder.Build(
+            "delegate", "csharp-dev", TaskPrompt + "\n\n" + planRead, "conductor", "harness", config,
+            promptInserted: true);
 
         Assert.True(shortFacts.TryGet("delegation.planning-paths", out ArbiterFact? shortPaths));
-        Assert.True(expandedFacts.TryGet("delegation.planning-paths", out ArbiterFact? expandedPaths));
+        Assert.True(typedFacts.TryGet("delegation.planning-paths", out ArbiterFact? typedPaths));
+        Assert.True(insertedFacts.TryGet("delegation.planning-paths", out ArbiterFact? insertedPaths));
         Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<string>>(shortPaths!.Value!));
-        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(expandedPaths!.Value!));
+        Assert.NotEmpty(Assert.IsAssignableFrom<IReadOnlyList<string>>(typedPaths!.Value!));
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(insertedPaths!.Value!));
     }
 
     /// <summary>A host configuration loader that answers one configuration for every root.</summary>
