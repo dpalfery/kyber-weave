@@ -47,6 +47,9 @@ when nothing matches it falls back to the fast tier. `--help` lists
 its modes; `--full` and `--scoped` reach the `test` gate, so they are not for dev agents and exit 89 from a non-terminal shell. It is
 **not** evidence and must never be cited as such ([`REVIEW.md`](REVIEW.md)).
 
+A full run, wherever it happens — the council's `test` gate or CI — is timed and its number reported: see
+[the two-minute budget](#the-net-unit-suite-completes-in-120-seconds-or-less).
+
 Run the tests that cover your change, plus build/lint of the touched projects, and check each
 run reports a non-zero test count. The commands for each area:
 
@@ -81,6 +84,17 @@ docs gates:
 dotnet run --project src/KyberWeave.Cli -- docs validate . --merge-ready
 dotnet run --project src/KyberWeave.Cli -- docs drift .
 ```
+
+#### The .NET unit suite completes in 120 seconds or less — a hard limit
+
+The full run — `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`, the `test` gate's command over
+`tests/KyberWeave.Tests` — must complete within 120 seconds of wall-clock time. That is a hard limit, not a target.
+Time every local full run: the runner's closing summary `duration:` line is the number, and whoever ran it, person
+or agent, states it in their report. Any local full run over 120 seconds is escalated at once, whatever else the
+machine was doing — no second run to confirm. The work is not done: escalate with the measured time, the commit,
+the slowest test classes and what else was running on the machine, if known. Then loop: per-class timings, fix or
+split the slowest classes, re-measure, until it is at or under 120 seconds. Never raise the budget, skip or disable
+tests, or report the task complete while it is over; a change that makes the suite slower than the budget is not mergeable.
 
 `review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
 so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
