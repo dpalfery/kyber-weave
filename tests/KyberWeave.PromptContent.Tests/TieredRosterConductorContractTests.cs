@@ -155,6 +155,59 @@ public sealed class TieredRosterConductorContractTests
         Assert.Contains("tiered", line, StringComparison.Ordinal);
     }
 
+    /// <summary>The callers that send work to the live-platform agent list its tiered replacement too.</summary>
+    [Fact]
+    public void TheCallersThatReplacedAzureReaderListTheTieredResearcher()
+    {
+        string[] callers = [ConductorPath, ArchitectPath];
+
+        string[] missing =
+        [
+            .. callers.Where(caller => !FrontmatterLine(Read(caller), "delegates-to:")
+                    .Contains("platform-researcher", StringComparison.Ordinal))
+        ];
+
+        Assert.True(
+            missing.Length == 0,
+            $"These callers must list 'platform-researcher' so a tiered run can dispatch it (KW-ARB-ROSTER-001): " +
+            string.Join(", ", missing));
+    }
+
+    /// <summary>
+    /// The unqualified technology rules must not come back. Each former sentence now opens with its roster, and
+    /// the tiered branch states the override, so a future edit that drops the scope fails here rather than
+    /// silently letting a tiered run match a technology agent to a file type.
+    /// </summary>
+    [Fact]
+    public void TheTieredRoutingOverridesTheTechnologySelectionRules()
+    {
+        string conductor = Read(ConductorPath);
+        string skill = Read(DeliveryExecutionPath);
+        string bugCrusher = Read(BugCrusherSkillPath);
+
+        Assert.DoesNotContain(
+            "When none is named, assign it to the delegate whose description trigger matches its files",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Choose each task's agent by matching the abilities it needs",
+            skill,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "If the fix is more than a few lines or sits in a specialist's domain, hand it to that specialist",
+            bugCrusher,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Under `tiered` the line's `agent=` is the kind of worker and the dispatch tool names the tier",
+            conductor,
+            StringComparison.Ordinal);
+        Assert.Contains("Under `tiered` the dispatch tool names the agent", skill, StringComparison.Ordinal);
+        Assert.Contains(
+            "Under `worker-roster: tiered` the specialist is a developer tier",
+            bugCrusher,
+            StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// A dispatch of the delivery agent under the tiered roster must name the tiered agent. The rule is per
     /// site, because a global "read this name as that name" does not travel with a skill another entry point
