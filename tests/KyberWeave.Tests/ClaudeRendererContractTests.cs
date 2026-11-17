@@ -375,7 +375,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// </summary>
     [Theory]
     [InlineData("test-dev")]
-    [InlineData("docs-dev")]
     [InlineData("dal-dev")]
     public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
     {
@@ -426,6 +425,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     /// Pins Sonnet 5.5 for Claude's general workers without changing planning membership.
     /// </summary>
     [Theory]
+    [InlineData("docs-dev")]
     [InlineData("github-devops")]
     [InlineData("pulumi-dev")]
     [InlineData("tauri-dev")]
@@ -471,7 +471,6 @@ public sealed class ClaudeRendererContractTests : IDisposable
             ".claude/agents/csharp-dev.md",
             ".claude/agents/dal-dev.md",
             ".claude/agents/dev-easy.md",
-            ".claude/agents/docs-dev.md",
             ".claude/agents/maui-dev.md",
             ".claude/agents/platform-researcher.md",
             ".claude/agents/python-dev.md",

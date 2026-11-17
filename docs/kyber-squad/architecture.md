@@ -2471,11 +2471,11 @@ Each tier's model comes from its own agent file through its model profile — `d
 `dev-medium` is `general`, `dev-hard` is the `dev-hard` profile — and nothing assigns a model at
 dispatch. `dev-hard` is its own profile, so changing a planning profile never changes the developer
 ladder, and it carries the model `architect` pinned on that harness when the tier became a real
-upgrade (`opus`, `gpt-6.1-sol`, `Claude Opus 5.5 (copilot)`, `zai-coding-plan/glm-5.3`, and so on).
+upgrade (`opus`, `gpt-6.1-sol`, `Gemini 4 Hydrogen (copilot)`, `zai-coding-plan/glm-5.3`, and so on).
 A failed task that moves up to `dev-hard` therefore also changes its model on every harness that
 renders one. Two harnesses have no second model to move to: Warp renders no per-agent model key at
 all, and Command Code has no bundled column, so both profiles resolve to the session's model there.
-`fast` and `general` pin the same token on six harnesses, so the first step, `dev-easy` to
+`fast` and `general` pin the same token on five harnesses, so the first step, `dev-easy` to
 `dev-medium`, changes the tier but not the model on those; the `dev-hard` step is the one that always
 changes it. A host can point any profile at another model with a [model preset](model-profiles.md).
 Under `tiered` the Arbiter's model-targeting rules follow the same three profiles:

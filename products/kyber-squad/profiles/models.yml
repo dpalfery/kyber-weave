@@ -35,7 +35,7 @@ profiles:
     antigravity: pro
     claude: opus
     codex: gpt-6.1-sol
-    copilot: Claude Opus 5.5 (copilot)
+    copilot: Gemini 4 Hydrogen (copilot)
     cursor: claude-sonnet-5-5[effort=high]
     devin: claude-opus-5-5-high
     factory: glm-5.3[reasoningEffort=high]
@@ -48,7 +48,7 @@ profiles:
     antigravity: flash
     claude: claude-haiku-5-5
     codex: gpt-6-luna
-    copilot: GPT-6.1 Terra (copilot)
+    copilot: Claude Haiku 5.5 (copilot)
     cursor: composer-2.5[]
     devin: deepseek-v4-1-flash-high
     factory: deepseek-v4.1-flash[reasoningEffort=high]
