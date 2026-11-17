@@ -153,8 +153,10 @@ public sealed class WorkerGuard(
     /// </summary>
     /// <remarks>
     /// A judged command with no working directory is refused rather than allowed: the technology's list lives under
-    /// the working directory, so without one the guard cannot read what the command was allowed to run. The event
-    /// naming no directory is itself a machine fact, which is what ADR 0072 permits a refusal on. The dispatch's
+    /// the working directory, so without one the guard cannot read what the command was allowed to run. An
+    /// unreadable configuration is refused for the same reason: a list the guard cannot read is one it cannot apply,
+    /// so a load failure never widens what a read-only dispatch may run. The event naming no directory, and the
+    /// failed load, are themselves machine facts, which is what ADR 0072 permits a refusal on. The dispatch's
     /// technology scopes the list: a dispatch that names none, has returned, or cannot be told apart from a parallel
     /// one falls back to every declared technology's list, so a refusal is never lost.
     /// </remarks>
@@ -173,7 +175,14 @@ public sealed class WorkerGuard(
         }
 
         HostConfigLoadResult loaded = hostConfig.TryLoad(call.Cwd);
-        if (!loaded.Success || loaded.Config is null || loaded.Config.Arbiter.ExplicitlyEnabled == false)
+        if (!loaded.Success || loaded.Config is null)
+        {
+            return "The worker guard refused this command: the repository configuration at '" + call.Cwd +
+                "' could not be read, so the technology's allowed command forms are unknown. Nothing ran. " +
+                "Fix the configuration, or report what you could not inspect.";
+        }
+
+        if (loaded.Config.Arbiter.ExplicitlyEnabled == false)
         {
             return null;
         }
