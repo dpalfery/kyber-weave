@@ -193,6 +193,8 @@ Under `autonomy: autonomous`, decide per the autonomous-decisions reference and 
 
 After every plan save, obtain the two checks. Leave `mergeReady` false while the plan is in the active plans folder. A shell is not permission to implement.
 
+A check passes when it reports no error; warnings do not fail it. The standards warning period (`KW-DOC-SPEC-012`, `KW-DOC-SPEC-013`, `KW-CONFIG-REG-001`, `KW-CONFIG-REG-002`) means the host has not run `kyber-weave docs standards migrate` yet, so record those warnings in the plan's risks and continue. Only an error outside your write boundary is `STATUS: BLOCKED`.
+
 ### With a shell
 
 Run `kyber-weave docs validate . --merge-ready` and `kyber-weave docs drift .` in the checkout that holds your plan (the worktree when the run uses one) and report `DOCS_VALIDATE: pass (cli, <path>)`. You may use the kw-docs MCP tools `docs_validate_governed_document_schema` and `docs_detect_drift_between_documents_and_code` instead, only in the canonical checkout and only when each response has `rev=` and `branch=` equal to your `RUN_BASE` and `RUN_BRANCH` and `repo=` equal to `git rev-parse --git-common-dir` in your checkout. `repo=` is the git directory, so a different value is another repository, and a matching one proves nothing alone because every worktree shares it. On any mismatch, or when the result is missing, run the CLI commands.
@@ -203,7 +205,7 @@ The MCP result cannot be checked against your checkout, so do not rely on it. Us
 
 ## Ready
 
-Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass:
+Return `PLAN_READY` only when the saved Draft has no open decisions (all rows in `## Decisions` have status `ANSWERED` or approved), contains the selected mode and matching approved contract, declares its scale (`documentation-impact` with `impact-components`) and its `Design harvest` table, has a schedulable dependency graph, and both documentation checks pass (no error; the standards warning period does not count):
 
 ```text
 STATUS: PLAN_READY

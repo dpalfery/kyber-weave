@@ -191,6 +191,28 @@ public sealed class TieredRosterConductorContractTests
         Assert.Contains("never stops a run", contract, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// The planner's gate is the CLI's: it fails on an error, not on a warning. A host that has not
+    /// run the standards migration reports warnings only, and a planner that read those as a failed
+    /// check stopped a run that the configuration itself made valid.
+    /// </summary>
+    [Fact]
+    public void TheArchitectTreatsAWarningOnlyPlanningCheckAsAPass()
+    {
+        string architect = Read(ArchitectPath);
+        string planAuthoring = Read("products/kyber-squad/agents/architect/references/plan-authoring.md");
+
+        Assert.Contains(
+            "A check passes when it reports no error, so warnings never block the plan",
+            architect,
+            StringComparison.Ordinal);
+        Assert.Contains("warnings do not fail it", planAuthoring, StringComparison.Ordinal);
+        Assert.Contains(
+            "`kyber-weave docs standards migrate`",
+            architect,
+            StringComparison.Ordinal);
+    }
+
     /// <summary>The callers that send work to the live-platform agent list its tiered replacement too.</summary>
     [Fact]
     public void TheCallersThatReplacedAzureReaderListTheTieredResearcher()
