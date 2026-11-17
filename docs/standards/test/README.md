@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-17
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -39,6 +39,32 @@ namespace root they use for routing (`KyberWeave.Tests` and `KyberWeave.Integrat
 fully-qualified class name names one test in one project.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
+
+## Which project a test belongs in
+
+One rule, and it is checkable by reading the test:
+
+- **`tests/KyberWeave.Integration.Tests`** holds a test that performs a real Squad deployment, starts
+  a real program (git, the CLI, `dotnet`, `sqlite3`, node, bun), or needs a real file system beyond
+  its own small scratch folder.
+- **`tests/KyberWeave.Tests`** holds everything else. Its full run is the 120-second unit suite, so
+  a real deployment or a real child program in it is a defect, not a slow test to tolerate.
+
+**New behaviour gets an in-memory unit test written against an interface.** If the behaviour depends
+on the disk, the clock or another program, the seam is an interface the test replaces: a file-system
+or executor abstraction, a fake release source, a fake renderer. The unit test proves the decision
+through that seam, and the integration suite proves the real implementation once, end to end.
+
+**Code that can only be tested through the real disk or a real program is a design gap to raise, not
+a reason to add a slow test to the unit project.** Introduce the interface first (or widen an existing
+one), write the unit test against it, and keep the real-disk or real-program test in the integration
+project. A new test in the unit project that reaches the real disk or spawns a process will be moved
+at review.
+
+The integration project is the safety net: CI runs it on every pull request in its own job, and a
+developer agent does not run it. The review council's `integration-test` gate is marked
+`full-suite: true`, so a developer's `review gates` run refuses it (`KW-REVIEW-033`) the same way it
+refuses the unit `test` gate.
 
 ## Real files, and fakes that earn their keep
 
@@ -212,19 +238,20 @@ test stops at 12 million tokens or $2.
 ## Fixtures
 
 The shared helpers live in `tests/KyberWeave.Testing` and are referenced by both test projects.
+Two helpers that need a real disk tree live with their callers in
+`tests/KyberWeave.Integration.Tests`: `CodeGraphFixtureDb` (a real sqlite index, for adapter parity only)
+and `TestGitRepositoryTemplate` (a pre-seeded git repository copied without spawning OS child processes).
 
 | Helper | For |
 |---|---|
 | `TempDirectory` | A disposable scratch directory. Implement `IDisposable` on the test class and dispose it. |
 | `DocFixture` | A documentation corpus on disk — `.WithCatalog()`, `.WithSourceRoot()`, `.Write()`, `.Load()` |
 | `FakeCodeGraphResolver` | `.WithSymbols(...)` for deterministic symbol and route resolution |
-| `CodeGraphFixtureDb` | A real sqlite index, for adapter parity only |
 | `KyberWeaveTestPaths` | Locates the repository root by walking up to `KyberWeave.sln` |
 | `ProcessConsoleCapture` | Lock-free, `AsyncLocal` console capture isolating stdout, stderr, and Spectre console width per async context |
 | `TestSquadCorpus` | Thread-safe, lazy-cached immutable canonical `SquadSource` and target baseline renders |
 | `SquadRenderedOutput` | Reading rendered Squad files back: frontmatter split, required scalars, shared and suppressed identities |
 | `SyntheticValidSquadReleaseSource` | Lightweight ~15-file valid Squad source tree for state, lock, receipt, and lifecycle tests |
-| `TestGitRepositoryTemplate` | Pre-initialized git repository template directory copied without spawning OS child processes |
 
 ## Tests that start processes
 
@@ -289,12 +316,22 @@ format check, then report. Run these `dotnet` commands directly from the reposit
 **No dev agent runs the full test suite**: the review council's `test` gate and CI run it. Whoever
 runs it, person or agent, times it and reports the number: it must finish in 120 seconds or less
 ([the .NET test budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)).
+The integration project (`tests/KyberWeave.Integration.Tests`) is not part of that budget: CI and the
+council's `integration-test` gate run it, and a developer agent runs only the integration classes its
+change touches when it is asked to.
 
 ```bash
 dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
+```
+
+A class in the integration project builds and runs the same way, against its own project:
+
+```bash
+dotnet build tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj -c Release
+dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 ```
 
 The build comes first and `--no-build` depends on it: the same build produced the binaries the
