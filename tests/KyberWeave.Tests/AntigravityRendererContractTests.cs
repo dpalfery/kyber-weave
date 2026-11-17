@@ -451,8 +451,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         HashSet<string> expectedTrueProfiles =
         [
-            "architect", "documentation", "investigator", "product-planning", "reviewer", "review-seat", "root-fixer",
-            "worker", "publishing-worker"
+            "architect", "documentation", "investigator", "platform-reader", "product-planning", "reviewer", "review-seat",
+            "root-fixer", "worker", "publishing-worker"
         ];
         HashSet<string> expectedFalseProfiles = ["orchestrator", "read-only"];
 

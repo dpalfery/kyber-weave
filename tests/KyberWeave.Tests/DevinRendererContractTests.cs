@@ -90,6 +90,7 @@ public sealed class DevinRendererContractTests : IDisposable
         ["deep-planning"] = "claude-opus-5-5-high",
         ["fast"] = "deepseek-v4-1-flash-high",
         ["general"] = "swe-2-high",
+        ["dev-hard"] = "swe-2-high",
         ["reviewer"] = "grok-4-7-high"
     };
 

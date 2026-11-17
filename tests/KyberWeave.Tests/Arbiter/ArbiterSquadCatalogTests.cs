@@ -21,7 +21,8 @@ public sealed class ArbiterSquadCatalogTests
         string[] expected =
         [
             "architect", "azure-reader", "bug-crusher", "bug-crusher-investigator", "code-reviewer",
-            "conductor", "csharp-dev", "dal-dev", "docs-dev", "github-devops", "go-dev", "maui-dev",
+            "conductor", "csharp-dev", "dal-dev", "dev-easy", "dev-hard", "dev-medium", "devops",
+            "docs-dev", "github-devops", "go-dev", "maui-dev", "platform-researcher",
             "product-owner", "pulumi-dev", "python-dev", "react-dev", "research-agent", "review-lens",
             "review-triage", "rust-dev", "sql-database-architect", "tauri-dev", "test-dev",
             "typescript-dev",

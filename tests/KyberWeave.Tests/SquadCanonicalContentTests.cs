@@ -82,6 +82,10 @@ public sealed class SquadCanonicalContentTests
     [
         "csharp-dev",
         "dal-dev",
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops",
         "github-devops",
         "go-dev",
         "maui-dev",
@@ -106,10 +110,15 @@ public sealed class SquadCanonicalContentTests
         "conductor",
         "csharp-dev",
         "dal-dev",
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops",
         "docs-dev",
         "github-devops",
         "go-dev",
         "maui-dev",
+        "platform-researcher",
         "product-owner",
         "pulumi-dev",
         "python-dev",
@@ -919,6 +928,9 @@ public sealed class SquadCanonicalContentTests
     [Theory]
     [InlineData("csharp-dev")]
     [InlineData("dal-dev")]
+    [InlineData("dev-easy")]
+    [InlineData("dev-hard")]
+    [InlineData("dev-medium")]
     [InlineData("github-devops")]
     [InlineData("go-dev")]
     [InlineData("maui-dev")]

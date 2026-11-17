@@ -875,6 +875,49 @@ public sealed class SquadSourceTests
         AssertInvalid(fixture, relativePath, missingProfile);
     }
 
+    /// <summary>
+    /// A model profile is required: the model comes from the agent, so an agent without one would
+    /// render a worker whose model nobody chose. The conductor is the single exception, and the error
+    /// says so.
+    /// </summary>
+    [Fact]
+    public void LoadAgentWithNoModelProfileFailsUnlessItIsTheConductor()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Replace("agents/architect.md", "model-profile: deep-planning\n", string.Empty);
+
+        Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "architect");
+
+        Assert.Contains("model-profile", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Contains("conductor", diagnostic.Hint!, StringComparison.Ordinal);
+        Assert.Contains("profiles/models.yml", diagnostic.Hint!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoadConductorWithNoModelProfileIsValid()
+    {
+        using SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Write("agents/conductor.md", """
+            ---
+            schema: kyber-squad.agent/v1
+            name: conductor
+            description: Routes work to the agents a run may dispatch.
+            invocation: primary
+            capability-profile: architect
+            copilot-tools: [vscode, read]
+            delegates-to: []
+            fallback: role-skill
+            aliases: []
+            ---
+            You are conductor.
+            """);
+
+        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+
+        Assert.True(string.IsNullOrWhiteSpace(
+            source.Agents.Single(agent => agent.Name == "conductor").ModelProfile));
+    }
+
     [Fact]
     public void LoadProfileUsesUnknownCapabilityReportsCapabilityProfileLocation()
     {
