@@ -28,7 +28,7 @@ public sealed class TaskGatesRepositoryConfigTests
     /// <summary>The configuration file's own top-level <c>onboarding</c> key, as the loader does not model it yet.</summary>
     private const string OnboardingKey = "onboarding";
 
-    private const string AgentGithubDevops = "github-devops";
+    private const string TechnologyGithubActions = "github-actions";
     private const string AgentSqlDatabaseArchitect = "sql-database-architect";
 
     /// <summary>A change of only that file kind selects at least one task gate.</summary>
@@ -47,6 +47,7 @@ public sealed class TaskGatesRepositoryConfigTests
         KyberWeaveConfig config = Load();
 
         string[] selected = config.Review.TaskGates
+            .Concat(config.Review.TechnologyGates)
             .SelectMany(pair => pair.Value
                 .Where(gate => gate.Include.Any(pattern => PathGlob.IsMatch(pattern, changed)))
                 .Select(gate => $"{pair.Key}/{gate.Id}"))
@@ -77,18 +78,19 @@ public sealed class TaskGatesRepositoryConfigTests
     }
 
     /// <summary>
-    /// <c>github-devops</c> selects a gate for the workflows it edits, rather than only the .NET gates it aliases.
+    /// The <c>github-actions</c> technology selects a gate for the workflows it edits, rather than only the .NET
+    /// gates it aliases.
     /// </summary>
     /// <remarks>
     /// The role mostly edits <c>.github/workflows/</c> and Dockerfiles; the .NET format and build globs it aliases
     /// never match those, so every one of its gates is skipped. The open question in
     /// <c>docs/todo/task-gate-config-review.md</c> is whether that is intended, and the answer recorded here is
-    /// that it is not.
+    /// that it is not. The entry is keyed by technology since the agent-keyed ones moved.
     /// </remarks>
     [Fact]
-    public void GithubDevopsSelectsAGateForTheWorkflowsItEdits()
+    public void GithubActionsSelectsAGateForTheWorkflowsItEdits()
     {
-        AssertAgentSelects(AgentGithubDevops, ".github/workflows/ci.yml");
+        AssertTechnologySelects(TechnologyGithubActions, ".github/workflows/ci.yml");
     }
 
     /// <summary>
@@ -104,6 +106,16 @@ public sealed class TaskGatesRepositoryConfigTests
         AssertAgentSelects(AgentSqlDatabaseArchitect, "db/migrations/0001-init.sql");
     }
 
+    private static void AssertTechnologySelects(string technology, string changed)
+    {
+        KyberWeaveConfig config = Load();
+
+        Assert.True(
+            config.Review.TechnologyGates.TryGetValue(technology, out IReadOnlyList<ReviewTaskGate>? gates),
+            $"review.technology-gates declares no entry for '{technology}', so every one of its changes runs no gate.");
+        AssertSelects(technology, gates, changed);
+    }
+
     private static void AssertAgentSelects(string agent, string changed)
     {
         KyberWeaveConfig config = Load();
@@ -111,6 +123,11 @@ public sealed class TaskGatesRepositoryConfigTests
         Assert.True(
             config.Review.TaskGates.TryGetValue(agent, out IReadOnlyList<ReviewTaskGate>? gates),
             $"review.task-gates declares no entry for '{agent}', so every one of its changes runs no gate.");
+        AssertSelects(agent, gates, changed);
+    }
+
+    private static void AssertSelects(string key, IReadOnlyList<ReviewTaskGate> gates, string changed)
+    {
         string[] selected = gates
             .Where(gate => gate.Include.Any(pattern => PathGlob.IsMatch(pattern, changed)))
             .Select(gate => gate.Id)
@@ -118,7 +135,7 @@ public sealed class TaskGatesRepositoryConfigTests
 
         Assert.True(
             selected.Length > 0,
-            $"None of '{agent}'s gates selects '{changed}'. The agent that edits these files must have a gate for " +
+            $"None of '{key}'s gates selects '{changed}'. The worker that edits these files must have a gate for " +
             "them, or its task digest reports executed evidence it does not have.");
     }
 
