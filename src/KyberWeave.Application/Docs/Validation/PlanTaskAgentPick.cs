@@ -127,14 +127,29 @@ public sealed class PlanTaskAgentPick : IPlanTaskAgentPicker, IDisposable
         if (result.AnswersByRule.TryGetValue(difficultyId, out string? rated)
             && result.ScoresByRule is not null
             && result.ScoresByRule.TryGetValue(difficultyId, out ArbiterStep1Score? difficultyScore)
-            && difficultyScore.Confidence >= ConfidenceFloor)
+            && difficultyScore.Confidence >= ConfidenceFloor
+            && DifficultyOf(rated) is { } ratedDifficulty)
         {
-            difficulty = string.Equals(rated, StandardAnswer, StringComparison.Ordinal) ? "medium" : rated;
+            difficulty = ratedDifficulty;
             difficultyConfidence = Math.Round(difficultyScore.Confidence!.Value, 3);
         }
 
         return new PlanTaskAgentChoice(answer, Math.Round(sure, 3), difficulty, difficultyConfidence);
     }
+
+    /// <summary>
+    /// The difficulty to record for an answer, or null when the answer is not one the difficulty
+    /// question offered. A value that is not a legal difficulty is never recorded: the agent's name
+    /// or a model the question did not list would otherwise be written into the task file as a
+    /// difficulty, and the task-file check would refuse the plan.
+    /// </summary>
+    private static string? DifficultyOf(string? answer) => answer switch
+    {
+        "easy" => "easy",
+        StandardAnswer => "medium",
+        "hard" => "hard",
+        _ => null,
+    };
 
     /// <summary>The difficulty rule, with the shipped rule's question, answers and criteria, asked beside the pick.</summary>
     private static ArbiterRule DifficultyRuleFor(string taskId, string key) => new(
