@@ -371,10 +371,12 @@ find the tool however it was reached: a quoted program, an absolute path such as
 such as `timeout 10 az …`, a subshell, or a second command on the same line all still name it, so the
 technology's list refuses them. A redirect, a pipeline or a compound command is not one command, so it has
 no form a listed read may match and its whole text is the form: that is how `az vm list > resources.txt`
-is refused. A technology folder that declares no such rule refuses nothing. Where no worker guard runs,
-nothing is refused: on those eleven harnesses the same forms are stated in the technology's `rules.md`,
-which reaches the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and
-the [runbook](runbook.md#reading-a-canonical-checkout-refusal).
+is refused. A technology folder that declares no such rule refuses nothing. A judged command whose event
+names no working directory is refused too, because the technology's list lives under that directory and
+cannot be read; the missing directory is itself a machine fact. Where no worker guard runs, nothing is
+refused: on those eleven harnesses the same forms are stated in the technology's `rules.md`, which reaches
+the prompt's `<technology-rules>` part, and are an instruction only. See Requirement 8.6 and the
+[runbook](runbook.md#reading-a-canonical-checkout-refusal).
 
 ## Secondary triggers, families and effects
 

@@ -154,6 +154,16 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         }
     }
 
+    [Fact]
+    public void ACommandWithNoWorkingDirectoryIsRefusedBecauseTheListCannotBeRead()
+    {
+        TechnologyRepository(_repository.Path, "azure");
+
+        string answer = Guard("claude", CommandWithoutWorkingDirectory("claude", "az vm delete --name db -g rg"));
+
+        Assert.Contains("working directory", Reason("claude", answer), StringComparison.Ordinal);
+    }
+
     /// <summary>
     /// A repository that turns the Arbiter on, declares <paramref name="technology"/> and holds its shipped
     /// standards folder, so the folder's rules file is the one the worker guard reads.
@@ -218,6 +228,17 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
                 toolName = "bash",
                 toolArgs = JsonSerializer.Serialize(new { command }),
             });
+
+    /// <summary>A Claude Code tool call with no <c>cwd</c>, which a malformed event or a proxy might send.</summary>
+    private string CommandWithoutWorkingDirectory(string harness, string command) =>
+        JsonSerializer.Serialize(new
+        {
+            hook_event_name = "PreToolUse",
+            agent_id = "agent-1",
+            agent_type = "platform-researcher",
+            tool_name = "Bash",
+            tool_input = new { command },
+        });
 
     private static string Reason(string harness, string answer)
     {

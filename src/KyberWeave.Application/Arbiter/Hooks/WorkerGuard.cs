@@ -149,11 +149,23 @@ public sealed class WorkerGuard(
     /// The refusal a technology's command allow-list makes for a read-only dispatch's command, or null. The
     /// configuration is read only for a profile the list judges, so an ordinary developer command costs no YAML parse.
     /// </summary>
+    /// <remarks>
+    /// A judged command with no working directory is refused rather than allowed: the technology's list lives under
+    /// the working directory, so without one the guard cannot read what the command was allowed to run. The event
+    /// naming no directory is itself a machine fact, which is what ADR 0072 permits a refusal on.
+    /// </remarks>
     private string? CommandRefusal(WorkerGuardRules.ToolCall call)
     {
-        if (!WorkerGuardRules.IsCommandJudged(call) || string.IsNullOrWhiteSpace(call.Cwd))
+        if (!WorkerGuardRules.IsCommandJudged(call))
         {
             return null;
+        }
+
+        if (string.IsNullOrWhiteSpace(call.Cwd))
+        {
+            return "The worker guard refused this command: the event named no working directory, so the " +
+                "technology's allowed command forms could not be read. Nothing ran. Run it again from the " +
+                "repository the list lives in, or report what you could not inspect.";
         }
 
         HostConfigLoadResult loaded = hostConfig.TryLoad(call.Cwd);
