@@ -307,10 +307,13 @@ tier = min(hard, rated difficulty + failed attempts at this task)
 ```
 
 The conductor passes the number of failed attempts at the task to the task prompt tool, which
-returns the agent name. The conductor dispatches that agent. The task file records the kind of
-worker and the difficulty, never a tier, so a step-up does not contradict it. The same sentence is in the conductor's instructions, so a run with the Arbiter off
-behaves the same. The limit of three rework dispatches per failure cluster is unchanged, and at the
-limit the architect mediates as today.
+returns the agent name. The conductor dispatches that agent. The task file records the developer
+tier the architect's rating gives — `dev-easy`, `dev-medium` or `dev-hard` — beside the difficulty
+and its source, not the kind of worker, so a reader of the file sees the first attempt the run will
+make. A step-up then dispatches a higher tier than the file names, and the file is not rewritten,
+so the rating it holds stays the architect's. The same sentence is in the conductor's instructions,
+so a run with the Arbiter off behaves the same. The limit of three rework dispatches per failure
+cluster is unchanged, and at the limit the architect mediates as today.
 
 `KW-ARB-LADDER-001` moves to the `conductor` role folder unchanged. Its ladder becomes `dev-easy`,
 `dev-medium`, `dev-hard`. When the conductor has already dispatched the next tier, the rule's
