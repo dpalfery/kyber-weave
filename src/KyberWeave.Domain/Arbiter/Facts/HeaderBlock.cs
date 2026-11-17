@@ -26,6 +26,7 @@ public sealed partial class HeaderBlock
         "LENS",
         "REFUTE",
         "REVIEW_RUN",
+        "TECHNOLOGY",
     };
 
     /// <summary>The fifteen lens names a <c>LENS</c> header or <c>REFUTE</c> lens may name.</summary>
@@ -225,6 +226,13 @@ public sealed partial class HeaderBlock
         "TASK" => IsTaskId(value),
         "LENS" => LensNames.Contains(value),
         "REFUTE" => IsValidRefute(value),
+        // A technology is the name of one standards folder: no path separator, no space, no parent hop.
+        "TECHNOLOGY" => value.Length > 0
+            && !value.Contains('/', StringComparison.Ordinal)
+            && !value.Contains('\\', StringComparison.Ordinal)
+            && !string.Equals(value, ".", StringComparison.Ordinal)
+            && !string.Equals(value, "..", StringComparison.Ordinal)
+            && value.AsSpan().IndexOfAny(' ', '\t') < 0,
         // Any non-empty value: the store keys it by digest, so its characters and length name no path.
         "REVIEW_RUN" => value.Length > 0,
         _ => false,
@@ -259,7 +267,7 @@ public sealed partial class HeaderBlock
     }
 
     [GeneratedRegex(
-        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN):[ \t]*(?<value>\S.*?)[ \t]*$",
+        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY):[ \t]*(?<value>\S.*?)[ \t]*$",
         RegexOptions.CultureInvariant)]
     private static partial Regex HeaderLineRegex();
 

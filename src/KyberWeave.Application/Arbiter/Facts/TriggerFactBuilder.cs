@@ -181,6 +181,7 @@ public static class TriggerFactBuilder
 
         block.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         block.Headers.TryGetValue("TASK", out string? task);
+        block.Headers.TryGetValue("TECHNOLOGY", out string? technology);
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);
         // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
@@ -233,10 +234,11 @@ public static class TriggerFactBuilder
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
-                // A machine fact: whether the host's task gates list any gate for the agent that returned, by
-                // its own review.task-gates entry, which is the one this dispatch's agent is keyed on.
+                // A machine fact: whether the host's task gates resolve any gate for the agent that returned and
+                // the technology the dispatch names, by the same resolver the gate run uses. A host whose gates
+                // are keyed only by technology must not read as having none.
                 "config.task-gates-declared" => target is not null
-                                                && TaskGateResolver.Resolve(config.Review, target).Gates.Count > 0,
+                                                && TaskGateResolver.Resolve(config.Review, target, technology).Gates.Count > 0,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,
