@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -126,6 +127,13 @@ public sealed record ArbiterConfig
 
     /// <summary>The <c>LENS-001</c> step-0 per-lens path table.</summary>
     public IReadOnlyList<ArbiterLensPathEntry> LensPaths { get; init; } = [];
+
+    /// <summary>
+    /// The findings the host's rule folders raised when the configuration was read. A folder file that could not be
+    /// parsed, or held a rule the Arbiter cannot use, is named here; the shipped rules are in force for that folder.
+    /// <c>arbiter validate</c> and <c>arbiter doctor</c> report these.
+    /// </summary>
+    public IReadOnlyList<Diagnostic> RuleFolderFindings { get; init; } = [];
 
     /// <summary>The <c>arbiter.model-targeting</c> block.</summary>
     public ArbiterModelTargetingConfig ModelTargeting { get; init; } = ArbiterModelTargetingConfig.Defaults;
