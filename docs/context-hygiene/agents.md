@@ -6,7 +6,7 @@ status: current
 component: ContextHygiene
 source-root: src/KyberWeave.Domain/Agents
 owner: dpalfery
-last-reviewed: 2026-10-16
+last-reviewed: 2026-11-17
 code-refs:
   - AgentFileReader
   - AgentSpecValidator
@@ -50,7 +50,7 @@ narrow to one.
 
 While `agent validate` and `agent sync-check` audit and lint existing on-disk agent definitions
 across individual harnesses, **[Kyber-Squad](../kyber-squad/architecture.md)** provides the
-authoritative, end-to-end deployment control plane. Kyber-Squad maintains 24 canonical agent
+authoritative, end-to-end deployment control plane. Kyber-Squad maintains 29 canonical agent
 definitions in `products/kyber-squad/` and compiles them into target-native configurations
 for all thirteen currently implemented and registered renderers: `copilot`, `cursor`, `claude`, `codex`,
 `antigravity`, `opencode`, `kilo`, `pi`, `factory`, `warp`, `zcode`, `devin`, and `commandcode`.

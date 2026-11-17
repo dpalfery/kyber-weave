@@ -16,6 +16,7 @@ code-refs:
   - ReviewConfig
   - TaskGateResolver
   - TaskPromptService
+  - WorkerRosters
 ---
 
 # Configuration
@@ -450,6 +451,46 @@ characters is a configuration error (`KW-CONFIG-001`) naming the setting and its
 key takes the default. It is not published in the `AGENTS.md` Config Reg block, like the other
 settings the CLI and MCP server read for themselves. The decision is in
 [ADR 0085](adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md).
+
+### Worker roster
+
+A top-level `worker-roster:` key chooses which developer agents a run dispatches to:
+
+```yaml
+worker-roster: tiered
+```
+
+- **`technology`** is the default, and what an absent key means: one developer agent per technology
+  (`csharp-dev`, `react-dev`, and so on), `sql-database-architect` for schema work, `test-dev` for a
+  test-only task, and `github-devops` for delivery.
+- **`tiered`** replaces them with three developer agents that name no technology — `dev-easy`,
+  `dev-medium`, `dev-hard` — plus `devops` for delivery and `platform-researcher` for live platform
+  state.
+
+Any other value is a configuration error (`KW-CONFIG-001`) naming both. The setting is read when a
+task file is written and recorded in that file (`worker-roster`), so every later reader takes the
+run's roster from the task file rather than from a configuration that may have changed since. A
+dispatch that belongs to no task file — a fix the bug flow hands on, a research request — reads this
+setting instead.
+
+An agent declares the roster it belongs to with a `worker-roster` key in its frontmatter. The three
+developer agents, `devops` and `platform-researcher` declare `tiered`; the fourteen agents the
+tiered roster replaces declare `technology`; an agent that declares none serves both rosters, which
+is why `architect`, `docs-dev`, `code-reviewer` and the review seats are dispatchable either way.
+
+Under `tiered` a file-changing developer task must name the one technology it is written in: a
+developer task without a `Technology:` line is `KW-DOC-TASKS-018`, whose hint says that a
+documentation or delivery task names its role instead and needs none. Under `technology` a task needs
+no technology line.
+
+The tier for each attempt comes from the task file's difficulty and the attempts that already failed:
+`tier = min(hard, rated difficulty + failed attempts)`, so an `easy` task starts on `dev-easy`,
+`medium` and an unrated task on `dev-medium`, and `hard` on `dev-hard`; a failed attempt moves one
+tier up and never down. The roster, the agents of each roster and the tier table are in the
+[Kyber-Squad architecture](../kyber-squad/architecture.md#12-worker-rosters-and-developer-tiers).
+
+The value is not published in the `AGENTS.md` Config Reg block, like the settings above: the task
+file is the record a run reads, and the CLI and MCP server read the host setting for themselves.
 
 ### Several documentation roots
 

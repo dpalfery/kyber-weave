@@ -109,7 +109,7 @@ implemented and registered renderers today.
 ```mermaid
 flowchart TD
     subgraph Canonical["Canonical Product Source (products/kyber-squad/)"]
-        Agents["agents/*.md (24 Agents)"]
+        Agents["agents/*.md (29 Agents)"]
         Skills["skills/*/SKILL.md (Squad canonical skills)"]
         Profiles["profiles/*.yml (Lattice & Models)"]
         Catalog["squad.yml / toolchain.yml"]
@@ -1218,7 +1218,7 @@ and validates.
 - **Copilot emit today**: `CopilotRenderer` writes each agent's
   `.github/agents/<name>.agent.md` and each skill's `.github/skills/<name>/SKILL.md`, then
   `SquadResourceProjection.Append` places every file that owner's Markdown links reach beside
-  the principal. A fresh Copilot render is 149 files — 24 agents, 28 skills, plus projected
+  the principal. A fresh Copilot render is 162 files — 29 agents, 29 skills, plus projected
   closures — with authored relative links resolving in the output; every skill resource
   reaches this render except `skills/setup-dev-environment/agents/openai.yaml`, which stays
   packaged-only Codex skill-UI metadata. That count is the current
@@ -2367,6 +2367,138 @@ are shipped in shadow until enforced (see the [Arbiter architecture](../kyber-ar
   no thread, so nothing is resolved; inline threads keep reply-and-resolve.
 - **Known gap.** The fixing-commit check for summary rows (Requirement 20.5) is not delivered. An
   `already-fixed` answer for a summary row rests on the model alone.
+
+## 12. Worker rosters and developer tiers
+
+Kyber-Squad ships two worker rosters side by side. One is the roster of per-technology agents the
+product has always shipped; the other replaces the developer agents with three tiers that name no
+technology. The host chooses one with `worker-roster`, so the same approved plan can be run once on
+each roster for comparison.
+
+### The agents of each roster
+
+| Role | `technology` roster | `tiered` roster |
+|---|---|---|
+| Developer work | `csharp-dev`, `dal-dev`, `go-dev`, `maui-dev`, `pulumi-dev`, `python-dev`, `react-dev`, `rust-dev`, `tauri-dev`, `typescript-dev`, and `sql-database-architect` for schema work | `dev-easy`, `dev-medium`, `dev-hard` |
+| Test-only work | `test-dev` | none: the developer tier writes the task's tests |
+| Documentation | `docs-dev` | `docs-dev` |
+| Delivery | `github-devops` | `devops` |
+| Live platform state | `azure-reader` | `platform-researcher` |
+| Everything else | `conductor`, `architect`, `product-owner`, `code-reviewer`, `review-lens`, `review-triage`, `bug-crusher`, `bug-crusher-investigator`, `research-agent` | the same agents |
+
+Twenty-nine agent files ship while both rosters exist: the twenty-four the product had, plus the
+three developer tiers, `platform-researcher` and `devops`. An agent declares its roster with a
+`worker-roster` frontmatter key: the five new agents declare `tiered`, the fourteen agents the
+tiered roster replaces declare `technology` — `azure-reader`, the ten technology developers,
+`sql-database-architect`, `test-dev` and `github-devops` — and an agent with no key serves both. That
+is why `docs-dev`, the two planners and the review seats are dispatchable on either roster.
+
+The three developer agents are one body rendered three times. They differ only in name, description
+and model profile (`fast`, `general`, `dev-hard`), use the `worker` capability profile, and name no
+technology, command or skill: the task prompt carries the technology's rules, skills and standard,
+and the agent reads them there.
+
+`platform-researcher` uses the `platform-reader` capability profile: it reads files and live state
+and runs commands, and can neither write files, publish nor delegate. `devops` uses
+`publishing-worker`, does what `github-devops` does — run start, push, pull request, pipeline files —
+and names no platform: the task or the host configuration names the one platform, and its folder's
+rules and skills reach it through the prompt.
+
+### The roster switch
+
+`worker-roster` is a top-level host setting:
+
+```yaml
+worker-roster: tiered
+```
+
+`technology` is the default and what an absent key means. Any other value is the configuration error
+`KW-CONFIG-001`, naming both. The setting is read when the task file is written and recorded in the
+file (`worker-roster`), and every later reader takes the run's roster from there, so a configuration
+change mid-run cannot move a half-executed run onto the other roster. A dispatch that belongs to no
+task file — the bug flow's fix, a research request — reads the host setting instead.
+
+The switch changes which developer, test, delivery and platform agents a run dispatches to. It does
+not change the workflow: `docs-dev` and the planners are the same agents on both rosters, and
+`bug-crusher` and `delivery-execution` carry both paths.
+
+The value is not published in the `AGENTS.md` Config Reg block, unlike the paths an agent looks up
+there: the task file is the record a run reads, and the CLI and the MCP server read the host setting
+for themselves.
+
+Under `tiered` a task a developer agent will do must name the one technology it is written in. A
+developer task without a `Technology:` line is `KW-DOC-TASKS-018`; a documentation or delivery task
+names its role instead and needs none. Under `technology` a task needs no technology line and a run
+behaves as it did before the roster existed, apart from the task prompt.
+
+### How a tier is chosen
+
+The task file records the *kind* of worker and the difficulty, never a tier: under `tiered` a pick
+records `dev-medium` whatever the rating, so a later step-up cannot contradict the file. The tier is
+computed again for every dispatch:
+
+```text
+tier = min(hard, rated difficulty + failed attempts)
+```
+
+`rated difficulty` is the task's difficulty — `easy` 0, `medium` 1, `hard` 2, and `medium` for a
+task without one — and `failed attempts` is how many attempts at that task already failed:
+
+| Rating | 0 attempts | 1 failed attempt | 2 or more |
+|---|---|---|---|
+| `easy` | `dev-easy` | `dev-medium` | `dev-hard` |
+| `medium`, or no rating | `dev-medium` | `dev-hard` | `dev-hard` |
+| `hard` | `dev-hard` | `dev-hard` | `dev-hard` |
+
+A failed attempt moves the next attempt exactly one tier up and never down. A failure on `dev-hard`
+stays on `dev-hard`, where the existing circuit-breaker applies unchanged: the limit of three rework
+dispatches per failure cluster, and above it architect mediation. A dispatch that belongs to no task
+has no rating, so it starts on `dev-medium` and moves to `dev-hard` on its second attempt. A task
+whose role is `docs-dev` or `devops` keeps that role and is never stepped up.
+
+A wrong rating therefore costs one attempt and corrects itself; nothing validates whether a rating is
+right.
+
+The conductor does not choose the tier itself. It calls
+`docs_build_task_prompt_for_agent_dispatch` with the task id and the failed-attempt count, and
+dispatches the agent the reply names. The tool and the dispatch hook build the prompt through the
+same service, so the agent, the tier and the prompt cannot disagree. Its reply gives the agent, the
+difficulty in use and its source (`architect`, `default` or `decision-model`), the technology,
+anything the prompt budget left out, and the prompt file's path on a harness whose hook cannot
+rewrite the dispatch; it never returns the prompt text.
+
+Each tier's model comes from its own agent file through its model profile — `dev-easy` is `fast`,
+`dev-medium` is `general`, `dev-hard` is the `dev-hard` profile — and nothing assigns a model at
+dispatch. The `dev-hard` profile is separate from the planning profiles so that changing a planning
+model never changes it; on most harnesses it currently pins the same model as `general`, so moving
+up to `dev-hard` is not a model upgrade there unless the host points that profile at a stronger
+model. Under `tiered` the Arbiter's model-targeting rules follow the same three profiles:
+`KW-ARB-DIFFICULTY-001` answers from the rating the task file records and makes no second model call,
+so the agent and the model cannot disagree, and `KW-ARB-LADDER-001`'s ladder is `fast`, `general`,
+`dev-hard`. A dispatch the conductor already put on the next tier already renders that profile, so
+the rule writes nothing.
+
+### What a tiered dispatch carries
+
+The conductor dispatches the task id, the task's technology where the dispatch belongs to no task,
+and the failed-attempt count, plus the prior-results file when earlier reports matter. The dispatch
+hook replaces the task id with the whole prompt before the worker starts, so the conductor never
+reads or retypes it, and every other line of the dispatch survives. The prompt's parts, its tags and
+the harness-by-harness delivery path are in
+[§9](#the-tracked-task-file-and-the-inserted-task-prompt).
+
+### Where the product differs from the design
+
+- The design's file-format table gives the Config Reg a `<worker-roster>` property. The constant
+  exists (`ConfigRegConfig.WorkerRosterProperty`), but the generated `AGENTS.md` block does not
+  publish a line for it and no agent instruction resolves one. Nothing depends on the line: the task
+  file is the record, and a dispatch with no task reads the host setting.
+- The design says `platform-researcher` replaces `azure-reader`. Both agents ship and both are legal
+  target agents; the conductor's, architect's and code-reviewer's `delegates-to` lists carry both.
+  The conductor's instructions read `azure-reader` as `platform-researcher` under `tiered`, but the
+  architect's own instruction still sends live Azure state to `azure-reader`, so on the architect's
+  path a tiered run keeps using the old agent until that body is updated or `azure-reader` leaves in
+  phase 5.
 
 ## Related
 

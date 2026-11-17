@@ -505,7 +505,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 3.4, 3.5
   - _Requirements: 1.8_
 
-- [ ] 3.9 Document phase 3
+- [x] 3.9 Document phase 3
   - **Objective:** Describe the developer tiers, the two new agents, the roster switch and the step-up in the canonical documents.
   - **Files:**
     - `docs/kyber-squad/architecture.md`, `docs/kyber-squad/onboarding.md`, `docs/configuration.md`, `products/kyber-squad/README.md`

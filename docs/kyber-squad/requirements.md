@@ -4,7 +4,7 @@ title: Kyber-Squad requirements and degradation contract
 doc-type: requirements
 component: KyberSquad
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0019-pi-native-subagents-and-primary-lowering
@@ -29,7 +29,7 @@ This document defines the formal requirement specifications (**KS-001** through 
 
 | ID | Requirement Specification |
 |---|---|
-| **KS-001** | **Canonical Source Governance**: Maintain exactly 24 canonical agent instruction bodies and the canonical skill identities under `products/kyber-squad/`. The skill tree retains its supplemental resources beside each `SKILL.md`, and agents own 10 progressive-disclosure references (including the Arbiter escalation reference); every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
+| **KS-001** | **Canonical Source Governance**: Maintain exactly 29 canonical agent instruction bodies and the canonical skill identities under `products/kyber-squad/`. The skill tree retains its supplemental resources beside each `SKILL.md`, and agents own 10 progressive-disclosure references (including the Arbiter escalation reference); every owner's local references form a validated resource closure, and every retained resource carries a reviewed disposition in the [skill-resource dispositions audit](skill-resource-dispositions.md). Generated role-skill projections and target-rendered `.github` trees do not alter the canonical product inventory. |
 | **KS-002** | **Deterministic Resolution & Permission Lattice**: Resolve canonical identity, invocation mode, model profiles, capabilities, permissions, delegation hierarchies, fallbacks, aliases, and instruction body digests deterministically. Permission translation adheres to the lattice `deny < ask < allow`. Unsupported `ask` permissions narrow to `deny`, and unenforceable `ask` or `deny` constraints cause representation omission rather than permission broadening. A target-scoped internal capability profile (`copilot-capability-profile`, `devin-capability-profile`) may validate exact target tool membership but must not replace or widen the shared capability profile or metadata; a profile marked `target: <name>` is rejected when assigned as an agent's shared `capability-profile`; a `<target>-capability-profile` naming a profile without that marker is rejected; and a primary agent naming `devin-capability-profile` is rejected because Devin lowers primaries to skills with no tool allow-list ([ADR 0028](../adr/0028-devin-target-scoped-authoring-capability-profiles.md)). The capability vocabulary includes `decision.query`, the Arbiter fallback signal: allowed only for the `orchestrator` and `reviewer` profiles (the conductor and `code-reviewer`) and denied for the other ten, it lowers to the `kw-arbiter` MCP server on the fallback-only targets `warp` and `zcode`, and to nothing on a hooked target. |
 | **KS-003** | **Deterministic Target Resolution**: For install, resolve deployment targets from explicit CLI flags, saved repository configuration, then strong filesystem markers. For update, a non-empty explicit `--target` list is the complete desired deployment target set and takes precedence over the existing receipt; when omitted, reuse the receipt roster. Update never re-detects filesystem markers. Uninstall uses the existing receipt roster. The `all` keyword expands strictly to the approved 13-target roster (`codex`, `cursor`, `claude`, `copilot`, `opencode`, `kilo`, `antigravity`, `warp`, `factory`, `pi`, `zcode`, `devin`, `commandcode`). |
 | **KS-004** | **Transactional Lifecycle & State Governance**: Execute install, update, and uninstall operations via an isolated render plan with preflight validation, exact-match adoption (`--adopt`), managed-edit preservation, exclusive cross-process mutex leasing (`kyber-weave-squad-<root-key>`), leaf-level no-overwrite claim/publish execution, compare-and-restore rollback, and lock/receipt state applied last. Lock and receipt state is kept under the user home (`~/.kyber-weave/squad/`), never in the repository ([ADR 0037](../adr/0037-squad-state-in-user-home.md)). |
@@ -280,7 +280,7 @@ canonical raw `SKILL.md` except the five explicitly evolved skills (`bug-crusher
 canonical bytes, as does every non-evolved agent body. The retired `create-pull-request-github`
 skill is folded into `create-pull-request`, and the three retired `-v3` agent identities are
 folded into their canonical counterparts and no longer exist as separate agents. Renderers project every file an
-owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 149
+owner's Markdown links reach beside its principal output, so a fresh Copilot render emits 162
 files with no dangling link; every skill resource reaches this render except
 `skills/setup-dev-environment/agents/openai.yaml`, which stays packaged-only Codex skill-UI
 metadata. The tracked root `.github/`
