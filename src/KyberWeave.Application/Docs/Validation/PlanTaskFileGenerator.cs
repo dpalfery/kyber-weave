@@ -196,7 +196,7 @@ public sealed partial class PlanTaskFileGenerator
                 artifactPath,
                 PlanDocumentParser.ExecutionDigest(parsed),
                 entries,
-                workerRoster ?? WorkerRosters.Technology);
+                workerRoster ?? WorkerRosters.Tiered);
     }
 
     private static PlanTaskFileEntry? BuildEntry(

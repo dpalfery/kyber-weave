@@ -118,13 +118,13 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
             new ArbiterLedgerEvent(LedgerId, DateTimeOffset.UtcNow, "hook", "copilot-cli", "s-1", ArbiterLedgerPhases.Pre)
             {
                 Trigger = "delegate",
-                Target = "csharp-dev",
+                Target = "dev-medium",
             }).GetAwaiter().GetResult();
         string answer = step == 1 ? "within-task" : "no-task";
         File.WriteAllText(
             Path.Combine(arbiter, "decisions.jsonl"),
             "{\"id\":\"0000000000000009-bbbbbbbb\",\"at\":\"2026-11-14T00:00:00Z\",\"source\":\"hook\",\"harness\":\"copilot-cli\"," +
-            $"\"ledger-id\":\"{LedgerId}\",\"trigger\":\"{trigger}\",\"caller-source\":\"none\",\"target\":\"csharp-dev\"," +
+            $"\"ledger-id\":\"{LedgerId}\",\"trigger\":\"{trigger}\",\"caller-source\":\"none\",\"target\":\"dev-medium\"," +
             "\"rule-set\":\"x\",\"rules\":[{\"id\":\"KW-ARB-SCOPE-002\",\"step\":" + step + ",\"answer\":\"" + answer +
             "\",\"effect\":\"allow\",\"facts\":[]}],\"provider\":{\"kind\":\"systemone\",\"latency-ms\":1,\"status\":\"answered\"}," +
             "\"outcome\":\"allow\",\"repeat\":1,\"duration-ms\":1,\"schema\":\"kyber-arbiter.decision/v1\"}\n");

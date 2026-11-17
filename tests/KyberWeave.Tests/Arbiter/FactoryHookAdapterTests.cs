@@ -188,7 +188,7 @@ public sealed class FactoryHookAdapterTests
 
         // updatedInput is the complete tool_input: every original field survives.
         JsonElement updated = specific.GetProperty("updatedInput");
-        Assert.Equal("csharp-dev", updated.GetProperty("subagent_type").GetString());
+        Assert.Equal("dev-medium", updated.GetProperty("subagent_type").GetString());
         Assert.Equal("Implement T16.5", updated.GetProperty("description").GetString());
         string prompt = updated.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal("Implement the adapter.", prompt);
@@ -200,7 +200,7 @@ public sealed class FactoryHookAdapterTests
     public void PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
     {
         string stdin = Fixture("pre-task-dispatch.json").Replace(
-            "\"subagent_type\": \"csharp-dev\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
+            "\"subagent_type\": \"dev-medium\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
         (int exit, string stdout, _) = Run(stdin, null, new ScriptedEngine());
 
@@ -214,7 +214,7 @@ public sealed class FactoryHookAdapterTests
     [Fact]
     public void PreDispatch_AllowWithRewrite_WritesRewrittenInput()
     {
-        const string rewritten = """{"prompt":"Hello.","subagent_type":"csharp-dev"}""";
+        const string rewritten = """{"prompt":"Hello.","subagent_type":"dev-medium"}""";
         ScriptedEngine engine = new()
         {
             PreResult = new HookOutcome(HookOutcomeKind.AllowWithRewrite, RewrittenInputJson: rewritten),
@@ -237,7 +237,7 @@ public sealed class FactoryHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal(FactoryHookAdapter.Token, engine.SeenPreHarness);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
         Assert.StartsWith("KYBER-ARBITER: true", engine.SeenPrePrompt, StringComparison.Ordinal);
         Assert.Contains("Implement the adapter.", engine.SeenPrePrompt, StringComparison.Ordinal);
     }
@@ -612,14 +612,14 @@ public sealed class FactoryHookAdapterTests
         string transcript = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + ".jsonl");
         File.WriteAllText(
             transcript,
-            File.ReadAllText(TranscriptFixture()).Replace("\"echoer\"", "\"csharp-dev\"", StringComparison.Ordinal));
+            File.ReadAllText(TranscriptFixture()).Replace("\"echoer\"", "\"dev-medium\"", StringComparison.Ordinal));
         try
         {
             ContextualEngine engine = new();
 
             Run(SubagentStop(transcript), null, engine);
 
-            Assert.Equal("csharp-dev", engine.SeenPostTarget);
+            Assert.Equal("dev-medium", engine.SeenPostTarget);
             Assert.DoesNotContain("KYBER-ARBITER", engine.SeenPostPrompt, StringComparison.Ordinal);
         }
         finally

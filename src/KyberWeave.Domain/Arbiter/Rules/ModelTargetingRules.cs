@@ -50,18 +50,19 @@ internal static class ModelTargetingRules
     /// <param name="mode"><c>off</c> disables both rules, <c>shadow</c> records them without effect, and <c>enforce</c> lets them gate.
     /// Any other mode is treated as shadow, so an unrecognised mode never gates a dispatch.</param>
     /// <param name="roster">
-    /// The run's worker roster. Under <c>tiered</c> the difficulty rule answers from the recorded rating and makes
-    /// no second model call; under <c>technology</c>, and when no roster is given, both rules are as they ship.
+    /// The run's worker roster, <c>tiered</c> unless a caller says otherwise. Under <c>tiered</c> the difficulty
+    /// rule answers from the recorded rating and makes no second model call; the removed <c>technology</c>
+    /// roster reaches the same path, because there is no other roster to dispatch from.
     /// </param>
     public static IReadOnlyList<ArbiterRule> Apply(
         IReadOnlyList<ArbiterRule> rules,
         string mode,
-        string? roster = WorkerRosters.Technology)
+        string? roster = WorkerRosters.Tiered)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(mode);
 
-        bool tiered = string.Equals(roster, WorkerRosters.Tiered, StringComparison.Ordinal);
+        bool tiered = string.Equals(WorkerRosters.Resolve(roster), WorkerRosters.Tiered, StringComparison.Ordinal);
         List<ArbiterRule> applied = new(rules.Count);
         foreach (ArbiterRule rule in rules)
         {
@@ -86,16 +87,16 @@ internal static class ModelTargetingRules
     }
 
     /// <summary>
-    /// The model-targeting block in use: under the tiered roster its difficulty map and ladder name the three
-    /// developer tiers' profiles, and they do so whether or not the host set its own. Under the technology
-    /// roster, and when no roster is given, the host's block is returned unchanged.
+    /// The model-targeting block in use: its difficulty map and ladder name the three developer tiers' profiles,
+    /// and they do so whether or not the host set its own. The removal left one roster, so this is the block for
+    /// every run.
     /// </summary>
     /// <param name="targeting">The host's model-targeting block.</param>
-    /// <param name="roster">The run's worker roster.</param>
+    /// <param name="roster">The run's worker roster, which now always means <c>tiered</c>.</param>
     public static ArbiterModelTargetingConfig Targeting(ArbiterModelTargetingConfig targeting, string? roster)
     {
         ArgumentNullException.ThrowIfNull(targeting);
-        if (!string.Equals(roster, WorkerRosters.Tiered, StringComparison.Ordinal))
+        if (!string.Equals(WorkerRosters.Resolve(roster), WorkerRosters.Tiered, StringComparison.Ordinal))
         {
             return targeting;
         }

@@ -55,7 +55,7 @@ The shipped binaries build for:
 - Platform-specific code lives in `_unix.go` / `_windows.go` files or behind `//go:build`
   constraints, each with a counterpart for the other OS.
 - Release builds use `-trimpath` and stamp the version with `-ldflags "-X ..."`. Release
-  automation belongs to `github-devops`.
+  automation belongs to `devops`.
 
 ## Coding standards
 
@@ -94,8 +94,8 @@ The shipped binaries build for:
 ### Tests
 
 Test authorship follows `<test-coding-standard>`. This standard requires that the code be
-testable: dependencies passed in as interfaces, no package-level mutable state. Test
-authorship belongs to `test-dev`.
+testable: dependencies passed in as interfaces, no package-level mutable state. A task whose
+deliverable is tests goes to a developer tier like any other.
 
 ## Commands
 

@@ -83,7 +83,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             "delegate",
             "conductor",
             ArbiterCallerSources.Harness,
-            "csharp-dev",
+            "dev-medium",
             planFile,
             planDigest,
             task,
@@ -122,7 +122,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             PreId = "pre-1",
             Caller = "conductor",
             CallerSource = ArbiterCallerSources.Harness,
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Trigger = "delegate",
             Marker = "delegate",
             Headers = new ArbiterLedgerHeaders("docs/plans/plan.md", "T3", "infra-workflow", "finding-1", "csharp"),
@@ -180,7 +180,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         var decision = new ArbiterDecisionRecord(
             ArbiterRecordId.New(at), at, ArbiterSources.Hook, "pi", "session-1",
             "ledger-1", "delegate", "conductor", ArbiterCallerSources.Harness,
-            "csharp-dev", "docs/plans/plan.md", "plan-digest", "T3",
+            "dev-medium", "docs/plans/plan.md", "plan-digest", "T3",
             "ruleset-sha", [rule], provider, RuleEffects.Escalate, 1, 42);
 
         await decisions.AppendAsync(decision);
@@ -579,7 +579,7 @@ public sealed class ArbiterLedgerTests : IDisposable
 
         var ledger = new InFlightLedger(ArbiterDirectory);
         var decisions = new DecisionLog(ArbiterDirectory);
-        var pre = NewEvent(At(0), ArbiterLedgerPhases.Pre, trigger: "delegate", target: "csharp-dev", pairDigest: digest);
+        var pre = NewEvent(At(0), ArbiterLedgerPhases.Pre, trigger: "delegate", target: "dev-medium", pairDigest: digest);
         await ledger.AppendAsync(pre);
 
         ArbiterDecisionRecord decision = Decision(

@@ -5,7 +5,7 @@
   "cwd": "/repo",
   "permission_mode": "default",
   "agent_id": "agent-worker-2",
-  "agent_type": "csharp-dev",
+  "agent_type": "dev-medium",
   "tool_name": "Read",
   "tool_input": {
     "file_path": "/repo/src/Foo.cs"

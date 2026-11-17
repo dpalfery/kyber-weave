@@ -7,6 +7,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.FileSystem;
+using KyberWeave.Core.Review.Catalogue;
 using KyberWeave.Core.Text;
 using static KyberWeave.Core.Docs.Validation.PlanTaskFileRules;
 
@@ -391,14 +392,21 @@ public sealed partial class PlanTaskFileValidator
                 Hint: $"A task file belongs to the {kind} it sits beside. Run {TaskFileCommand.Write(artifact.RelativePath)} to rewrite it for this {kind}."));
         }
 
+        CheckWorkerRoster(file, taskFile, artifact.RelativePath, report);
         CheckTasks(parsed, file, taskFile, artifact.RelativePath, report);
         CheckDigest(parsed, artifact.RelativePath, kind, file, taskFile, report);
+
+        // A file that predates the tiered roster keeps validating: the technology requirement is on a file
+        // written under the roster that has it, and an older file is read with a warning, not made an error.
+        bool predatesTiered = legacy
+            || file.SchemaVersion == PlanTaskFileRules.LegacySchemaVersion
+            || string.Equals(file.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal);
 
         foreach (PlanTaskFileEntry? entry in file.Tasks ?? [])
         {
             if (entry is not null)
             {
-                CheckTaskScope(entry, taskFile, artifact.RelativePath, file.WorkerRoster, report);
+                CheckTaskScope(entry, taskFile, artifact.RelativePath, file.WorkerRoster, predatesTiered, report);
                 CheckPrompt(entry, taskFile, artifact.RelativePath, planningDirectories, report);
             }
         }
@@ -586,6 +594,31 @@ public sealed partial class PlanTaskFileValidator
             "so a status or decisions-row edit is not what moved it."));
     }
 
+    /// <summary>
+    /// Reports a task file written under the roster the removal deleted. The file is still read, as
+    /// <c>tiered</c>, because there is no other roster to dispatch from; the warning names the change.
+    /// </summary>
+    private static void CheckWorkerRoster(
+        PlanTaskFile file,
+        string taskFile,
+        string artifactPath,
+        DiagnosticReport report)
+    {
+        if (!string.Equals(file.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        report.Add(new Diagnostic(
+            RetiredTechnologyRoster,
+            Severity.Warning,
+            $"Task file '{taskFile}' records worker-roster 'technology'. The removal deleted that roster's worker " +
+            "agents, so the file is read as 'tiered'.",
+            artifactPath,
+            taskFile,
+            Hint: $"Run {TaskFileCommand.Write(artifactPath)}: it rewrites the file under the roster now in use."));
+    }
+
     /// <summary>Reports a prompt with no command, no acceptance criteria, or a plan read in it.</summary>
     /// <summary>
     /// Checks the task's difficulty and technology: the three legal difficulty values, one declared
@@ -596,9 +629,11 @@ public sealed partial class PlanTaskFileValidator
         string taskFile,
         string artifactPath,
         string? workerRoster,
+        bool predatesTiered,
         DiagnosticReport report)
     {
-        if (string.Equals(workerRoster, WorkerRosters.Tiered, StringComparison.Ordinal)
+        if (!predatesTiered
+            && string.Equals(WorkerRosters.Resolve(workerRoster), WorkerRosters.Tiered, StringComparison.Ordinal)
             && string.IsNullOrWhiteSpace(entry.Technology)
             && NeedsTechnology(entry))
         {
@@ -660,6 +695,11 @@ public sealed partial class PlanTaskFileValidator
     /// documentation or delivery task is named by its role or its capabilities; everything else is
     /// developer work the conductor will hand to a developer agent.
     /// </summary>
+    /// <remarks>
+    /// A task file written before the removal names its worker by an agent the removal deleted. That name
+    /// resolves to a developer tier at dispatch time, so the file keeps validating without a technology line:
+    /// the requirement lands on a task that names a worker which still ships, not on one the resolution rewrites.
+    /// </remarks>
     private static bool NeedsTechnology(PlanTaskFileEntry entry)
     {
         string role = entry.Role?.Trim() ?? string.Empty;
@@ -669,7 +709,19 @@ public sealed partial class PlanTaskFileValidator
             return false;
         }
 
+        if (RemovedAgentMap.IsRemoved(role) || RemovedAgentMap.IsRemoved(agent))
+        {
+            return false;
+        }
+
         string capabilities = entry.Capabilities ?? string.Empty;
+        if (capabilities
+            .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(RemovedAgentMap.IsRemoved))
+        {
+            return false;
+        }
+
         return !capabilities.Contains("documentation", StringComparison.OrdinalIgnoreCase)
                && !capabilities.Contains("delivery", StringComparison.OrdinalIgnoreCase);
     }

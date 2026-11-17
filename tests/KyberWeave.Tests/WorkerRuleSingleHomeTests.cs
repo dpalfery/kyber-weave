@@ -16,7 +16,7 @@ namespace KyberWeave.Tests;
 public sealed class WorkerRuleSingleHomeTests
 {
     /// <summary>The developer agents whose failure-loop text the rule map moves to the rework reference.</summary>
-    private static readonly string[] FailureLoopAgents = ["csharp-dev", "test-dev", "github-devops"];
+    private static readonly string[] FailureLoopAgents = ["dev-easy", "dev-medium", "dev-hard", "devops"];
 
     private static string ToolRoot => KyberWeaveTestPaths.ToolRoot;
 

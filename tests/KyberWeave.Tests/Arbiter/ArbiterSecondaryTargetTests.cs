@@ -21,7 +21,7 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
     private const string ModelTrigger = "delegate.model";
     private const string NonImplementation = "code-reviewer";
-    private const string Implementation = "csharp-dev";
+    private const string Implementation = "dev-medium";
 
     private readonly TempDirectory _repo = new();
 
@@ -50,7 +50,7 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
                 .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
-                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "dev-medium" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);

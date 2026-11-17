@@ -44,10 +44,10 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
     public bool WorktreeIndexHook { get; init; } = true;
 
     /// <summary>
-    /// The worker roster a run dispatches from: <c>technology</c> (the per-technology agents, the
-    /// default) or <c>tiered</c> (the three developer agents). The task file records it when written.
+    /// The worker roster a run dispatches from: <c>tiered</c>, the three developer agents by difficulty. The
+    /// removal left no other roster, and the task file records this value when it is written.
     /// </summary>
-    public string WorkerRoster { get; init; } = WorkerRosters.Technology;
+    public string WorkerRoster { get; init; } = WorkerRosters.Tiered;
 
     /// <summary>The shipped prompt budget: the most characters one task prompt may hold before parts are cut.</summary>
     /// <remarks>

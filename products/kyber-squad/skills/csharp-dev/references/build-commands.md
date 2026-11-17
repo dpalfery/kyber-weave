@@ -31,7 +31,7 @@ dotnet watch
 
 ## Run tests
 
-Run your task's tests with the one command in the `testing` skill. A bare `dotnet test` is the
-whole suite, which only the review council and CI run.
+Run your task's tests with the one command in the C# standard's Testing section. A bare `dotnet test`
+is the whole suite, which only the review council and CI run.
 
-Migrations are owned by `dal-dev`. See **<data-access-layer-coding-standard>**.
+Migrations are planned by `architect` and written by the developer tier that owns the task. See **<data-access-layer-coding-standard>**.

@@ -7,7 +7,7 @@ description: FluentMigrator migration conventions — versioning, up/down script
 
 ## Ownership
 
-The `dal-dev` agent authors FluentMigrator scripts. The `sql-database-architect` agent approves the underlying DDL schema before any migration is written. If a migration script diverges from the approved schema (wrong type, missing constraint, dropped index), do not apply it; report the divergence as an open item.
+The developer tier the task routes to authors FluentMigrator scripts. The `architect` approves the underlying DDL schema in the plan before any migration is written. If a migration script diverges from the approved schema (wrong type, missing constraint, dropped index), do not apply it; report the divergence as an open item.
 
 ---
 
@@ -51,7 +51,7 @@ public class AddIngestionJobsTable : Migration
 - Re-run safety for `Up()` follows **<sql-coding-standard>** § Migrations; FluentMigrator
   provides `IfTableDoesNotExist` / `IfIndexDoesNotExist` for the existence check.
 - `Down()` is a host decision, per **<data-access-layer-coding-standard>** § Migrations.
-- Schema changes approved by `sql-database-architect` (DDL) must match exactly what FluentMigrator applies — column names, data types, constraints, and index declarations must align.
+- Schema changes the plan approves (DDL) must match exactly what FluentMigrator applies — column names, data types, constraints, and index declarations must align.
 
 ---
 

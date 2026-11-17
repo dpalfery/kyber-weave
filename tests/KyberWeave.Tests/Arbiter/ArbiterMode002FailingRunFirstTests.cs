@@ -50,13 +50,13 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     private static readonly DateTime Earlier = new(2026, 11, 13, 10, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime Later = Earlier.AddMinutes(20);
 
-    private static string Claim(string path) => $"STATUS: PASS\nTASK_GATE: PASS — agent=csharp-dev gates=2 failed=none skipped=0 report={path} runs=2";
+    private static string Claim(string path) => $"STATUS: PASS\nTASK_GATE: PASS — agent=dev-medium gates=2 failed=none skipped=0 report={path} runs=2";
 
     private static ArbiterFactSet TestFirstReturn(bool? failingRunFirst) =>
         new ArbiterFactSet()
             .With("plan.task", "T3", ArbiterFactLabel.Derived)
             .With("plan.development-mode", "test-first", ArbiterFactLabel.Derived)
-            .With("delegation.target", "csharp-dev", ArbiterFactLabel.Derived)
+            .With("delegation.target", "dev-medium", ArbiterFactLabel.Derived)
             .With("delegation.target-profile", "worker", ArbiterFactLabel.Derived)
             .With(GateReportFacts.FailingRunFirstFact, failingRunFirst, ArbiterFactLabel.Derived);
 
@@ -107,8 +107,8 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
 
     [Theory]
     [InlineData("Done. Tests pass.")]
-    [InlineData("TASK_GATE: NONE_DECLARED — agent=go-dev gates=0 failed=none skipped=0 report=<none> runs=1")]
-    [InlineData("TASK_GATE: PASS — agent=csharp-dev report=.agent_scratchpad/T3/missing.json")]
+    [InlineData("TASK_GATE: NONE_DECLARED — agent=dev-medium gates=0 failed=none skipped=0 report=<none> runs=1")]
+    [InlineData("TASK_GATE: PASS — agent=dev-medium report=.agent_scratchpad/T3/missing.json")]
     public void AClaimOrReportThatCannotBeReadLeavesTheFactAbsent(string returned)
     {
         Assert.Null(new GateReportFacts().FailingRunFirst(returned, _root));

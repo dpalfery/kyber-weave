@@ -251,8 +251,6 @@ public sealed class CopilotRendererTests
     [Theory]
     [InlineData("architect",
         "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
-    [InlineData("azure-reader",
-        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, web]")]
     [InlineData("bug-crusher",
         "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
     [InlineData("bug-crusher-investigator",
@@ -261,42 +259,16 @@ public sealed class CopilotRendererTests
         "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]")]
     [InlineData("conductor",
         "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, 'kw-docs/*', agent]")]
-    [InlineData("csharp-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("dal-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
     [InlineData("docs-dev",
         "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("github-devops",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, web, execute]")]
-    [InlineData("go-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("maui-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
     [InlineData("product-owner",
         "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename, web, agent]")]
-    [InlineData("pulumi-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("python-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("react-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
     [InlineData("research-agent",
         "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, web]")]
     [InlineData("review-lens",
         "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, web]")]
     [InlineData("review-triage",
         "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, web]")]
-    [InlineData("rust-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("sql-database-architect",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("tauri-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("test-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
-    [InlineData("typescript-dev",
-        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
     public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
     {
         SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
@@ -351,7 +323,7 @@ public sealed class CopilotRendererTests
 
     [Theory]
     [InlineData("review-triage", "reviewer", "Gemini 3.8 Flash (copilot)")]
-    [InlineData("test-dev", "fast", "GPT-6.1 Terra (copilot)")]
+    [InlineData("dev-easy", "fast", "GPT-6.1 Terra (copilot)")]
     public async Task RenderAsync_ReviewerAndFastAgentsResolveToTheirProfileCopilotModels(
         string agentName,
         string expectedProfile,
@@ -668,8 +640,8 @@ public sealed class CopilotRendererTests
     /// like a subagent does — but stays user-invocable (asserted separately).
     /// </summary>
     [Theory]
-    [InlineData("architect", "agents: ['azure-reader', 'platform-researcher', 'research-agent']")]
-    [InlineData("code-reviewer", "agents: ['azure-reader', 'platform-researcher', 'review-lens', 'review-triage']")]
+    [InlineData("architect", "agents: ['platform-researcher', 'research-agent']")]
+    [InlineData("code-reviewer", "agents: ['platform-researcher', 'review-lens', 'review-triage']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
         string agentName,
         string expectedAgentsLine)
@@ -694,18 +666,16 @@ public sealed class CopilotRendererTests
     [Theory]
     [InlineData(
         "conductor",
-        "agents: ['architect', 'azure-reader', 'bug-crusher-investigator', 'code-reviewer', " +
-        "'csharp-dev', 'dal-dev', 'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
-        "'github-devops', 'go-dev', 'maui-dev', 'platform-researcher', 'product-owner', " +
-        "'pulumi-dev', 'python-dev', 'react-dev', 'research-agent', 'review-lens', 'review-triage', " +
-        "'rust-dev', 'sql-database-architect', 'tauri-dev', 'test-dev', 'typescript-dev']")]
+        "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', " +
+        "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
+        "'platform-researcher', 'product-owner', " +
+        "'research-agent', 'review-lens', 'review-triage']")]
     [InlineData("product-owner", "agents: ['research-agent']")]
     [InlineData(
         "bug-crusher",
-        "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', 'csharp-dev', 'dal-dev', " +
-        "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', 'github-devops', 'go-dev', " +
-        "'maui-dev', 'pulumi-dev', 'python-dev', 'react-dev', 'review-lens', 'review-triage', 'rust-dev', " +
-        "'sql-database-architect', 'tauri-dev', 'test-dev', 'typescript-dev']")]
+        "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', " +
+        "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
+        "'review-lens', 'review-triage']")]
     public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
         string agentName,
         string expectedAgentsLine)
@@ -820,9 +790,9 @@ public sealed class CopilotRendererTests
     /// exercised through a synthetic source below.)
     /// </summary>
     [Theory]
-    [InlineData("csharp-dev")]
+    [InlineData("dev-easy")]
     [InlineData("review-lens")]
-    [InlineData("azure-reader")]
+    [InlineData("platform-researcher")]
     public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
     {
         string frontmatter = await RenderFrontmatterAsync(agentName);

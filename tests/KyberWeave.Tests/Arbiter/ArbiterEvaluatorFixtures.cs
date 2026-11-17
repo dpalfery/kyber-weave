@@ -89,7 +89,7 @@ internal static class ArbiterEvaluatorFixtures
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
 
-    public static ArbiterEvent DelegateEvent(string target = "csharp-dev") =>
+    public static ArbiterEvent DelegateEvent(string target = "dev-medium") =>
         new()
         {
             Harness = "claude",

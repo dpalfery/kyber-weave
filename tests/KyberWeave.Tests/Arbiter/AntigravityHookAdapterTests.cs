@@ -161,7 +161,7 @@ public sealed class AntigravityHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal(2, engine.SeenPre.Count);
-        Assert.Equal("csharp-dev", engine.SeenPre[0].Target);
+        Assert.Equal("dev-medium", engine.SeenPre[0].Target);
         Assert.StartsWith("KYBER-ARBITER: true", engine.SeenPre[0].Prompt, StringComparison.Ordinal);
         Assert.Equal("docs-dev", engine.SeenPre[1].Target);
         Assert.Equal("Document the adapter.", engine.SeenPre[1].Prompt);
@@ -260,7 +260,7 @@ public sealed class AntigravityHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal("{}", stdout);
-        Assert.Equal(["csharp-dev"], engine.SeenPostTargets);
+        Assert.Equal(["dev-medium"], engine.SeenPostTargets);
         Assert.Equal(["conv-antigravity-3:4"], engine.SeenPostToolCallIds);
         Assert.Equal(["conv-antigravity-3"], engine.SeenPostSessionIds);
     }
@@ -290,7 +290,7 @@ public sealed class AntigravityHookAdapterTests
                 {
                     ["Subagents"] = new JsonArray(new JsonObject
                     {
-                        ["TypeName"] = "csharp-dev",
+                        ["TypeName"] = "dev-medium",
                         ["Prompt"] = "Implement the change.",
                     }),
                 },

@@ -72,18 +72,29 @@ public sealed class ModelTargetResolverTests : IDisposable
         }
     }
 
-    private sealed class PlanFacts : IArbiterPlanReader
+    /// <summary>
+    /// The plan facts the evaluator reads. The recorded difficulty is the rating the dispatch runs under: under
+    /// the one remaining roster the difficulty rule takes it as its answer and makes no model call, so this
+    /// fake supplies whatever rating the provider would otherwise have answered.
+    /// </summary>
+    private sealed class PlanFacts(string? difficulty) : IArbiterPlanReader
     {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            facts
-                .With("plan.exists", true, ArbiterFactLabel.Derived)
+        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification)
+        {
+            facts = facts
+                .With("plan.exists", true, ArbiterFactLabel.Derived);
+            facts = facts
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
                 .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
-                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "dev-medium" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);
+            return difficulty is null
+                ? facts
+                : facts.With("plan.task.difficulty", difficulty, ArbiterFactLabel.Derived);
+        }
     }
 
     private sealed class NoGitFacts : IArbiterGitFacts
@@ -99,9 +110,9 @@ public sealed class ModelTargetResolverTests : IDisposable
             {
                 ["easy"] = "fast",
                 ["standard"] = "general",
-                ["hard"] = "deep-planning",
+                ["hard"] = "dev-hard",
             },
-            ["fast", "general", "deep-planning"]);
+            ["fast", "general", "dev-hard"]);
         return new()
         {
             Arbiter = ArbiterConfig.ProductDefaults with
@@ -119,7 +130,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         new InFlightLedger(ArbiterDirectory),
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
-        new PlanFacts(),
+        new PlanFacts(provider is HardProvider { Hard: false } ? null : provider is HardProvider hard ? hard.Difficulty : "hard"),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
             new FileArbiterStateFactory(),
@@ -135,7 +146,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         {
             Harness = Harness,
             Phase = "pre",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Prompt = Prompt,
             HarnessCaller = "conductor",
             Session = "s1",
@@ -182,12 +193,12 @@ public sealed class ModelTargetResolverTests : IDisposable
             {
                 ["fast"] = "haiku",
                 ["general"] = generalToken,
-                ["deep-planning"] = deepToken,
+                ["dev-hard"] = deepToken,
             },
             includeAgent
                 ? new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
                 {
-                    ["csharp-dev"] = new("general", generalToken),
+                    ["dev-medium"] = new("general", generalToken),
                 }
                 : new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal));
         File.WriteAllText(
@@ -204,7 +215,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", Harness, null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Headers = new ArbiterLedgerHeaders(PlanFile: Plan, Task: "T2"),
             ModelProfile = profile,
             ModelSource = profile is null ? null : "model-targets",
@@ -242,7 +253,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch());
 
         ArbiterModelBlock block = BlockOf(record);
-        Assert.Equal("deep-planning", block.Profile);
+        Assert.Equal("dev-hard", block.Profile);
         Assert.Equal("difficulty", block.Source);
     }
 
@@ -266,7 +277,7 @@ public sealed class ModelTargetResolverTests : IDisposable
     public async Task PriorFailOnTheTopRung_EasyDifficultyDoesNotCutTheModel()
     {
         WriteTable();
-        await SeedPriorFailAsync("deep-planning");
+        await SeedPriorFailAsync("dev-hard");
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(), new HardProvider { Difficulty = "easy" });
 
@@ -300,7 +311,7 @@ public sealed class ModelTargetResolverTests : IDisposable
     public async Task PriorPass_EasyDifficultyStillRetargetsPerDifficultyProfile()
     {
         WriteTable();
-        await SeedPriorAttemptAsync("deep-planning", "PASS");
+        await SeedPriorAttemptAsync("dev-hard", "PASS");
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(), new HardProvider { Difficulty = "easy" });
 
@@ -341,7 +352,7 @@ public sealed class ModelTargetResolverTests : IDisposable
     [Fact]
     public async Task ProfileWithNoToken_SaysNoToken()
     {
-        // The hard difficulty resolves to deep-planning, so that profile is the one left without a token.
+        // The hard difficulty resolves to dev-hard, so that profile is the one left without a token.
         WriteTable(deepToken: null);
 
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch(renderedToken: null));
@@ -368,7 +379,7 @@ public sealed class ModelTargetResolverTests : IDisposable
     [Fact]
     public async Task RenderedToken_ComesFromTheTargetAgentsTableEntry_AndEqualTokenSaysSameAsRendered()
     {
-        // The table gives csharp-dev the opus token, and the hard retarget also lands on opus. Nothing
+        // The table gives dev-medium the opus token, and the hard retarget also lands on opus. Nothing
         // in the caller supplies the rendered token, so the pre event and the resolver must read it from the table.
         WriteTable(generalToken: "opus");
 
@@ -392,7 +403,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         ArbiterModelBlock block = BlockOf(record);
         Assert.False(block.Delivered);
         Assert.Equal("unsupported-harness", block.Reason);
-        Assert.Equal("deep-planning", block.Profile);
+        Assert.Equal("dev-hard", block.Profile);
         Assert.Equal("opus", block.Token);
     }
 
@@ -434,7 +445,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         (ArbiterDecisionRecord record, _) = await RunAsync(Dispatch());
 
         ArbiterModelBlock block = BlockOf(record);
-        Assert.Equal("deep-planning", block.Profile);
+        Assert.Equal("dev-hard", block.Profile);
         Assert.Equal("opus", block.Token);
         Assert.Equal(Model, block.RenderedToken);
         Assert.Equal("difficulty", block.Source);

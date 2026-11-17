@@ -105,14 +105,12 @@ public sealed class PlatformAgentContentTests
         Assert.Equal("publishing-worker", agent.CapabilityProfile);
         Assert.Equal("tiered", agent.WorkerRoster);
         Assert.Equal("general", agent.ModelProfile);
-        Assert.Equal(Agent("github-devops").CopilotTools, agent.CopilotTools);
     }
 
     [Fact]
-    public void DevopsDoesWhatGithubDevopsDidAndNamesNoPlatform()
+    public void DevopsOwnsTheDeliveryDutiesAndNamesNoPlatform()
     {
         string body = Agent("devops").InstructionBody;
-        string replaced = Agent("github-devops").InstructionBody;
 
         Assert.DoesNotMatch(PlatformWord, body);
         Assert.Contains("TASK_GATE:", body, StringComparison.Ordinal);
@@ -120,7 +118,6 @@ public sealed class PlatformAgentContentTests
         foreach (string duty in new[] { "run start", "push", "pull request", "secret", "pipeline" })
         {
             Assert.Contains(duty, body, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains(duty, replaced, StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -140,12 +137,6 @@ public sealed class PlatformAgentContentTests
         Assert.Contains("platform-researcher", Source.Value.Bundle.AgentNames);
     }
 
-    [Fact]
-    public void TheAgentsTheyReplaceAreStillPresent()
-    {
-        Assert.Equal("read-only", Agent("azure-reader").CapabilityProfile);
-        Assert.Equal("publishing-worker", Agent("github-devops").CapabilityProfile);
-    }
 
     /// <summary>
     /// Run start gates on the capability profile, not on the agent name: a dispatch to <c>devops</c>

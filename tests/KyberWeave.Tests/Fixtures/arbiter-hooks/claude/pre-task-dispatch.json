@@ -10,7 +10,7 @@
   "tool_input": {
     "description": "Write tests for T3",
     "prompt": "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nWrite the tests.",
-    "subagent_type": "test-dev"
+    "subagent_type": "dev-medium"
   },
   "tool_use_id": "toolu-task-1"
 }

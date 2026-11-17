@@ -62,8 +62,6 @@ rules:
     stated-in:
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         section: Developer exit gate
-      - path: products/kyber-squad/agents/test-dev.md
-        anchor: "Defect class:"
     controls:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
@@ -98,19 +96,16 @@ rules:
   - id: E4
     statement: Artifact and baseline paths go in the message body beside the completion digest, not inside the digest.
     stated-in:
-      - products/kyber-squad/agents/csharp-dev.md
-      - path: products/kyber-squad/agents/test-dev.md
+      - path: products/kyber-squad/skills/task-gate/SKILL.md
         anchor: "Baseline:"
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: coverage-gaps-in-message-body
     statement: Coverage gaps are reported in the message body beside the completion digest, not as a digest field.
     stated-in:
-      - path: products/kyber-squad/agents/test-dev.md
+      - path: products/kyber-squad/skills/task-gate/SKILL.md
         anchor: "COVERAGE_GAPS:"
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: six-field-rejection
     statement: The conductor rejects a completion digest that is missing a required field or whose STATUS or TASK_GATE is FAIL.
@@ -260,7 +255,6 @@ rules:
       - products/kyber-squad/skills/task-gate/SKILL.md
     controls:
       - products/kyber-squad/shared/worker-baseline.md
-      - products/kyber-squad/agents/go-dev.md
   # ---------------------------------------------------------------- the full-suite ban and test runs
   - id: C1
     statement: A developer agent, or worker, never runs the full test suite.
@@ -362,15 +356,12 @@ rules:
     stated-in:
       - docs/standards/test/test.standards.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
     retired:
       statement: A worker whose change reaches shared test infrastructure asks the conductor for one full test-suite run.
       example: If your change touches shared test infrastructure, ask the conductor for one full run of the suite.
       seed-into: products/kyber-squad/shared/worker-baseline.md
       absent-from:
-        - products/kyber-squad/agents/csharp-dev.md
-        - products/kyber-squad/agents/test-dev.md
         - docs/standards/test/test.standards.md
   - id: shared-test-infra-definition
     statement: Shared test infrastructure is anything referenced by more than one test class.
@@ -384,8 +375,6 @@ rules:
     stated-in:
       - path: products/kyber-squad/agents/conductor.md
         anchor: "--artifacts-path"
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/test-dev.md
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         anchor: "--artifacts-path"
       - path: products/kyber-squad/skills/task-gate/SKILL.md
@@ -394,15 +383,13 @@ rules:
         anchor: "--artifacts-path"
         section: Concurrency and scheduling model (worktree and artifact isolation)
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: F2
     statement: A worker in its own git worktree does not need --artifacts-path, because the worktree already isolates its build output.
     stated-in:
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/test-dev.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        anchor: "--artifacts-path"
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: F3
     statement: Build once and test many times, reusing the build with --no-build or running the compiled test assembly directly.
@@ -411,7 +398,6 @@ rules:
       - products/kyber-squad/skills/delivery-execution/SKILL.md
       - docs/standards/test/test.standards.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: fully-qualified-test-class
     statement: A direct test-assembly run names each test class fully qualified, because a short name runs zero tests and still exits 0.
@@ -427,32 +413,17 @@ rules:
       - products/kyber-squad/agents/conductor.md
       - products/kyber-squad/skills/delivery-execution/SKILL.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/agents/conductor/references/autonomy.md
   - id: D1
     statement: Before reading or searching files directly, the reader asks the code index (codegraph_explore) and the documentation tools.
     stated-in:
       - products/kyber-squad/shared/worker-baseline.md
       - products/kyber-squad/agents/architect.md
-      - products/kyber-squad/agents/azure-reader.md
       - products/kyber-squad/agents/bug-crusher-investigator.md
       - products/kyber-squad/agents/code-reviewer.md
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/dal-dev.md
       - products/kyber-squad/agents/docs-dev.md
-      - products/kyber-squad/agents/github-devops.md
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/agents/maui-dev.md
-      - products/kyber-squad/agents/pulumi-dev.md
-      - products/kyber-squad/agents/python-dev.md
-      - products/kyber-squad/agents/react-dev.md
       - products/kyber-squad/agents/review-lens.md
       - products/kyber-squad/agents/review-triage.md
-      - products/kyber-squad/agents/rust-dev.md
-      - products/kyber-squad/agents/sql-database-architect.md
-      - products/kyber-squad/agents/tauri-dev.md
-      - products/kyber-squad/agents/test-dev.md
-      - products/kyber-squad/agents/typescript-dev.md
       - products/kyber-squad/skills/product-owner/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
@@ -549,26 +520,19 @@ rules:
       seed-into: products/kyber-squad/agents/conductor/references/autonomy.md
       absent-from:
         - products/kyber-squad/agents/conductor.md
-        - products/kyber-squad/agents/csharp-dev.md
-        - products/kyber-squad/skills/testing/SKILL.md
   - id: green-against-red
-    statement: A developer worker writes the tests for its own change rather than leaving them to test-dev.
+    statement: A developer worker writes the tests for its own change rather than leaving them to another role.
     stated-in:
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/typescript-dev.md
-      - products/kyber-squad/agents/go-dev.md
+      - path: products/kyber-squad/skills/delivery-execution/SKILL.md
+        section: Test-first mode
     controls:
-      - products/kyber-squad/agents/sql-database-architect.md
       - products/kyber-squad/agents/research-agent.md
     retired:
-      statement: A developer worker leaves test authorship to test-dev and does not write test files.
-      example: Hand test authorship to test-dev. Report what needs covering; do not write the test files.
+      statement: A developer worker leaves test authorship to another role and does not write test files.
+      example: Hand test authorship to another agent. Report what needs covering; do not write the test files.
       seed-into: products/kyber-squad/shared/worker-baseline.md
       absent-from:
-        - products/kyber-squad/agents/csharp-dev.md
-        - products/kyber-squad/agents/dal-dev.md
-        - products/kyber-squad/agents/go-dev.md
-        - products/kyber-squad/agents/python-dev.md
+        - products/kyber-squad/skills/delivery-execution/SKILL.md
   - id: G4
     statement: The Discovery line reporting codegraph, docs and direct-read counts comes before the completion digest.
     stated-in:
@@ -614,24 +578,10 @@ rules:
   - id: standards-via-tool
     statement: The reader gets its coding standard through the docs_get_coding_standard_for_technology tool, and reads the standard's file only when that tool is unavailable.
     stated-in:
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/dal-dev.md
-      - products/kyber-squad/agents/github-devops.md
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/agents/maui-dev.md
-      - products/kyber-squad/agents/pulumi-dev.md
-      - products/kyber-squad/agents/python-dev.md
-      - products/kyber-squad/agents/react-dev.md
-      - products/kyber-squad/agents/rust-dev.md
-      - products/kyber-squad/agents/sql-database-architect.md
-      - products/kyber-squad/agents/tauri-dev.md
-      - products/kyber-squad/agents/test-dev.md
-      - products/kyber-squad/agents/typescript-dev.md
       - products/kyber-squad/skills/go-dev/SKILL.md
       - products/kyber-squad/skills/maui-dev/SKILL.md
       - products/kyber-squad/skills/python-dev/SKILL.md
       - products/kyber-squad/skills/rust-dev/SKILL.md
-      - products/kyber-squad/skills/testing/SKILL.md
       - products/kyber-squad/skills/typescript-dev/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
@@ -641,12 +591,7 @@ rules:
       example: Before you start, open docs/standards/<technology>/README.md directly and read the coding standard; do not use a tool for it.
       seed-into: products/kyber-squad/shared/worker-baseline.md
       absent-from:
-        - products/kyber-squad/agents/csharp-dev.md
-        - products/kyber-squad/agents/go-dev.md
-        - products/kyber-squad/agents/python-dev.md
-        - products/kyber-squad/agents/test-dev.md
         - products/kyber-squad/skills/go-dev/SKILL.md
-        - products/kyber-squad/skills/testing/SKILL.md
   # ---------------------------------------------------------------- the review loop and the council
   - id: council-loop-until-approve
     statement: The review council re-reviews after every fix round until the verdict says nothing is left to fix (fix round none, review clean), or the loop reaches its hard stop.
@@ -1091,7 +1036,6 @@ rules:
       - path: products/kyber-squad/skills/code-review/SKILL.md
         section: Pre-push self-review gate
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: council-applies-review-guidance
     statement: Every council seat applies the repository's review guidance in REVIEW.md.
@@ -1269,52 +1213,51 @@ rules:
       - products/kyber-squad/agents/conductor/references/autonomy.md
   # ---------------------------------------------------------------- specialist routing
   - id: rust-tauri-routing-split
-    statement: rust-dev takes Rust code outside a Tauri app and hands src-tauri to tauri-dev.
+    statement: The Rust standard governs Rust code outside a Tauri app's src-tauri core, and that core follows the Tauri standard.
     stated-in:
-      - products/kyber-squad/agents/rust-dev.md
-    controls:
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/agents/python-dev.md
-  - id: tauri-takes-src-tauri
-    statement: tauri-dev takes the src-tauri part of a Tauri app and hands other Rust code to rust-dev.
-    stated-in:
-      - path: products/kyber-squad/agents/tauri-dev.md
+      - path: products/kyber-squad/standards/rust/rust.standards.md
         anchor: "src-tauri"
     controls:
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/agents/python-dev.md
+      - products/kyber-squad/standards/go/go.standards.md
+  - id: tauri-takes-src-tauri
+    statement: The Tauri standard governs the Rust core of a Tauri desktop app, which sits under src-tauri.
+    stated-in:
+      - path: products/kyber-squad/standards/tauri/tauri.standards.md
+        anchor: "src-tauri"
+    controls:
+      - products/kyber-squad/standards/go/go.standards.md
   - id: go-tests-to-test-dev
-    statement: go-dev writes the _test.go tests of its own Go change; test-dev takes only work whose deliverable is tests.
+    statement: go-dev writes the _test.go tests of its own Go change.
     stated-in:
-      - products/kyber-squad/agents/go-dev.md
+      - path: products/kyber-squad/standards/go/go.standards.md
+        anchor: "deliverable is tests"
     controls:
-      - products/kyber-squad/agents/rust-dev.md
-      - products/kyber-squad/agents/python-dev.md
+      - products/kyber-squad/standards/python/python.standards.md
     retired:
-      statement: go-dev takes Go source and module files but not _test.go files, which go to test-dev.
-      example: "Go routing: go-dev takes non-test .go files, go.mod and go.sum, and never authors _test.go files; every _test.go file goes to test-dev."
-      seed-into: products/kyber-squad/agents/rust-dev.md
+      statement: go-dev takes Go source and module files but not _test.go files, which go to another agent.
+      example: "Go routing: go-dev takes non-test .go files, go.mod and go.sum, and never authors _test.go files; every _test.go file goes to another agent."
+      seed-into: products/kyber-squad/standards/go/go.standards.md
       absent-from:
-        - products/kyber-squad/agents/go-dev.md
+        - products/kyber-squad/standards/go/go.standards.md
   - id: typescript-routing-split
-    statement: typescript-dev takes .ts files outside a React UI together with their tests, and React UI code goes to react-dev.
+    statement: The TypeScript standard governs .ts code outside a React UI, and React UI code follows the React standard.
     stated-in:
-      - products/kyber-squad/agents/typescript-dev.md
+      - path: products/kyber-squad/standards/typescript/typescript.standards.md
+        anchor: "React UI code"
     controls:
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/agents/python-dev.md
+      - products/kyber-squad/standards/python/python.standards.md
     retired:
-      statement: typescript-dev takes non-test .ts files outside a React UI; test files go to test-dev.
-      example: Test files — *.test.ts, *.spec.ts, fixtures, and test helpers are test-dev's. Write testable code; do not author the tests.
+      statement: TypeScript test files belong to a separate testing agent rather than the worker that writes the code.
+      example: Test files — *.test.ts, *.spec.ts, fixtures, and test helpers belong to another agent. Write testable code; do not author the tests.
       absent-from:
-        - products/kyber-squad/agents/typescript-dev.md
+        - products/kyber-squad/standards/typescript/typescript.standards.md
   - id: react-routing-split
-    statement: react-dev takes .tsx and .jsx React UI code, and not .ts files outside a React UI.
+    statement: The React standard governs .tsx and .jsx React UI code, and .ts outside a React UI follows the TypeScript standard.
     stated-in:
-      - products/kyber-squad/agents/react-dev.md
+      - path: products/kyber-squad/standards/react/react.standards.md
+        section: Coding standards
     controls:
-      - products/kyber-squad/agents/go-dev.md
-      - products/kyber-squad/agents/python-dev.md
+      - products/kyber-squad/standards/python/python.standards.md
   - id: conductor-routes-ts
     statement: The conductor routes non-test .ts code outside a React UI to typescript-dev.
     stated-in:
@@ -1427,7 +1370,6 @@ rules:
         section: Ready queue
       - path: products/kyber-squad/agents/architect.md
         anchor: "projectPath"
-      - products/kyber-squad/agents/azure-reader.md
       - products/kyber-squad/agents/product-owner.md
       - products/kyber-squad/agents/research-agent.md
       - products/kyber-squad/agents/review-lens.md
@@ -1758,7 +1700,6 @@ rules:
     stated-in:
       - products/kyber-squad/agents/docs-dev.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: plan-closeout-waivers
     statement: Plan closeout keeps the mapping table and the ADR and Documentation waivers, and a plan without them is not archived.
@@ -1776,14 +1717,12 @@ rules:
         anchor: "Design harvest"
         section: Plan closeout
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: spec-closeout-migrates-before-archive
     statement: Specification closeout migrates the durable content through the Design harvest before the specification is archived.
     stated-in:
       - products/kyber-squad/agents/docs-dev.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: docs-dev-shell-commands
     statement: docs-dev runs only a closed list of commands, the plan closeout command, a specification's archival git mv and git rm of its task file, docs validate, docs drift, a task-file rewrite after it made the task file stale, targeted documentation tests and a commit of its own documentation edits, and nothing else.
@@ -1791,7 +1730,6 @@ rules:
       - path: products/kyber-squad/agents/docs-dev.md
         section: Commands you run
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: plan-closeout-by-command
     statement: docs-dev checks a plan closeout by running the kyber-weave docs closeout command, which names every closeout item still missing, and a plan is archived only by that command's archive mode, never by moving or editing the files by hand.
@@ -1799,14 +1737,12 @@ rules:
       - path: products/kyber-squad/agents/docs-dev.md
         section: Plan closeout
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: docs-dev-only-spec-archiver
     statement: docs-dev is the only role that archives a specification.
     stated-in:
       - products/kyber-squad/agents/docs-dev.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: plan-archived-by-conductor-tool
     statement: A completed plan is archived by the conductor's archive tool; docs-dev archives one only on an archive dispatch.
@@ -1815,7 +1751,6 @@ rules:
       - path: products/kyber-squad/skills/delivery-execution/SKILL.md
         anchor: "docs_archive_plan_after_closeout_is_complete"
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: bug-crusher-docs-review
     statement: bug-crusher routes its fix through a docs-dev documentation-impact review and reports the outcome.
@@ -2094,7 +2029,6 @@ rules:
       - products/kyber-squad/skills/product-owner/SKILL.md
     controls:
       - products/kyber-squad/skills/task-gate/references/rework.md
-      - products/kyber-squad/agents/go-dev.md
     retired:
       statement: The reader asks the person directly, verbatim, to approve each phase at a numbered gate.
       example: At each numbered phase gate, ask the person directly, in these exact words, whether they approve the phase, and wait for their answer.
@@ -2139,7 +2073,6 @@ rules:
       - path: products/kyber-squad/skills/bug-crusher/SKILL.md
         anchor: "stop-on-tool-failure"
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: run-start-before-work
     statement: A run starts with kyber-weave run start before any writer is dispatched.
@@ -2179,9 +2112,7 @@ rules:
       example: If the standard is not declared, or the document it names is still status draft, say so and ask the human whether to proceed before writing code. Running headless, return that question to your orchestrator instead.
       seed-into: products/kyber-squad/skills/task-gate/references/rework.md
       absent-from:
-        - products/kyber-squad/agents/csharp-dev.md
-        - products/kyber-squad/agents/sql-database-architect.md
-        - products/kyber-squad/agents/tauri-dev.md
+        - products/kyber-squad/shared/worker-baseline.md
   - id: plan-orders-red-green-per-compile-unit
     statement: A test-first plan never splits one behaviour into a task that writes its failing tests and another task that implements it.
     stated-in:
@@ -2223,14 +2154,8 @@ rules:
   - id: baseline-diagnostics-never-needs-one-tool
     statement: When the harness offers no language-diagnostics tool, a developer worker takes its baseline from the project's own build or type-check and lint commands, never stops, refuses or asks for lack of that tool, and says which source it used.
     stated-in:
-      - products/kyber-squad/agents/csharp-dev.md
-      - products/kyber-squad/agents/dal-dev.md
-      - products/kyber-squad/agents/maui-dev.md
-      - products/kyber-squad/agents/pulumi-dev.md
-      - products/kyber-squad/agents/react-dev.md
-      - products/kyber-squad/agents/test-dev.md
+      - products/kyber-squad/agents/dev-medium.md
     controls:
-      - products/kyber-squad/agents/go-dev.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: architect-runs-docs-tasks-check-before-finalize
     statement: Before FINALIZE the architect runs docs tasks --check and fixes every packet warning it prints, such as a task whose packet cannot be understood without the plan.
@@ -2246,7 +2171,6 @@ rules:
       - path: products/kyber-squad/skills/task-gate/SKILL.md
         section: Failing run (test-first)
     controls:
-      - products/kyber-squad/agents/sql-database-architect.md
       - products/kyber-squad/shared/worker-baseline.md
   - id: stub-task-needs-a-recorded-plan-decision
     statement: A test-first plan never adds a stub task so that another task's tests compile.
@@ -2292,12 +2216,12 @@ rules:
       - products/kyber-squad/agents/conductor/references/autonomy.md
       - products/kyber-squad/skills/task-gate/references/rework.md
   - id: test-dev-takes-test-only-tasks
-    statement: test-dev is assigned only tasks whose deliverable is tests, such as characterization tests, an end-to-end suite or test infrastructure.
+    statement: A task whose deliverable is only tests goes to the developer tier that owns it, like any other task.
     stated-in:
-      - products/kyber-squad/agents/test-dev.md
+      - path: products/kyber-squad/standards/shared-rules.md
+        section: Testing
     controls:
-      - products/kyber-squad/agents/sql-database-architect.md
-      - products/kyber-squad/shared/worker-baseline.md
+      - products/kyber-squad/agents/dev-medium.md
   - id: test-adequacy-is-the-independent-test-check
     statement: Because one worker writes both a task's tests and its code, the test-adequacy lens reads those tests as the independent check on them.
     stated-in:

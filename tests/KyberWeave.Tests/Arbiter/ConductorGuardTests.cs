@@ -189,7 +189,7 @@ public sealed class ConductorGuardTests
     [Fact]
     public void AWorkerToolCall_IsPermitted()
     {
-        string json = JsonSerializer.Serialize(new { cwd = Cwd, agentId = "a1", parentAgentId = "p1", agentType = "csharp-dev", toolName = "edit", toolArgs = new { } });
+        string json = JsonSerializer.Serialize(new { cwd = Cwd, agentId = "a1", parentAgentId = "p1", agentType = "dev-medium", toolName = "edit", toolArgs = new { } });
 
         Assert.Empty(Run(json));
     }

@@ -84,7 +84,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
         {
             Harness = "claude",
             Phase = "pre",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Prompt = Prompt,
             HarnessCaller = "conductor",
             IsDispatch = true,

@@ -53,18 +53,10 @@
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\rust.rules.md" LogicalName="Standards.rust.rules.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\rust.skills.md" LogicalName="Standards.rust.skills.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\rust\rust.arbiter-rules.yml" LogicalName="Standards.rust.arbiter-rules.yml" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\sql.standards.md" LogicalName="Standards.sql.standards.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\sql.rules.md" LogicalName="Standards.sql.rules.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\sql.skills.md" LogicalName="Standards.sql.skills.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\sql\sql.arbiter-rules.yml" LogicalName="Standards.sql.arbiter-rules.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.standards.md" LogicalName="Standards.tauri.standards.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.rules.md" LogicalName="Standards.tauri.rules.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.skills.md" LogicalName="Standards.tauri.skills.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\tauri\tauri.arbiter-rules.yml" LogicalName="Standards.tauri.arbiter-rules.yml" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\test.standards.md" LogicalName="Standards.test.standards.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\test.rules.md" LogicalName="Standards.test.rules.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\test.skills.md" LogicalName="Standards.test.skills.md" />
-    <EmbeddedResource Include="..\..\products\kyber-squad\standards\test\test.arbiter-rules.yml" LogicalName="Standards.test.arbiter-rules.yml" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.standards.md" LogicalName="Standards.typescript.standards.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.rules.md" LogicalName="Standards.typescript.rules.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\typescript\typescript.skills.md" LogicalName="Standards.typescript.skills.md" />

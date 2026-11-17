@@ -44,7 +44,7 @@ global singleton for something a caller could pass.
 
 ### Images
 
-`github-devops` owns Dockerfiles. When this service is containerized, the image is
+`devops` owns Dockerfiles. When this service is containerized, the image is
 multi-stage, runs as a non-root user, and puts the apt (or equivalent) layer before the
 application layer so dependency changes do not bust the runtime cache. Say so when handing
 the image need off; do not write the Dockerfile here.
@@ -106,8 +106,8 @@ do.
 ### Tests
 
 Test authorship follows `<test-coding-standard>`. This standard requires that the code
-be testable: dependency injection, mockable interfaces, no global state. Test
-authorship belongs to `test-dev`.
+be testable: dependency injection, mockable interfaces, no global state. A task whose deliverable
+is tests goes to a developer tier like any other.
 
 ## Commands
 

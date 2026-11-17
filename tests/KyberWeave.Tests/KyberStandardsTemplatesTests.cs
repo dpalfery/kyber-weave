@@ -24,12 +24,10 @@ public sealed class KyberStandardsTemplatesTests
         "python",
         "react",
         "rust",
-        "sql",
+        "sql-server",
         "tauri",
-        "test",
         "typescript",
-        "aws",
-        "sql-server"
+        "aws"
     ];
 
     private static readonly string[] InnerLoopCommands = ["build", "test", "format"];
@@ -167,9 +165,8 @@ public sealed class KyberStandardsTemplatesTests
     [InlineData("python")]
     [InlineData("react")]
     [InlineData("rust")]
-    [InlineData("sql")]
+    [InlineData("sql-server")]
     [InlineData("tauri")]
-    [InlineData("test")]
     [InlineData("typescript")]
     public void TryGetRetrievesTemplateForEachDeclaredTechnology(string technology)
     {

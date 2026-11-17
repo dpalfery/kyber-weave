@@ -67,6 +67,12 @@ public static partial class PlanTaskFileRules
     /// <summary>Error: under the tiered roster a developer task names no technology.</summary>
     public const string MissingTechnologyUnderTiered = "KW-DOC-TASKS-018";
 
+    /// <summary>
+    /// Warning: the task file records <c>worker-roster: technology</c>. The removal deleted that roster's
+    /// agents, so the file is read as <c>tiered</c> and the warning names the change.
+    /// </summary>
+    public const string RetiredTechnologyRoster = "KW-DOC-TASKS-019";
+
     /// <summary>The three legal difficulty values, in order.</summary>
     public static IReadOnlyList<string> Difficulties { get; } = ["easy", "medium", "hard"];
 

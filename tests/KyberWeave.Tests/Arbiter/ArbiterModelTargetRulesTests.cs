@@ -93,19 +93,28 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         }
     }
 
-    /// <summary>The plan stands in for a free T2 owned by csharp-dev with one implementation file.</summary>
-    private sealed class PlanFacts : IArbiterPlanReader
+    /// <summary>
+    /// The plan stands in for a free T2 owned by a developer tier with one implementation file, and carries the
+    /// rating the task file records. Under the one remaining roster the difficulty rule takes that rating as its
+    /// answer and asks no model.
+    /// </summary>
+    private sealed class PlanFacts(string? difficulty) : IArbiterPlanReader
     {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            facts
+        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification)
+        {
+            facts = facts
                 .With("plan.exists", true, ArbiterFactLabel.Derived)
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
                 .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
-                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "dev-medium" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);
+            return difficulty is null
+                ? facts
+                : facts.With("plan.task.difficulty", difficulty, ArbiterFactLabel.Derived);
+        }
     }
 
     private sealed class NoGitFacts : IArbiterGitFacts
@@ -121,9 +130,9 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
             {
                 ["easy"] = "fast",
                 ["standard"] = "general",
-                ["hard"] = "deep-planning",
+                ["hard"] = "dev-hard",
             },
-            ["fast", "general", "deep-planning"]),
+            ["fast", "general", "dev-hard"]),
     };
 
     private static KyberWeaveConfig Config(string mode = "shadow") => new()
@@ -132,13 +141,15 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
+    private string? _recordedDifficulty;
+
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
         new InFlightLedger(ArbiterDirectory),
         new DecisionLog(ArbiterDirectory),
         new NoGitFacts(),
-        new PlanFacts(),
+        new PlanFacts(_recordedDifficulty),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
             new FileArbiterStateFactory(),
@@ -151,7 +162,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
     {
         Harness = "claude",
         Phase = "pre",
-        Target = "csharp-dev",
+        Target = "dev-medium",
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
@@ -184,7 +195,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", "claude", null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Headers = new ArbiterLedgerHeaders(PlanFile: Plan, Task: "T2"),
             ModelProfile = recordProfile ? profile : null,
             ModelSource = recordProfile ? "model-targets" : null,
@@ -208,11 +219,11 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
             {
                 ["fast"] = "t-fast",
                 ["general"] = "t-general",
-                ["deep-planning"] = "t-deep",
+                ["dev-hard"] = "t-deep",
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
             {
-                ["csharp-dev"] = new("general", "t-general"),
+                ["dev-medium"] = new("general", "t-general"),
             });
         File.WriteAllText(
             Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
@@ -222,40 +233,30 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
     // 1. KW-ARB-DIFFICULTY-001
 
     [Theory]
-    [InlineData("easy")]
-    [InlineData("standard")]
-    [InlineData("hard")]
-    public async Task Difficulty_AnsweredWithAnyDifficultyAboveTheFloor_Retargets(string answer)
+    [InlineData("easy", "easy")]
+    [InlineData("standard", "medium")]
+    [InlineData("hard", "hard")]
+    public async Task Difficulty_AnyRecordedRating_Retargets(string answer, string rating)
     {
-        ScriptedProvider provider = new()
-        {
-            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [DifficultyRule] = answer },
-            Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.9, 0.05, 0.05], 0.9, 0.8),
-            },
-        };
+        _recordedDifficulty = rating;
+        ScriptedProvider provider = new();
 
         ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(provider, mode: "enforce");
 
         Assert.Equal(RuleEffects.Retarget, RuleOf(record, DifficultyRule).Effect);
+        Assert.Equal(answer, RuleOf(record, DifficultyRule).Answer);
+        Assert.DoesNotContain(DifficultyRule, provider.AskedRuleIds);
     }
 
     [Fact]
-    public async Task Difficulty_BelowTheFloor_Keeps()
+    public async Task Difficulty_NoRecordedRating_Keeps()
     {
-        ScriptedProvider provider = new()
-        {
-            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [DifficultyRule] = "hard" },
-            Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.5, 0.3, 0.2], 0.5, 0.8),
-            },
-        };
+        ScriptedProvider provider = new();
 
         ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(provider, mode: "enforce");
 
         Assert.Equal(RuleEffects.Keep, RuleOf(record, DifficultyRule).Effect);
+        Assert.DoesNotContain(DifficultyRule, provider.AskedRuleIds);
     }
 
     [Theory]
@@ -332,7 +333,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
     [Fact]
     public async Task Ladder_PriorProfileIsTheTop_IsTopOfLadder()
     {
-        await SeedAttemptAsync("deep-planning", "FAIL");
+        await SeedAttemptAsync("dev-hard", "FAIL");
 
         ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(new ScriptedProvider(), mode: "enforce");
 
@@ -357,14 +358,8 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
     {
         await SeedAttemptAsync("fast", "FAIL");
         WriteModelTargetsTable();
-        ScriptedProvider provider = new()
-        {
-            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [DifficultyRule] = "hard" },
-            Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8),
-            },
-        };
+        _recordedDifficulty = "hard";
+        ScriptedProvider provider = new();
 
         ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(provider, mode: "enforce");
 
@@ -398,14 +393,8 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
     public async Task ModeShadow_EvaluatesAndLogsWithoutEffecting()
     {
         await SeedAttemptAsync("fast", "FAIL");
-        ScriptedProvider provider = new()
-        {
-            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [DifficultyRule] = "hard" },
-            Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8),
-            },
-        };
+        _recordedDifficulty = "hard";
+        ScriptedProvider provider = new();
 
         ArbiterDecisionRecord record = await EvaluateAndReadSecondaryAsync(provider, mode: "shadow");
 

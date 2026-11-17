@@ -55,7 +55,7 @@ public sealed class ArbiterPlanReadRuleTests
     /// <see cref="KyberWeaveConfig.ProductDefaults" /> places it at <c>6-Docs</c>, so a prompt naming
     /// <c>docs/plans/…</c> would name no configured planning directory and the rule could not fire.
     /// </remarks>
-    private static ArbiterFactSet Facts(string prompt, string target = "csharp-dev")
+    private static ArbiterFactSet Facts(string prompt, string target = "dev-medium")
     {
         return TriggerFactBuilder.Build(
             "delegate",
@@ -76,10 +76,10 @@ public sealed class ArbiterPlanReadRuleTests
     }
 
     /// <summary>The shipped rule's step-0 answer for those facts.</summary>
-    private static string Answer(string prompt, string target = "csharp-dev") => RuleEngine.Decide(Rule(), Facts(prompt, target));
+    private static string Answer(string prompt, string target = "dev-medium") => RuleEngine.Decide(Rule(), Facts(prompt, target));
 
     /// <summary>The effect the shipped rule produces for those facts.</summary>
-    private static string Effect(string prompt, string target = "csharp-dev")
+    private static string Effect(string prompt, string target = "dev-medium")
     {
         ArbiterOutcome outcome = RuleEngine.EvaluateStep0([Rule()], Facts(prompt, target), "delegate");
         return outcome.CombinedEffect;
@@ -109,7 +109,7 @@ public sealed class ArbiterPlanReadRuleTests
     /// product's own packet commands name the plan so the machine can identify the dispatch, and never reach the question.
     /// </summary>
     [Theory]
-    [InlineData("Fetch your packet with `kyber-weave docs packet T1 --agent dal-dev`.")]
+    [InlineData("Fetch your packet with `kyber-weave docs packet T1 --agent dev-medium`.")]
     [InlineData("Fetch your packet with `kyber-weave docs tasks docs/plans/2026-11-07-ready-tasks.md --task T1` (from the worktree).")]
     [InlineData("Your first action is `kyber-weave docs packet T1 --plan docs/plans/2026-11-07-ready-tasks.md`.")]
     public void RoutingMetadataAndPacketCommandsNameNoPlanToTheQuestion(string body)

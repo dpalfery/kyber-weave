@@ -52,13 +52,13 @@ follow **<sql-coding-standard>** § Schema and types.
 
 ---
 
-## Data Layer Boundary with dal-dev and csharp-dev
+## Data Layer Boundary
 
-- `sql-database-architect` owns schema design end-to-end: table definitions, data types, constraints, clustered key strategy, indexes, and the SQL database project producing the dacpac.
-- `dal-dev` owns parameterized ADO.NET repositories, FluentMigrator migration scripts, and the connection factory.
-- `csharp-dev` consumes `IRepository<T>` in application services. It does not write SQL or migrations.
-- When `dal-dev` needs a schema change, they describe the access need → you design the schema → return the approved DDL as the explicit contract artifact.
-- If a FluentMigrator script from `dal-dev` diverges from the approved schema, flag the conflict and provide corrected DDL.
+- `architect` owns schema and data-model planning end-to-end: table definitions, data types, constraints, clustered key strategy, indexes, and the SQL database project producing the dacpac.
+- The developer tier the task routes to writes parameterized ADO.NET repositories, FluentMigrator migration scripts, the connection factory, and the DDL the plan approves.
+- The application tier consumes `IRepository<T>` in application services. It does not write SQL or migrations.
+- When the data access needs a schema change, describe the access need in the task prompt → the plan records the design → the approved DDL is the explicit contract artifact.
+- If a FluentMigrator script diverges from the approved schema, flag the conflict in the plan and do not apply the script.
 
 Shared contract artifact for parallel work: a table-definition block listing column names, data types, nullability, and key/index declarations.
 

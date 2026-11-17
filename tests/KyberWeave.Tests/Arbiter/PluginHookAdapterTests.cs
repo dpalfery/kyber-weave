@@ -117,16 +117,16 @@ public sealed class PluginHookAdapterTests
         {
             ["description"] = "Implement T4",
             ["prompt"] = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.3\n\nImplement the parser.",
-            ["agent"] = "csharp-dev",
+            ["agent"] = "dev-medium",
         };
 
         (int exit, string stdout) = RunProduction("opencode", Envelope("before", "subagent", args), engine);
 
         Assert.Equal(0, exit);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
         using JsonDocument doc = JsonDocument.Parse(stdout);
         JsonElement returned = doc.RootElement.GetProperty("args");
-        Assert.Equal("csharp-dev", returned.GetProperty("agent").GetString());
+        Assert.Equal("dev-medium", returned.GetProperty("agent").GetString());
         Assert.Equal("Implement the parser.", returned.GetProperty("prompt").GetString());
     }
 
@@ -134,7 +134,7 @@ public sealed class PluginHookAdapterTests
     public void OpenCode225SubagentShapeIsBlockedWhenTheEngineDenies()
     {
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, Reason: "not in plan") };
-        JsonObject args = new() { ["prompt"] = "Do it.", ["agent"] = "csharp-dev" };
+        JsonObject args = new() { ["prompt"] = "Do it.", ["agent"] = "dev-medium" };
 
         (_, string stdout) = RunProduction("opencode", Envelope("before", "subagent", args), engine);
 
@@ -146,11 +146,11 @@ public sealed class PluginHookAdapterTests
     public void OpenCodeStillGatesTheOlderTaskShapeAndKiloKeepsItsOwn()
     {
         ScriptedEngine engine = new();
-        RunProduction("opencode", Envelope("before", "task", TaskArgs("csharp-dev", "Do it.")), engine);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        RunProduction("opencode", Envelope("before", "task", TaskArgs("dev-medium", "Do it.")), engine);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
 
         ScriptedEngine kilo = new();
-        RunProduction("kilo", Envelope("before", "subagent", new JsonObject { ["prompt"] = "Do it.", ["agent"] = "csharp-dev" }, harness: "kilo"), kilo);
+        RunProduction("kilo", Envelope("before", "subagent", new JsonObject { ["prompt"] = "Do it.", ["agent"] = "dev-medium" }, harness: "kilo"), kilo);
         Assert.Null(kilo.SeenPreTarget);
     }
 
@@ -160,7 +160,7 @@ public sealed class PluginHookAdapterTests
         const string body = "Implement the plan parser.";
         string prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 4.3\n\n" + body;
         (int exit, string stdout) = Run(
-            Envelope("before", "task", TaskArgs("csharp-dev", prompt)), "conductor", new ScriptedEngine());
+            Envelope("before", "task", TaskArgs("dev-medium", prompt)), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -168,7 +168,7 @@ public sealed class PluginHookAdapterTests
         Assert.False(doc.RootElement.TryGetProperty("reason", out _), "Allow must carry no reason.");
         JsonElement args = doc.RootElement.GetProperty("args");
         Assert.Equal("Implement T4", args.GetProperty("description").GetString());
-        Assert.Equal("csharp-dev", args.GetProperty("subagent_type").GetString());
+        Assert.Equal("dev-medium", args.GetProperty("subagent_type").GetString());
         string stripped = args.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal(body, stripped);
         Assert.DoesNotContain("KYBER-ARBITER", stripped, StringComparison.Ordinal);
@@ -196,7 +196,7 @@ public sealed class PluginHookAdapterTests
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
         (int exit, string stdout) = Run(
-            Envelope("before", "task", TaskArgs("csharp-dev", "Implement the parser.")),
+            Envelope("before", "task", TaskArgs("dev-medium", "Implement the parser.")),
             "conductor",
             engine);
 
@@ -204,13 +204,13 @@ public sealed class PluginHookAdapterTests
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
         Assert.Equal(envelope, doc.RootElement.GetProperty("reason").GetString());
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
     }
 
     [Fact]
     public void After_Allow_WritesAllow()
     {
-        JsonObject args = TaskArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
         (int exit, string stdout) = Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "conductor",
@@ -228,7 +228,7 @@ public sealed class PluginHookAdapterTests
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
-        JsonObject args = TaskArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
@@ -246,7 +246,7 @@ public sealed class PluginHookAdapterTests
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
-        JsonObject args = TaskArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
             Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),

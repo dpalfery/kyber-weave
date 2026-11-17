@@ -15,25 +15,16 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Under the tiered roster the pick chooses the kind of worker and the difficulty chooses the tier:
 /// <c>tier = min(hard, rated difficulty + failed attempts)</c>. A failed attempt moves the task one tier up and
-/// never down, the task file records the kind rather than a tier, and under the technology roster nothing moves.
+/// never down, and the task file records the kind rather than a tier. There is one roster, so these are the rules
+/// for every run.
 /// </summary>
 public sealed class DeveloperTierSelectionTests
 {
     private const string Plan = PlanTaskFileProbe.PlanPath;
 
-    private static readonly string[] TechnologyCandidates =
-    [
-        "csharp-dev", "dal-dev", "docs-dev", "github-devops", "go-dev", "maui-dev", "pulumi-dev",
-        "python-dev", "react-dev", "rust-dev", "sql-database-architect", "tauri-dev", "test-dev",
-        "typescript-dev"
-    ];
-
     private static KyberWeaveConfig Tiered => KyberWeaveConfig.ProductDefaults
         .WithOntology(new OntologyConfig { Technologies = ["csharp"] })
         .WithWorkerRoster(WorkerRosters.Tiered);
-
-    private static KyberWeaveConfig Technology => KyberWeaveConfig.ProductDefaults
-        .WithOntology(new OntologyConfig { Technologies = ["csharp"] });
 
     /// <summary>
     /// A corpus with a Ready plan whose first task is <paramref name="difficulty"/> and names csharp, whose second
@@ -214,18 +205,6 @@ public sealed class DeveloperTierSelectionTests
     }
 
     [Fact]
-    public void UnderTheTechnologyRosterThePickAndTheDispatchAreUnchanged()
-    {
-        using DocFixture fixture = Ready(Technology, "easy");
-
-        TaskPromptResult result = Prompt(fixture, Technology, failedAttempts: 2);
-
-        Assert.True(result.Built, result.Refusal);
-        Assert.Null(result.Agent);
-        Assert.Equal("easy", result.Difficulty);
-    }
-
-    [Fact]
     public void TheTieredCandidatesAreTheDeveloperKindAndTheDocumentationAndDeliveryAgents()
     {
         IReadOnlyList<ArbiterSquadAgent> tiered = PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered);
@@ -237,15 +216,6 @@ public sealed class DeveloperTierSelectionTests
         Assert.DoesNotContain("csharp-dev", names);
     }
 
-    [Fact]
-    public void TheTechnologyCandidatesAreTheAgentsThatServeTheTechnologyRoster()
-    {
-        IReadOnlyList<ArbiterSquadAgent> technology = PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Technology);
-
-        Assert.Equal(TechnologyCandidates, technology.Select(agent => agent.Name));
-        Assert.DoesNotContain("dev-medium", technology.Select(agent => agent.Name));
-        Assert.DoesNotContain("devops", technology.Select(agent => agent.Name));
-    }
 
     [Fact]
     public void AConfidentPickUnderTheTieredRosterRecordsTheDeveloperKindAndTheTierFollowsDifficulty()

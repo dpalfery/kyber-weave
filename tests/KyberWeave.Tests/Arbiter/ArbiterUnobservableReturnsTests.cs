@@ -216,7 +216,7 @@ public sealed class ArbiterUnobservableReturnsTests
             "\"toolCall\":{" +
             "\"name\":\"invoke_subagent\"," +
             "\"args\":{" +
-            "\"Subagents\":[{\"TypeName\":\"csharp-dev\",\"Prompt\":" +
+            "\"Subagents\":[{\"TypeName\":\"dev-medium\",\"Prompt\":" +
             JsonSerializer.Serialize(prompt) + "}]}}}";
     }
 
@@ -227,7 +227,7 @@ public sealed class ArbiterUnobservableReturnsTests
         {
             ["description"] = "Implement T3",
             ["prompt"] = prompt,
-            ["subagent_type"] = "csharp-dev",
+            ["subagent_type"] = "dev-medium",
         });
         return "{\"hook_event_name\":\"PreToolUse\"," +
             "\"session_id\":\"sess-wiring-1\",\"cwd\":\"" + escapedRoot + "\"," +
@@ -304,7 +304,7 @@ public sealed class ArbiterUnobservableReturnsTests
     [Fact]
     public void FactBuilder_SuppliesObservesReturns_AsDerivedFact_FromTheEngine()
     {
-        TriggerClassification classification = Classify("delegate", "csharp-dev", DispatchPrompt);
+        TriggerClassification classification = Classify("delegate", "dev-medium", DispatchPrompt);
         ArbiterFactSet observed = TriggerFactBuilder.Build(classification, DispatchPrompt, DocsConfig(), observesReturns: true);
         ArbiterFactSet unobserved = TriggerFactBuilder.Build(classification, DispatchPrompt, DocsConfig(), observesReturns: false);
 
@@ -350,6 +350,6 @@ public sealed class ArbiterUnobservableReturnsTests
             "### T3 — Dependent task\n" +
             "Files: src/a.cs\n" +
             "Depends on: T1\n" +
-            "Required skills: csharp-dev\n");
+            "Required skills: dev-medium\n");
     }
 }

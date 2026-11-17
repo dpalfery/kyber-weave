@@ -22,8 +22,6 @@ public sealed class SquadPerformanceContractTests
     private const string SharedExecutionSkillPath =
         "products/kyber-squad/skills/delivery-execution/SKILL.md";
 
-    private const string CSharpDevAgentPath = "products/kyber-squad/agents/csharp-dev.md";
-    private const string TestDevAgentPath = "products/kyber-squad/agents/test-dev.md";
 
     /// <summary>
     ///     The skill a worker loads when it finishes. Report formats — the completion digest and its
@@ -217,9 +215,14 @@ public sealed class SquadPerformanceContractTests
         Assert.Matches(ContiguousSixFieldDigestRegex, content);
     }
 
+    /// <summary>
+    /// The per-task artifact path is stated once for every worker, in the shared execution contract and the
+    /// task gate, rather than repeated in each developer body: the tiered bodies carry no technology and no
+    /// command of their own.
+    /// </summary>
     [Theory]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
+    [InlineData(SharedExecutionSkillPath)]
+    [InlineData("products/kyber-squad/skills/task-gate/SKILL.md")]
     public void SpecialistSurfacesNameTheArtifactsPathFlag(string relativePath)
     {
         string content = ReadRepoFile(relativePath);
@@ -227,8 +230,8 @@ public sealed class SquadPerformanceContractTests
     }
 
     [Theory]
-    [InlineData(CSharpDevAgentPath)]
-    [InlineData(TestDevAgentPath)]
+    [InlineData(SharedExecutionSkillPath)]
+    [InlineData("products/kyber-squad/skills/task-gate/SKILL.md")]
     public void SpecialistPromptsDoNotContainMalformedArtifactsPathOptionTypo(string relativePath)
     {
         string content = ReadRepoFile(relativePath);

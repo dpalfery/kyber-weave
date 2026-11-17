@@ -205,7 +205,7 @@ public sealed class ArbiterPlanParserTests
         Assert.Equal(
             ["src/KyberWeave.Core/Arbiter/Plans/PlanDocument.cs", "src/KyberWeave.Core/Arbiter/Plans/PlanDocumentParser.cs"],
             bold.Files);
-        Assert.Equal(["test-dev"], bold.Skills);
+        Assert.Equal(["dev-medium"], bold.Skills);
         Assert.Empty(bold.DependsOn);
 
         PlanTask slash = Task(parsed, "T2");
@@ -221,11 +221,11 @@ public sealed class ArbiterPlanParserTests
 
         PlanTask suffix = Task(parsed, "T5");
         Assert.Equal(["README.md"], suffix.Files);
-        Assert.Equal(["github-cli", "github-devops"], suffix.Skills);
+        Assert.Equal(["github-cli", "devops"], suffix.Skills);
 
         PlanTask lowercase = Task(parsed, "T6");
         Assert.Equal(["products/README.md"], lowercase.Files);
-        Assert.Equal(["test-dev"], lowercase.Skills);
+        Assert.Equal(["dev-medium"], lowercase.Skills);
 
         Assert.Equal("test-first", parsed.DevelopmentMode);
     }
@@ -433,14 +433,14 @@ public sealed class ArbiterPlanParserTests
             - {filesFirst}
           - **Acceptance:**
             - `Widget.Flag` is reported.
-          - **Skills:** `test-dev`
+          - **Skills:** `dev-medium`
           - **Depends on:** {dependsOnFirst}
           - _Requirements: 1.1, 1.2_
         - [ ] 1.2 GREEN: The second task
           - **Objective:** Make the second behaviour pass.
           - **Files:**
             - `src/two.cs`
-          - **Skills:** `csharp-dev`
+          - **Skills:** `dev-medium`
           - **Depends on:** 1.1
           - _Requirements: 1.1, 1.2_
         """;

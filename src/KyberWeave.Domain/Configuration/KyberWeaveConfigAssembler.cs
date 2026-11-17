@@ -159,20 +159,31 @@ public static class KyberWeaveConfigAssembler
             "checkout, or 'false' to leave the git hook alone, or remove the key; an absent setting is 'true'.");
     }
 
-    /// <summary>Reads the top-level <c>worker-roster</c> setting. Absent means <c>technology</c>.</summary>
-    /// <exception cref="YamlException">The value is neither <c>technology</c> nor <c>tiered</c>.</exception>
+    /// <summary>
+    /// Reads the top-level <c>worker-roster</c> setting. Absent means <c>tiered</c>, the only roster left after
+    /// the removal; <c>technology</c> is an error that names the change.
+    /// </summary>
+    /// <exception cref="YamlException">The value is not <c>tiered</c>.</exception>
     private static string ParseWorkerRoster(string? value)
     {
         if (value is null)
-            return WorkerRosters.Technology;
+            return WorkerRosters.Tiered;
 
         string roster = value.Trim();
         if (WorkerRosters.IsKnown(roster))
             return roster;
 
+        if (string.Equals(roster, WorkerRosters.Technology, StringComparison.Ordinal))
+        {
+            throw new YamlException(
+                $"{WorkerRosterKey} '{value}' names the worker roster that was removed. The per-technology worker " +
+                "agents no longer ship, so every run dispatches from the tiered roster: remove the key, or set " +
+                $"{WorkerRosterKey}: {WorkerRosters.Tiered}.");
+        }
+
         throw new YamlException(
-            $"{WorkerRosterKey} '{value}' is not a roster. Use 'technology' for the per-technology workers, " +
-            "or 'tiered' for the three developer agents; remove the key for 'technology'.");
+            $"{WorkerRosterKey} '{value}' is not a roster. The only roster is '{WorkerRosters.Tiered}', the three " +
+            "developer agents by difficulty; remove the key for the same result.");
     }
 
     /// <summary>Reads the top-level <c>task-prompt-budget</c> setting. Absent means the shipped 60,000 characters.</summary>

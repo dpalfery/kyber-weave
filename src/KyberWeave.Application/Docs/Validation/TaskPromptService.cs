@@ -186,7 +186,7 @@ public sealed class TaskPromptService(
         string? recorded = Clean(entry?.Agent);
         string? agent = requested ?? recorded;
         RemovedAgentResolution? removed = null;
-        if (string.Equals(fileRoster ?? config.WorkerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
+        if (string.Equals(WorkerRosters.Resolve(fileRoster ?? config.WorkerRoster), WorkerRosters.Tiered, StringComparison.Ordinal))
         {
             removed = PlanTaskAgentPick.ResolveRemovedAgent(
                 requested ?? recorded, entry?.Difficulty, request.FailedAttempts);

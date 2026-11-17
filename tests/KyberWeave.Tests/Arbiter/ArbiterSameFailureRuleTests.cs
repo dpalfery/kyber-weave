@@ -141,7 +141,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     {
         Harness = "claude",
         Phase = "pre",
-        Target = "csharp-dev",
+        Target = "dev-medium",
         Prompt = "KYBER-ARBITER: true\n\nFAILURE-CLUSTER: " + clusterKey + "\n\nFAILURE:\n" + failureText + "\n\nRework the change.",
         HarnessCaller = "conductor",
         IsDispatch = true,
@@ -161,7 +161,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
         ArbiterEvent rework = Rework(FirstFailure);
 
         TriggerClassification classification = TriggerClassifier.ClassifySingle(
-            rework, "csharp-dev", rework.Prompt);
+            rework, "dev-medium", rework.Prompt);
 
         Assert.Equal("delegate", classification.Trigger);
         Assert.Contains(FailureTrigger, SecondaryTriggers.For("delegate", rework));
@@ -173,7 +173,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     {
         ArbiterEvent plain = Rework(FirstFailure) with { Prompt = "KYBER-ARBITER: true\n\nImplement the widget." };
 
-        TriggerClassification classification = TriggerClassifier.ClassifySingle(plain, "csharp-dev", plain.Prompt);
+        TriggerClassification classification = TriggerClassifier.ClassifySingle(plain, "dev-medium", plain.Prompt);
 
         Assert.Equal("delegate", classification.Trigger);
         Assert.DoesNotContain(FailureTrigger, SecondaryTriggers.For("delegate", plain));
@@ -186,7 +186,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
         const string prompt = "KYBER-ARBITER: true\n\nImplement the widget.\nFAILURE-CLUSTER: cluster-a";
         ArbiterEvent ev = Rework(FirstFailure) with { Prompt = prompt };
 
-        TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "csharp-dev", prompt);
+        TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "dev-medium", prompt);
 
         Assert.Equal("delegate", classification.Trigger);
         Assert.DoesNotContain(FailureTrigger, SecondaryTriggers.For("delegate", ev));

@@ -108,7 +108,7 @@ public sealed class ClaudeHookAdapterModelWriteTests
     {
         JsonObject input = new()
         {
-            ["subagent_type"] = "csharp-dev",
+            ["subagent_type"] = "dev-medium",
             ["prompt"] = HeaderedPrompt,
             ["description"] = "Implement T2",
         };

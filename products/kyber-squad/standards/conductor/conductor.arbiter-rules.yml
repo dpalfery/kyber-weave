@@ -427,8 +427,8 @@ rules:
   #
   # A task whose files are all test files owes no failing run: writing tests is the whole task, so there is
   # no implementation step for a red run to precede. The fact is machine-read from the task's own file list
-  # and the test-file patterns, so it replaces the retired roster's clause on `test-dev` by name: a dispatch
-  # to `test-dev` still answers not-required because its task's files are test files.
+  # and the test-file patterns, which replaces the clause that named the retired testing agent: a task whose
+  # files are all test files answers not-required whatever agent dispatches it.
   - id: KW-ARB-MODE-002
     trigger: delegate.returned
     question: In test-first mode, did the worker's task gate fail on its new tests before it passed?

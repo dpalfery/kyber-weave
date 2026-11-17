@@ -26,9 +26,6 @@ public sealed class RemovedAgentResolutionTests
         .WithOntology(new OntologyConfig { Technologies = ["csharp"] })
         .WithWorkerRoster(WorkerRosters.Tiered);
 
-    private static KyberWeaveConfig Technology => KyberWeaveConfig.ProductDefaults
-        .WithOntology(new OntologyConfig { Technologies = ["csharp"] });
-
     [Theory]
     [InlineData("csharp-dev", "easy", 0, "dev-easy")]
     [InlineData("csharp-dev", "medium", 0, "dev-medium")]
@@ -123,17 +120,6 @@ public sealed class RemovedAgentResolutionTests
         Assert.Contains("dev-hard", result.Substitution, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void UnderTheTechnologyRosterTheAgentStillExistsSoTheNameIsLeftAlone()
-    {
-        using DocFixture fixture = Ready(Technology);
-
-        TaskPromptResult result = Prompt(fixture, Technology);
-
-        Assert.True(result.Built, result.Refusal);
-        Assert.Equal("csharp-dev", result.Agent);
-        Assert.Null(result.Substitution);
-    }
 
     /// <summary>
     ///     The retirement of the fourteen agents the removal phase deletes, on a global deployment of two

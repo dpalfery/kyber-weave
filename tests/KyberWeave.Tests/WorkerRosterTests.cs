@@ -9,9 +9,10 @@ using YamlDotNet.Core;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// The host chooses a worker roster (<c>technology</c> or <c>tiered</c>), an agent may declare one, and the
-/// task file records the roster it was written under. Under <c>tiered</c>, a developer task carries one
-/// technology; a documentation or delivery task needs none.
+/// The removal leaves one roster: the three developer agents by difficulty. An absent setting is
+/// <c>tiered</c>, the value <c>technology</c> is a configuration error that names the change, an agent
+/// may declare a roster, and the task file records the roster it was written under. Under <c>tiered</c> a
+/// developer task carries one technology; a documentation or delivery task needs none.
 /// </summary>
 public sealed class WorkerRosterTests
 {
@@ -23,11 +24,11 @@ public sealed class WorkerRosterTests
     ];
 
     [Fact]
-    public void AnAbsentSettingIsTheTechnologyRoster()
+    public void AnAbsentSettingIsTheTieredRoster()
     {
-        Assert.Equal(WorkerRosters.Technology, KyberWeaveConfig.ProductDefaults.WorkerRoster);
+        Assert.Equal(WorkerRosters.Tiered, KyberWeaveConfig.ProductDefaults.WorkerRoster);
         Assert.Equal(
-            WorkerRosters.Technology,
+            WorkerRosters.Tiered,
             KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\n").WorkerRoster);
     }
 
@@ -40,28 +41,50 @@ public sealed class WorkerRosterTests
     }
 
     [Fact]
-    public void AnotherValueIsAConfigurationErrorNamingBoth()
+    public void TheTechnologyRosterIsAnErrorThatNamesTheChange()
+    {
+        YamlException error = Assert.Throws<YamlException>(() =>
+            KyberWeaveConfigLoader.LoadFromYaml("worker-roster: technology\n"));
+
+        Assert.Contains("worker-roster", error.Message, StringComparison.Ordinal);
+        Assert.Contains("technology", error.Message, StringComparison.Ordinal);
+        Assert.Contains("tiered", error.Message, StringComparison.Ordinal);
+        Assert.Contains("removed", error.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void AnotherValueIsAConfigurationErrorNamingTheRoster()
     {
         YamlException error = Assert.Throws<YamlException>(() =>
             KyberWeaveConfigLoader.LoadFromYaml("worker-roster: side-by-side\n"));
 
-        Assert.Contains("technology", error.Message, StringComparison.Ordinal);
         Assert.Contains("tiered", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheFourteenRemovedAgentsDeclareTheTechnologyRosterAndTheConductorServesBoth()
+    public void TheShippedSquadHoldsFifteenAgentsAndNoRemovedAgentBody()
     {
-        foreach (string name in RemovedAgents)
-        {
-            string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents", name + ".md");
-            string text = File.ReadAllText(path);
-            Assert.Equal(1, text.Split("worker-roster: technology", StringSplitOptions.None).Length - 1);
-        }
+        string[] agentFiles = Directory
+            .EnumerateFiles(
+                Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents"),
+                "*.md",
+                SearchOption.TopDirectoryOnly)
+            .Select(path => Path.GetFileNameWithoutExtension(path))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(15, agentFiles.Length);
+        Assert.Empty(agentFiles.Intersect(RemovedAgents, StringComparer.Ordinal));
 
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
-        Assert.Equal(WorkerRosters.Technology, catalog.Agents["csharp-dev"].WorkerRoster);
+        Assert.Equal(agentFiles, catalog.Agents.Keys.Order(StringComparer.Ordinal));
+        Assert.All(
+            catalog.Agents.Values,
+            agent => Assert.True(
+                agent.WorkerRoster is null or WorkerRosters.Tiered,
+                $"Agent '{agent.Name}' declares worker-roster '{agent.WorkerRoster}'; only the tiered roster remains."));
         Assert.Null(catalog.Agents["conductor"].WorkerRoster);
+        Assert.Equal(WorkerRosters.Tiered, catalog.Agents["dev-medium"].WorkerRoster);
     }
 
     [Fact]
@@ -80,12 +103,7 @@ public sealed class WorkerRosterTests
     public void UnderTieredADeveloperTaskWithoutTechnologyIsAnError()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        string text = PlanTaskFileProbe.TaskFile().Replace(
-            "  - id: T1\n",
-            "  - id: T1\n    worker-roster: tiered\n",
-            StringComparison.Ordinal);
-        // The roster is a file-level field; put it at the top for the reader.
-        text = text.Replace("    worker-roster: tiered\n", string.Empty, StringComparison.Ordinal)
+        string text = NamedDeveloper(PlanTaskFileProbe.TaskFile())
             .Replace("schema-version:", "worker-roster: tiered\nschema-version:", StringComparison.Ordinal);
         fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
 
@@ -98,7 +116,7 @@ public sealed class WorkerRosterTests
     public void UnderTieredADeveloperTaskWithTechnologyIsAccepted()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        string text = AddToEachTask(PlanTaskFileProbe.TaskFile(), "    technology: csharp")
+        string text = AddToEachTask(NamedDeveloper(PlanTaskFileProbe.TaskFile()), "    technology: csharp")
             .Replace("schema-version:", "worker-roster: tiered\nschema-version:", StringComparison.Ordinal);
         fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
 
@@ -122,19 +140,39 @@ public sealed class WorkerRosterTests
         Assert.DoesNotContain(report.Items, item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
     }
 
+    /// <summary>
+    /// A task file written before the removal records the roster it was written under. That roster is
+    /// gone, so the file is read as <c>tiered</c> and reported as a warning naming the change, rather than
+    /// dispatched against agents that no longer ship. Its tasks keep validating: the technology requirement
+    /// belongs to a file written under the roster that has it.
+    /// </summary>
     [Fact]
-    public void UnderTheTechnologyRosterNoTechnologyIsRequired()
+    public void ATaskFileThatRecordsTheTechnologyRosterIsReadAsTieredAndWarns()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
+        string text = PlanTaskFileProbe.TaskFile()
+            .Replace("schema-version:", "worker-roster: technology\nschema-version:", StringComparison.Ordinal);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, text);
 
-        DiagnosticReport report = new PlanTaskFileValidator(
-            fixture.Root,
-            KyberWeaveConfig.ProductDefaults,
-            DocsPorts.Files).Validate(fixture.Load());
+        DiagnosticReport report = ValidateTiered(fixture);
 
-        Assert.DoesNotContain(report.Items, item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
+        Diagnostic warning = Assert.Single(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.RetiredTechnologyRoster);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Contains("tiered", warning.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            report.Items,
+            item => item.Code == PlanTaskFileRules.MissingTechnologyUnderTiered);
     }
+
+    /// <summary>
+    /// The probe's task file with each task's worker named as the shipped developer tier it would dispatch to.
+    /// A removed agent's name resolves at dispatch time, so it is the shipped name that carries the requirement.
+    /// </summary>
+    private static string NamedDeveloper(string yaml) => yaml
+        .Replace("role: csharp-dev", "role: dev-medium", StringComparison.Ordinal)
+        .Replace("role: test-dev", "role: dev-medium", StringComparison.Ordinal);
 
     private static string AddToEachTask(string yaml, string line)
     {
@@ -155,7 +193,6 @@ public sealed class WorkerRosterTests
         new PlanTaskFileValidator(
             fixture.Root,
             KyberWeaveConfig.ProductDefaults
-                .WithOntology(new OntologyConfig { Technologies = ["csharp"] })
-                .WithWorkerRoster(WorkerRosters.Tiered),
+                .WithOntology(new OntologyConfig { Technologies = ["csharp"] }),
             DocsPorts.Files).Validate(fixture.Load());
 }

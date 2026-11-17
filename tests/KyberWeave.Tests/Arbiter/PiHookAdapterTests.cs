@@ -95,7 +95,7 @@ public sealed class PiHookAdapterTests
         const string body = "Implement the plan parser.";
         string prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 12.1\n\n" + body;
         (int exit, string stdout) = Run(
-            Envelope("before", "Agent", AgentArgs("csharp-dev", prompt)), "conductor", new ScriptedEngine());
+            Envelope("before", "Agent", AgentArgs("dev-medium", prompt)), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -103,7 +103,7 @@ public sealed class PiHookAdapterTests
         Assert.False(doc.RootElement.TryGetProperty("reason", out _), "Allow must carry no reason.");
         JsonElement args = doc.RootElement.GetProperty("args");
         Assert.Equal("Implement T12", args.GetProperty("description").GetString());
-        Assert.Equal("csharp-dev", args.GetProperty("subagent_type").GetString());
+        Assert.Equal("dev-medium", args.GetProperty("subagent_type").GetString());
         string stripped = args.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal(body, stripped);
         Assert.DoesNotContain("KYBER-ARBITER", stripped, StringComparison.Ordinal);
@@ -117,7 +117,7 @@ public sealed class PiHookAdapterTests
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
         (int exit, string stdout) = Run(
-            Envelope("before", "Agent", AgentArgs("csharp-dev", "Implement the parser.")),
+            Envelope("before", "Agent", AgentArgs("dev-medium", "Implement the parser.")),
             "conductor",
             engine);
 
@@ -125,13 +125,13 @@ public sealed class PiHookAdapterTests
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal("block", doc.RootElement.GetProperty("decision").GetString());
         Assert.Equal(envelope, doc.RootElement.GetProperty("reason").GetString());
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
     }
 
     [Fact]
     public void After_Allow_WritesAllow()
     {
-        JsonObject args = AgentArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
         (int exit, string stdout) = Run(
             Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
             "conductor",
@@ -149,7 +149,7 @@ public sealed class PiHookAdapterTests
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
-        JsonObject args = AgentArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
             Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
@@ -167,7 +167,7 @@ public sealed class PiHookAdapterTests
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
-        JsonObject args = AgentArgs("csharp-dev", "Implement the parser.");
+        JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
             Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),

@@ -63,16 +63,20 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         }
     }
 
-    /// <summary>The plan stands in for a free T2 owned by csharp-dev, standard mode, so the primary allows.</summary>
+    /// <summary>
+    /// The plan stands in for a free T2 owned by a developer tier, standard mode, so the primary allows. It
+    /// records the hard rating the difficulty rule reads: under the one remaining roster there is no second call.
+    /// </summary>
     private sealed class PlanStub : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
             facts
                 .With("plan.exists", true, ArbiterFactLabel.Derived)
+                .With("plan.task.difficulty", "hard", ArbiterFactLabel.Derived)
                 .With("plan.tasks.count", 3, ArbiterFactLabel.Derived)
                 .With("plan.development-mode", "standard", ArbiterFactLabel.Derived)
                 .With("plan.task", "T2", ArbiterFactLabel.Derived)
-                .With("plan.task.skills", new List<string> { "csharp-dev" }, ArbiterFactLabel.Derived)
+                .With("plan.task.skills", new List<string> { "dev-medium" }, ArbiterFactLabel.Derived)
                 .With("plan.task.files", new List<string> { "src/A.cs" }, ArbiterFactLabel.Derived)
                 .With("plan.task.depends-on", new List<string>(), ArbiterFactLabel.Derived)
                 .With("plan.test-contract.row", "A failing test", ArbiterFactLabel.Derived);
@@ -89,9 +93,9 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
                 {
                     ["easy"] = "fast",
                     ["standard"] = "general",
-                    ["hard"] = "deep-planning",
+                    ["hard"] = "dev-hard",
                 },
-                ["fast", "general", "deep-planning"]),
+                ["fast", "general", "dev-hard"]),
         },
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
@@ -119,11 +123,11 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             {
                 ["fast"] = "haiku",
                 ["general"] = "sonnet",
-                ["deep-planning"] = deepToken,
+                ["dev-hard"] = deepToken,
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal)
             {
-                ["csharp-dev"] = new("general", "sonnet"),
+                ["dev-medium"] = new("general", "sonnet"),
             });
         File.WriteAllText(
             Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
@@ -134,7 +138,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         Engine(provider).DecidePreDispatch(
             "claude",
             "conductor",
-            "csharp-dev",
+            "dev-medium",
             Prompt,
             Config(mode),
             Context(),
@@ -237,7 +241,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             ?? throw new InvalidOperationException("The shipped Claude fixture is not a JSON document.");
         root["tool_input"] = new JsonObject
         {
-            ["subagent_type"] = "csharp-dev",
+            ["subagent_type"] = "dev-medium",
             ["prompt"] = Prompt,
             ["description"] = "Implement T2",
         };

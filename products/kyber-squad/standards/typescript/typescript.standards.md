@@ -122,7 +122,7 @@ the way to the surface that displays it.
 
 Test authorship follows `<test-coding-standard>`. This standard requires that the code be
 testable: dependencies passed in, no module-level mutable state, clocks injectable. Test files
-(`*.test.ts`, `*.spec.ts`) belong to `test-dev`.
+(`*.test.ts`, `*.spec.ts`) are written by the developer tier that owns the task.
 
 ## Commands
 
