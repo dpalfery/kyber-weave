@@ -521,13 +521,13 @@ public sealed class DocSpecValidator
         {
             foreach (string docsRoot in _config.DocsRoots)
             {
-                string relativeFolder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
+                string relativeFolder = RepositoryRelative($"{docsRoot}/{DocsLayout.Standards}/{scope}");
                 if (!checkedFolders.Add(relativeFolder)) continue;
 
                 string absoluteFolder = Combine(relativeFolder);
                 if (!Directory.Exists(absoluteFolder)) continue;
 
-                string standard = DocsLayout.StandardFile(docsRoot, scope);
+                string standard = RepositoryRelative(DocsLayout.StandardFile(docsRoot, scope));
                 string legacy = $"{relativeFolder}/README.md";
 
                 if (!File.Exists(Combine(standard)))
@@ -565,7 +565,7 @@ public sealed class DocSpecValidator
                              DocsLayout.ArbiterRulesFile(docsRoot, scope)
                          })
                 {
-                    if (File.Exists(Combine(file))) continue;
+                    if (File.Exists(Combine(RepositoryRelative(file)))) continue;
 
                     report.Add(new Diagnostic(
                         MissingFolderFile, Severity.Error,
@@ -576,6 +576,18 @@ public sealed class DocSpecValidator
             }
         }
     }
+
+    /// <summary>
+    /// The canonical repository-relative form of a path built from a configured docs root. A root
+    /// written as <c>.</c> denotes the repository itself, and the loader records its documents
+    /// without a <c>./</c> prefix; paths that keep one would miss the byPath index.
+    /// </summary>
+    private static string RepositoryRelative(string relativePath) =>
+        string.Join(
+            '/',
+            relativePath
+                .Split('/', StringSplitOptions.RemoveEmptyEntries)
+                .Where(segment => segment != "."));
 
     /// <summary>
     /// Checks each standard's <c>builds-on</c> key: the parent must be declared, must not be

@@ -220,6 +220,33 @@ public class StandardsFolderShapeTests
         Assert.Contains(report.Items, i => i.Code == DocSpecValidator.StandardHeadings);
     }
 
+    /// <summary>
+    /// A docs root written as <c>.</c> is the repository itself. The loader records those
+    /// documents without a <c>./</c> prefix, so the folder check must build the same paths or its
+    /// heading check silently finds no document and reports nothing.
+    /// </summary>
+    [Fact]
+    public void AStandardUnderTheRepositoryRootIsCheckedForItsHeadings()
+    {
+        const string OwnHeadings = """
+            ## Stack
+
+            ## Commands
+            """;
+        using DocFixture fixture = new DocFixture()
+            .Write("standards/dotnet/dotnet.standards.md", Standard("dotnet", OwnHeadings))
+            .Write("standards/dotnet/dotnet.rules.md", Rules("dotnet"))
+            .Write("standards/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("standards/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+        OntologyConfig ontology = new() { DocsRoots = ["."], Technologies = ["dotnet"] };
+
+        DiagnosticReport report = fixture.Validate(ontology);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.StandardHeadings
+            && i.Message.Contains("## Stack", StringComparison.Ordinal));
+    }
+
     private static string RoleRules(string scope) => Rules(scope).Replace(
         "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
 
