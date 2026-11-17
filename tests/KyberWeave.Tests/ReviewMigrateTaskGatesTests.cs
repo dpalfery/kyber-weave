@@ -534,11 +534,12 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     }
 
     /// <summary>
-    /// The technology roster is the shipped default and the one today's hosts run. Agent-keyed gates are its normal
-    /// shape there, so a host is not told to migrate a configuration it is meant to keep.
+    /// The tiered roster is the only roster a host can select, so a configuration that never wrote the key is not
+    /// mid-migration. Its agent-keyed gates are still read, and the host is not told to run a migration it never
+    /// started.
     /// </summary>
     [Fact]
-    public void TheTechnologyRosterWarnsAboutNoRemovedAgent()
+    public void AHostThatNeverSelectedARosterIsNotWarnedAboutARemovedAgent()
     {
         KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
             review:
