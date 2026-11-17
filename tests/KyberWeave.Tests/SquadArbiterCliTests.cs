@@ -227,6 +227,16 @@ public sealed class SquadArbiterCliTests : IDisposable
     }
 
     [Fact]
+    public void TheOpenCodeArbiterRegistrationStepIsNamedOnlyWhereTheRenderGrantsTheServer()
+    {
+        Assert.Null(SquadInstallCommand.OpenCodeArbiterRegistrationStep(SquadDeploymentScope.Global));
+        Assert.Contains(
+            "Register kw-arbiter in opencode.json",
+            SquadInstallCommand.OpenCodeArbiterRegistrationStep(SquadDeploymentScope.Project),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Install_PrintsTrustStepsForSelectedTargets()
     {
         string targetDir = NewDir("arbiter-install-trust");
