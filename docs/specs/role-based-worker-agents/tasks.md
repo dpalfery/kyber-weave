@@ -579,7 +579,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 4.1, 3.6
   - _Requirements: 2.10, 3.4_
 
-- [ ] 4.6 Document phase 4 and record the decision
+- [x] 4.6 Document phase 4 and record the decision
   - **Objective:** Write the decision record for rules by folder and update the Arbiter documents.
   - **Files:**
     - `docs/adr/` (new record), `docs/adr/README.md`
