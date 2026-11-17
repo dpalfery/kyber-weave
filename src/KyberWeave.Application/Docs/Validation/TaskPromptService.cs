@@ -167,6 +167,13 @@ public sealed class TaskPromptService(
     }
 
     /// <summary>
+    /// Whether the path names a file inside the run's scratch area, the only place a prior-results file is read from.
+    /// </summary>
+    /// <param name="root">The repository root.</param>
+    /// <param name="path">The path the dispatch named, relative to the root or absolute.</param>
+    public static bool IsScratchFile(string root, string path) => ScratchFile(root, path, out _);
+
+    /// <summary>
     /// Resolves a prior-results path and reports whether it stays inside the run's scratch area. Only that area is
     /// readable: the dispatch header names a file, and a header must not turn any readable file into prompt text.
     /// </summary>
@@ -175,12 +182,41 @@ public sealed class TaskPromptService(
     /// <param name="absolute">The resolved path, when it is inside the scratch area.</param>
     private static bool ScratchFile(string root, string path, out string absolute)
     {
-        absolute = Path.GetFullPath(path, root);
+        // The check is on the resolved path: a symlink lying inside the scratch area is a window onto its target,
+        // and that target is what a read would return to the worker.
+        absolute = RealPath(Path.GetFullPath(path, root));
         string scratch = Path.TrimEndingDirectorySeparator(
-            Path.GetFullPath(Path.Combine(root, ScratchFolder)));
+            RealPath(Path.GetFullPath(Path.Combine(root, ScratchFolder))));
         return string.Equals(absolute, scratch, StringComparison.Ordinal)
             ? false
             : absolute.StartsWith(scratch + Path.DirectorySeparatorChar, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The path with every symlinked component resolved, so a check made on it describes the file a read returns.
+    /// A component that does not exist is kept as written; the read then reports it as unreadable.
+    /// </summary>
+    /// <param name="full">An absolute path.</param>
+    private static string RealPath(string full)
+    {
+        string root = Path.GetPathRoot(full) ?? string.Empty;
+        string current = root;
+        foreach (string segment in full[root.Length..].Split(
+            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
+            StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
+            if (!info.Exists || info.LinkTarget is null)
+            {
+                continue;
+            }
+
+            current = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
+                ?? Path.GetFullPath(info.LinkTarget, Path.GetDirectoryName(current) ?? root);
+        }
+
+        return current;
     }
 
     /// <summary>

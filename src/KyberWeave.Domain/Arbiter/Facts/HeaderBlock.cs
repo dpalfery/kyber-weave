@@ -5,7 +5,7 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// <summary>
 /// The dispatch header block (design section 5): the run of lines at the very start
 /// of the prompt in which every line matches
-/// <c>^(KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE):[ \t]*(\S.*?)[ \t]*$</c>.
+/// <c>^(KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY|PRIOR_RESULTS|FAILED_ATTEMPTS):[ \t]*(\S.*?)[ \t]*$</c>.
 /// The block ends at the first line that does not match. The set is closed:
 /// there is no <c>FILES:</c> header.
 /// </summary>
@@ -27,6 +27,8 @@ public sealed partial class HeaderBlock
         "REFUTE",
         "REVIEW_RUN",
         "TECHNOLOGY",
+        "PRIOR_RESULTS",
+        "FAILED_ATTEMPTS",
     };
 
     /// <summary>The fifteen lens names a <c>LENS</c> header or <c>REFUTE</c> lens may name.</summary>
@@ -226,6 +228,13 @@ public sealed partial class HeaderBlock
         "TASK" => IsTaskId(value),
         "LENS" => LensNames.Contains(value),
         "REFUTE" => IsValidRefute(value),
+        // The retry's scratch file: any non-empty path. The prompt service is what confines it to the scratch area.
+        "PRIOR_RESULTS" => value.Length > 0,
+        "FAILED_ATTEMPTS" => int.TryParse(
+            value,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out _),
         // A technology is the name of one standards folder: no path separator, no space, no parent hop.
         "TECHNOLOGY" => value.Length > 0
             && !value.Contains('/', StringComparison.Ordinal)
@@ -267,7 +276,7 @@ public sealed partial class HeaderBlock
     }
 
     [GeneratedRegex(
-        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY):[ \t]*(?<value>\S.*?)[ \t]*$",
+        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY|PRIOR_RESULTS|FAILED_ATTEMPTS):[ \t]*(?<value>\S.*?)[ \t]*$",
         RegexOptions.CultureInvariant)]
     private static partial Regex HeaderLineRegex();
 

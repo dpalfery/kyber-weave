@@ -91,6 +91,8 @@ public static class TriggerFactBuilder
     /// join the bag, because the secondary rules read from the same bag as the primary.</param>
     /// <param name="promptInserted">Whether the hook inserted the prompt into this dispatch. Only that evidence,
     /// never the prompt's own text, exempts it from the plan-read rule: a conductor can type the tags itself.</param>
+    /// <param name="repoRoot">The repository root the standards folders sit under, when the caller has one. It
+    /// resolves the technology's parent template, so a parent-keyed gate is found exactly as the gate run finds it.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
@@ -99,11 +101,13 @@ public static class TriggerFactBuilder
         string? modelOverrideField = null,
         string? delegationModel = null,
         IReadOnlyList<string>? secondaryTriggers = null,
-        bool promptInserted = false)
+        bool promptInserted = false,
+        string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(config);
+        _ = repoRoot;
 
         if (classification.Trigger is null)
             return new ArbiterFactSet();
@@ -134,6 +138,7 @@ public static class TriggerFactBuilder
     /// <param name="delegationModel">The model the dispatch input names for its sub-agent, or null.</param>
     /// <param name="secondaryTriggers">Secondary triggers whose declared facts are added to the bag.</param>
     /// <param name="promptInserted">Whether the hook inserted the prompt into this dispatch.</param>
+    /// <param name="repoRoot">The repository root the standards folders sit under, when the caller has one.</param>
     /// <exception cref="ArgumentException">Thrown for an unknown trigger, with the known names as hint.</exception>
     public static ArbiterFactSet Build(
         string trigger,
@@ -146,7 +151,8 @@ public static class TriggerFactBuilder
         string? modelOverrideField = null,
         string? delegationModel = null,
         IReadOnlyList<string>? secondaryTriggers = null,
-        bool promptInserted = false)
+        bool promptInserted = false,
+        string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -182,6 +188,9 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         block.Headers.TryGetValue("TASK", out string? task);
         block.Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        string? parentTechnology = repoRoot is not null && technology is not null
+            ? TaskGateResolver.ParentTechnology(repoRoot, config, technology)
+            : null;
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);
         // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
@@ -238,7 +247,8 @@ public static class TriggerFactBuilder
                 // the technology the dispatch names, by the same resolver the gate run uses. A host whose gates
                 // are keyed only by technology must not read as having none.
                 "config.task-gates-declared" => target is not null
-                                                && TaskGateResolver.Resolve(config.Review, target, technology).Gates.Count > 0,
+                                                && TaskGateResolver.Resolve(
+                                                    config.Review, target, technology, parentTechnology).Gates.Count > 0,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,

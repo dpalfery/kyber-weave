@@ -190,6 +190,52 @@ public sealed class ArbiterGateReportRuleTests
         Assert.Equal(declared, fact.Value);
     }
 
+    /// <summary>
+    /// A technology inherits its parent template's gates, as the packet, the gate run and the prompt all resolve
+    /// them. The Arbiter's fact must use the same resolution, or a host with gates only on the parent reads as
+    /// having none and the return's gate report goes unchecked.
+    /// </summary>
+    [Fact]
+    public void TheDeclaredTaskGateFactUsesTheParentsTechnology()
+    {
+        using TempDirectory repository = new();
+        string standard = Path.Combine(repository.Path, "docs", "standards", "react", "react.standards.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(standard)!);
+        File.WriteAllText(
+            standard,
+            """
+            ---
+            builds-on: typescript
+            ---
+
+            # React standard
+            """);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+            ontology:
+              docs-root: docs
+            """);
+        ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
+        config = new KyberWeaveConfig
+        {
+            Ontology = config.Ontology,
+            Review = new ReviewConfig
+            {
+                TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+                {
+                    ["typescript"] = [gate]
+                }
+            }
+        };
+
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", "developer",
+            "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
+            ArbiterCallerSources.Harness, config, repoRoot: repository.Path);
+
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(true, fact.Value);
+    }
+
     [Fact]
     public void AnAgreeingReportAllowsTheDispatch()
     {

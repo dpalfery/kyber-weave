@@ -89,6 +89,25 @@ public sealed class DocsPacketCommandTests
         Assert.DoesNotContain(PlanTaskPacket.NoPriorResults, output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A prior-results file outside the run's scratch area is refused by this command under its own code, not
+    /// reported as a stale task file after the prompt service refuses it.
+    /// </summary>
+    [Fact]
+    public void APriorResultsFileOutsideTheScratchAreaIsRefusedUnderItsOwnCode()
+    {
+        using DocFixture fixture = Ready();
+        string results = Path.Combine(fixture.Root, "results.txt");
+        File.WriteAllText(results, "a file outside the scratch area");
+
+        (int exit, string output) = Packet(fixture, "T2", prior: results);
+
+        Assert.Equal(1, exit);
+        Assert.Contains(DocsPacketCommand.PriorResultsUnreadable, output, StringComparison.Ordinal);
+        Assert.Contains(TaskPromptService.ScratchFolder, output, StringComparison.Ordinal);
+        Assert.DoesNotContain(DocsPacketCommand.TaskFileStale, output, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AStaleTaskFileIsRefusedWithTheCommandThatFixesIt()
     {

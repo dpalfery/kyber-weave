@@ -175,6 +175,14 @@ public sealed class FactoryHookAdapter : IHarnessHookAdapter
                 "Malformed Factory hook event: Task input carries no prompt.");
         HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, context);
 
+        // The rule's denial is the decision: a prompt that also could not be built must not hide it.
+        if (outcome.Kind == HookOutcomeKind.Deny)
+        {
+            return RenderPreDeny(
+                outcome.Reason ?? throw new InvalidOperationException(
+                    "Hook engine denied without a reason."));
+        }
+
         // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
         DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
         if (insertion.Kind == DispatchInsertionKind.Stopped)

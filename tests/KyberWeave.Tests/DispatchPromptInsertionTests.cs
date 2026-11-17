@@ -371,6 +371,47 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     private static JsonElement json(string text) => JsonDocument.Parse(text).RootElement.Clone();
 
     /// <summary>
+    /// A rule's denial is the decision, even when the prompt could not be built as well: reporting only the
+    /// repair command would hide the policy refusal behind a documentation error on those two harnesses.
+    /// </summary>
+    [Theory]
+    [InlineData("factory")]
+    [InlineData("devin")]
+    public void ARuleDenialOutranksAPromptThatCannotBeBuilt(string harness)
+    {
+        RecordingEngine engine = new()
+        {
+            PreResult = new HookOutcome(HookOutcomeKind.Deny, "denied by the roster rule"),
+        };
+        ScriptedPrompts prompts = new() { Refusal = "No prompt: the task file is stale." };
+        IHarnessHookAdapter adapter = Adapter(engine, harness);
+        string payload = Payload(harness, TaskDispatch);
+
+        string stdout = adapter.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(prompts));
+
+        using JsonDocument document = JsonDocument.Parse(stdout);
+        string reason = harness == "devin"
+            ? document.RootElement.GetProperty("reason").GetString()!
+            : document.RootElement.GetProperty("hookSpecificOutput")
+                .GetProperty("permissionDecisionReason").GetString()!;
+        Assert.Contains("denied by the roster rule", reason, StringComparison.Ordinal);
+        Assert.DoesNotContain("stale", reason, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A return event carries the prompt the harness executed, so an expanded prompt there is proof the hook
+    /// inserted it. A pre event's prompt is the conductor's text: typing the tags must never claim an insertion.
+    /// </summary>
+    [Fact]
+    public void OnlyAReturnEventCarriesAProvenPromptInsertion()
+    {
+        Assert.False(new ArbiterEvent { Phase = "pre", Prompt = TaskPrompt }.PromptInserted);
+        Assert.True(new ArbiterEvent { Phase = "post", Prompt = TaskPrompt }.PromptInserted);
+        Assert.True(new ArbiterEvent { Phase = "return", Prompt = TaskPrompt }.PromptInserted);
+        Assert.False(new ArbiterEvent { Phase = "post", Prompt = TaskDispatch }.PromptInserted);
+    }
+
+    /// <summary>
     /// A rule that also writes the model returns the allow path that writes the model; the prompt inserted for
     /// the allowed dispatch must still reach the worker.
     /// </summary>
