@@ -296,26 +296,17 @@ public sealed class PiRendererContractTests : IDisposable
                 _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
             };
 
-            // Extract thinking level from the profile's pi value
-            string? expectedThinking = null;
-            if (expectedModel != "inherit" && source.ModelProfiles.Profiles.TryGetValue(agent.ModelProfile, out SquadModelProfile? profile))
+            // The approved thinking level per profile, pinned here rather than read back from
+            // models.yml: a value derived from the file under test agrees with any suffix that file
+            // carries, so a wrong level could never fail.
+            string? expectedThinking = agent.ModelProfile switch
             {
-                if (profile.HarnessModels.TryGetValue("pi", out string? piValue))
-                {
-                    // Parse [thinking=<level>] suffix if present
-                    const string thinkingPrefix = "[thinking=";
-                    int thinkingStart = piValue.IndexOf(thinkingPrefix, 0, StringComparison.Ordinal);
-                    if (thinkingStart >= 0)
-                    {
-                        int thinkingValueStart = thinkingStart + thinkingPrefix.Length;
-                        int thinkingEnd = piValue.IndexOf(']', thinkingValueStart);
-                        if (thinkingEnd > thinkingValueStart)
-                        {
-                            expectedThinking = piValue.Substring(thinkingValueStart, thinkingEnd - thinkingValueStart);
-                        }
-                    }
-                }
-            }
+                "architect" or "deep-planning" or "dev-hard" or "reviewer" => "high",
+                "general" => "medium",
+                "fast" => "low",
+                "" => null,
+                _ => throw new InvalidOperationException($"Unknown profile '{agent.ModelProfile}' for agent '{agent.Name}'.")
+            };
 
             if (expectedModel == "inherit")
             {
