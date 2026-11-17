@@ -247,21 +247,23 @@ public sealed class SquadCapturePluginStepTests : IDisposable
 
     // ---- wiring through the Squad commands ----
 
+    // Every install case below is one prepared install, built once for the run through
+    // PreparedSquadInstalls and keyed by everything that changes what the command or the plugin step
+    // does. A test reads the recorded exit code, console output and plugin-step calls. The three
+    // update cases still run their update for real: each updates the deployment that a copy of the
+    // prepared OpenCode global install left in its own home.
+
     [Fact]
     public void GlobalInstallWithOpenCodeRunsThePluginStepOnceAfterSuccess()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-opencode"));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(OpenCodeGlobal());
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        ProcessStartInfo call = Assert.Single(prepared.Calls);
         Assert.Equal(
             [
                 "kyber", "capture", "plugin", "install", "--harness", "opencode", "--preserve", "--config-dir",
-                h.GlobalRoot(SquadTarget.OpenCode)
+                prepared.GlobalRoot(SquadTarget.OpenCode)
             ],
             call.ArgumentList);
     }
@@ -269,42 +271,28 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithoutOpenCodeDoesNotRunThePluginStep()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-codex"));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(new InstallSpec("codex-global", ["codex"], SquadDeploymentScope.Global));
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["codex"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Empty(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Empty(prepared.Calls);
     }
 
     [Fact]
     public void GlobalInstallWithNoCapturePluginDoesNotRunThePluginStep()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-no-plugin"));
-        FakeProcessExecutor executor = new();
-        SquadInstallSettings settings = GlobalInstall(h, ["opencode"]);
-        settings.NoCapturePlugin = true;
+        PreparedCase prepared = Prepared(OpenCodeGlobal() with { NoCapturePlugin = true });
 
-        CommandExecution execution = Capture(() => h.InstallCommand(executor).Execute(null!, settings), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Empty(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Empty(prepared.Calls);
     }
 
     [Fact]
     public void GlobalInstallDryRunPassesDryRunThroughToThePluginStep()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-dry-run"));
-        FakeProcessExecutor executor = new();
-        SquadInstallSettings settings = GlobalInstall(h, ["opencode"]);
-        settings.DryRun = true;
+        PreparedCase prepared = Prepared(OpenCodeGlobal() with { DryRun = true });
 
-        CommandExecution execution = Capture(() => h.InstallCommand(executor).Execute(null!, settings), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        ProcessStartInfo call = Assert.Single(prepared.Calls);
         Assert.Equal("--dry-run", call.ArgumentList[^1]);
     }
 
@@ -312,75 +300,49 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     public void ProjectInstallWithOpenCodeDoesNotRunThePluginStep()
     {
         // The plugin is global capture, so a project-scope install never touches the OpenCode global root.
-        using Harness h = new(Path.Combine(_temp.Path, "install-project"));
-        FakeProcessExecutor executor = new();
-        string project = h.MakeDirectory("project");
+        PreparedCase prepared = Prepared(new InstallSpec(
+            "opencode-project",
+            ["opencode"],
+            SquadDeploymentScope.Project));
 
-        CommandExecution execution = Capture(() => h.InstallCommand(executor).Execute(null!, new SquadInstallSettings
-        {
-            Path = project,
-            Global = false,
-            Targets = ["opencode"],
-            Version = InstalledVersion,
-            Yes = true
-        }), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Empty(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Empty(prepared.Calls);
     }
 
     [Fact]
     public void DeclinedGlobalInstallDoesNotRunThePluginStep()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-declined"));
-        FakeProcessExecutor executor = new();
-        SquadInstallSettings settings = GlobalInstall(h, ["opencode"]);
-        settings.Yes = false;
+        PreparedCase prepared = Prepared(OpenCodeGlobal() with { Declined = true });
 
-        CommandExecution execution = Capture(
-            () => h.InstallCommand(executor, true, _ => false).Execute(null!, settings),
-            out _);
-
-        Assert.Equal(2, execution.ExitCode);
-        Assert.Empty(executor.Calls);
+        Assert.Equal(2, prepared.Record.ExitCode);
+        Assert.Empty(prepared.Calls);
     }
 
     [Fact]
     public void PluginStepFailureLeavesTheSquadExitCodeUnchanged()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-plugin-fails"));
-        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", string.Empty, 3);
+        PreparedCase prepared = Prepared(OpenCodeGlobal() with { Executor = "exit-3" });
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("Successfully installed", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("warning", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains("Successfully installed", prepared.Record.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("warning", prepared.Record.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
     public void PluginStepThatCannotBeExecutedLeavesTheSquadExitCodeUnchanged()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-plugin-not-executable"));
-        FakeProcessExecutor executor = new FakeProcessExecutor().WithException(
-            "kyberdash",
-            new UnauthorizedAccessException("Access to the path '/fake/bin/kyberdash' is denied."));
+        PreparedCase prepared = Prepared(OpenCodeGlobal() with { Executor = "not-executable" });
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("Successfully installed", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("warning", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains("Successfully installed", prepared.Record.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("warning", prepared.Record.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
     public void GlobalUpdateWithOpenCodeRunsThePluginStepAfterTheDeploymentUpdates()
     {
         using Harness h = new(Path.Combine(_temp.Path, "update-opencode"));
-        Assert.Equal(0, Capture(() => h.InstallCommand(new FakeProcessExecutor())
-            .Execute(null!, GlobalInstall(h, ["opencode"])), out _).ExitCode);
+        CopyOpenCodeGlobal(h);
         FakeProcessExecutor executor = new();
 
         CommandExecution execution = Capture(() => h.UpdateCommand(executor).Execute(null!, GlobalUpdate(h)), out _);
@@ -394,8 +356,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     public void GlobalUpdateWithNoCapturePluginDoesNotRunThePluginStep()
     {
         using Harness h = new(Path.Combine(_temp.Path, "update-no-plugin"));
-        Assert.Equal(0, Capture(() => h.InstallCommand(new FakeProcessExecutor())
-            .Execute(null!, GlobalInstall(h, ["opencode"])), out _).ExitCode);
+        CopyOpenCodeGlobal(h);
         FakeProcessExecutor executor = new();
         SquadUpdateSettings settings = GlobalUpdate(h);
         settings.NoCapturePlugin = true;
@@ -409,24 +370,17 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-guidance"));
-        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
-            "kyberdash",
-            $"opencode plugin: installed /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
+        PreparedCase prepared = Prepared(OpenCodeGlobal() with { Executor = "guidance" });
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains(GuidanceAlpha, execution.Output, StringComparison.Ordinal);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains(GuidanceAlpha, prepared.Record.StandardOutput, StringComparison.Ordinal);
     }
 
     [Fact]
     public void GlobalUpdateRelaysTheVerbGuidanceAndKeepsTheSquadExitCode()
     {
         using Harness h = new(Path.Combine(_temp.Path, "update-guidance"));
-        Assert.Equal(0, Capture(() => h.InstallCommand(new FakeProcessExecutor())
-            .Execute(null!, GlobalInstall(h, ["opencode"])), out _).ExitCode);
+        CopyOpenCodeGlobal(h);
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             $"opencode plugin: upgraded /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
@@ -447,14 +401,10 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithFactoryRunsThePluginVerbForFactoryInPreserveMode()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-factory"));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(FactoryGlobal());
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        ProcessStartInfo call = Assert.Single(prepared.Calls);
         Assert.Equal(FakeKyberDash, call.FileName);
         Assert.Equal(
             [
@@ -472,23 +422,15 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithFactoryNamesNoRootSoTheVerbResolvesTheFactoryTreeItself()
     {
-        string home = Path.Combine(_temp.Path, "factory-home");
-        Directory.CreateDirectory(home);
-        using Harness h = new(
-            Path.Combine(_temp.Path, "install-factory-root"),
-            new SquadGlobalRoots(_ => null, home));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(FactoryGlobal() with { FactoryHomeRoots = true });
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
+        Assert.Equal(0, prepared.Record.ExitCode);
         // The repository resolves the Factory tree to ~/.factory: the tree the verb resolves for itself.
-        Assert.Equal(Path.Combine(home, ".factory"), h.GlobalRoot(SquadTarget.Factory));
-        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal(Path.Combine(prepared.FactoryHome!, ".factory"), prepared.GlobalRoot(SquadTarget.Factory));
+        ProcessStartInfo call = Assert.Single(prepared.Calls);
         Assert.Equal(string.Empty, ConfigDirOf(call));
         Assert.DoesNotContain("--config-dir", call.ArgumentList);
-        Assert.DoesNotContain(h.GlobalRoot(SquadTarget.Factory), call.ArgumentList);
+        Assert.DoesNotContain(prepared.GlobalRoot(SquadTarget.Factory), call.ArgumentList);
     }
 
     /// <summary>
@@ -499,21 +441,17 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithOpenCodeAndFactoryGivesOnlyTheOpenCodeStepARoot()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-opencode-factory-roots"));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(OpenCodeAndFactoryGlobal());
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode", "factory"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        IReadOnlyList<ProcessStartInfo> calls = executor.Calls;
+        Assert.Equal(0, prepared.Record.ExitCode);
+        IReadOnlyList<ProcessStartInfo> calls = prepared.Calls;
         Assert.Equal(2, calls.Count);
         // The OpenCode step keeps its own root: that flag still selects the OpenCode config root.
-        Assert.Equal(h.GlobalRoot(SquadTarget.OpenCode), ConfigDirOf(calls[0]));
+        Assert.Equal(prepared.GlobalRoot(SquadTarget.OpenCode), ConfigDirOf(calls[0]));
         // The Factory step names no root, so it cannot be handed the OpenCode one.
         Assert.Equal(string.Empty, ConfigDirOf(calls[1]));
-        Assert.DoesNotContain(h.GlobalRoot(SquadTarget.OpenCode), calls[1].ArgumentList);
-        Assert.NotEqual(h.GlobalRoot(SquadTarget.OpenCode), h.GlobalRoot(SquadTarget.Factory));
+        Assert.DoesNotContain(prepared.GlobalRoot(SquadTarget.OpenCode), calls[1].ArgumentList);
+        Assert.NotEqual(prepared.GlobalRoot(SquadTarget.OpenCode), prepared.GlobalRoot(SquadTarget.Factory));
         // The order is unchanged: OpenCode first, Factory second.
         Assert.Equal("opencode", HarnessOf(calls[0]));
         Assert.Equal("factory", HarnessOf(calls[1]));
@@ -526,14 +464,10 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithOpenCodeAndFactoryRunsTheFactoryPluginStepAfterTheOpenCodeOne()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-opencode-factory-order"));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(OpenCodeAndFactoryGlobal());
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode", "factory"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        IReadOnlyList<ProcessStartInfo> calls = executor.Calls;
+        Assert.Equal(0, prepared.Record.ExitCode);
+        IReadOnlyList<ProcessStartInfo> calls = prepared.Calls;
         Assert.Equal(2, calls.Count);
         Assert.Equal("opencode", HarnessOf(calls[0]));
         Assert.Equal("factory", HarnessOf(calls[1]));
@@ -546,21 +480,13 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void ProjectInstallWithFactoryDoesNotRunThePluginStep()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-project-factory"));
-        FakeProcessExecutor executor = new();
-        string project = h.MakeDirectory("project-factory");
+        PreparedCase prepared = Prepared(new InstallSpec(
+            "factory-project",
+            ["factory"],
+            SquadDeploymentScope.Project));
 
-        CommandExecution execution = Capture(() => h.InstallCommand(executor).Execute(null!, new SquadInstallSettings
-        {
-            Path = project,
-            Global = false,
-            Targets = ["factory"],
-            Version = InstalledVersion,
-            Yes = true
-        }), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Empty(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Empty(prepared.Calls);
     }
 
     /// <summary>
@@ -570,14 +496,10 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithoutFactoryRunsOnlyTheOpenCodePluginStep()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-opencode-only"));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(OpenCodeGlobal());
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["opencode"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        ProcessStartInfo call = Assert.Single(executor.Calls);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        ProcessStartInfo call = Assert.Single(prepared.Calls);
         Assert.Equal("opencode", HarnessOf(call));
     }
 
@@ -588,18 +510,12 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithFactoryAndNoKyberDashSkipsThePluginStepAndKeepsTheExitCode()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-factory-no-dash"));
-        FakeProcessExecutor executor = new();
+        PreparedCase prepared = Prepared(FactoryGlobal() with { MissingKyberDash = true });
 
-        CommandExecution execution = Capture(
-            () => h.InstallCommand(executor, locateKyberDash: () => null)
-                .Execute(null!, GlobalInstall(h, ["factory"])),
-            out string output);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Empty(executor.Calls);
-        Assert.Contains("capture plugin", output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("skipped", output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Empty(prepared.Calls);
+        Assert.Contains("capture plugin", prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("skipped", prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -609,15 +525,11 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithFactoryKeepsTheSquadExitCodeWhenThePluginStepFails()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-factory-plugin-fails"));
-        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", string.Empty, 3);
+        PreparedCase prepared = Prepared(FactoryGlobal() with { Executor = "exit-3" });
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("Successfully installed", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("exit 3", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains("Successfully installed", prepared.Record.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("exit 3", prepared.Record.StandardOutput, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -627,16 +539,10 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithFactoryRelaysTheVerbsVerdictLine()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-factory-verdict"));
-        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
-            "kyberdash",
-            "FACTORY-VERDICT-LINE\n");
+        PreparedCase prepared = Prepared(FactoryGlobal() with { Executor = "verdict" });
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("FACTORY-VERDICT-LINE", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains("FACTORY-VERDICT-LINE", prepared.Record.StandardOutput, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -646,18 +552,14 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     [Fact]
     public void GlobalInstallWithFactoryNamesAPreVerbKyberDashAsASkipAndNotAWarning()
     {
-        using Harness h = new(Path.Combine(_temp.Path, "install-factory-old-dash"));
-        FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
-            "kyberdash",
-            "error: unknown command 'capture'\n",
-            1);
+        PreparedCase prepared = Prepared(FactoryGlobal() with { Executor = "old-dash" });
 
-        CommandExecution execution =
-            Capture(() => h.InstallCommand(executor).Execute(null!, GlobalInstall(h, ["factory"])), out _);
-
-        Assert.Equal(0, execution.ExitCode);
-        Assert.Contains("capture plugin", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("capture plugin step failed", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.Contains("capture plugin", prepared.Record.StandardOutput, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(
+            "capture plugin step failed",
+            prepared.Record.StandardOutput,
+            StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>The harness the verb names, or an empty string when it names none.</summary>
@@ -687,11 +589,135 @@ public sealed class SquadCapturePluginStepTests : IDisposable
 
     // ---- fixtures ----
 
+    /// <summary>One install input, which is also its recipe: every field that changes the run is in the key.</summary>
+    private sealed record InstallSpec(
+        string Recipe,
+        string[] Targets,
+        SquadDeploymentScope Scope,
+        string Version = InstalledVersion,
+        string Executor = "ok",
+        bool NoCapturePlugin = false,
+        bool DryRun = false,
+        bool Declined = false,
+        bool MissingKyberDash = false,
+        bool FactoryHomeRoots = false)
+    {
+        public string Key => SquadInstallRecipe.Key(
+            "install",
+            Scope,
+            SquadTargetCatalog.Parse(Targets),
+            ("case", "squad-capture-plugin-step"),
+            ("install", Recipe),
+            ("version", Version),
+            ("executor", Executor),
+            ("no-capture-plugin", NoCapturePlugin ? "true" : null),
+            ("dry-run", DryRun ? "true" : null),
+            ("declined", Declined ? "true" : null),
+            ("kyber-dash", MissingKyberDash ? "missing" : null),
+            ("factory-home-roots", FactoryHomeRoots ? "true" : null));
+    }
+
+    private static InstallSpec OpenCodeGlobal() =>
+        new("opencode-global", ["opencode"], SquadDeploymentScope.Global);
+
+    private static InstallSpec FactoryGlobal() =>
+        new("factory-global", ["factory"], SquadDeploymentScope.Global);
+
+    private static InstallSpec OpenCodeAndFactoryGlobal() =>
+        new("opencode-factory-global", ["opencode", "factory"], SquadDeploymentScope.Global);
+
+    private static PreparedCase Prepared(InstallSpec spec) =>
+        PreparedSquadInstalls.Get(spec.Key, () => Build(spec));
+
+    /// <summary>
+    /// Copies the prepared OpenCode global install into <paramref name="harness"/> and checks that the
+    /// install it copies succeeded, so a passing update cannot come from a seed that wrote nothing.
+    /// </summary>
+    private static void CopyOpenCodeGlobal(Harness harness)
+    {
+        PreparedCase prepared = Prepared(OpenCodeGlobal());
+        prepared.CopyInto(harness);
+        Assert.Equal(0, prepared.Record.ExitCode);
+    }
+
+    /// <summary>
+    /// Builds the one real install for <paramref name="spec"/> through the install command, with the
+    /// plugin step's behaviour supplied by the executor its spec names.
+    /// </summary>
+    private static PreparedCase Build(InstallSpec spec)
+    {
+        TempDirectory? directory = new();
+        try
+        {
+            string root = Path.Combine(directory.Path, "harness");
+            string? factoryHome = spec.FactoryHomeRoots ? Path.Combine(root, "factory-home") : null;
+            if (factoryHome is not null)
+                Directory.CreateDirectory(factoryHome);
+
+            using Harness h = new(root, factoryHome is null ? null : new SquadGlobalRoots(_ => null, factoryHome));
+            FakeProcessExecutor executor = ExecutorFor(spec.Executor);
+            SquadInstallSettings settings = spec.Scope == SquadDeploymentScope.Global
+                ? GlobalInstall(h, spec.Targets, spec.Version)
+                : ProjectInstall(h, spec.Targets, spec.Version);
+            settings.NoCapturePlugin = spec.NoCapturePlugin;
+            settings.DryRun = spec.DryRun;
+            settings.Yes = !spec.Declined;
+
+            CommandExecution execution = Capture(
+                () => (spec.Declined
+                        ? h.InstallCommand(executor, isInteractive: true, readAnswer: _ => false)
+                        : h.InstallCommand(
+                            executor,
+                            locateKyberDash: spec.MissingKyberDash ? () => null : null))
+                    .Execute(null!, settings),
+                out _);
+
+            PreparedCase prepared = new(
+                spec.Key,
+                directory,
+                execution,
+                executor.Calls,
+                h.HomeDirectory,
+                h.ApplicationDataDirectory,
+                h.GlobalRootsDirectory,
+                SquadTargetCatalog.Parse(spec.Targets).ToDictionary(target => target, target => h.GlobalRoot(target)),
+                factoryHome);
+            directory = null;
+            return prepared;
+        }
+        finally
+        {
+            directory?.Dispose();
+        }
+    }
+
+    private static FakeProcessExecutor ExecutorFor(string behavior)
+    {
+        return behavior switch
+        {
+            "ok" => new FakeProcessExecutor(),
+            "exit-3" => new FakeProcessExecutor().WithProbeOutput("kyberdash", string.Empty, 3),
+            "not-executable" => new FakeProcessExecutor().WithException(
+                "kyberdash",
+                new UnauthorizedAccessException("Access to the path '/fake/bin/kyberdash' is denied.")),
+            "guidance" => new FakeProcessExecutor().WithProbeOutput(
+                "kyberdash",
+                $"opencode plugin: installed /fake/opencode/plugins/kyberdash-opencode.js\n" +
+                $"{HarnessPrefix}{GuidanceAlpha}\n"),
+            "verdict" => new FakeProcessExecutor().WithProbeOutput("kyberdash", "FACTORY-VERDICT-LINE\n"),
+            "old-dash" => new FakeProcessExecutor().WithProbeOutput(
+                "kyberdash",
+                "error: unknown command 'capture'\n",
+                1),
+            _ => throw new ArgumentOutOfRangeException(nameof(behavior), behavior, "Unknown executor behavior.")
+        };
+    }
+
     private static CommandExecution Capture(Func<int> execute, out string output)
     {
         CapturedConsoleExecution<int> captured = ProcessConsoleCapture.Run(execute);
         output = captured.Output;
-        return new CommandExecution(captured.Result, captured.Output);
+        return new CommandExecution(captured.Result, captured.Output, captured.ErrorOutput);
     }
 
     private static CapturePluginStepOutcome Capture(Func<CapturePluginStepOutcome> step, out string output)
@@ -701,14 +727,26 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         return captured.Result;
     }
 
-    private static SquadInstallSettings GlobalInstall(Harness h, string[] targets)
+    private static SquadInstallSettings GlobalInstall(Harness h, string[] targets, string version = InstalledVersion)
     {
         return new SquadInstallSettings
         {
             Path = h.Anchor,
             Global = true,
             Targets = targets,
-            Version = InstalledVersion,
+            Version = version,
+            Yes = true
+        };
+    }
+
+    private static SquadInstallSettings ProjectInstall(Harness h, string[] targets, string version)
+    {
+        return new SquadInstallSettings
+        {
+            Path = h.MakeDirectory("project"),
+            Global = false,
+            Targets = targets,
+            Version = version,
             Yes = true
         };
     }
@@ -724,7 +762,71 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         };
     }
 
-    private sealed record CommandExecution(int ExitCode, string Output);
+    private sealed record CommandExecution(int ExitCode, string Output, string ErrorOutput);
+
+    /// <summary>
+    /// One prepared install: the command's record, the plugin-step calls it made, and the roots a test
+    /// names when it checks those calls. The update tests copy it into their own harness.
+    /// </summary>
+    private sealed class PreparedCase(
+        string key,
+        TempDirectory directory,
+        CommandExecution execution,
+        IReadOnlyList<ProcessStartInfo> calls,
+        string home,
+        string applicationData,
+        string globalRoots,
+        IReadOnlyDictionary<SquadTarget, string> globalRootByTarget,
+        string? factoryHome) : PreparedSquadInstall(
+            key,
+            directory,
+            new SquadInstallRecord
+            {
+                ExitCode = execution.ExitCode,
+                StandardOutput = execution.Output,
+                StandardError = execution.ErrorOutput
+            })
+    {
+        /// <summary>The plugin-step calls the command made, in order.</summary>
+        public IReadOnlyList<ProcessStartInfo> Calls { get; } = calls;
+
+        /// <summary>The home the install resolved its global roots and state under.</summary>
+        public string Home { get; } = home;
+
+        /// <summary>The home a Factory-only resolver resolved <c>~/.factory</c> against, or null.</summary>
+        public string? FactoryHome { get; } = factoryHome;
+
+        /// <summary>The prepared harness's global root for <paramref name="target"/>, as it resolved them.</summary>
+        public string GlobalRoot(SquadTarget target) => globalRootByTarget[target];
+
+        /// <summary>
+        /// Copies the install into <paramref name="harness"/>'s own root as if it had run there: the
+        /// deployed global roots, the home state and the application data, with the recorded home root
+        /// re-rooted to the copy's and the deployed receipt digests recomputed for its one target.
+        /// </summary>
+        public void CopyInto(Harness harness)
+        {
+            ArgumentNullException.ThrowIfNull(harness);
+
+            SquadInstallCopy.Tree(Home, harness.HomeDirectory);
+            SquadInstallCopy.Tree(applicationData, harness.ApplicationDataDirectory);
+            SquadInstallCopy.Tree(globalRoots, harness.GlobalRootsDirectory);
+
+            string templateHome = SquadInstallCopy.Canonical(Home);
+            string copyHome = SquadInstallCopy.Canonical(harness.HomeDirectory);
+            SquadInstallCopy.ReRoot(
+                Path.Combine(harness.HomeDirectory, ".kyber-weave", "squad"),
+                templateHome,
+                copyHome);
+            _ = SquadInstallCopy.ReRootDeployed(
+                harness.GlobalRoot(SquadTarget.OpenCode),
+                harness.Store.ResolveReceiptPath(harness.HomeDirectory, SquadDeploymentScope.Global),
+                harness.Store,
+                templateHome,
+                copyHome,
+                SquadTargetCatalog.GetToken(SquadTarget.OpenCode));
+        }
+    }
 
     private sealed class Harness : IDisposable
     {
@@ -738,17 +840,25 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             Anchor = Path.Combine(root, "global-anchor");
             string applicationData = Path.Combine(root, "app-data");
             string home = Path.Combine(root, "home");
-            string globalRootsDirectory = Path.Combine(root, "global-roots");
+            GlobalRootsDirectory = Path.Combine(root, "global-roots");
             Directory.CreateDirectory(Anchor);
             Directory.CreateDirectory(applicationData);
             Directory.CreateDirectory(home);
-            Directory.CreateDirectory(globalRootsDirectory);
+            Directory.CreateDirectory(GlobalRootsDirectory);
             _userPaths = new HomeUserPaths(applicationData, home);
             _store = new SquadStateStore(_userPaths);
-            _globalRoots = globalRoots ?? new TempGlobalRoots(globalRootsDirectory);
+            _globalRoots = globalRoots ?? new TempGlobalRoots(GlobalRootsDirectory);
         }
 
         public string Anchor { get; }
+
+        public string HomeDirectory => _userPaths.HomeDirectory;
+
+        public string ApplicationDataDirectory => _userPaths.ApplicationDataDirectory;
+
+        public string GlobalRootsDirectory { get; }
+
+        public SquadStateStore Store => _store;
 
         public void Dispose()
         {
