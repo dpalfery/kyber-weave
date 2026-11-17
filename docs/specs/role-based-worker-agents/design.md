@@ -475,17 +475,28 @@ worker starts. Every other line of the dispatch is kept, so a retry's failure re
 the worker. The worker begins with its whole prompt and reads
 nothing. The conductor never sees the text.
 
-Kyber-Weave already rewrites dispatch text this way: the Arbiter's hook removes routing headers
-from the prompt before a worker starts.
+Kyber-Weave already rewrote dispatch text this way before this work: the Arbiter's hook removes
+routing headers from the prompt before a worker starts.
 
-| Harness | Can the hook rewrite the dispatch? | Evidence |
+As built, eleven harnesses take the prompt inside the dispatch and three take the file. A harness
+counts as a rewrite only where its adapter inserts the prompt in a field the harness applies; the
+table is the Arbiter's [dispatch delivery path](../../kyber-arbiter/architecture.md#dispatch-delivery-path)
+table, and the rewrite set is the one `DispatchPromptInsertion.CanRewriteDispatch` carries.
+
+| Harness | Delivery path | How the prompt travels |
 |---|---|---|
-| Claude | yes | `updatedInput` carries the rewritten `prompt` (`docs/kyber-arbiter/architecture.md`). |
-| Copilot CLI | yes | `CopilotHookAdapter.RenderCliAllowStrip` rewrites `prompt` in the call's arguments. |
-| Copilot in VS Code | yes, with limits | `CopilotHookAdapter.RenderLocalPreAllowStrip` writes `updatedInput`. Hooks there are a preview that needs `chat.useHooks` and a trusted workspace, and the sub-agent dispatch is not confirmed by name. |
-| Codex, Cursor, Pi, Kilo, OpenCode | yes | Each adapter's strip writes the rewritten input (architecture, delivery per harness). |
-| Antigravity | not checked; its current docs describe a rewrite field, and Kyber-Weave does not use it yet | The hooks page (read 2026-11-16) documents a `PreToolUse` output field `overwrite`: "Replacement arguments merged (shallow top-level merge) into `toolCall.args` before execution." The repository's note that no rewrite field exists is out of date. It counts as a rewrite only after the live check in the first task of phase 2 shows the worker received the text and the dispatcher transcript did not. Two things that check must prove: the merge is top-level, so the whole `Subagents` list must be replaced, and `decision` is required, so the hook must pick a value that does not skip the user's approval. |
-| Devin, Factory and any other harness | not checked | Confirmed in the first task of phase 2. |
+| Claude | rewrite | `hookSpecificOutput.updatedInput` replaces the whole tool input; only `prompt` changes. |
+| Copilot in VS Code | rewrite | `hookSpecificOutput.updatedInput.prompt` (a preview that needs `chat.useHooks` and a trusted workspace). |
+| Copilot CLI | rewrite | `modifiedArgs.prompt`, beside `permissionDecision: allow`. |
+| Codex | rewrite | `hookSpecificOutput.updatedInput.message`, valid only with `allow`. |
+| Cursor | rewrite | `updated_input.prompt`, riding on `allow` only. |
+| OpenCode, Kilo | rewrite | the complete `args` object, assigned over the call by the plug-in shim. |
+| Pi | rewrite | `args` in the plug-in envelope. |
+| Antigravity | rewrite | `overwrite` replaces `toolCall.args` by a shallow top-level merge, so the whole `Subagents` array is resent with every element kept and only its `Prompt` replaced; `decision` is required, and the hook returns `ask` so the user's approval still applies. |
+| Factory | rewrite | `hookSpecificOutput.updatedInput.prompt`, with every `tool_input` field copied. |
+| Devin | rewrite | `hookSpecificOutput.updatedInput.prompt`, merged into the tool call. |
+| ZCode, CommandCode | file | each documents a tool-input rewrite field, but no Kyber-Weave hook or mod is rendered for it yet. |
+| Warp | file | no dispatch hook exists. |
 
 **Fallback: a file.** Where the hook cannot rewrite the dispatch, the prompt is written to
 `.agent_scratchpad/<task>/prompt.md`, the dispatch names that file, and the worker's first step is
