@@ -133,6 +133,20 @@ public sealed class PlanTaskFileValidatorTests
     }
 
     [Fact]
+    public void AVersionOneYamlFileWarnsAndNamesTheWriteCommand()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(schemaVersion: 1));
+
+        DiagnosticReport report = ValidateScope(fixture, OntologyConfig.ProductDefaults);
+
+        Diagnostic warning = Assert.Single(report.Items, item => item.Code == PlanTaskFileRules.LegacyJsonTaskFile);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Contains("--write", warning.Hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("--convert", warning.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void AnUndeclaredTechnologyIsKWDOCTASKS016NamingTheDeclaredList()
     {
         using DocFixture fixture = CorpusWithTaskFields(null, "cobol");

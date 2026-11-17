@@ -391,7 +391,7 @@ Phase 1 has no outside dependency. The standards plan first drafted on
   - **Depends on:** 2.4
   - _Requirements: 2.2, 4.7, 4.8_
 
-- [ ] 2.12 Document phase 2 and record the decisions
+- [x] 2.12 Document phase 2 and record the decisions
   - **Objective:** Write the decision records for the task fields and the task prompt, and for the YAML task list, and update the canonical documents.
   - **Files:**
     - `docs/adr/` (two new records), `docs/adr/README.md`

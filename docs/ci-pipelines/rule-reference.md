@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-17
 ---
 
 # Rule reference
@@ -115,10 +115,11 @@ behind a flag, because the orchestrator has the docs tools and no shell. Rules `
 | `KW-DOC-TASKS-011` | Warning | `docs tasks --check` only, when a model key is configured (skipped with an info line otherwise): the Arbiter model, asked once per packet, answers with at least 0.8 confidence that a developer reading only the packet lacks the files, behaviour, tests or command. The finding names the missing element |
 | `KW-DOC-TASKS-012` | Info | `docs tasks` (write and check): an entry in a task's files that is not a repository path (a URL, a call such as `page.goto('/')`, a route like `/api/drivers`, or a pattern with no folder name before its wildcard) was left out of the task's file scope. The message lists what was dropped. The overlap check and diff attribution use the kept entries only. The entry's text alone decides: whether the path or its folder exists yet makes no difference, so the same plan always gives the same file list |
 | `KW-DOC-TASKS-013` | Error | `docs tasks` (write, check and preview) and the finalize step: a task's files name a path under the scratch folder `.agent_scratchpad/`. That folder is git-ignored and every worker may write there, so it is never a task's file scope, and no task file is written. The message lists the entries to take out of the task's Files list |
-| `KW-DOC-TASKS-014` | Warning | The task file is in the JSON form an older release wrote. It is read for two minor releases; the hint names `kyber-weave docs tasks <plan> --convert`, which rewrites it as YAML. |
+| `KW-DOC-TASKS-014` | Warning | The task file is in the JSON form an older release wrote (hint names `--convert`), or declares schema version 1 (hint names `--write`). It is read for two minor releases. |
 | `KW-DOC-TASKS-015` | Error | A task entry's `Difficulty:` is not `easy`, `medium` or `hard`. |
 | `KW-DOC-TASKS-016` | Error | A task entry's `Technology:` names a technology `ontology.technologies` does not declare; the finding names the declared list. |
 | `KW-DOC-TASKS-017` | Error | A task entry's `Technology:` names more than one technology; split it into one task per technology with a dependency between them. |
+| `KW-DOC-TASKS-018` | Error | Under the `tiered` worker roster, a developer task has no `Technology:` line; a documentation or delivery task needs none. |
 | `KW-DOC-TASKS-CLI-002` | Error | `docs packet` with no `--plan`: several plans are Ready or In progress (the finding lists each; pass `--plan <one of them>`), or none is in this checkout and no other git worktree of the repository has an active plan with the task (the finding names the directory searched), or several worktrees do (the finding lists each `cd <worktree> && kyber-weave docs packet <id>`). A worker with none reports the finding and stops |
 | `KW-DOC-TASKS-CLI-003` | Error | `docs packet`: the task id matches no task, or several. The finding lists the plan's task ids. Ids are accepted as `T1`, `t1`, `task 1`, `Task-1` or `1` |
 | `KW-DOC-TASKS-CLI-004` | Error | `docs packet`: the task file is missing or no longer matches its plan (the stale-digest and difference findings are printed with it). No packet is printed; run `kyber-weave docs tasks <plan> --write` and again |

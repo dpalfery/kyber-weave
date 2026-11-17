@@ -4,7 +4,7 @@ title: Configuration
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-11
+last-reviewed: 2026-11-17
 code-refs:
   - KyberWeaveConfig
   - KyberWeaveConfigLoader
@@ -14,6 +14,8 @@ code-refs:
   - ReviewConfigLoader
   - ConfigRegConfig
   - ReviewConfig
+  - TaskGateResolver
+  - TaskPromptService
 ---
 
 # Configuration
@@ -431,6 +433,24 @@ on a tool failure while `stop-on-tool-failure` is on — and warns instead of st
 off. An absent setting stops, and that default is applied in code rather than in instruction
 text, because absence is the common case and a run cannot rely on an agent having read a rule.
 
+### Task prompt budget
+
+A top-level `task-prompt-budget:` key sets the most characters one task prompt may hold:
+
+```yaml
+task-prompt-budget: 60000
+```
+
+The default is `60000`, about 15,000 tokens. The task prompt service reads it when it builds a
+prompt for the dispatch hook, `docs packet` or `docs_build_task_prompt_for_agent_dispatch`, so all
+three cut the same text. Past the budget, rules are kept whole; the parent technology's skills and
+the technology's skills are cut first, then the standard's sections, least relevant to the task
+text first; the prompt's last part names every cut. A value that is not a positive whole number of
+characters is a configuration error (`KW-CONFIG-001`) naming the setting and its default; an absent
+key takes the default. It is not published in the `AGENTS.md` Config Reg block, like the other
+settings the CLI and MCP server read for themselves. The decision is in
+[ADR 0085](adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt.md).
+
 ### Several documentation roots
 
 Not every repository keeps its documentation in one tree. A component's `README.md` often
@@ -689,9 +709,31 @@ concurrency cap (see `ReviewConfig`):
 | `council-deadline-seconds` | `600` | Wall-clock budget for a `review gates --deadline` run, which the council passes. Each gate runs for the shorter of its own `timeout-seconds` and the time left; every gate still running at the deadline (a `concurrent` gate declared earlier included), every gate not yet started, and a gate stopped by its own timeout are reported as not run (`KW-REVIEW-039`, a warning) and left out of the exit code. Without `--deadline` (CI, task gates, pre-push) no run deadline applies and a timed-out blocking gate fails the run as before. `--deadline` is refused with `--gate` and `--agent`. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `parallelism` | `2` | The most gates a `review gates` run has running at one time, `concurrent` or not. Gates still start in declaration order and each waits for the one before it unless it is `concurrent`, so a host that declares none sees no change; the bound stops several gates marked `concurrent` from piling onto one machine's cores. It does not make gates overlap by itself: only gates the host marks `concurrent` do, and the runner cannot know whether two gates share build output. A positive integer; `0` or a negative value is a configuration error (`KW-CONFIG-001`) |
 | `gates` | `[]` | Repository-wide deterministic gates, started in declaration order; each waits for the one before it unless that one is `concurrent` |
-| `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug |
+| `task-gates` | empty | Per-agent gates each developer runs on its own change, keyed by agent slug. An entry here is read first, so it is the path a task with no technology, or the old agent-keyed roster, still uses |
+| `technology-gates` | empty | Per-technology gates each developer runs on its own change, keyed by technology name. Read after the agent's own entry and before the shipped technology map; a parent technology resolves the same way |
 | `policy.fix-level` | `minor` | How much of what a review finds is fixed in the run; each level includes the ones before it: `critical` (failed blocking gates and critical findings: data loss, a security hole, corruption, behaviour that breaks silently), `major` (also major findings: the change is wrong or fails under conditions a normal user reaches, or a file or type sits against the documented structure), `minor` (also minor findings: real but bounded, such as a narrow edge case, a misleading comment or document statement, a missing test for a stated behaviour; the default) and `nitpick` (also nitpicks: purely stylistic points with no effect on how the application operates). Findings below the level are listed in the pull request and filed as todos; nitpicks below it appear only in the review report. It decides what is fixed, not what blocks: `policy.strictness`, `major-count-blocks` and `min-confidence` decide that. The retired `policy.minor-findings` key still reads, as `major` for `follow-up` and `minor` for `fix`. The severity it reads is the host's where the review guidance's `Severity overrides` section grades the finding ([review guidance](code-review/architecture.md#review-guidance)) |
 | `test-map` | empty | Source glob to the fully qualified test classes that cover it. A task gate's `{tests}` token expands from this map first and from the `<Stem>Tests` naming convention second; a change no class covers skips the gate with `KW-REVIEW-026` rather than passing it |
+
+Task gates are resolved in one order by `TaskGateResolver`: the agent's own `task-gates` entry,
+then `technology-gates.<technology>`, then the `task-gates` entry of the technology agent the
+shipped map names, then the same two steps for the parent technology the standard's `builds-on`
+key names. The first entry that exists is the task's whole gate list; lists are never merged and
+no gate is added. A task that names a technology and resolves nothing is refused with a non-zero
+exit and a message naming both `technology-gates.<technology>` and the technology's agent entry.
+A task with no technology keeps the old behaviour: no entry is a warning and an empty report.
+
+```yaml
+review:
+  technology-gates:
+    csharp:
+      - id: dotnet-build
+        run: [dotnet, build, -c, Release]
+        blocking: true
+    typescript:
+      - id: ts-typecheck
+        run: [npm, run, --prefix, dash, typecheck]
+        blocking: true
+```
 
 Every .NET `dotnet build` invocation in the gate path carries
 `-nr:false -p:UseSharedCompilation=false` (no MSBuild node reuse, no shared
