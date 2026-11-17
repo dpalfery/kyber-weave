@@ -489,11 +489,11 @@ The tier for each attempt comes from the task file's difficulty and the attempts
 tier up and never down. The roster, the agents of each roster and the tier table are in the
 [Kyber-Squad architecture](../kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers).
 
-The value is published in the `AGENTS.md` Config Reg block as `<worker-roster>`, because an agent
-has to know which roster a dispatch belongs to before it reads a task file. A host that changes
-the key without re-running `docs init` therefore carries a stale block, which `docs validate`
-reports as `KW-CONFIG-REG-002` with `docs init` as the fix. The configuration is the authority for
-that difference: a run follows it and has the block regenerated, and never stops over it.
+It is not published in the `AGENTS.md` Config Reg block, unlike the paths an agent looks up
+there: the task file is the record a run reads, and the CLI and the MCP server read the host
+setting for themselves. The `ConfigRegConfig.WorkerRosterProperty` constant exists, but the
+generated block carries no line for it and no agent instruction resolves one, so nothing depends
+on it.
 
 ### Several documentation roots
 
