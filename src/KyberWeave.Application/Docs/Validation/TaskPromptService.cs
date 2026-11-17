@@ -142,9 +142,12 @@ public sealed class TaskPromptService(
 
         string? promptFile = null;
         string? harness = Clean(request.Harness);
-        if (taskId is not null && harness is not null && !DispatchPromptInsertion.CanRewriteDispatch(harness))
+        // A dispatch that names only a technology gets a file too, keyed by that technology: on a fallback harness
+        // it has no other way to reach the worker, and the tool's reply must not claim a hook inserts it.
+        string? slugSource = taskId ?? technology;
+        if (slugSource is not null && harness is not null && !DispatchPromptInsertion.CanRewriteDispatch(harness))
         {
-            TaskPromptResult? unwritten = WritePromptFile(root, taskId, prompt, out promptFile);
+            TaskPromptResult? unwritten = WritePromptFile(root, slugSource, prompt, out promptFile);
             if (unwritten is not null)
             {
                 return unwritten;

@@ -185,6 +185,20 @@ public class McpPackagingTests
     }
 
     /// <summary>
+    /// The dispatch-prompt tool writes the prompt file on a fallback harness, so it is not a read-only tool: a
+    /// client that honours <c>readOnlyHint</c> would let it through a read-only grant that it then writes under.
+    /// </summary>
+    [Fact]
+    public void TheDispatchPromptToolIsNotMarkedReadOnlyBecauseItWritesThePromptFile()
+    {
+        McpServerToolAttribute attribute = McpToolMethod("docs_build_task_prompt_for_agent_dispatch")
+            .GetCustomAttribute<McpServerToolAttribute>()!;
+
+        Assert.False(attribute.ReadOnly, "the tool writes .agent_scratchpad/<task>/prompt.md on a fallback harness");
+        Assert.False(attribute.OpenWorld);
+    }
+
+    /// <summary>
     /// A client binds arguments to a tool by the names the server publishes, so a renamed
     /// parameter or a changed default breaks callers while leaving the suite green as long as
     /// nothing pins them. <c>docs_find_duplicates_conflicts_ambiguous_terms</c> and <c>docs_look_up_glossary_term_definition</c> are pinned in

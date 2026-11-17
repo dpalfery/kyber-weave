@@ -285,8 +285,10 @@ public sealed partial class DocsTools
     /// task-id line with the whole prompt before the worker starts. The conductor therefore needs the
     /// agent's name, not the prompt, and this tool answers with exactly that: who to dispatch, the
     /// difficulty in use and who rated it, the technology, and anything the prompt budget left out.
+    /// On a harness whose hook cannot rewrite the dispatch it also writes the prompt file and answers with
+    /// its path, so this tool is not read-only.
     /// </remarks>
-    [McpServerTool(Name = "docs_build_task_prompt_for_agent_dispatch", ReadOnly = true, OpenWorld = false)]
+    [McpServerTool(Name = "docs_build_task_prompt_for_agent_dispatch", ReadOnly = false, OpenWorld = false)]
     [Description("""
         Use when you are the conductor about to dispatch a worker for a task: call it with the task id
         and it names the agent to dispatch. Answers with the agent, the difficulty in use and its
