@@ -1225,7 +1225,10 @@ public sealed class SquadTransaction : ISquadTransaction
             {
                 Artifacts = [.. intent.Artifacts, artifact],
                 ActiveTransitions =
-                [new IntentTransition(claimArtifactIdentity, ArtifactLifecycleState.PreOperation)]
+                [
+                    .. intent.ActiveTransitions,
+                    new IntentTransition(claimArtifactIdentity, ArtifactLifecycleState.PreOperation)
+                ]
             };
         }
         else
