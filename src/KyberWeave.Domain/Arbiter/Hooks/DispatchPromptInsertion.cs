@@ -122,11 +122,15 @@ public static partial class DispatchPromptInsertion
         return RewriteHarnesses.Contains(harness.Trim());
     }
 
+    /// <summary>
+    /// Every harness token recorded as rewriting the dispatch. Each one must be served by an adapter that inserts
+    /// the prompt: a token listed here and served by nothing would leave the worker with no prompt and no file.
+    /// </summary>
+    public static IReadOnlySet<string> RewriteHarnessTokens => RewriteHarnesses;
+
     private static readonly IReadOnlySet<string> RewriteHarnesses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "claude",
-        "claude-code",
-        "copilot",
         "copilot-vscode",
         "copilot-cli",
         "codex",

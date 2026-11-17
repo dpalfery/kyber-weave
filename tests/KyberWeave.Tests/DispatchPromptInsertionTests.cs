@@ -311,6 +311,28 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     /// not listed takes the prompt file instead. A harness listed without an insertion would leave the worker with
     /// the short dispatch and no prompt at all.
     /// </summary>
+    /// <summary>
+    /// The reverse of the registry check: every token the insertion records as rewriting must be served by an
+    /// adapter that actually inserts the prompt, including the aliases no adapter serves.
+    /// </summary>
+    [Fact]
+    public void EveryRecordedRewriteHarnessIsServedByAnAdapterThatInsertsThePrompt()
+    {
+        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(new RecordingEngine());
+        string expected = TaskPrompt + "\n\nImplement the plan parser.";
+
+        foreach (string token in DispatchPromptInsertion.RewriteHarnessTokens)
+        {
+            Assert.True(
+                registry.TryGet(token, out IHarnessHookAdapter? adapter),
+                $"Harness '{token}' is recorded as rewriting the dispatch, but no adapter serves it.");
+            string payload = Payload(token, TaskDispatch);
+            string stdout = adapter!.Handle(json(payload), payload, "conductor", EnabledConfig(), Context(new ScriptedPrompts()));
+
+            Assert.Equal(expected, TryInsertedPrompt(token, stdout));
+        }
+    }
+
     [Fact]
     public void EveryServedHarnessEitherRewritesTheDispatchOrTakesThePromptFile()
     {
