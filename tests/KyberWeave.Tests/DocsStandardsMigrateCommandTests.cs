@@ -275,6 +275,35 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
+    /// A standard the folder holds but the process may not read is an error that names it, not a
+    /// folder treated as having no standard and answered with a stub.
+    /// </summary>
+    [Fact]
+    public void AStandardThatCannotBeReadIsReportedRatherThanReplacedByAStub()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string standard = StandardPath(repo.Path, "csharp");
+        File.WriteAllText(standard, LegacyCsharp);
+
+        if (!TryMakeUnreadable(standard))
+            Assert.Skip("An unreadable file needs a POSIX mode, so this case cannot be arranged here.");
+
+        try
+        {
+            IOException error = Assert.Throws<IOException>(() =>
+                new StandardsFolderMigration(repo.Path, Declared).Run());
+
+            Assert.Contains("csharp.standards.md", error.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            RestoreReadable(standard);
+        }
+    }
+
+    /// <summary>
     /// A standards file the process may not read is a diagnosable refusal, not a stack trace:
     /// the command names the failure and exits 1.
     /// </summary>

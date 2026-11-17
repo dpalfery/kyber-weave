@@ -259,10 +259,25 @@ public sealed partial class StandardsFolderMigration
         return match.Success ? match.Groups["owner"].Value.Trim() : null;
     }
 
+    /// <summary>
+    /// Reads a standard, distinguishing a file the folder does not hold from one it holds but
+    /// cannot use. An absent file is null; an unreadable one is an error naming it, so a
+    /// permission failure is never mistaken for a folder with no standard and answered with a stub.
+    /// </summary>
     private string? ReadOrNull(string relativePath)
     {
         string full = Absolute(relativePath);
-        return File.Exists(full) ? File.ReadAllText(full) : null;
+        if (!File.Exists(full)) return null;
+
+        try
+        {
+            return File.ReadAllText(full);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            throw new IOException(
+                $"'{relativePath}' exists but could not be read: {exception.Message}", exception);
+        }
     }
 
     private string Absolute(string relativePath) =>
