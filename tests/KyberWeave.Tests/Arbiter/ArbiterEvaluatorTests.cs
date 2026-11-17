@@ -4,6 +4,7 @@ using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -171,7 +172,9 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         IArbiterProvider provider,
         IArbiterGitFacts? gitFacts = null,
         IArbiterPlanReader? planReader = null,
-        DateTimeOffset? now = null)
+        DateTimeOffset? now = null,
+        IArbiterModelTargetsReader? modelTargets = null,
+        string? modelTargetsDirectory = null)
     {
         DateTimeOffset fixedNow = now ?? new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero);
         return new ArbiterEvaluator(
@@ -181,10 +184,26 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             new DecisionLog(ArbiterDirectory),
             gitFacts ?? new PassThroughGitFacts(),
             planReader ?? new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            modelTargets ?? new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             new GateReportFacts(),
             new FileArbiterStateFactory(),
-            new FixedClock(fixedNow));
+            new FixedClock(fixedNow),
+            modelTargetsDirectory: modelTargetsDirectory);
+    }
+
+    /// <summary>Records the directory and harness the evaluator asked for a model targets table.</summary>
+    private sealed class RecordingModelTargetsReader : IArbiterModelTargetsReader
+    {
+        public string? Directory { get; private set; }
+
+        public string? Harness { get; private set; }
+
+        public ArbiterModelTargets? TryRead(string arbiterDirectory, string harness)
+        {
+            Directory = arbiterDirectory;
+            Harness = harness;
+            return null;
+        }
     }
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
@@ -225,6 +244,34 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.Equal(1, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
+    }
+
+    /// <summary>
+    /// A global-scope evaluation keeps its ledger under a per-project directory but reads the model targets
+    /// table from the harness's own global root, so the caller hands the evaluator both directories.
+    /// </summary>
+    [Fact]
+    public async Task Evaluator_ReadsModelTargetsFromTheGivenDirectoryOrTheLedgers()
+    {
+        const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
+        KyberWeaveConfig config = ConfigWith([
+            Step0Rule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
+        ]);
+        string harnessTableDirectory = Path.Combine(_root, "claude-root", ".kyber-weave", "arbiter");
+        RecordingModelTargetsReader given = new();
+        RecordingModelTargetsReader defaulted = new();
+
+        await CreateEvaluator(
+                new CountingProvider(ArbiterDirectory),
+                modelTargets: given,
+                modelTargetsDirectory: harnessTableDirectory)
+            .EvaluateAsync(DelegateEvent(Prompt), config);
+        await CreateEvaluator(new CountingProvider(ArbiterDirectory), modelTargets: defaulted)
+            .EvaluateAsync(DelegateEvent(Prompt), config);
+
+        Assert.Equal(harnessTableDirectory, given.Directory);
+        Assert.Equal("claude", given.Harness);
+        Assert.Equal(ArbiterDirectory, defaulted.Directory);
     }
 
     [Fact]

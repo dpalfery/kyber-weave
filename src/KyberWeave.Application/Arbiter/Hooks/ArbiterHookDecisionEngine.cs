@@ -8,6 +8,8 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 using YamlDotNet.Core;
 using KyberWeave.Core.FileSystem;
 
@@ -367,7 +369,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
                 arbiterDirectory,
                 gitFacts,
                 _planReaderFactory(evaluationRoot),
-                _clock);
+                _clock,
+                ModelTargetsDirectory(harness, context));
             ArbiterEvent ev = new()
             {
                 Harness = harness,
@@ -763,6 +766,36 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
 
         return Path.Combine(repoRoot, "artifacts", "arbiter");
+    }
+
+    /// <summary>
+    /// The directory holding the harness's model targets table, or null when the state directory already
+    /// holds it. A project-scope evaluation writes the table into the project's <c>artifacts/arbiter</c>,
+    /// which is its state directory. A global-scope evaluation keeps per-project state under the user's home,
+    /// but the table is not per project: a user-scope Squad install deploys one per harness beside that
+    /// harness's hooks, under the harness's global root.
+    /// </summary>
+    /// <param name="harness">The harness the event came from.</param>
+    /// <param name="context">The event's context, whose scope decides where the table lives.</param>
+    private string? ModelTargetsDirectory(string harness, HookContext context)
+    {
+        if (context.Scope != HookScope.Global
+            || !SquadTargetCatalog.TryResolve(harness, out SquadTarget target))
+        {
+            return null;
+        }
+
+        try
+        {
+            string home = _hostConfig.ResolveHomeDirectory(context.HomeDirectory);
+            string root = new SquadGlobalRoots(_environment, home).ResolveGlobalRoot(target);
+            return Path.Combine(root, ".kyber-weave", "arbiter");
+        }
+        catch (ArgumentException)
+        {
+            // A target with no verified global root cannot be installed at user scope, so it has no table.
+            return null;
+        }
     }
 
     internal static string ProjectRootKey(string projectRoot)

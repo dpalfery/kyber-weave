@@ -48,6 +48,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     private readonly IArbiterStateFactory _state;
     private readonly TimeProvider _clock;
     private readonly Func<string, ArbiterEvent, IReadOnlyList<string>> _secondaryTriggers;
+    private readonly string? _modelTargetsDirectory;
 
     /// <summary>Creates an evaluator over already-constructed collaborators.</summary>
     /// <param name="provider">The step-1 provider.</param>
@@ -61,6 +62,11 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
     /// <param name="state">Opens the run stores under the arbiter directory.</param>
     /// <param name="clock">The evaluation clock.</param>
     /// <param name="secondaryTriggers">Derives the secondary triggers of a primary dispatch; defaults to none.</param>
+    /// <param name="modelTargetsDirectory">
+    /// The directory holding the harness's model targets table, or null for the ledger's own directory. A
+    /// global-scope evaluation reads the table a user-scope install deployed under the harness's global root,
+    /// not the per-project state directory its ledger lives in.
+    /// </param>
     public ArbiterEvaluator(
         IArbiterProvider provider,
         Func<Uri, string?> keyResolver,
@@ -72,7 +78,8 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         IGateReportFacts gateReports,
         IArbiterStateFactory state,
         TimeProvider clock,
-        Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null)
+        Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null,
+        string? modelTargetsDirectory = null)
     {
         ArgumentNullException.ThrowIfNull(provider);
         ArgumentNullException.ThrowIfNull(keyResolver);
@@ -95,6 +102,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         _state = state;
         _clock = clock;
         _secondaryTriggers = secondaryTriggers ?? SecondaryTriggers.For;
+        _modelTargetsDirectory = modelTargetsDirectory;
     }
 
     /// <summary>Runs the evaluation flow for <paramref name="ev"/> end to end.</summary>
@@ -112,7 +120,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         // configuration a host loads keeps the shipped block, and this is the run's effective one.
         ArbiterModelTargetingConfig targeting = ModelTargetingRules.Targeting(config.Arbiter.ModelTargeting);
         IReadOnlyList<ArbiterRule> rules = ModelTargetingRules.Apply(config.Arbiter.Rules, targeting.Mode);
-        ArbiterModelTargets? table = _modelTargets.TryRead(_ledger.DirectoryPath, ev.Harness);
+        ArbiterModelTargets? table = _modelTargets.TryRead(_modelTargetsDirectory ?? _ledger.DirectoryPath, ev.Harness);
 
         // Allocated outside the try so the error result can name the ledger entry that
         // was already appended. A fault after the append leaves exactly one record that

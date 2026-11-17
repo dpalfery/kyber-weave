@@ -38,6 +38,13 @@ public sealed class ArbiterDoctorService(
     private const string EnforcedGlobal = "enforced-global";
     private const string SquadUpdateHint = "Run kyber-weave squad update to rewrite the model targets.";
 
+    /// <summary>
+    /// How much older than the global Squad lock a model targets file may be before it counts as stale. A
+    /// deployment writes its files and then its lock, so the table that same deployment wrote is always a
+    /// moment older than the lock; only a table a later deployment did not rewrite is older than this.
+    /// </summary>
+    private static readonly TimeSpan SameDeploymentWindow = TimeSpan.FromMinutes(10);
+
     /// <inheritdoc />
     public ArbiterDoctorReport Inspect(string repositoryPath, string? configFile, DiagnosticReport report)
     {
@@ -96,8 +103,9 @@ public sealed class ArbiterDoctorService(
 
     /// <summary>
     /// Warns when model targeting is on and a hooked global target has no current model targets file.
-    /// The file lives under the global Arbiter directory, and it must be at least as new as the global
-    /// Squad lock, because an older one was written before the last squad update.
+    /// The file lives under each harness's own global root, where the user-scope Squad install writes it
+    /// and where the harness's global hook reads it. It must be at least as new as the global Squad lock,
+    /// because an older one was written before the last squad update.
     /// </summary>
     private void CheckModelTargets(
         KyberWeaveConfig config,
@@ -111,11 +119,10 @@ public sealed class ArbiterDoctorService(
             return;
         }
 
-        string arbiterDirectory = Path.Combine(home, ".kyber-weave", "arbiter");
         string lockPath = Path.Combine(home, ".kyber-weave", "squad", "global", "squad.lock.yml");
         foreach (string token in globalTargets)
         {
-            if (!IsHooked(token))
+            if (!IsHooked(token) || GlobalArbiterDirectory(token, home) is not { } arbiterDirectory)
             {
                 continue;
             }
@@ -125,7 +132,7 @@ public sealed class ArbiterDoctorService(
             bool readable = modelTargets.TryRead(arbiterDirectory, token) is not null
                 && TryGetWriteTimeUtc(targetsPath, out targetsWritten);
             bool stale = readable && TryGetWriteTimeUtc(lockPath, out DateTime lockWritten)
-                && targetsWritten < lockWritten;
+                && targetsWritten < lockWritten - SameDeploymentWindow;
             if (readable && !stale)
             {
                 continue;
@@ -143,6 +150,33 @@ public sealed class ArbiterDoctorService(
                 $"Model targeting is '{config.Arbiter.ModelTargeting.Mode}' but the {TargetDisplayName(token)} model targets file {reason}.",
                 targetsPath,
                 Hint: SquadUpdateHint));
+        }
+    }
+
+    /// <summary>
+    /// The directory holding a harness's global model targets table: <c>.kyber-weave/arbiter</c> under the
+    /// harness's own global root. That is where the user-scope Squad install deploys it and where the global
+    /// hook reads it, so the doctor has to look there rather than under the operator's home.
+    /// </summary>
+    /// <param name="token">The harness token.</param>
+    /// <param name="home">The operator's home, which a global root falls back to.</param>
+    /// <returns>The directory, or null when the token names no target with a global root.</returns>
+    private string? GlobalArbiterDirectory(string token, string home)
+    {
+        if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
+        {
+            return null;
+        }
+
+        try
+        {
+            string root = new SquadGlobalRoots(environment.GetVariable, home).ResolveGlobalRoot(target);
+            return Path.Combine(root, ".kyber-weave", "arbiter");
+        }
+        catch (ArgumentException)
+        {
+            // A target with no verified global root cannot be installed at user scope, so it has no table.
+            return null;
         }
     }
 

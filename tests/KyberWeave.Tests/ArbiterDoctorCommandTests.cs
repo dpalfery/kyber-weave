@@ -88,9 +88,9 @@ public sealed class ArbiterDoctorCommandTests : IDisposable
         "\"preset\":{\"name\":\"work\",\"digest\":\"d\"},\"bundle-digest\":\"b\"," +
         "\"profiles\":{\"fast\":\"claude-haiku-5-5\"},\"agents\":{}}";
 
-    /// <summary>The global model-targets file for Claude, where the global scope writes it.</summary>
+    /// <summary>The global model-targets file for Claude, under Claude's own global root.</summary>
     private string GlobalModelTargetsPath =>
-        Path.Combine(_home.Path, ".kyber-weave", "arbiter", "model-targets.claude.json");
+        Path.Combine(_home.Path, ".claude", ".kyber-weave", "arbiter", "model-targets.claude.json");
 
     /// <summary>The global Squad lock, which the targets file must be at least as new as.</summary>
     private string GlobalLockPath =>
