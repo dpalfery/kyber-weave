@@ -100,6 +100,41 @@ public static partial class DispatchPromptInsertion
         return ExpandedTags.Any(tag => first.StartsWith(tag, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// Whether this harness's dispatch hook can replace the dispatch text, so the prompt travels inside the call.
+    /// </summary>
+    /// <remarks>
+    /// From the per-harness table in <c>docs/kyber-arbiter/architecture.md</c>, which records a harness as a rewrite
+    /// only where a live dispatch showed the worker received the replaced text. Every other harness, and any token
+    /// this list does not know, takes the prompt file instead.
+    /// </remarks>
+    /// <param name="harness">The harness token, such as <c>claude</c> or <c>antigravity</c>.</param>
+    public static bool CanRewriteDispatch(string? harness)
+    {
+        if (string.IsNullOrWhiteSpace(harness))
+        {
+            return false;
+        }
+
+        return RewriteHarnesses.Contains(harness.Trim());
+    }
+
+    private static readonly IReadOnlySet<string> RewriteHarnesses = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        "claude",
+        "claude-code",
+        "copilot",
+        "copilot-vscode",
+        "copilot-cli",
+        "codex",
+        "cursor",
+        "opencode",
+        "pi",
+        "kilo",
+        "factory",
+        "devin",
+    };
+
     /// <summary>Expands the dispatch's identity line into the full prompt, or says why it cannot.</summary>
     /// <param name="prompt">The dispatch text as the harness sent it.</param>
     /// <param name="context">The hook context carrying the prompt service, when the host installed one.</param>

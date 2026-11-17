@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -7,6 +8,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Text;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Docs.Validation;
 
@@ -30,6 +32,12 @@ public sealed class TaskPromptService(
 {
     /// <summary>What the last part says when the budget cut nothing.</summary>
     public const string NothingLeftOut = "Nothing was left out.";
+
+    /// <summary>The folder, relative to the repository root, a fallback harness's prompt file is written under.</summary>
+    public const string ScratchFolder = ".agent_scratchpad";
+
+    /// <summary>The prompt file's name inside the task's scratch folder.</summary>
+    public const string PromptFileName = "prompt.md";
 
     private const string ParentSkillsUnit = "parent-skills";
     private const string SkillsUnit = "skills";
@@ -113,6 +121,17 @@ public sealed class TaskPromptService(
         int budget = config.TaskPromptBudget > 0 ? config.TaskPromptBudget : KyberWeaveConfig.DefaultTaskPromptBudget;
         (string prompt, IReadOnlyList<string> leftOut) = Fit(content, budget);
 
+        string? promptFile = null;
+        string? harness = Clean(request.Harness);
+        if (taskId is not null && harness is not null && !DispatchPromptInsertion.CanRewriteDispatch(harness))
+        {
+            TaskPromptResult? unwritten = WritePromptFile(root, taskId, prompt, out promptFile);
+            if (unwritten is not null)
+            {
+                return unwritten;
+            }
+        }
+
         return new TaskPromptResult(
             true,
             prompt,
@@ -121,7 +140,53 @@ public sealed class TaskPromptService(
             entry?.DifficultySource,
             technology,
             leftOut,
-            null);
+            null,
+            promptFile);
+    }
+
+    /// <summary>
+    /// Writes the prompt to a fallback harness's one file under the run's scratch folder, returning the path in
+    /// <paramref name="relativePath"/>.
+    /// </summary>
+    /// <remarks>
+    /// The file replaces the dispatch rewrite, so it is part of the delivery: a file that cannot be written is a
+    /// refusal naming what to check, not a prompt the conductor dispatches without.
+    /// </remarks>
+    private static TaskPromptResult? WritePromptFile(
+        string root,
+        string taskId,
+        string prompt,
+        out string? relativePath)
+    {
+        relativePath = null;
+        string slug = TaskSlug.Normalise(taskId);
+        if (slug.Length == 0)
+        {
+            return TaskPromptResult.NotBuilt(
+                $"No prompt: '{taskId}' does not make a task folder under {ScratchFolder}. Dispatch a task id with a " +
+                "letter or digit in it.");
+        }
+
+        string relative = $"{ScratchFolder}/{slug}/{PromptFileName}";
+        string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+        try
+        {
+            string? directory = Path.GetDirectoryName(path);
+            if (directory is not null)
+            {
+                _ = Directory.CreateDirectory(directory);
+            }
+
+            File.WriteAllText(path, prompt);
+            relativePath = relative;
+            return null;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return TaskPromptResult.NotBuilt(
+                $"No prompt: the prompt file '{relative}' could not be written ({ex.Message}). Check that " +
+                $"{ScratchFolder} is writable, then build the prompt again.");
+        }
     }
 
     private PromptContent ContentOf(string? taskText, string? hostText, string? technology)

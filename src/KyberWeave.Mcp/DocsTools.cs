@@ -297,6 +297,10 @@ public sealed partial class DocsTools
 
         Name a technology instead of a task id for a dispatch that belongs to no task, such as a
         research request.
+
+        Name the harness too. Where its hook cannot rewrite the dispatch, the prompt is written to one
+        file under the run's scratch folder and this reply carries the path; name that path in the
+        dispatch and tell the worker to read it first.
         """)]
     public string BuildTaskPrompt(
         [Description("""
@@ -307,9 +311,14 @@ public sealed partial class DocsTools
         [Description("The plan or specification the task is in, when the checkout has more than one active plan.")] string? plan = null,
         [Description("A file holding the results earlier tasks reported, when this is a retry.")] string? priorResults = null,
         [Description("How many attempts at this task already failed; the retry's step-up reads it.")] int failedAttempts = 0,
+        [Description("""
+            The harness you dispatch from, such as 'antigravity' or 'claude'. On a harness whose hook cannot
+            rewrite the dispatch, the prompt is written to the run's scratch folder and this reply gives its path.
+            Omit it when unknown; no file is written then.
+            """)] string? harness = null,
         [Description("Absolute path of your worktree; omit for the server's checkout.")] string? projectPath = null)
     {
-        if (Redirect(projectPath, tools => tools.BuildTaskPrompt(taskId, technology, plan, priorResults, failedAttempts)) is { } redirected)
+        if (Redirect(projectPath, tools => tools.BuildTaskPrompt(taskId, technology, plan, priorResults, failedAttempts, harness)) is { } redirected)
             return redirected;
 
         DiagnosticReport report = new();
@@ -320,7 +329,14 @@ public sealed partial class DocsTools
         }
 
         TaskPromptResult prompt = _prompts.Build(
-            new TaskPromptRequest(_repositoryRoot, taskId, plan, PriorResultsPath: priorResults, Technology: technology, FailedAttempts: failedAttempts),
+            new TaskPromptRequest(
+                _repositoryRoot,
+                taskId,
+                plan,
+                PriorResultsPath: priorResults,
+                Technology: technology,
+                FailedAttempts: failedAttempts,
+                Harness: harness),
             config);
 
         return FormatTaskPrompt(prompt);
@@ -344,6 +360,14 @@ public sealed partial class DocsTools
         text.Append('\n');
         text.Append("technology: ").Append(prompt.Technology ?? "none").Append('\n');
         text.Append("left out: ").Append(prompt.LeftOut.Count == 0 ? "none" : string.Join("; ", prompt.LeftOut)).Append('\n');
+        if (prompt.PromptFile is not null)
+        {
+            text.Append("prompt file: ").Append(prompt.PromptFile).Append('\n');
+            text.Append("\nThe prompt text is not returned. This harness's hook cannot rewrite the dispatch, so the prompt is in the file above: name that path in the dispatch and tell the worker to read it first. A worker that starts without it runs 'kyber-weave docs packet <task id>'.");
+            return text.ToString();
+        }
+
+        text.Append("prompt file: none\n");
         text.Append("\nThe prompt text is not returned. Dispatch the agent above with the task id and the dispatch hook inserts it; a worker that starts without it runs 'kyber-weave docs packet <task id>'.");
         return text.ToString();
     }

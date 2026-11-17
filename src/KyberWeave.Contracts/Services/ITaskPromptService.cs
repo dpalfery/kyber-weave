@@ -15,6 +15,10 @@ namespace KyberWeave.Contracts.Services;
 /// </param>
 /// <param name="Technology">The technology a dispatch with no task names; ignored when <paramref name="TaskId"/> is set.</param>
 /// <param name="FailedAttempts">How many attempts at this task already failed; the step-up reads it.</param>
+/// <param name="Harness">
+/// The harness the dispatch runs on. A harness whose hook cannot rewrite the dispatch gets the prompt written to
+/// the run's scratch folder; null (the packet command and the hook) writes no file.
+/// </param>
 public sealed record TaskPromptRequest(
     string RepoRoot,
     string? TaskId = null,
@@ -22,7 +26,8 @@ public sealed record TaskPromptRequest(
     string? Agent = null,
     string? PriorResultsPath = null,
     string? Technology = null,
-    int FailedAttempts = 0);
+    int FailedAttempts = 0,
+    string? Harness = null);
 
 /// <summary>The task prompt, or why no prompt was built.</summary>
 /// <param name="Built">Whether <paramref name="Prompt"/> holds a prompt.</param>
@@ -35,6 +40,10 @@ public sealed record TaskPromptRequest(
 /// <param name="Refusal">
 /// Why no prompt was built, naming the command that repairs it, or null when one was built.
 /// </param>
+/// <param name="PromptFile">
+/// The repository-relative file the prompt was written to, for a dispatch whose harness cannot rewrite it; null
+/// when the prompt is not written to a file.
+/// </param>
 public sealed record TaskPromptResult(
     bool Built,
     string Prompt,
@@ -43,7 +52,8 @@ public sealed record TaskPromptResult(
     string? DifficultySource,
     string? Technology,
     IReadOnlyList<string> LeftOut,
-    string? Refusal)
+    string? Refusal,
+    string? PromptFile = null)
 {
     /// <summary>A refusal that names the command repairing the reason no prompt was built.</summary>
     /// <param name="refusal">Why the prompt could not be built, and what repairs it.</param>

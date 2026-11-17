@@ -19,7 +19,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DocsTaskPromptToolTests
 {
-    private static DocFixture Ready(string plan = "")
+    internal static DocFixture Ready(string plan = "")
     {
         DocFixture fixture = PlanTaskFileProbe.Corpus(plan.Length == 0 ? PlanNaming() : plan);
         Standards(fixture);
@@ -83,7 +83,7 @@ public sealed class DocsTaskPromptToolTests
             """;
     }
 
-    private static KyberWeaveConfig Config(DocFixture fixture) => KyberWeaveConfigLoader.Load(fixture.Root);
+    internal static KyberWeaveConfig Config(DocFixture fixture) => KyberWeaveConfigLoader.Load(fixture.Root);
 
     private static DocumentIndexHost Host(DocFixture fixture, KyberWeaveConfig config) => new(
         fixture.Root,
@@ -92,10 +92,10 @@ public sealed class DocsTaskPromptToolTests
         config.Ontology.DocsRoots,
         config.Ontology.ResolvedCatalogPath);
 
-    private static DocsTools Tools(DocFixture fixture) =>
+    internal static DocsTools Tools(DocFixture fixture) =>
         DocsToolsComposition.Create(Host(fixture, Config(fixture)));
 
-    private static TaskPromptService Service(DocFixture fixture)
+    internal static TaskPromptService Service(DocFixture fixture)
     {
         IServiceProvider provider = DocsTestCommands.Services();
         KyberWeaveConfig config = Config(fixture);
