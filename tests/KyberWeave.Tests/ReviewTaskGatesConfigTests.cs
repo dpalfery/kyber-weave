@@ -352,28 +352,34 @@ public sealed class ReviewTaskGatesConfigTests
     }
 
     /// <summary>
-    ///     The checked-in configuration is what this repository's own developer agents run. Declaring
-    ///     the gates there is the point of the section, so the set is pinned: a missing agent is a
-    ///     silent gap, and an extra one is a gate nobody reviewed for that role.
+    ///     The checked-in configuration is what this repository's own developers run. Declaring the
+    ///     gates there is the point of the sections, so both sets are pinned: a missing technology or
+    ///     role is a silent gap, and an extra one is a gate nobody reviewed for it.
     /// </summary>
     [Fact]
     public void RepositoryConfigDeclaresDeveloperTaskGates()
     {
         IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> taskGates = RepositoryTaskGates();
+        IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> technologyGates = RepositoryTechnologyGates();
 
-        string[] developers =
+        // Every technology the removed per-technology agents used to be the key for is now a
+        // technology key, so its worker resolves the same gates through the task's technology.
+        string[] technologies =
         [
-            "csharp-dev",
-            "dal-dev",
-            "react-dev",
-            "maui-dev",
-            "tauri-dev",
-            "test-dev",
-            "pulumi-dev",
+            "csharp",
+            "github-actions",
+            "react",
+            "tauri",
+            "typescript",
+            "rust"
+        ];
+
+        string[] roles =
+        [
+            // These roles do not map to one technology, so they keep an agent-keyed entry that the
+            // resolver reads first.
             "sql-database-architect",
-            "github-devops",
-            "typescript-dev",
-            "rust-dev",
+            "test-dev",
 
             // docs-dev joined this set when the conductor run-speed programme gave it its first
             // gate (that programme's D60): a config-only edit in this repository is a docs-dev
@@ -382,10 +388,12 @@ public sealed class ReviewTaskGatesConfigTests
             "docs-dev"
         ];
 
-        Assert.Equal(developers.Order(StringComparer.Ordinal), taskGates.Keys.Order(StringComparer.Ordinal));
-        Assert.All(developers, agent => Assert.NotEmpty(taskGates[agent]));
-        Assert.Equal(["dash-typecheck", "dash-lint"], taskGates["typescript-dev"].Select(gate => gate.Id));
-        Assert.Equal(["cargo-fmt", "cargo-clippy"], taskGates["rust-dev"].Select(gate => gate.Id));
+        Assert.Equal(technologies.Order(StringComparer.Ordinal), technologyGates.Keys.Order(StringComparer.Ordinal));
+        Assert.Equal(roles.Order(StringComparer.Ordinal), taskGates.Keys.Order(StringComparer.Ordinal));
+        Assert.All(technologies, technology => Assert.NotEmpty(technologyGates[technology]));
+        Assert.All(roles, role => Assert.NotEmpty(taskGates[role]));
+        Assert.Equal(["dash-typecheck", "dash-lint"], technologyGates["typescript"].Select(gate => gate.Id));
+        Assert.Equal(["cargo-fmt", "cargo-clippy"], technologyGates["rust"].Select(gate => gate.Id));
         Assert.Equal(["review-config"], taskGates["docs-dev"].Select(gate => gate.Id));
     }
 
@@ -976,6 +984,14 @@ public sealed class ReviewTaskGatesConfigTests
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.TaskGates;
+    }
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> RepositoryTechnologyGates()
+    {
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+
+        Assert.True(result.Success, result.Error);
+        return result.Config!.Review.TechnologyGates;
     }
 
     private static IReadOnlyList<ReviewGate> RepositoryReviewGates()
