@@ -4,7 +4,7 @@ title: Review council architecture
 doc-type: architecture
 status: current
 component: ReviewCouncil
-source-root: src/KyberWeave.Core/Review
+source-root: src/KyberWeave.Application/Review
 owner: dpalfery
 last-reviewed: 2026-11-17
 decided-by:
@@ -24,8 +24,8 @@ code-refs:
   - ReviewConfig
   - ReviewConfigParser
   - ReviewTaskGate
-  - TaskGateSelection
-  - GateCatalogue
+  - TaskGateSelectionService
+  - GateCatalogueRenderer
   - ProjectRootDetection
   - ReviewBlockWriter
   - ReviewCatalogueCommand
