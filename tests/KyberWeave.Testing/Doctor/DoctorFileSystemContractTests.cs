@@ -121,18 +121,20 @@ public abstract class DoctorFileSystemContractTests : IDisposable
     }
 
     [Fact]
-    public void ADanglingLinkIsNeitherAFileNorAPresentFile()
+    public void ADanglingLinkIsNotAPresentFileAndCannotBeRead()
     {
         Start();
         string link = At("settings.json");
         CreateLink(link, At("missing.json"));
 
-        Assert.False(Files.FileExists(link));
+        // FileExists is the raw probe and answers with whatever the runtime's File.Exists says about a dangling link,
+        // which is not the doctor's question, so the contract pins only what the doctor reads.
         Assert.False(Files.IsPresentFile(link));
+        _ = Assert.Throws<FileNotFoundException>(() => Files.ReadAllBytes(link));
     }
 
     [Fact]
-    public void ALinkToADirectoryIsADirectoryAndAPresentFileButNotAFile()
+    public void ALinkToADirectoryIsADirectoryAndNotAPresentFile()
     {
         Start();
         string directory = At("user-data");
@@ -140,8 +142,9 @@ public abstract class DoctorFileSystemContractTests : IDisposable
         string link = At("settings-directory");
         CreateLink(link, directory);
 
+        // The adapter asks a FileInfo to resolve the link, so a directory target has no file to read.
         Assert.True(Files.DirectoryExists(link));
-        Assert.True(Files.IsPresentFile(link));
+        Assert.False(Files.IsPresentFile(link));
         Assert.False(Files.FileExists(link));
     }
 
