@@ -404,9 +404,9 @@ public sealed partial class StandardsFolderMigration
     /// <param name="named">How a refusal names the path: the repository-relative path the caller asked for.</param>
     private string RequireWritable(string fullPath, string named)
     {
-        string boundary = _repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string boundary = RepositoryBoundary.For(_repoRoot, Path.DirectorySeparatorChar);
         string full = Path.GetFullPath(fullPath);
-        if (!full.StartsWith(boundary, StringComparison.Ordinal))
+        if (!RepositoryBoundary.IsWithin(full, boundary, OperatingSystem.IsWindows()))
         {
             throw new IOException(
                 $"Refusing to write '{named}': it resolves outside the repository root, so nothing was written.");
