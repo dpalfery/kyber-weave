@@ -3,7 +3,11 @@ using KyberWeave.Tests.Configuration;
 using KyberWeave.Application.Review;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -605,6 +609,32 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
             .Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";
         File.WriteAllText(ConfigPath, text);
         return text;
+    }
+
+    /// <summary>
+    /// A preview reads the file and the repository it was given, so a run whose configuration exists only in the
+    /// seams migrates it: no branch of the read may probe the disk behind them.
+    /// </summary>
+    [Fact]
+    public void AnExplicitConfigTheSeamsHoldIsMigratedWithoutAFileOnDisk()
+    {
+        string root = Path.Combine(_root.Path, "seam-only");
+        InMemoryFileSystem files = new();
+        files.CreateDirectory(root);
+        files.WriteAllText(Path.Combine(root, "custom.yml"), TwoAgentsOnOneTechnology());
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => CliApplication.Create(services =>
+                {
+                    services.AddSingleton<IKyberWeaveConfigRepository>(new FakeKyberWeaveConfigRepository());
+                    services.AddSingleton<IWritableFileSystem>(files);
+                    services.AddSingleton<IRepositoryTreeProbe>(new FakeRepositoryTreeProbe());
+                })
+                .Run(["review", "migrate-task-gates", root, "--config", "custom.yml"]));
+
+        Assert.Equal(0, execution.Result);
+        Assert.DoesNotContain("no kyber-weave.yml was found", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("technology-gates", execution.Output, StringComparison.Ordinal);
     }
 
     private CliRun Migrate(params string[] options)
