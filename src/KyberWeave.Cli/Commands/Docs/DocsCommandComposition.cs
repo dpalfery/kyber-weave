@@ -58,7 +58,8 @@ internal static class DocsCommandComposition
                 Ontology = ontology,
                 Harness = config.Harness,
                 DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology),
-                Squad = config.Squad
+                Squad = config.Squad,
+                Arbiter = Core.Arbiter.ArbiterConfigDefaults.Product
             };
             return true;
         }
