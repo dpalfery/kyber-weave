@@ -9,6 +9,7 @@ using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Processes;
+using Spectre.Console;
 using Spectre.Console.Cli;
 using Xunit;
 
@@ -344,7 +345,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
         {
-            DocsInitCommand.PrintRepairScope(fixes);
+            DocsInitCommand.PrintRepairScope(AnsiConsole.Console, fixes);
             return 0;
         });
 

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using System.Diagnostics;
@@ -30,22 +31,42 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     private readonly IDocsScaffoldingService _scaffolder;
     private readonly IRepositoryDoctor _doctor;
     private readonly IKyberWeaveConfigRepository _configs;
+    private readonly IAnsiConsole _console;
+    private readonly IFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+    private readonly IBoundedProcessExecutor _processes;
 
     /// <summary>Creates the command over the services the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
     /// <param name="scaffolder">Bootstraps the documentation corpus.</param>
     /// <param name="doctor">Runs the provisioning doctor when <c>--provision</c> is given.</param>
     /// <param name="configs">Reads back the configuration the scaffold wrote.</param>
+    /// <param name="console">Where the command writes its report and asks its question.</param>
+    /// <param name="files">Answers whether a retired skill directory is still present.</param>
+    /// <param name="paths">Resolves the repository path against the working directory.</param>
+    /// <param name="environment">Names the working directory and the variables, and says whether input is redirected.</param>
+    /// <param name="processes">Runs <c>apm</c>, and the provisioning doctor's children, with a time limit.</param>
     public DocsInitCommand(
         IMcpWiringService wiring,
         IDocsScaffoldingService scaffolder,
         IRepositoryDoctor doctor,
-        IKyberWeaveConfigRepository configs)
+        IKyberWeaveConfigRepository configs,
+        IAnsiConsole console,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IBoundedProcessExecutor processes)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _scaffolder = scaffolder ?? throw new ArgumentNullException(nameof(scaffolder));
         _doctor = doctor ?? throw new ArgumentNullException(nameof(doctor));
         _configs = configs ?? throw new ArgumentNullException(nameof(configs));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+        _processes = processes ?? throw new ArgumentNullException(nameof(processes));
     }
 
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
@@ -98,7 +119,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         (int ExitCode, ScaffoldResult? Result, string? Error) attempt = TryScaffold(_scaffolder, settings);
         if (attempt.ExitCode != 0)
         {
-            AnsiConsole.MarkupLine($"[red]Could not scaffold: {Markup.Escape(attempt.Error!)}[/]");
+            _console.MarkupLine($"[red]Could not scaffold: {Markup.Escape(attempt.Error!)}[/]");
             return attempt.ExitCode;
         }
 
@@ -111,12 +132,12 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             _ => throw new InvalidOperationException(
                 $"Unknown documentation root source: {result.DocsRootSource}")
         };
-        AnsiConsole.MarkupLine($"Documentation root: [bold]{Markup.Escape(result.DocsRoot)}[/]{rootNote}");
-        AnsiConsole.WriteLine();
+        _console.MarkupLine($"Documentation root: [bold]{Markup.Escape(result.DocsRoot)}[/]{rootNote}");
+        _console.WriteLine();
 
         foreach (ScaffoldedFile file in result.Files)
         {
-            AnsiConsole.MarkupLine($"  {Label(file.Outcome)} {Markup.Escape(file.RelativePath)}{Note(file)}");
+            _console.MarkupLine($"  {Label(file.Outcome)} {Markup.Escape(file.RelativePath)}{Note(file)}");
         }
 
         if (result.ReviewGates is not null)
@@ -124,7 +145,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             PrintReviewGates(result.ReviewGates);
         }
 
-        AnsiConsole.WriteLine();
+        _console.WriteLine();
 
         if (!settings.NoSkill)
         {
@@ -143,11 +164,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             return wiringExitCode;
         }
 
-        AnsiConsole.MarkupLine("[bold]Next:[/]");
-        AnsiConsole.MarkupLine($"  1. Replace the example row in [grey]{Markup.Escape(result.DocsRoot)}/catalog.md[/] with your real components and owners.");
-        AnsiConsole.MarkupLine($"  2. Run [grey]kyber-weave docs validate {Markup.Escape(settings.Path)}[/] to see what the corpus needs.");
-        AnsiConsole.MarkupLine("  3. Ask your agent to apply the [grey]kyber-docs-authoring[/] skill to the failing documents.");
-        AnsiConsole.MarkupLine($"  4. Declare your stacks in [grey]ontology.technologies[/] and re-run, to scaffold a coding standard per technology under [grey]{Markup.Escape(result.DocsRoot)}/standards/[/].");
+        _console.MarkupLine("[bold]Next:[/]");
+        _console.MarkupLine($"  1. Replace the example row in [grey]{Markup.Escape(result.DocsRoot)}/catalog.md[/] with your real components and owners.");
+        _console.MarkupLine($"  2. Run [grey]kyber-weave docs validate {Markup.Escape(settings.Path)}[/] to see what the corpus needs.");
+        _console.MarkupLine("  3. Ask your agent to apply the [grey]kyber-docs-authoring[/] skill to the failing documents.");
+        _console.MarkupLine($"  4. Declare your stacks in [grey]ontology.technologies[/] and re-run, to scaffold a coding standard per technology under [grey]{Markup.Escape(result.DocsRoot)}/standards/[/].");
 
         return settings.Provision ? Provision(settings) : 0;
     }
@@ -168,14 +189,14 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             TimeSpan.FromSeconds(20),
             "codegraph",
             McpExecutable ?? "kyber-weave-mcp");
-        IProcessExecutor executor = Executor ?? ProcessExecutor.WithTimeout(ProvisionIndexTimeout);
+        IProcessExecutor executor = Executor ?? new BoundedExecutor(_processes, ProvisionIndexTimeout);
 
         DoctorReport report = _doctor.Run(
-            Path.GetFullPath(settings.Path),
+            FullPath(settings.Path),
             DoctorMode.Provision,
             options,
             executor,
-            Environment.GetEnvironmentVariable);
+            _environment.GetVariable);
 
         DoctorReportRenderer.Write(report, asJson: false);
         return report.ExitCode;
@@ -239,16 +260,16 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// folds at 80 columns, and a wrapped gate id or reason would fail an exact-match check
     /// as well as read badly.
     /// </remarks>
-    private static void PrintReviewGates(ReviewGatesOutcome review)
+    private void PrintReviewGates(ReviewGatesOutcome review)
     {
-        CommandHelpers.WriteUnfolded(() => PrintReviewGatesUnfolded(review));
+        CommandHelpers.WriteUnfolded(_console, () => PrintReviewGatesUnfolded(review));
     }
 
-    private static void PrintReviewGatesUnfolded(ReviewGatesOutcome review)
+    private void PrintReviewGatesUnfolded(ReviewGatesOutcome review)
     {
         if (review.OptedOut)
         {
-            AnsiConsole.MarkupLine("review gates not written (--no-review-gates)");
+            _console.MarkupLine("review gates not written (--no-review-gates)");
             return;
         }
 
@@ -256,37 +277,37 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                      entry => entry.Technology, StringComparer.Ordinal))
         {
             string ids = string.Join(", ", group.Select(entry => entry.GateId));
-            AnsiConsole.MarkupLine($"review gates for {Markup.Escape(group.Key)}: {Markup.Escape(ids)}");
+            _console.MarkupLine($"review gates for {Markup.Escape(group.Key)}: {Markup.Escape(ids)}");
         }
 
         foreach ((string gateId, string reason) in review.CommentedOutGates)
         {
-            AnsiConsole.MarkupLine($"review gate '{Markup.Escape(gateId)}' commented out: {Markup.Escape(reason)}");
+            _console.MarkupLine($"review gate '{Markup.Escape(gateId)}' commented out: {Markup.Escape(reason)}");
         }
 
         foreach (string technology in review.NoFamily)
         {
-            AnsiConsole.MarkupLine($"no gates shipped for {Markup.Escape(technology)}");
+            _console.MarkupLine($"no gates shipped for {Markup.Escape(technology)}");
         }
 
         foreach (string missing in review.MissingFromExisting)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"review gate '{Markup.Escape(missing)}' is in the catalogue but missing from the host configuration.");
         }
 
         if (review.Written)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 "CI: copy templates/github-actions/kyber-weave-review-gate.yml from https://github.com/dpalfery/kyber-weave into .github/workflows/.");
         }
     }
 
-    private static void DeploySkill(DocsInitSettings settings)
+    private void DeploySkill(DocsInitSettings settings)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("apm")
         {
-            WorkingDirectory = Path.GetFullPath(settings.Path),
+            WorkingDirectory = FullPath(settings.Path),
             // Input is redirected only so the runner can close it at once: an APM prompt then reads end-of-file
             // rather than waiting on a terminal nobody can see, because its output is captured too.
             RedirectStandardInput = true,
@@ -306,12 +327,12 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, ApmInstallTimeout);
+            ProcessResult result = _processes.Run(startInfo, string.Empty, ApmInstallTimeout);
 
             if (result.ExitCode == 0)
             {
-                AnsiConsole.MarkupLine($"  [green]deployed[/] kyber-docs-authoring skill → target [bold]{Markup.Escape(settings.Target)}[/]");
-                AnsiConsole.WriteLine();
+                _console.MarkupLine($"  [green]deployed[/] kyber-docs-authoring skill → target [bold]{Markup.Escape(settings.Target)}[/]");
+                _console.WriteLine();
                 return;
             }
 
@@ -344,14 +365,14 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// software on a machine as a side effect of scaffolding documentation, so this path
     /// tells the operator what to run and stops.
     /// </remarks>
-    private static void SkillUnavailable(string command, string reason)
+    private void SkillUnavailable(string command, string reason)
     {
-        AnsiConsole.MarkupLine($"  [yellow]skipped[/]  kyber-docs-authoring skill — {Markup.Escape(reason)}.");
-        AnsiConsole.MarkupLine("           APM is an expected dependency; Kyber-Weave does not install it for you.");
-        AnsiConsole.MarkupLine("           Install it ([grey]https://microsoft.github.io/apm[/]), then run:");
-        AnsiConsole.MarkupLine($"             [grey]{Markup.Escape(command)}[/]");
-        AnsiConsole.MarkupLine("           Or re-run with [grey]--no-skill[/] to skip this step.");
-        AnsiConsole.WriteLine();
+        _console.MarkupLine($"  [yellow]skipped[/]  kyber-docs-authoring skill — {Markup.Escape(reason)}.");
+        _console.MarkupLine("           APM is an expected dependency; Kyber-Weave does not install it for you.");
+        _console.MarkupLine("           Install it ([grey]https://microsoft.github.io/apm[/]), then run:");
+        _console.MarkupLine($"             [grey]{Markup.Escape(command)}[/]");
+        _console.MarkupLine("           Or re-run with [grey]--no-skill[/] to skip this step.");
+        _console.WriteLine();
     }
 
     /// <summary>
@@ -365,9 +386,9 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// behaviour is pinned because none was observed. A warning rather than a
     /// failure: the stale copy still works, but it is no longer deployed.
     /// </remarks>
-    private static void ReportRetiredSkills(DocsInitSettings settings)
+    private void ReportRetiredSkills(DocsInitSettings settings)
     {
-        string repoRoot = Path.GetFullPath(settings.Path);
+        string repoRoot = FullPath(settings.Path);
         string[] targets = settings.Target.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         string[] retired = ["kyber-weave-docs", "doc-corpus-integrity-review"];
         foreach (string target in targets)
@@ -386,18 +407,18 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             foreach (string name in retired)
             {
                 string staleDir = Path.Combine(skillsRoot, name);
-                if (!Directory.Exists(staleDir))
+                if (!_files.DirectoryExists(staleDir))
                 {
                     continue;
                 }
 
-                CommandHelpers.WriteUnfolded(() =>
+                CommandHelpers.WriteUnfolded(_console, () =>
                 {
-                    AnsiConsole.MarkupLine(
+                    _console.MarkupLine(
                         $"  [yellow]warn[/] Retired skill '{Markup.Escape(name)}' still present at [bold]{Markup.Escape(staleDir)}[/]. " +
                         "APM prunes retired skills only when a lockfile records the install (observed on 0.28.0 and 0.35.0); " +
                         "without a lockfile the stale directory is left behind.");
-                    AnsiConsole.MarkupLine(
+                    _console.MarkupLine(
                         $"         Remove it with: [grey]rm -rf \"{Markup.Escape(staleDir)}\"[/]");
                 });
             }
@@ -423,18 +444,18 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     {
         if (settings.NoMcpCheck)
         {
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine("MCP wiring not checked (--no-mcp-check).");
+            _console.WriteLine();
+            _console.MarkupLine("MCP wiring not checked (--no-mcp-check).");
             return 0;
         }
 
-        string root = Path.GetFullPath(settings.Path);
+        string root = FullPath(settings.Path);
         KyberWeaveConfigLoadResult loaded = _configs.TryLoad(root);
 
         if (!loaded.Success)
         {
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine(
+            _console.WriteLine();
+            _console.MarkupLine(
                 $"[red]{Markup.Escape(KyberWeaveConfigDiagnosticCodes.LoadError)}[/]: "
                 + Markup.Escape(loaded.Error ?? "kyber-weave.yml could not be read."));
             return 1;
@@ -458,9 +479,9 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         McpConfig mcp = config.Mcp;
         McpWiringReport report = _wiring.Inspect(root, mcp);
 
-        AnsiConsole.WriteLine();
+        _console.WriteLine();
         PrintWiringSection(report, mcp);
-        AnsiConsole.WriteLine();
+        _console.WriteLine();
 
         IReadOnlyList<McpWiringFix> fixes = _wiring.Derive(report, root);
         if (fixes.Count > 0 && CanPrompt())
@@ -491,21 +512,21 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         if (leftovers.Count == 0)
             return;
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
             foreach (McpRenameChange leftover in leftovers)
             {
                 string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
 
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [yellow]warn[/] {Markup.Escape(McpServerRenamer.RenameCode)} {file}: "
                     + Markup.Escape(TerminalText.Line(leftover.Message)));
 
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"        [grey]Run: {Markup.Escape(McpServerRenamer.MigrateCommand + " --target " + leftover.Harness)}[/]");
             }
 
-            AnsiConsole.WriteLine();
+            _console.WriteLine();
         });
     }
 
@@ -519,16 +540,16 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// columns, and a finding whose rule id, server name and path are split across lines is neither
     /// readable nor copy-pasteable.
     /// </remarks>
-    private static void PrintWiringSection(McpWiringReport report, McpConfig config)
+    private void PrintWiringSection(McpWiringReport report, McpConfig config)
     {
         RequiredMcpServer[] declared =
         [
             .. config.RequiredServers.Values.OrderBy(server => server.Name, StringComparer.Ordinal)
         ];
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
-            AnsiConsole.MarkupLine("[bold]MCP wiring:[/]");
+            _console.MarkupLine("[bold]MCP wiring:[/]");
 
             foreach (HarnessMcpEntry row in HarnessMcpCatalog.Rows)
             {
@@ -557,7 +578,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 
                 if (gaps.Count == 0 && declared.Length > 0)
                 {
-                    AnsiConsole.MarkupLine(
+                    _console.MarkupLine(
                         $"  [green]ok[/]    {Markup.Escape(row.Harness)}: "
                         + $"{Markup.Escape(TerminalText.Line(string.Join(", ", declared.Select(server => server.Name))))} wired");
                     continue;
@@ -575,7 +596,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// so both are text somebody else wrote — <c>kyber-weave.yml</c> or a harness's own configuration
     /// — and both go through <see cref="TerminalText"/> before the terminal sees them.
     /// </remarks>
-    private static void PrintFinding(McpWiringFinding finding)
+    private void PrintFinding(McpWiringFinding finding)
     {
         string level = finding.Severity switch
         {
@@ -584,7 +605,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             _ => "[grey]info[/] "
         };
 
-        AnsiConsole.MarkupLine(
+        _console.MarkupLine(
             $"  {level} {Markup.Escape(finding.Code)} {Markup.Escape(finding.Harness)}: "
             + Markup.Escape(TerminalText.Line(finding.Message)));
 
@@ -596,7 +617,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         // statement of how. The exception is decided by the catalog's shape — repository settings,
         // not a file — rather than by the harness's name.
         if (AdviceBelongsToOperator(finding) && !string.IsNullOrWhiteSpace(finding.Hint))
-            AnsiConsole.MarkupLine($"        [grey]{Markup.Escape(TerminalText.Line(finding.Hint))}[/]");
+            _console.MarkupLine($"        [grey]{Markup.Escape(TerminalText.Line(finding.Hint))}[/]");
     }
 
     /// <summary>
@@ -609,11 +630,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             && HarnessMcpCatalog.Find(finding.Harness)?.Shape == McpConfigurationShape.RepositorySettings);
 
     /// <summary>Whether this run may ask the operator, honouring the seam when a test set it.</summary>
-    private static bool CanPrompt() =>
+    private bool CanPrompt() =>
         InteractiveCheckOverride?.Invoke()
-            ?? (!Console.IsInputRedirected
-                && !Console.IsOutputRedirected
-                && AnsiConsole.Profile.Capabilities.Interactive);
+            ?? (!_environment.IsInputRedirected
+                && _console.Profile.Out.IsTerminal
+                && _console.Profile.Capabilities.Interactive);
 
     /// <summary>
     /// Asks whether to perform the repair, and performs it through the same bounded write path as the
@@ -642,11 +663,11 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// It defaults to no. The repair writes files a harness will load and a receipt into version
     /// control, and a bare Enter is not a considered yes for that.
     /// </remarks>
-    private static bool ConfirmRepair(IReadOnlyList<McpWiringFix> fixes)
+    private bool ConfirmRepair(IReadOnlyList<McpWiringFix> fixes)
     {
-        PrintRepairScope(fixes);
+        PrintRepairScope(_console, fixes);
 
-        return AnsiConsole.Confirm(
+        return _console.Confirm(
             $"Wire the declared MCP servers into those {fixes.Count} files now?",
             defaultValue: false);
     }
@@ -671,13 +692,14 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     /// else's text — but per value, so the cap bounds one name and never the whole scope.
     /// </para>
     /// </remarks>
-    internal static void PrintRepairScope(IReadOnlyList<McpWiringFix> fixes)
+    internal static void PrintRepairScope(IAnsiConsole console, IReadOnlyList<McpWiringFix> fixes)
     {
+        ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(fixes);
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(console, () =>
         {
-            AnsiConsole.MarkupLine("This writes:");
+            console.MarkupLine("This writes:");
 
             foreach (McpWiringFix fix in fixes)
             {
@@ -685,7 +707,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 string harness = Markup.Escape(TerminalText.Line(fix.Harness));
                 string servers = Markup.Escape(TerminalText.Line(string.Join(", ", fix.Servers)));
 
-                AnsiConsole.MarkupLine($"  [bold]{path}[/] [grey]({harness})[/] adding {servers}");
+                console.MarkupLine($"  [bold]{path}[/] [grey]({harness})[/] adding {servers}");
             }
         });
     }
@@ -712,7 +734,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             _wiring.Harnesses(fixes),
             dryRun: false);
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
             bool wrote = false;
 
@@ -723,31 +745,38 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 if (change.Written)
                 {
                     wrote = true;
-                    AnsiConsole.MarkupLine(
+                    _console.MarkupLine(
                         $"  [green]wrote[/]  {Markup.Escape(path)} ({Markup.Escape(TerminalText.Line(string.Join(", ", change.Servers)))})");
 
                     if (!string.IsNullOrWhiteSpace(change.Message))
-                        AnsiConsole.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(change.Message))}[/]");
+                        _console.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(change.Message))}[/]");
 
                     continue;
                 }
 
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [yellow]refused[/] {Markup.Escape(change.Code ?? McpWiringRepairer.RefusalCode)} "
                     + Markup.Escape(TerminalText.Line(change.Message ?? $"{path} was not written.")));
 
                 if (!string.IsNullOrWhiteSpace(change.Hint))
-                    AnsiConsole.MarkupLine($"          [grey]{Markup.Escape(TerminalText.Line(change.Hint))}[/]");
+                    _console.MarkupLine($"          [grey]{Markup.Escape(TerminalText.Line(change.Hint))}[/]");
             }
 
             if (wrote)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  Receipt: [grey]{Markup.Escape(McpWiringReceipt.RelativePath)}[/]");
             }
 
-            AnsiConsole.WriteLine();
+            _console.WriteLine();
         });
     }
 
+    private string FullPath(string path) => _paths.GetFullPath(path, _environment.CurrentDirectory);
+
+    private sealed class BoundedExecutor(IBoundedProcessExecutor process, TimeSpan timeout) : IProcessExecutor
+    {
+        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
+            process.Run(startInfo, standardInput, timeout);
+    }
 }
