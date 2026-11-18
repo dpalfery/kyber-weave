@@ -21,7 +21,7 @@ The helpers both this project and `tests/KyberWeave.Integration.Tests` use live 
 | Helper | For |
 |---|---|
 | `TempDirectory` | A disposable scratch directory. Implement `IDisposable` on the test class and dispose it. |
-| `DocFixture` | A documentation corpus on disk — `.WithCatalog()`, `.WithSourceRoot()`, `.Write()`, `.Load()` |
+| `DocFixture` | A documentation corpus — `.WithCatalog()`, `.WithSourceRoot()`, `.Write()`, `.Load()`. `DocFixture.CreateInMemory()` builds it on the in-memory file system for a unit test; `DocFixture.Create()` uses a real directory, for adapter and integration tests only |
 | `FakeCodeGraphResolver` | `.WithSymbols(...)` for deterministic symbol and route resolution |
 | `KyberWeaveTestPaths` | Locates the repository root by walking up to `KyberWeave.sln` |
 
