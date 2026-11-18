@@ -59,10 +59,10 @@ public static class BriefMapLoader
                 Dictionary<string, BriefCondition> sections = new(StringComparer.Ordinal);
                 foreach ((string heading, string when) in file.Sections)
                 {
-                    sections[heading] = BriefCondition.Parse(when, $"{where} § {heading}");
+                    sections[heading] = BriefConditionExtensions.ParseCondition(when, $"{where} § {heading}");
                 }
 
-                rules.Add(new BriefFileRule(file.File, BriefCondition.Parse(file.When ?? "always", where), sections));
+                rules.Add(new BriefFileRule(file.File, BriefConditionExtensions.ParseCondition(file.When ?? "always", where), sections));
             }
 
             agents[agent] = rules;

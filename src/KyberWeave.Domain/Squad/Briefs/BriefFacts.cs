@@ -33,13 +33,4 @@ public sealed record BriefFacts(
             ["autonomy"] = ["supervised", "autonomous"],
             ["mode"] = ["test-first", "standard"],
         };
-
-    /// <summary>The value of the named fact, or null when it is unknown.</summary>
-    public string? Get(string fact) => fact switch
-    {
-        "path" => Path,
-        "autonomy" => Autonomy,
-        "mode" => Mode,
-        _ => null,
-    };
 }

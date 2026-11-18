@@ -29,7 +29,7 @@ public sealed class CopilotPromptFileTests : IDisposable
     [Fact]
     public void EmbeddedText_ParsesAsYamlWhoseOnlyTopLevelKeyIsSystemPrompt()
     {
-        YamlMappingNode root = ParseRoot(CopilotPromptFile.EmbeddedText());
+        YamlMappingNode root = ParseRoot(CopilotPromptFile.EmbeddedText(ShippedCopilotPrompt.Resources));
 
         string[] keys = root.Children.Keys.Select(KeyText).ToArray();
         string[] expected = ["systemPrompt"];
@@ -39,7 +39,7 @@ public sealed class CopilotPromptFileTests : IDisposable
     [Fact]
     public void EmbeddedText_IsNonEmptyAndAtMost8000Characters()
     {
-        string text = CopilotPromptFile.EmbeddedText();
+        string text = CopilotPromptFile.EmbeddedText(ShippedCopilotPrompt.Resources);
 
         Assert.True(text.Length > 0, "the embedded system prompt is empty");
         Assert.True(text.Length <= 8000, $"the embedded system prompt is {text.Length} characters; the limit is 8000");
@@ -56,7 +56,7 @@ public sealed class CopilotPromptFileTests : IDisposable
     [InlineData("task")]
     public void EmbeddedText_NamesEachInstructionSource(string term)
     {
-        string text = CopilotPromptFile.EmbeddedText();
+        string text = CopilotPromptFile.EmbeddedText(ShippedCopilotPrompt.Resources);
 
         Assert.True(text.Contains(term, StringComparison.Ordinal), $"the embedded system prompt does not mention '{term}'");
     }
@@ -64,7 +64,7 @@ public sealed class CopilotPromptFileTests : IDisposable
     [Fact]
     public void EmbeddedText_HasSafetyHeadingOrLine()
     {
-        string text = CopilotPromptFile.EmbeddedText();
+        string text = CopilotPromptFile.EmbeddedText(ShippedCopilotPrompt.Resources);
 
         Assert.True(
             text.Split('\n').Any(line => line.Contains("Safety", StringComparison.Ordinal)),
@@ -74,7 +74,7 @@ public sealed class CopilotPromptFileTests : IDisposable
     [Fact]
     public void Validate_EmbeddedText_ReturnsNull()
     {
-        Assert.Null(CopilotPromptFile.Validate(CopilotPromptFile.EmbeddedText()));
+        Assert.Null(CopilotPromptFile.Validate(CopilotPromptFile.EmbeddedText(ShippedCopilotPrompt.Resources)));
     }
 
     [Fact]

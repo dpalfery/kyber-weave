@@ -48,10 +48,6 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
             discardOutput ? RehearsalTimeout : FinishUpdateTimeout);
 
     /// <inheritdoc />
-    public bool RefreshCopilotPrompt(string homeDirectory, Action<string> log) =>
-        new CopilotPromptRefresher(homeDirectory, log).Refresh();
-
-    /// <inheritdoc />
     bool ISelfUpdateSystem.CanWriteDirectory(string directory) => CanWriteDirectory(directory);
 
     /// <inheritdoc />

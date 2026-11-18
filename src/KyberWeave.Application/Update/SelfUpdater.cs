@@ -64,6 +64,7 @@ internal sealed class SelfUpdater : IDisposable
     private readonly Func<string, bool> _canWriteDirectory;
     private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
     private readonly ISelfUpdateSystem _system;
+    private readonly CopilotPromptRefresher? _copilotPrompt;
     private readonly IArbiterRefreshTargets? _arbiterTargets;
     private readonly IArbiterHookRefresher? _arbiterHookRefresher;
     private readonly Func<string, IReadOnlyList<string>, bool, int>? _finishingProcess;
@@ -77,6 +78,7 @@ internal sealed class SelfUpdater : IDisposable
     /// <param name="finishingProcess">Starts the hand-off child and the rehearsal; defaults to the system adapter's.</param>
     /// <param name="system">The processes, files and archives the update touches.</param>
     /// <param name="arbiterTargets">What the arbiter hook refresh covers; required when a refresher is given.</param>
+    /// <param name="copilotPrompt">Refreshes the installed Copilot prompt file; null leaves it untouched. The update service always supplies it.</param>
     /// <param name="captureProcess">
     /// Runs a KyberDash verb whose output decides the next step (the engine verdict, the plugin verdict).
     /// Separate from <paramref name="runProcess"/> because that seam returns only an exit code, and the guidance
@@ -97,7 +99,8 @@ internal sealed class SelfUpdater : IDisposable
         IArbiterHookRefresher? arbiterHookRefresher = null,
         Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null,
         ISelfUpdateSystem? system = null,
-        IArbiterRefreshTargets? arbiterTargets = null)
+        IArbiterRefreshTargets? arbiterTargets = null,
+        CopilotPromptRefresher? copilotPrompt = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
@@ -107,6 +110,7 @@ internal sealed class SelfUpdater : IDisposable
         _log = log ?? (_ => { });
         _system = system ?? new SelfUpdateSystem();
         _arbiterTargets = arbiterTargets;
+        _copilotPrompt = copilotPrompt;
         _runProcess = runProcess ?? _system.RunProcess;
         _captureProcess = captureProcess ?? _system.RunCapture;
         _arbiterHookRefresher = arbiterHookRefresher;
@@ -132,7 +136,8 @@ internal sealed class SelfUpdater : IDisposable
         Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null,
         ISelfUpdateSystem? system = null,
         IArbiterRefreshTargets? arbiterTargets = null,
-        Func<string, string?>? readEnvironment = null)
+        Func<string, string?>? readEnvironment = null,
+        CopilotPromptRefresher? copilotPrompt = null)
     {
         return new SelfUpdater(
             new SocketsHttpHandler { AllowAutoRedirect = true },
@@ -142,7 +147,8 @@ internal sealed class SelfUpdater : IDisposable
             arbiterHookRefresher: arbiterHookRefresher,
             finishingProcess: finishingProcess,
             system: system,
-            arbiterTargets: arbiterTargets);
+            arbiterTargets: arbiterTargets,
+            copilotPrompt: copilotPrompt);
     }
 
     internal SelfUpdateOutcome Run(SelfUpdateOptions options)
@@ -589,7 +595,7 @@ internal sealed class SelfUpdater : IDisposable
 
         try
         {
-            bool rewritten = _system.RefreshCopilotPrompt(home, message => _log($"warning: {message}"));
+            bool rewritten = _copilotPrompt?.Refresh(home, message => _log($"warning: {message}")) ?? false;
             if (rewritten)
                 _log("refreshed the installed Copilot system prompt");
         }

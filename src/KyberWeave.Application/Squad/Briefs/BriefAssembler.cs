@@ -16,7 +16,7 @@ public static class BriefAssembler
     {
         if (!rule.When.Holds(facts))
         {
-            return new BriefPart(rule.File, readFrom, rule.When.Text, [], [], [], string.Empty, text.Length);
+            return new BriefPart(rule.File, readFrom, rule.When.Spell(), [], [], [], string.Empty, text.Length);
         }
 
         IReadOnlyList<MarkdownSection> sections = MarkdownSections.Split(text);
@@ -56,7 +56,7 @@ public static class BriefAssembler
                 }
                 else if (!condition.Holds(facts))
                 {
-                    leftOut.Add((section.Heading, condition.Text));
+                    leftOut.Add((section.Heading, condition.Spell()));
                     continue;
                 }
             }

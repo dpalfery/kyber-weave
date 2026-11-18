@@ -184,6 +184,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepositoryLocator` (`Arbiter/ArbiterRepositoryLocator.cs`) | file system, paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
+| `ArbiterRecordId` (`Arbiter/Facts/ArbiterJson.cs`) | identifiers | 2.5 |
 | `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
 | `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths, identifiers | 4.3 |
@@ -220,6 +221,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PlanTaskService` (`Docs/Validation/PlanTaskService.cs`) | paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
+| `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | paths | 2.5 |
 | `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | 4.8 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | 4.8 |
@@ -331,7 +333,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
 | `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: 4.9 |
-| `DocsRootPath` (`FileSystem/DocsRootPath.cs`) | file system | 4.4 |
+| `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
 | `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileFactoryTranscriptSource` (`Hooks/Arbiter/FileFactoryTranscriptSource.cs`) | file system | 4.4 |
@@ -375,16 +377,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotMcpServerProbe` (`Squad/Rendering/CopilotMcpServerProbe.cs`) | file system | 3.5 |
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 | `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
-| `CopilotPromptRefresher` (`Update/CopilotPromptRefresher.cs`) | file system | 4.4 |
 | `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
 
 #### KyberWeave.Domain (24 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `ArbiterLedgerEvent` (`Arbiter/Facts/ArbiterLedgerEvent.cs`) | identifiers | 2.5 |
-| `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | file system, paths | 2.5 |
-| `BriefMap` (`Squad/Briefs/BriefMap.cs`) | file system | 2.5 |
 | `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths | 2.5 |
 | `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths | 2.5 |
 | `SquadResponseGuidanceSource` (`Squad/Deployment/SquadResponseGuidanceSource.cs`) | file system | 2.5 |

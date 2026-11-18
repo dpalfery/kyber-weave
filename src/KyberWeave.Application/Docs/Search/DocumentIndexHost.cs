@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Domain.FileSystem;
 
 namespace KyberWeave.Core.Docs.Search;
 
@@ -180,9 +181,9 @@ public sealed class DocumentIndexHost
                 : Path.Combine(_repoRoot, relativeRoot.Replace('/', Path.DirectorySeparatorChar));
             if (!Directory.Exists(docsRoot)) continue;
 
-            // Use DocsRootPath.EnumerateContainedFiles to avoid following symbolic links
+            // Use DocsRootWalk.EnumerateContainedFiles to avoid following symbolic links
             // into directories outside the configured root (issue #124).
-            foreach (string file in DocsRootPath.EnumerateContainedFiles(docsRoot, "*.md"))
+            foreach (string file in DocsRootWalk.EnumerateContainedFiles(docsRoot, "*.md"))
             {
                 if (!visited.Add(file)) continue;
 
@@ -197,8 +198,8 @@ public sealed class DocumentIndexHost
             string catalog = Path.Combine(
                 _repoRoot, _catalogRelativePath.Replace('/', Path.DirectorySeparatorChar));
             // Skip a catalog that is, or sits beneath, a symlink (issue #124), without
-            // resolving the link: see DocsRootPath.IsContainedFile.
-            if (DocsRootPath.IsContainedFile(_repoRoot, _catalogRelativePath, _docsRelativeRoots)
+            // resolving the link: see DocsRootWalk.IsContainedFile.
+            if (DocsRootWalk.IsContainedFile(_repoRoot, _catalogRelativePath, _docsRelativeRoots)
                 && visited.Add(catalog))
             {
                 count++;

@@ -1,38 +1,19 @@
-using DomainDocsRootPath = KyberWeave.Domain.FileSystem.DocsRootPath;
-
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>
-/// The file-system half of <see cref="DomainDocsRootPath"/>: the symlink-refusing walk and
-/// the single-file containment check, plus forwarding members so a legacy caller that imports
-/// only this namespace still reaches the pure half.
+/// The raw directory walk behind documentation roots: the symlink-refusing enumeration and the
+/// single-file containment check. It performs I/O, so it lives in the Data layer beside the
+/// adapters that walk documentation roots; canonicalizing a root string is Application's
+/// <c>DocsRootPath</c>.
 /// </summary>
-/// <remarks>
-/// <para>
-/// Canonicalization is pure and lives in
-/// <c>src/KyberWeave.Domain/FileSystem/DocsRootPath.cs</c>. This half performs I/O, so it
-/// lives in the Data layer beside the adapters that walk documentation roots.
-/// </para>
-/// <para>
-/// Two types rather than one partial one because a partial type cannot span assemblies; the
-/// forwarding members keep the hundreds of existing call sites unchanged until the later
-/// namespace rename collapses the two.
-/// </para>
-/// </remarks>
-internal static class DocsRootPath
+internal static class DocsRootWalk
 {
-    /// <summary>The repository root itself, as a documentation root.</summary>
-    public const string RepositoryRoot = DomainDocsRootPath.RepositoryRoot;
+    private const string RepositoryRoot = ".";
 
-    /// <summary>Path identity for documentation-root strings and corpus files.</summary>
-    public static StringComparer PathComparer => DomainDocsRootPath.PathComparer;
-
-    /// <summary>The canonical form of <paramref name="value"/>; see the pure half.</summary>
-    public static string Normalize(string value, string key) => DomainDocsRootPath.Normalize(value, key);
-
-    /// <summary>The canonical, de-duplicated documentation roots; see the pure half.</summary>
-    public static IReadOnlyList<string> NormalizeRoots(IEnumerable<string> values, string key) =>
-        DomainDocsRootPath.NormalizeRoots(values, key);
+    private static readonly StringComparer PathComparer =
+        OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
 
     /// <summary>
     /// Enumerates files under a root directory matching a search pattern, without descending
