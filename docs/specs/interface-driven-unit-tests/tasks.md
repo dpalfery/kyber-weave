@@ -279,7 +279,7 @@ from this file when it is marked Ready.
   - **Depends on:** 3.3
   - _Requirements: 2.1, 2.4, 2.5, 2.8, 10.2_
 
-- [x] 3.5 The other static classes in Data onto seams
+- [ ] 3.5 The other static classes in Data onto seams
   - **Objective:** the 32 static classes in `KyberWeave.Data` that hold logic (`SquadSourceLoader`,
     `SquadPacker`, `SquadInstanceLinkSync`, `DocsRootPath` and the rest in the data inventory) become
     instance classes behind interfaces.
