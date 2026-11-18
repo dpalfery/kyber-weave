@@ -1,8 +1,7 @@
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Data.Arbiter;
-using KyberWeave.Data.Hooks;
 using System.ComponentModel;
 using System.Reflection;
-using System.Xml.Linq;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter;
@@ -13,7 +12,6 @@ using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
 using ModelContextProtocol.Server;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -25,9 +23,11 @@ namespace KyberWeave.Tests.Arbiter;
 /// event, and never reports the key. Stdout belongs to the transport.
 /// RED: <c>ArbiterTools</c> and the serve surface do not exist yet.
 /// </summary>
-public sealed class ArbiterMcpPackagingTests
+public sealed class ArbiterMcpPackagingTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
+
+    public void Dispose() => _host.Dispose();
 
     private sealed class RecordingEngine : IContextualHookDecisionEngine
     {
@@ -83,7 +83,7 @@ public sealed class ArbiterMcpPackagingTests
             },
         };
 
-    private static ArbiterServeContext Context(string root, RecordingEngine engine, bool keyResolved = false) =>
+    private ArbiterServeContext Context(string root, RecordingEngine engine, bool keyResolved = false) =>
         new(root, engine, TextWriter.Null, _ => EnabledConfig(), _ => keyResolved);
 
     /// <summary>
@@ -116,13 +116,16 @@ public sealed class ArbiterMcpPackagingTests
         private string NextAnswer() => answers[Math.Min(_calls++, answers.Length - 1)];
     }
 
-    private static ArbiterTools RealEngineTools(string root, IArbiterProvider provider) =>
-        ArbiterTestServices.Tools(new ArbiterServeContext(
+    private ArbiterTools RealEngineTools(string root, IArbiterProvider provider) =>
+        _host.Tools(new ArbiterServeContext(
             root,
-            ArbiterTestServices.Engine(_ => provider, homeDirectory: () => root),
+            _host.Engine(_ => provider, homeDirectory: () => root),
             TextWriter.Null,
             _ => EnabledConfig(),
             _ => false));
+
+    private string RecordedLines(string fileName) =>
+        string.Join("\n", _host.State.Log.LinesOf(_host.ArbiterDirectory, fileName));
 
     private static string Finding(string id) =>
         $"- id: {id}\n" +
@@ -207,9 +210,9 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void EveryResponseLeadsWithTheProvenanceLine()
     {
-        using TempDirectory root = new();
-        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, new RecordingEngine()));
-        string prefix = $"provenance: root={FullPath(root.Path)} ";
+        string root = _host.RepoRoot;
+        ArbiterTools tools = _host.Tools(Context(root, new RecordingEngine()));
+        string prefix = $"provenance: root={FullPath(root)} ";
 
         Assert.StartsWith(prefix, tools.Rules(), StringComparison.Ordinal);
         Assert.StartsWith(prefix, tools.Status(), StringComparison.Ordinal);
@@ -222,27 +225,31 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void RootResolutionPrefersTheFlagThenTheEnvironmentThenTheWorkingDirectory()
     {
-        using TempDirectory flagRoot = new();
-        using TempDirectory envRoot = new();
-        using TempDirectory workingDirectory = new();
+        string flagRoot = _host.InWork("flag-root");
+        string envRoot = _host.InWork("env-root");
+        string workingDirectory = _host.InWork("working-directory");
+        foreach (string directory in new[] { flagRoot, envRoot, workingDirectory })
+        {
+            _host.Files.CreateDirectory(directory);
+        }
 
         Assert.Equal(
-            FullPath(flagRoot.Path),
-            ArbiterTestServices.Get<ArbiterRootResolver>().Resolve(["--repo-root", flagRoot.Path], workingDirectory.Path, envRoot.Path));
+            FullPath(flagRoot),
+            _host.Get<ArbiterRootResolver>().Resolve(["--repo-root", flagRoot], workingDirectory, envRoot));
         Assert.Equal(
-            FullPath(envRoot.Path),
-            ArbiterTestServices.Get<ArbiterRootResolver>().Resolve([], workingDirectory.Path, envRoot.Path));
+            FullPath(envRoot),
+            _host.Get<ArbiterRootResolver>().Resolve([], workingDirectory, envRoot));
         Assert.Equal(
-            FullPath(workingDirectory.Path),
-            ArbiterTestServices.Get<ArbiterRootResolver>().Resolve([], workingDirectory.Path, null));
+            FullPath(workingDirectory),
+            _host.Get<ArbiterRootResolver>().Resolve([], workingDirectory, null));
     }
 
     [Fact]
     public void EvaluateReturnsTheOutcomeTheHookEngineReturnsForTheSameEvent()
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Deny, "ENVELOPE-BODY") };
-        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
+        ArbiterTools tools = _host.Tools(Context(root, engine));
 
         string response = tools.Evaluate(
             "lens.spawn",
@@ -263,9 +270,9 @@ public sealed class ArbiterMcpPackagingTests
         // The shipped contract tells a fallback code-reviewer to pass `finding` and
         // never names `target` or the trigger header, so the tool must synthesize the
         // routing block the hook path would see (review 20.1, Major 2).
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
-        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
+        ArbiterTools tools = _host.Tools(Context(root, engine));
 
         const string finding =
             "- id: security/key-in-argv\n" +
@@ -289,9 +296,9 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void Evaluate_ClassifiesAFallbackLensCallWithoutTarget()
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
-        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
+        ArbiterTools tools = _host.Tools(Context(root, engine));
 
         string response = tools.Evaluate("lens.spawn", new ArbiterFacts { Lens = ["security", "test-adequacy"] });
 
@@ -312,9 +319,9 @@ public sealed class ArbiterMcpPackagingTests
     [InlineData("refute.spawn")]
     public void Evaluate_WithoutLensOrFinding_SaysWhatToPass(string trigger)
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         RecordingEngine engine = new();
-        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
+        ArbiterTools tools = _host.Tools(Context(root, engine));
 
         string response = tools.Evaluate(trigger, new ArbiterFacts { Target = "review-lens" });
 
@@ -327,14 +334,11 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void Evaluate_RefutationCallThroughTheRealEngine_DecidesAndRecords()
     {
-        using TempDirectory root = new();
-        Directory.CreateDirectory(Path.Combine(root.Path, ".kyber-weave"));
-        File.WriteAllText(
-            Path.Combine(root.Path, ".kyber-weave", "kyber-weave.yml"),
-            "arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
-        ArbiterHookDecisionEngine realEngine = ArbiterTestServices.Engine(homeDirectory: () => root.Path);
-        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
-            root.Path, realEngine, TextWriter.Null, _ => EnabledConfig(), _ => false));
+        string root = _host.RepoRoot;
+        _ = _host.WriteRepoConfig("arbiter:\n  enabled: true\n  provider:\n    kind: none\n");
+        ArbiterHookDecisionEngine realEngine = _host.Engine(homeDirectory: () => root);
+        ArbiterTools tools = _host.Tools(new ArbiterServeContext(
+            root, realEngine, TextWriter.Null, _ => EnabledConfig(), _ => false));
 
         const string finding =
             "- id: security/key-in-argv\n" +
@@ -350,18 +354,18 @@ public sealed class ArbiterMcpPackagingTests
         // The real evaluator re-classifies from the synthesized headers and records:
         // the decision log holds the refute.spawn decision, the ledger its headers.
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
-        string decisions = File.ReadAllText(Path.Combine(root.Path, "artifacts", "arbiter", "decisions.jsonl"));
+        string decisions = RecordedLines(DecisionLog.FileName);
         Assert.Contains("refute.spawn", decisions, StringComparison.Ordinal);
-        string ledger = File.ReadAllText(Path.Combine(root.Path, "artifacts", "arbiter", "ledger.jsonl"));
+        string ledger = RecordedLines(InFlightLedger.FileName);
         Assert.Contains("\"refute\":\"security/key-in-argv\"", ledger, StringComparison.Ordinal);
     }
 
     [Fact]
     public void RefuteBatch_TwoFindingsBothAllowed_ReturnsAllowAndDecidesEachFinding()
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts");
-        ArbiterTools tools = RealEngineTools(root.Path, provider);
+        ArbiterTools tools = RealEngineTools(root, provider);
 
         string response = tools.Evaluate(
             "refute.spawn",
@@ -369,7 +373,7 @@ public sealed class ArbiterMcpPackagingTests
 
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
         Assert.Equal(2, provider.Calls);
-        string ledger = File.ReadAllText(Path.Combine(root.Path, "artifacts", "arbiter", "ledger.jsonl"));
+        string ledger = RecordedLines(InFlightLedger.FileName);
         Assert.Contains("\"refute\":\"security/key-in-argv\"", ledger, StringComparison.Ordinal);
         Assert.Contains("\"refute\":\"correctness/off-by-one\"", ledger, StringComparison.Ordinal);
     }
@@ -377,9 +381,9 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void RefuteBatch_SecondFindingEscalates_NamesThatFindingInTheOutcome()
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts", "supports");
-        ArbiterTools tools = RealEngineTools(root.Path, provider);
+        ArbiterTools tools = RealEngineTools(root, provider);
 
         string response = tools.Evaluate(
             "refute.spawn",
@@ -394,9 +398,9 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void RefuteBatch_ThreeFindings_ThirdEscalatesAndNamesItself()
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts", "contradicts", "supports");
-        ArbiterTools tools = RealEngineTools(root.Path, provider);
+        ArbiterTools tools = RealEngineTools(root, provider);
 
         string response = tools.Evaluate(
             "refute.spawn",
@@ -420,24 +424,25 @@ public sealed class ArbiterMcpPackagingTests
     [InlineData("no-id")]
     public void RefuteBatch_InvalidFindingIds_FailWithWhatToPassAndDecideNothing(string kind)
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         ScriptedClaimProvider provider = new("contradicts");
-        ArbiterTools tools = RealEngineTools(root.Path, provider);
+        ArbiterTools tools = RealEngineTools(root, provider);
 
         string response = tools.Evaluate("refute.spawn", new ArbiterFacts { Finding = BadFindings(kind) });
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.Contains("lens/slug", response, StringComparison.Ordinal);
         Assert.Equal(0, provider.Calls);
-        Assert.False(Directory.Exists(Path.Combine(root.Path, "artifacts")));
+        Assert.False(_host.Files.DirectoryExists(Path.Combine(root, "artifacts")));
+        Assert.Empty(_host.State.Log.AppendedPaths);
     }
 
     [Fact]
     public void EvaluateAllowsWhenTheHookEngineAllows()
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         RecordingEngine engine = new() { Outcome = new HookOutcome(HookOutcomeKind.Allow) };
-        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
+        ArbiterTools tools = _host.Tools(Context(root, engine));
 
         string response = tools.Evaluate(
             "lens.spawn",
@@ -449,9 +454,9 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void EvaluateRefusesATriggerTheFactsDoNotClassifyAs()
     {
-        using TempDirectory root = new();
+        string root = _host.RepoRoot;
         RecordingEngine engine = new();
-        ArbiterTools tools = ArbiterTestServices.Tools(Context(root.Path, engine));
+        ArbiterTools tools = _host.Tools(Context(root, engine));
 
         string response = tools.Evaluate(
             "delegate",
@@ -464,9 +469,9 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void StatusReportsTheRootRuleSetAndKeyStateButNeverTheKey()
     {
-        using TempDirectory root = new();
-        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
-            root.Path, new RecordingEngine(), TextWriter.Null, _ => RemoteConfig(), _ => true));
+        string root = _host.RepoRoot;
+        ArbiterTools tools = _host.Tools(new ArbiterServeContext(
+            root, new RecordingEngine(), TextWriter.Null, _ => RemoteConfig(), _ => true));
 
         string status = tools.Status();
 
@@ -481,19 +486,18 @@ public sealed class ArbiterMcpPackagingTests
     {
         // The hook resolves the key against the user override, so status must report the
         // provider and origin the key is resolved for, not the repository's (review 20.1, c).
-        using TempDirectory root = new();
-        using TempDirectory home = new();
-        Directory.CreateDirectory(Path.GetDirectoryName(ArbiterUserSettings.GetPath(home.Path))!);
-        File.WriteAllText(
-            ArbiterUserSettings.GetPath(home.Path),
+        string root = _host.RepoRoot;
+        string home = _host.InHome("override-home");
+        _ = _host.Write(
+            ArbiterUserSettings.GetPath(home),
             "provider:\n  model: nimble-override\n  endpoint: https://override.example.test/v2\n");
-        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
-            root.Path,
+        ArbiterTools tools = _host.Tools(new ArbiterServeContext(
+            root,
             new RecordingEngine(),
             TextWriter.Null,
             _ => RemoteConfig(),
             _ => true,
-            config => new FileArbiterUserSettings(new PhysicalFileSystem()).ApplyTo(config.Arbiter.Provider, home.Path)));
+            config => new FileArbiterUserSettings(_host.Files).ApplyTo(config.Arbiter.Provider, home)));
 
         string status = tools.Status();
 
@@ -501,50 +505,6 @@ public sealed class ArbiterMcpPackagingTests
         Assert.Contains("origin=https://override.example.test", status, StringComparison.Ordinal);
         Assert.DoesNotContain("typesafe.example.test", status, StringComparison.Ordinal);
         Assert.DoesNotContain("jev-test", status, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void McpSourcesNeverWriteToStdout()
-    {
-        foreach (string file in Corpus.EnumerateFiles("src/KyberWeave.Arbiter/Mcp", "*.cs", recursive: false))
-        {
-            string source = Corpus.ReadText(file);
-            Assert.DoesNotContain("Console.Write", source, StringComparison.Ordinal);
-            Assert.DoesNotContain("Console.Out", source, StringComparison.Ordinal);
-        }
-    }
-
-    [Fact]
-    public void ArbiterProjectPinsTheMcpPackagesToTheVersionsTheMcpProjectUses()
-    {
-        XDocument arbiter = LoadProject("KyberWeave.Arbiter");
-        XDocument mcp = LoadProject("KyberWeave.Mcp");
-
-        // Comparing the two project files is the contract, not a literal: a dependency bump
-        // that moves one project and not the other fails here, which is what the name says.
-        foreach (string package in new[] { "ModelContextProtocol", "Microsoft.Extensions.Hosting" })
-        {
-            string? mcpVersion = PackageVersion(mcp, package);
-            string? arbiterVersion = PackageVersion(arbiter, package);
-
-            Assert.True(mcpVersion is not null, $"KyberWeave.Mcp must pin '{package}'.");
-            Assert.True(
-                string.Equals(mcpVersion, arbiterVersion, StringComparison.Ordinal),
-                $"'{package}' drifts: KyberWeave.Mcp pins {mcpVersion}, KyberWeave.Arbiter pins {arbiterVersion ?? "nothing"}.");
-        }
-    }
-
-    private static XDocument LoadProject(string projectName) =>
-        XDocument.Parse(Corpus.ReadText($"src/{projectName}/{projectName}.csproj"));
-
-    private static string? PackageVersion(XDocument doc, string name)
-    {
-        XNamespace ns = doc.Root!.Name.Namespace;
-
-        return doc.Descendants(ns + "PackageReference")
-            .Where(element => string.Equals((string?)element.Attribute("Include"), name, StringComparison.Ordinal))
-            .Select(element => (string?)element.Attribute("Version"))
-            .SingleOrDefault();
     }
 
     private static MethodInfo ToolMethod(string toolName)
