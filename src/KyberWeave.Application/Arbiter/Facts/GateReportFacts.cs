@@ -71,9 +71,8 @@ public sealed class GateReportFacts(
     /// <returns>The report, or <c>null</c> when it is missing or unreadable.</returns>
     public GateReport? TryRead(string repositoryRoot)
     {
-        if (string.IsNullOrWhiteSpace(repositoryRoot))
-            return null;
-        return TryReadFile(Path.Combine(repositoryRoot, "artifacts", "gates.json"));
+        string? fullRoot = FullRoot(repositoryRoot);
+        return fullRoot is null ? null : TryReadFile(Path.Combine(fullRoot, "artifacts", "gates.json"));
     }
 
     /// <summary>Reads a gate report from its file path.</summary>

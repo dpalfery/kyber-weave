@@ -59,6 +59,15 @@ public sealed class GateReportFactsOverSeamsTests
     }
 
     [Fact]
+    public void ARelativeRootFindsTheDefaultReportToo()
+    {
+        _ = Write("/kw/work/repo/artifacts/gates.json", Failing());
+
+        Assert.NotNull(Facts().TryRead("repo"));
+        Assert.True(Facts().FailedGateCorroborates("repo"));
+    }
+
+    [Fact]
     public void AFailingClaimForTheSameReportInARelativeSpellingInvalidatesThePass()
     {
         _ = Write(ReportPath, Passing());
