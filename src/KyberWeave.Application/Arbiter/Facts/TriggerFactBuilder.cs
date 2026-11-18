@@ -189,7 +189,7 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue("TASK", out string? task);
         block.Headers.TryGetValue("TECHNOLOGY", out string? technology);
         string? parentTechnology = repoRoot is not null && technology is not null
-            ? TaskGateResolver.ParentTechnology(repoRoot, config, technology)
+            ? TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, technology)
             : null;
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);

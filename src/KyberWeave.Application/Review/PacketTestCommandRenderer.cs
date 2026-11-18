@@ -113,7 +113,7 @@ public static class PacketTestCommandRenderer
             config.Review,
             agent,
             entry.Technology,
-            TaskGateResolver.ParentTechnology(repoRoot, config, entry.Technology));
+            TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, entry.Technology));
 
         ReviewTaskGate[] testGates = [.. resolved.Gates.Where(gate => gate.Run.Any(element => element.Contains(TestsToken, StringComparison.Ordinal)))];
         string slug = TaskSlug.Normalise(entry.Id);

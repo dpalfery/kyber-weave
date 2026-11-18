@@ -221,7 +221,7 @@ public sealed class TaskGateResolverTests : IDisposable
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
         string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
 
-        if (!TryRemoveReadPermission(path, out UnixFileMode originalMode))
+        if (!UnixFileModes.TryRemoveReadPermission(path, out UnixFileMode originalMode))
             Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
 
         try
@@ -231,48 +231,34 @@ public sealed class TaskGateResolverTests : IDisposable
         }
         finally
         {
-            RestoreFileMode(path, originalMode);
+            UnixFileModes.Restore(path, originalMode);
         }
     }
 
     /// <summary>
-    /// Denies this process every permission on <paramref name="path"/>, answering false when the platform
-    /// or the process cannot carry that denial. The caller restores the mode with
-    /// <see cref="RestoreFileMode"/>.
+    /// The caller that must keep going asks for the parent or none: the unreadable standard names no parent
+    /// and the reason comes back instead of a throw, so gate resolution can fall back and say why.
     /// </summary>
-    private static bool TryRemoveReadPermission(string path, out UnixFileMode originalMode)
+    [Fact]
+    public void AnUnreadableStandardNamesNoParentForACallerThatCollectsTheProblem()
     {
-        originalMode = default;
-        if (OperatingSystem.IsWindows())
-            return false;
+        Standard("react", "builds-on: dotnet");
+        KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
+        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
 
-        originalMode = File.GetUnixFileMode(path);
-        File.SetUnixFileMode(path, UnixFileMode.None);
-        return !CanRead(path);
-    }
+        if (!UnixFileModes.TryRemoveReadPermission(path, out UnixFileMode originalMode))
+            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
 
-    private static void RestoreFileMode(string path, UnixFileMode mode)
-    {
-        if (OperatingSystem.IsWindows())
-            return;
-
-        File.SetUnixFileMode(path, mode);
-    }
-
-    private static bool CanRead(string path)
-    {
         try
         {
-            File.ReadAllText(path);
-            return true;
+            List<string> problems = [];
+            Assert.Null(TaskGateResolver.ParentTechnologyOrNone(_root.Path, config, "react", problems));
+            string problem = Assert.Single(problems);
+            Assert.Contains("react.standards.md", problem, StringComparison.Ordinal);
         }
-        catch (IOException)
+        finally
         {
-            return false;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
+            UnixFileModes.Restore(path, originalMode);
         }
     }
 

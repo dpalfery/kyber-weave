@@ -153,6 +153,39 @@ public static class TaskGateResolver
         return null;
     }
 
+    /// <summary>
+    /// The parent technology for a caller that must keep working when its standard cannot be read.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ParentTechnology"/> refuses to turn a standard this process may not read into an absent
+    /// parent, because that hides a broken checkout. A caller that cannot fail the whole run — a packet
+    /// renderer, an Arbiter fact build, a gate run about to fall back to the mapped agent — asks for the
+    /// parent or none instead: the failure is recorded in <paramref name="problems"/> when the caller
+    /// collects them, and the technology names no parent.
+    /// </remarks>
+    /// <param name="repoRoot">The repository root the standards folders sit under.</param>
+    /// <param name="config">The effective configuration, whose ontology names the documentation root.</param>
+    /// <param name="technology">The task's technology.</param>
+    /// <param name="problems">Receives one line naming the standard that could not be read; null when the caller has nowhere to report it.</param>
+    public static string? ParentTechnologyOrNone(
+        string repoRoot,
+        KyberWeaveConfig config,
+        string? technology,
+        IList<string>? problems = null)
+    {
+        try
+        {
+            return ParentTechnology(repoRoot, config, technology);
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            problems?.Add(
+                $"The standard for technology '{Clean(technology)}' could not be read, so its parent " +
+                $"technology's gates are not used: {ex.Message}");
+            return null;
+        }
+    }
+
     private static IEnumerable<string> Candidates(string? technology, string? parent)
     {
         if (technology is not null)

@@ -79,7 +79,7 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
                 text.AppendLine(CultureInfo.InvariantCulture, $"- <{entry.Name}>: `{entry.Path}`");
         }
 
-        AppendGates(text, repoRoot, config, role, technology);
+        AppendGates(text, repoRoot, config, role, technology, diagnostics);
         AppendRules(text, repoRoot, config, diagnostics);
         text.AppendLine();
         text.AppendLine(CultureInfo.InvariantCulture,
@@ -92,7 +92,8 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
         string repoRoot,
         KyberWeaveConfig config,
         string? role,
-        string? technology)
+        string? technology,
+        IList<string>? diagnostics)
     {
         if (role is null && string.IsNullOrWhiteSpace(technology))
         {
@@ -104,7 +105,7 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
             config.Review,
             role,
             technology,
-            TaskGateResolver.ParentTechnology(repoRoot, config, technology));
+            TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, technology, diagnostics));
 
         string forWhom = role is null
             ? $"technology {technology}"
