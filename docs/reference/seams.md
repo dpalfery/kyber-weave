@@ -267,8 +267,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DocsMcpWireCommand` (`Commands/Docs/DocsMcpWireCommand.cs`) | file system, paths | 4.5 |
 | `DocsPacketCommand` (`Commands/Docs/DocsPacketCommand.cs`) | paths, console | 4.5 |
 | `DocsTasksCommand` (`Commands/Docs/DocsTasksCommand.cs`) | console | 4.5 |
-| `DoctorCommand` (`Commands/Doctor/DoctorCommand.cs`) | paths, console | 4.5 |
-| `DoctorReportRenderer` (`Commands/Doctor/DoctorReportRenderer.cs`) | console | 4.5 |
 | `PlanArguments` (`Commands/PlanArguments.cs`) | file system, paths | 4.5 |
 | `ReviewCatalogueCommand` (`Commands/Review/ReviewCatalogueCommand.cs`) | console | 4.5 |
 | `ReviewCycleCommand` (`Commands/Review/ReviewCycleCommand.cs`) | console | 4.5 |

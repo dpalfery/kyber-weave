@@ -425,8 +425,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
-
+        DoctorCommand command = DoctorTestEnvironment.Command(false, _ => null, executor, mcpExecutable);
         DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
@@ -487,8 +486,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
-
+        DoctorCommand command = DoctorTestEnvironment.Command(false, _ => null, executor, mcpExecutable);
         DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
@@ -549,8 +547,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
-
+        DoctorCommand command = DoctorTestEnvironment.Command(false, _ => null, executor, mcpExecutable);
         DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
@@ -760,8 +757,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
     private int RunEnsure(ScriptedProcessExecutor executor)
     {
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, DoctorHarness.HealthyStub(_stubs.Path, Root));
-
+        DoctorCommand command = DoctorTestEnvironment.Command(false, _ => null, executor, DoctorHarness.HealthyStub(_stubs.Path, Root));
         return DoctorAppHarness.Run(command, "doctor", "--ensure", Root);
     }
 }

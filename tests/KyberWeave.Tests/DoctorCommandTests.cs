@@ -60,8 +60,7 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
-
+        DoctorCommand command = DoctorTestEnvironment.Command(true, _ => null, executor, stubPath);
         DoctorSettings settings = new()
         {
             Path = CanonicalPath,
@@ -107,8 +106,6 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
-
         DoctorSettings settings = new()
         {
             Path = relativePath,
@@ -118,6 +115,7 @@ public sealed class DoctorCommandTests : IDisposable
         try
         {
             Environment.CurrentDirectory = WorktreePath;
+            DoctorCommand command = DoctorTestEnvironment.Command(true, _ => null, executor, stubPath);
             expectedCanonicalPath = Path.GetFullPath(relativePath);
 
             CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
@@ -175,8 +173,7 @@ public sealed class DoctorCommandTests : IDisposable
                 ? new ProcessResult(128, string.Empty, "fatal: not a git repository")
                 : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
 
-        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, "kyber-weave-mcp-absent");
-
+        DoctorCommand command = DoctorTestEnvironment.Command(true, _ => null, executor, "kyber-weave-mcp-absent");
         DoctorSettings settings = new()
         {
             Path = WorktreePath,
@@ -233,7 +230,7 @@ public sealed class DoctorCommandTests : IDisposable
             _ => throw DoctorHarness.BinaryNotFound());
 
         int exitCode = DoctorAppHarness.Run(
-            new DoctorCommand(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, "kyber-weave-mcp-absent"),
+            DoctorTestEnvironment.Command(false, _ => null, executor, "kyber-weave-mcp-absent"),
             "doctor",
             "--ensure",
             CanonicalPath);
