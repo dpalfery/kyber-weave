@@ -1,77 +1,19 @@
 namespace KyberWeave.Core.Squad.Briefs;
 
+/// <summary>One clause of a condition: the fact and the values it accepts.</summary>
+/// <param name="Fact">The fact name.</param>
+/// <param name="Values">The values the fact may have for the clause to hold.</param>
+public sealed record BriefClause(string Fact, IReadOnlyList<string> Values);
+
 /// <summary>
 /// A condition on the run's facts: every clause must hold. A clause on an unknown fact holds, so a fact
 /// the machine could not resolve never removes instructions.
 /// </summary>
-public sealed class BriefCondition
+/// <param name="Clauses">The clauses; none means the condition always holds.</param>
+public sealed record BriefCondition(IReadOnlyList<BriefClause> Clauses)
 {
     /// <summary>The condition with no clauses.</summary>
     public static BriefCondition Always { get; } = new([]);
-
-    private readonly IReadOnlyList<(string Fact, IReadOnlyList<string> Values)> _clauses;
-
-    private BriefCondition(IReadOnlyList<(string Fact, IReadOnlyList<string> Values)> clauses)
-    {
-        _clauses = clauses;
-    }
-
-    /// <summary>The condition as the map spells it.</summary>
-    public string Text => _clauses.Count == 0
-        ? "always"
-        : string.Join("; ", _clauses.Select(clause => $"{clause.Fact}={string.Join('|', clause.Values)}"));
-
-    /// <summary>Parses <c>always</c> or <c>fact=a|b; fact=c</c>.</summary>
-    /// <exception cref="BriefMapException">The text names a fact or value the vocabulary does not have.</exception>
-    public static BriefCondition Parse(string text, string where)
-    {
-        ArgumentNullException.ThrowIfNull(text);
-        string trimmed = text.Trim();
-        if (trimmed.Length == 0 || string.Equals(trimmed, "always", StringComparison.Ordinal))
-        {
-            return Always;
-        }
-
-        List<(string, IReadOnlyList<string>)> clauses = [];
-        foreach (string clause in trimmed.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            int equals = clause.IndexOf('=', StringComparison.Ordinal);
-            string fact = equals < 0 ? clause : clause[..equals].Trim();
-            if (equals < 0 || !BriefFacts.Vocabulary.TryGetValue(fact, out IReadOnlyList<string>? known))
-            {
-                throw new BriefMapException(
-                    $"{where}: '{clause}' is not 'fact=value'. Facts: {string.Join(", ", BriefFacts.Names)}.");
-            }
-
-            string[] values = clause[(equals + 1)..].Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            string? unknown = values.FirstOrDefault(value => !known.Contains(value, StringComparer.Ordinal));
-            if (values.Length == 0 || unknown is not null)
-            {
-                throw new BriefMapException(
-                    $"{where}: '{unknown ?? clause}' is not a value of '{fact}'. Values: {string.Join(", ", known)}.");
-            }
-
-            clauses.Add((fact, values));
-        }
-
-        return new BriefCondition(clauses);
-    }
-
-    /// <summary>True when every clause holds for <paramref name="facts"/>.</summary>
-    public bool Holds(BriefFacts facts)
-    {
-        ArgumentNullException.ThrowIfNull(facts);
-        foreach ((string fact, IReadOnlyList<string> values) in _clauses)
-        {
-            string? actual = facts.Get(fact);
-            if (actual is not null && !values.Contains(actual, StringComparer.Ordinal))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
 }
 
 /// <summary>One reference file in the map: its condition and the condition of each heading in it.</summary>
