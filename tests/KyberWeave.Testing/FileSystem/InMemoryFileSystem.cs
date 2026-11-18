@@ -58,6 +58,9 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     /// <summary>Gets whether names are compared case-sensitively in this instance.</summary>
     public bool CaseSensitive { get; }
 
+    /// <summary>Gets the root of the virtual tree: <c>/</c> on a Unix-like platform, <c>C:\</c> on Windows.</summary>
+    public string RootPath => _rootPath;
+
     /// <summary>
     ///     Gets the platform root every path resolves under: <c>/</c> on Unix and <c>C:\</c> on Windows. A test
     ///     derives its roots from this, so its literals stay valid on every platform.
