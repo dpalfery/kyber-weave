@@ -1,9 +1,13 @@
+using KyberWeave.Application;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberWeave.Tests;
 
@@ -37,6 +41,29 @@ internal static class DocsMemoryPortsC
     /// <param name="yamlPath">The config file.</param>
     public static OntologyConfig LoadOntologyMerged(this DocFixture fixture, OntologyConfig defaults, string yamlPath) =>
         OntologyConfigLoader.Merge(defaults, fixture.Config().ReadDocument(yamlPath).Ontology);
+
+    /// <summary>
+    /// The container the MCP documentation tools resolve their collaborators from, with every file, path, environment and
+    /// process port replaced by the fixture's in-memory file system and scripted process seams, so a tool answers over the
+    /// in-memory corpus and starts nothing. A process the test did not script fails loudly.
+    /// </summary>
+    /// <param name="fixture">An in-memory fixture.</param>
+    public static IServiceProvider McpServices(this DocFixture fixture)
+    {
+        InMemoryFileSystem memory = fixture.Memory ?? throw NotInMemory();
+        ScriptedProcessRunner runner = new();
+        _ = runner.Script("git", new ProcessRunResult(128, "fatal: not a git repository", TimedOut: false));
+        ScriptedProcessExecutor executor = new(_ => throw new UnscriptedProcessCallException("process"));
+        ServiceCollection services = new();
+        services.AddSingleton<IWritableFileSystem>(memory);
+        services.AddSingleton<IFileSystem>(memory);
+        services.AddSingleton(fixture.Store);
+        services.AddSingleton(fixture.Paths);
+        services.AddSingleton(fixture.Environment);
+        services.AddSingleton<IProcessRunner>(runner);
+        services.AddSingleton<IBoundedProcessExecutor>(executor);
+        return services.AddWeaveApplication().BuildServiceProvider();
+    }
 
     private static FileRepositoryTreeProbe Probe(DocFixture fixture) =>
         new(fixture.Memory ?? throw NotInMemory(), fixture.Paths, fixture.Environment);
