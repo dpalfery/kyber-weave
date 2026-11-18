@@ -84,6 +84,27 @@ public class SkillScannerTests
         Assert.Contains(diags, d => d.Code == "KW-SKILL-SEC-010");
     }
 
+    [Fact]
+    public void FlagsABase64UrlPayload()
+    {
+        string blob = string.Concat(Enumerable.Repeat("ab-_", 40));
+
+        IEnumerable<string> codes = Scan(Make(blob)).Select(d => d.Code);
+
+        Assert.Contains("KW-SKILL-SEC-007", codes);
+    }
+
+    [Fact]
+    public void FlagsABase64PayloadWrappedAcrossLines()
+    {
+        string raw = string.Concat(Enumerable.Repeat("abcdefghij0123456789", 8));
+        string wrapped = string.Join("\n", raw.Chunk(76).Select(chunk => new string(chunk)));
+
+        IEnumerable<string> codes = Scan(Make(wrapped)).Select(d => d.Code);
+
+        Assert.Contains("KW-SKILL-SEC-007", codes);
+    }
+
     private static Skill SkillWith(string body = "Safe body.", params SkillResource[] resources) => new()
     {
         SkillFilePath = "/tmp/scan-x/SKILL.md",
