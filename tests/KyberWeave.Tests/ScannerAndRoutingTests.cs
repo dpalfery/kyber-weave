@@ -172,4 +172,12 @@ public class RoutingTests
         Assert.Equal(0, summary.Total);
         Assert.Equal(0.0, summary.Accuracy);
     }
+
+    [Fact]
+    public void AnEvalWhoseCasesAreNullEvaluatesToNoCases()
+    {
+        RoutingEvalFile evalFile = RoutingEvalFileParser.Parse("cases: null");
+
+        Assert.Empty(evalFile.Cases);
+    }
 }

@@ -18,9 +18,20 @@ public sealed class RoutingEvalCase
 }
 
 /// <summary>A routing eval set: the cases one eval file declares.</summary>
+/// <remarks>
+/// A YAML <c>cases: null</c> deserializes to a null collection, so the setter keeps an empty
+/// one instead: an eval file with no cases is an empty set to score, not a null to iterate.
+/// </remarks>
 public sealed class RoutingEvalFile
 {
-    [YamlMember(Alias = "cases")] public Collection<RoutingEvalCase> Cases { get; init; } = [];
+    private readonly Collection<RoutingEvalCase> _cases = [];
+
+    [YamlMember(Alias = "cases")]
+    public Collection<RoutingEvalCase> Cases
+    {
+        get => _cases;
+        init => _cases = value ?? [];
+    }
 }
 
 /// <summary>One eval case's outcome against the strategy under test.</summary>
