@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 
@@ -58,9 +59,11 @@ internal sealed class SelfUpdater : IDisposable
 
     private readonly GitHubReleaseClient _releases;
     private readonly SelfUpdateHost _host;
+    private readonly IWritableFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
     private readonly Action<string> _log;
     private readonly Func<string, IReadOnlyList<string>, int> _runProcess;
-    private readonly Func<string, string?> _readEnvironment;
     private readonly Func<string, bool> _canWriteDirectory;
     private readonly Func<string, IReadOnlyList<string>, ProcessResult> _captureProcess;
     private readonly ISelfUpdateSystem _system;
@@ -71,12 +74,14 @@ internal sealed class SelfUpdater : IDisposable
 
     /// <param name="handler">The transport the release client sends through.</param>
     /// <param name="host">The running binary's snapshot.</param>
+    /// <param name="files">The staging, backup and probe file operations.</param>
+    /// <param name="paths">Resolves the two paths the update compares.</param>
+    /// <param name="environment">Reads the home directory and the environment variables the update consults.</param>
+    /// <param name="system">The processes, archives and binary replacements the update touches.</param>
     /// <param name="log">Receives one line per step.</param>
-    /// <param name="readEnvironment">Reads one environment variable.</param>
     /// <param name="runProcess">Runs the tray verb; defaults to the system adapter's.</param>
     /// <param name="canWriteDirectory">Probes the install directory; defaults to the system adapter's.</param>
     /// <param name="finishingProcess">Starts the hand-off child and the rehearsal; defaults to the system adapter's.</param>
-    /// <param name="system">The processes, files and archives the update touches.</param>
     /// <param name="arbiterTargets">What the arbiter hook refresh covers; required when a refresher is given.</param>
     /// <param name="copilotPrompt">Refreshes the installed Copilot prompt file; null leaves it untouched. The update service always supplies it.</param>
     /// <param name="captureProcess">
@@ -91,64 +96,46 @@ internal sealed class SelfUpdater : IDisposable
     internal SelfUpdater(
         HttpMessageHandler handler,
         SelfUpdateHost host,
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        ISelfUpdateSystem system,
         Action<string>? log = null,
-        Func<string, string?>? readEnvironment = null,
         Func<string, IReadOnlyList<string>, int>? runProcess = null,
         Func<string, bool>? canWriteDirectory = null,
         Func<string, IReadOnlyList<string>, ProcessResult>? captureProcess = null,
         IArbiterHookRefresher? arbiterHookRefresher = null,
         Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null,
-        ISelfUpdateSystem? system = null,
         IArbiterRefreshTargets? arbiterTargets = null,
         CopilotPromptRefresher? copilotPrompt = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(host);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(system);
         if (arbiterHookRefresher is not null)
             ArgumentNullException.ThrowIfNull(arbiterTargets);
         _host = host;
+        _files = files;
+        _paths = paths;
+        _environment = environment;
         _log = log ?? (_ => { });
-        _system = system ?? new SelfUpdateSystem();
+        _system = system;
         _arbiterTargets = arbiterTargets;
         _copilotPrompt = copilotPrompt;
         _runProcess = runProcess ?? _system.RunProcess;
         _captureProcess = captureProcess ?? _system.RunCapture;
         _arbiterHookRefresher = arbiterHookRefresher;
         _finishingProcess = finishingProcess;
-        _readEnvironment = readEnvironment ?? Environment.GetEnvironmentVariable;
         // A seam because the refusal cannot be provoked through mode bits everywhere:
         // root and Windows both write through a read-only POSIX mode.
         _canWriteDirectory = canWriteDirectory ?? _system.CanWriteDirectory;
         _releases = new GitHubReleaseClient(
             handler,
             host.CurrentVersion,
-            _readEnvironment);
-    }
-
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "HttpClient takes ownership of the handler (disposeHandler: true).")]
-    internal static SelfUpdater Create(
-        SelfUpdateHost host,
-        Action<string>? log = null,
-        IArbiterHookRefresher? arbiterHookRefresher = null,
-        Func<string, IReadOnlyList<string>, bool, int>? finishingProcess = null,
-        ISelfUpdateSystem? system = null,
-        IArbiterRefreshTargets? arbiterTargets = null,
-        Func<string, string?>? readEnvironment = null,
-        CopilotPromptRefresher? copilotPrompt = null)
-    {
-        return new SelfUpdater(
-            new SocketsHttpHandler { AllowAutoRedirect = true },
-            host,
-            log,
-            readEnvironment,
-            arbiterHookRefresher: arbiterHookRefresher,
-            finishingProcess: finishingProcess,
-            system: system,
-            arbiterTargets: arbiterTargets,
-            copilotPrompt: copilotPrompt);
+            _environment.GetVariable);
     }
 
     internal SelfUpdateOutcome Run(SelfUpdateOptions options)
@@ -221,17 +208,17 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         string tag = ReleaseVersion.Tag(version);
-        DirectoryInfo work = Directory.CreateTempSubdirectory("kyber-weave-update-");
+        string work = _files.CreateTemporaryDirectory("kyber-weave-update-");
         try
         {
             _log($"installing {tag} ({_host.Rid}) → {_host.InstallDirectory}");
             string sums = _releases.DownloadChecksums(tag);
             List<(string BaseName, string ExtractedPath, string Destination)> staged =
             [
-                StageBinary(CliBaseName, _host.Rid, tag, windows, sums, work.FullName)
+                StageBinary(CliBaseName, _host.Rid, tag, windows, sums, work)
             ];
             if (!options.NoMcp)
-                staged.Add(StageBinary(McpBaseName, _host.Rid, tag, windows, sums, work.FullName));
+                staged.Add(StageBinary(McpBaseName, _host.Rid, tag, windows, sums, work));
 
             // KyberDash carries its own RID (darwin-* on macOS, matching linux-*/win-x64 elsewhere).
             if (ShouldUpdateKyberDash(options, version, windows))
@@ -241,7 +228,7 @@ internal sealed class SelfUpdater : IDisposable
                     tag,
                     windows,
                     sums,
-                    work.FullName));
+                    work));
             }
 
             // The arbiter ships like kyber-weave-mcp, under this host's .NET RID.
@@ -253,7 +240,7 @@ internal sealed class SelfUpdater : IDisposable
                     tag,
                     windows,
                     sums,
-                    work.FullName));
+                    work));
             }
 
             // This process's own image is committed last. Overwriting it costs the runtime the ability
@@ -269,17 +256,17 @@ internal sealed class SelfUpdater : IDisposable
 
             RehearseHandOff(_host.ProcessPath);
 
-            DirectoryInfo backupDir = Directory.CreateTempSubdirectory("kyber-weave-backup-");
+            string backupDir = _files.CreateTemporaryDirectory("kyber-weave-backup-");
             try
             {
                 List<(string BackupPath, string Destination, bool Existed)> backups = [];
                 foreach ((string BaseName, string ExtractedPath, string Destination) item in staged)
                 {
-                    string backupFile = Path.Combine(backupDir.FullName, item.BaseName + ".bak");
-                    bool existed = File.Exists(item.Destination);
+                    string backupFile = Path.Combine(backupDir, item.BaseName + ".bak");
+                    bool existed = _files.FileExists(item.Destination);
                     if (existed)
                     {
-                        File.Copy(item.Destination, backupFile, true);
+                        _system.CopyFile(item.Destination, backupFile, overwrite: true);
                     }
 
                     backups.Add((backupFile, item.Destination, existed));
@@ -296,13 +283,13 @@ internal sealed class SelfUpdater : IDisposable
                     {
                         try
                         {
-                            if (backup.Existed && File.Exists(backup.BackupPath))
+                            if (backup.Existed && _files.FileExists(backup.BackupPath))
                             {
-                                File.Copy(backup.BackupPath, backup.Destination, true);
+                                _system.CopyFile(backup.BackupPath, backup.Destination, overwrite: true);
                             }
-                            else if (!backup.Existed && File.Exists(backup.Destination))
+                            else if (!backup.Existed && _files.FileExists(backup.Destination))
                             {
-                                File.Delete(backup.Destination);
+                                _files.DeleteFile(backup.Destination);
                             }
                         }
                         catch
@@ -318,7 +305,7 @@ internal sealed class SelfUpdater : IDisposable
             {
                 try
                 {
-                    backupDir.Delete(true);
+                    _files.DeleteTreeNoFollow(backupDir);
                 }
                 catch (IOException)
                 {
@@ -329,7 +316,7 @@ internal sealed class SelfUpdater : IDisposable
         {
             try
             {
-                work.Delete(true);
+                _files.DeleteTreeNoFollow(work);
             }
             catch (IOException)
             {
@@ -504,7 +491,7 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         string record = Path.Combine(TrayConfigDirectory(), TrayRecordFile);
-        if (!File.Exists(record))
+        if (!_files.FileExists(record))
         {
             _log($"no tray install recorded in {record}; install it with `kyberdash menubar`");
             return false;
@@ -533,7 +520,7 @@ internal sealed class SelfUpdater : IDisposable
         string kyberdash = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
-        if (!File.Exists(kyberdash))
+        if (!_files.FileExists(kyberdash))
         {
             _log($"kyberdash is not installed in {_host.InstallDirectory}; leaving the KyberDash tray unchanged");
             return false;
@@ -585,11 +572,7 @@ internal sealed class SelfUpdater : IDisposable
     /// </remarks>
     private void RefreshCopilotPrompt()
     {
-        string? home = _readEnvironment("HOME");
-        if (string.IsNullOrWhiteSpace(home))
-            home = _readEnvironment("USERPROFILE");
-        if (string.IsNullOrWhiteSpace(home))
-            home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        string? home = ResolveHome();
         if (string.IsNullOrWhiteSpace(home))
             return;
 
@@ -619,7 +602,7 @@ internal sealed class SelfUpdater : IDisposable
         string arbiter = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(ArbiterBaseName, windows));
-        if (!File.Exists(arbiter))
+        if (!_files.FileExists(arbiter))
             return;
 
         try
@@ -641,11 +624,7 @@ internal sealed class SelfUpdater : IDisposable
                     options);
             }
 
-            string? home = _readEnvironment("HOME");
-            if (string.IsNullOrWhiteSpace(home))
-                home = _readEnvironment("USERPROFILE");
-            if (string.IsNullOrWhiteSpace(home))
-                home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string? home = ResolveHome();
             bool hasConfiguredGlobalTargets = !string.IsNullOrWhiteSpace(home)
                 && _arbiterTargets!.ReadGlobalTargets(home).Count > 0;
 
@@ -750,7 +729,7 @@ internal sealed class SelfUpdater : IDisposable
     private void EnsureEngine(bool windows)
     {
         string kyberdash = InstalledKyberDash(windows);
-        if (!File.Exists(kyberdash))
+        if (!_files.FileExists(kyberdash))
         {
             _log($"kyberdash is not installed in {_host.InstallDirectory}; leaving the KyberDash engine unchanged");
             return;
@@ -822,7 +801,7 @@ internal sealed class SelfUpdater : IDisposable
     private void UpdateCapturePlugin(string harness, string name, bool windows)
     {
         string kyberdash = InstalledKyberDash(windows);
-        if (!File.Exists(kyberdash))
+        if (!_files.FileExists(kyberdash))
         {
             _log(
                 $"kyberdash is not installed in {_host.InstallDirectory}; leaving the {name} capture plugin unchanged");
@@ -868,11 +847,11 @@ internal sealed class SelfUpdater : IDisposable
     }
 
     /// <summary>The version the tray record names, or null when the record cannot be read or names no valid version.</summary>
-    private static string? ReadRecordedTrayVersion(string record)
+    private string? ReadRecordedTrayVersion(string record)
     {
         try
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(record));
+            using JsonDocument document = JsonDocument.Parse(_files.ReadAllText(record));
             if (document.RootElement.TryGetProperty("version", out JsonElement version)
                 && version.ValueKind == JsonValueKind.String)
                 return ReleaseVersion.Normalize(version.GetString() ?? string.Empty);
@@ -958,13 +937,20 @@ internal sealed class SelfUpdater : IDisposable
     /// skip does not depend on whether the developer running it happens to have
     /// a tray installed.
     /// </remarks>
-    private string TrayConfigDirectory()
+    private string TrayConfigDirectory() => Path.Combine(ResolveHome(), ".kyberdash");
+
+    /// <summary>
+    /// The operator's home: the variable the shell sets, then the platform's answer. Read through the environment
+    /// seam so a unit test states the home instead of inheriting the developer's.
+    /// </summary>
+    private string ResolveHome()
     {
-        string home =
-            _readEnvironment("HOME")
-            ?? _readEnvironment("USERPROFILE")
-            ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        return Path.Combine(home, ".kyberdash");
+        string? home = _environment.GetVariable("HOME");
+        if (string.IsNullOrWhiteSpace(home))
+            home = _environment.GetVariable("USERPROFILE");
+        if (string.IsNullOrWhiteSpace(home))
+            home = _environment.HomeDirectory;
+        return home;
     }
 
     private (string BaseName, string ExtractedPath, string Destination) StageBinary(
@@ -1000,7 +986,7 @@ internal sealed class SelfUpdater : IDisposable
         foreach (string siblingBaseName in KyberDashSiblingBaseNames)
         {
             string siblingName = BinaryInstaller.InstalledFileName(siblingBaseName, windows);
-            string? siblingPath = TryFindExtractedBinary(extractDir, siblingName);
+            string? siblingPath = TryFindExtractedBinary(_files, _environment, extractDir, siblingName);
             if (siblingPath is not null)
                 staged.Add((siblingBaseName, siblingPath, Path.Combine(_host.InstallDirectory, siblingName)));
         }
@@ -1019,12 +1005,12 @@ internal sealed class SelfUpdater : IDisposable
         string archiveName = BinaryInstaller.ArchiveName(baseName, rid);
         string archivePath = Path.Combine(workDirectory, archiveName);
         _log($"downloading {archiveName}…");
-        using (FileStream destination = File.Create(archivePath))
+        using (Stream destination = _files.OpenWriteNew(archivePath))
             _releases.DownloadAsset(tag, archiveName, destination);
 
         string expected = ChecksumVerifier.ExpectedHex(sums, archiveName);
         byte[] hash;
-        using (FileStream archive = File.OpenRead(archivePath))
+        using (Stream archive = _files.OpenRead(archivePath))
             hash = SHA256.HashData(archive);
         ChecksumVerifier.Verify(expected, hash, archiveName);
 
@@ -1067,7 +1053,7 @@ internal sealed class SelfUpdater : IDisposable
         string installed = Path.Combine(
             _host.InstallDirectory,
             BinaryInstaller.InstalledFileName(KyberDashBaseName, windows));
-        if (!File.Exists(installed))
+        if (!_files.FileExists(installed))
         {
             _log($"kyberdash is not installed in {_host.InstallDirectory}; add it with scripts/install.sh");
             return false;
@@ -1102,8 +1088,8 @@ internal sealed class SelfUpdater : IDisposable
             return false;
 
         return string.Equals(
-            Path.GetFullPath(destination),
-            Path.GetFullPath(_host.ProcessPath),
+            _paths.GetFullPath(destination, _environment.CurrentDirectory),
+            _paths.GetFullPath(_host.ProcessPath, _environment.CurrentDirectory),
             _host.IsWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
     }
 
@@ -1127,7 +1113,7 @@ internal sealed class SelfUpdater : IDisposable
         }
 
         string directory = _host.InstallDirectory;
-        if (!Directory.Exists(directory) || !_canWriteDirectory(directory))
+        if (!_files.DirectoryExists(directory) || !_canWriteDirectory(directory))
         {
             throw new SelfUpdateException(
                 $"no write permission for {directory}. Re-run from a writable Release install, or reinstall with scripts/install.sh --install-dir <dir>.");
@@ -1141,35 +1127,43 @@ internal sealed class SelfUpdater : IDisposable
                || normalized.EndsWith("/.dotnet/tools", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string FindExtractedBinary(string extractDir, string fileName) =>
-        TryFindExtractedBinary(extractDir, fileName)
+    private string FindExtractedBinary(string extractDir, string fileName) =>
+        TryFindExtractedBinary(_files, _environment, extractDir, fileName)
         ?? throw new SelfUpdateException($"archive did not contain {fileName}");
 
     /// <summary>
     ///     Finds <paramref name="fileName" /> in the extracted archive without following links: a directory link
     ///     in a tarball could otherwise lead the search to a binary outside <paramref name="extractDir" />.
     /// </summary>
-    internal static string? TryFindExtractedBinary(string extractDir, string fileName)
+    internal static string? TryFindExtractedBinary(
+        IFileSystem files,
+        IProcessEnvironment environment,
+        string extractDir,
+        string fileName)
     {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(environment);
         string direct = Path.Combine(extractDir, fileName);
-        if (File.Exists(direct) && new FileInfo(direct).LinkTarget is null)
+        if (files.FileExists(direct) && files.GetLinkTarget(direct) is null)
             return direct;
 
-        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        StringComparison comparison = environment.OperatingSystem == OperatingSystemKind.Windows
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
         List<string> matches = [];
         Stack<string> pending = new();
         pending.Push(extractDir);
         while (pending.Count > 0)
         {
-            foreach (FileSystemInfo entry in new DirectoryInfo(pending.Pop()).EnumerateFileSystemInfos())
+            foreach (FileSystemEntry entry in files.EnumerateEntries(pending.Pop()))
             {
-                if (entry.LinkTarget is not null)
+                if (entry.IsLink)
                     continue;
 
-                if (entry is DirectoryInfo child)
-                    pending.Push(child.FullName);
-                else if (string.Equals(entry.Name, fileName, comparison))
-                    matches.Add(entry.FullName);
+                if (entry.IsDirectory)
+                    pending.Push(entry.Path);
+                else if (string.Equals(Path.GetFileName(entry.Path), fileName, comparison))
+                    matches.Add(entry.Path);
             }
         }
 

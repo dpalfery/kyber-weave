@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 
@@ -12,11 +13,13 @@ namespace KyberWeave.Application.Update;
 internal sealed class SelfUpdateService(
     Func<SelfUpdateHost> host,
     IProcessEnvironment environment,
+    IWritableFileSystem files,
+    IPathResolver paths,
     ISelfUpdateSystem system,
     IArbiterHookRefresherFactory refreshers,
     IArbiterRefreshTargets targets,
     CopilotPromptRefresher copilotPrompt,
-    HttpMessageHandler? handler = null) : ISelfUpdateService
+    HttpMessageHandler handler) : ISelfUpdateService
 {
     /// <inheritdoc />
     public SelfUpdateOutcome Run(SelfUpdateOptions options, Action<string> log)
@@ -25,17 +28,17 @@ internal sealed class SelfUpdateService(
 
         SelfUpdateHost snapshot = host();
         IArbiterHookRefresher refresher = refreshers.Create(log);
-        using SelfUpdater updater = handler is null
-            ? SelfUpdater.Create(snapshot, log, refresher, system: system, arbiterTargets: targets, readEnvironment: environment.GetVariable, copilotPrompt: copilotPrompt)
-            : new SelfUpdater(
-                handler,
-                snapshot,
-                log,
-                environment.GetVariable,
-                arbiterHookRefresher: refresher,
-                system: system,
-                arbiterTargets: targets,
-                copilotPrompt: copilotPrompt);
+        using SelfUpdater updater = new(
+            handler,
+            snapshot,
+            files,
+            paths,
+            environment,
+            system,
+            log,
+            arbiterHookRefresher: refresher,
+            arbiterTargets: targets,
+            copilotPrompt: copilotPrompt);
         return updater.Run(options);
     }
 }

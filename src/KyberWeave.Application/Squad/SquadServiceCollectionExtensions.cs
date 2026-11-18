@@ -63,11 +63,13 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISelfUpdateService>(sp => new SelfUpdateService(
             sp.GetRequiredService<Func<SelfUpdateHost>>(),
             sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<ISelfUpdateSystem>(),
             sp.GetRequiredService<IArbiterHookRefresherFactory>(),
             sp.GetRequiredService<IArbiterRefreshTargets>(),
             sp.GetRequiredService<CopilotPromptRefresher>(),
-            sp.GetService<HttpMessageHandler>()));
+            sp.GetService<HttpMessageHandler>() ?? new SocketsHttpHandler { AllowAutoRedirect = true }));
         services.TryAddSingleton<ISquadLifecycleService>(sp => CreateLifecycle(sp, sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadInstanceService>(sp => new SquadInstanceService(
             CreateLifecycle(sp, sp.GetService<ISquadInstanceReleaseSource>() ?? sp.GetRequiredService<ISquadReleaseSource>()),
