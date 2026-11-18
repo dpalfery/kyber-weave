@@ -107,6 +107,11 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     public bool FileExists(string path)
     {
         Enter(nameof(FileExists), path);
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
         return Follow(Resolve(path, followFinal: false)) is { IsDirectory: false };
     }
 
@@ -114,6 +119,11 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     public bool DirectoryExists(string path)
     {
         Enter(nameof(DirectoryExists), path);
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
         return Follow(Resolve(path, followFinal: false)) is { IsDirectory: true };
     }
 
@@ -121,6 +131,11 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     public bool PathExists(string path)
     {
         Enter(nameof(PathExists), path);
+        if (string.IsNullOrEmpty(path))
+        {
+            return false;
+        }
+
         return Follow(Resolve(path, followFinal: false)) is not null;
     }
 

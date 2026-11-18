@@ -102,6 +102,19 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void ExistenceProbesOfANullPathAreFalse()
+    {
+        IWritableFileSystem files = CreateFileSystem();
+
+        Assert.False(files.FileExists(null!));
+        Assert.False(files.DirectoryExists(null!));
+        Assert.False(files.PathExists(null!));
+        Assert.False(files.FileExists(string.Empty));
+        Assert.False(files.DirectoryExists(string.Empty));
+        Assert.False(files.PathExists(string.Empty));
+    }
+
+    [Fact]
     public void PathExistsCoversFilesAndDirectories()
     {
         IWritableFileSystem files = Starting(out string root);
