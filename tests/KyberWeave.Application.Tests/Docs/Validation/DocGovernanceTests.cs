@@ -1,3 +1,4 @@
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 
 using KyberWeave.Core.Diagnostics;
@@ -5,10 +6,13 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Processes;
 using KyberWeave.Data.CodeGraph;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Validation;
 
 /// <summary>
 /// A rules or skills document may name a technology or a role only when it sits in that
@@ -85,7 +89,7 @@ public class SkillAndScopeTests
     [Fact]
     public void ASkillInItsTechnologysFolderIsValid()
     {
-        using DocFixture fixture = CompleteFolder(new DocFixture().WithCatalog(), "dotnet", "technology")
+        using DocFixture fixture = CompleteFolder(DocFixture.CreateInMemory().WithCatalog(), "dotnet", "technology")
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Document("skill", "dotnet", null));
 
         Assert.False(fixture.Validate(Scoped).HasErrors);
@@ -94,7 +98,7 @@ public class SkillAndScopeTests
     [Fact]
     public void ASkillInItsRolesFolderIsValid()
     {
-        using DocFixture fixture = CompleteFolder(new DocFixture().WithCatalog(), "reviewer", "role")
+        using DocFixture fixture = CompleteFolder(DocFixture.CreateInMemory().WithCatalog(), "reviewer", "role")
             .Write("6-Docs/standards/reviewer/reviewer.skills.md", Document("skill", null, "reviewer"));
 
         Assert.False(fixture.Validate(Scoped).HasErrors);
@@ -103,7 +107,7 @@ public class SkillAndScopeTests
     [Fact]
     public void ASkillNamingNeitherScopeIsSPEC011()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Document("skill", null, null));
 
         DiagnosticReport report = fixture.Validate(Scoped);
@@ -114,7 +118,7 @@ public class SkillAndScopeTests
     [Fact]
     public void ARuleNamingATechnologyInItsFolderIsValid()
     {
-        using DocFixture fixture = CompleteFolder(new DocFixture().WithCatalog(), "dotnet", "technology")
+        using DocFixture fixture = CompleteFolder(DocFixture.CreateInMemory().WithCatalog(), "dotnet", "technology")
             .Write("6-Docs/standards/dotnet/dotnet.skills.md", Document("skill", "dotnet", null));
 
         Assert.False(fixture.Validate(Scoped).HasErrors);
@@ -123,7 +127,7 @@ public class SkillAndScopeTests
     [Fact]
     public void ARuleNamingATechnologyOutsideItsFolderIsSPEC007()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/rules/backend.md", Document("rule", "dotnet", null));
 
         DiagnosticReport report = fixture.Validate(Scoped);
@@ -134,7 +138,7 @@ public class SkillAndScopeTests
     [Fact]
     public void ARoleOnAReferenceIsSPEC007()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/roles.md", Document("reference", null, "reviewer"));
 
         DiagnosticReport report = fixture.Validate(Scoped);
@@ -145,7 +149,7 @@ public class SkillAndScopeTests
     [Fact]
     public void AnUndeclaredRoleIsSPEC002()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/devops/devops.skills.md", Document("skill", null, "devops"));
 
         DiagnosticReport report = fixture.Validate(Scoped);
@@ -185,7 +189,7 @@ public class TechnologyDeclarationTests
     [Fact]
     public void DeclaredTechnologyInItsOwnFolderHasNoFindings()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/README.md", Standard("dotnet"));
 
         Assert.False(fixture.Validate(DotnetDeclared).HasErrors);
@@ -194,7 +198,7 @@ public class TechnologyDeclarationTests
     [Fact]
     public void UndeclaredTechnologyIsSPEC002()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/rust/README.md", Standard("rust"));
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -205,7 +209,7 @@ public class TechnologyDeclarationTests
     [Fact]
     public void MissingScopeOnAStandardIsSPEC011()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/README.md", """
                 ---
                 id: standards/dotnet
@@ -225,7 +229,7 @@ public class TechnologyDeclarationTests
     [Fact]
     public void TechnologyOnAnotherDocTypeIsSPEC007()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/dotnet/README.md", Standard("dotnet", docType: "reference"));
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -236,7 +240,7 @@ public class TechnologyDeclarationTests
     [Fact]
     public void TechnologyDisagreeingWithItsFolderIsSPEC007()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/backend/README.md", Standard("dotnet"));
 
         DiagnosticReport report = fixture.Validate(DotnetDeclared);
@@ -257,7 +261,7 @@ public class TechnologyDeclarationTests
     }
 }
 
-public class DocSpecValidatorTests
+public class DocGovernanceSpecValidatorTests
 {
     private const string ValidReference = """
         ---
@@ -275,7 +279,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void ConformingDocumentProducesNoFindings()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", ValidReference);
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", ValidReference);
 
         DiagnosticReport report = fixture.Validate();
 
@@ -285,7 +289,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void MissingFrontmatterIsSPEC001()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/thing.md", "# Just a heading\n");
 
         DiagnosticReport report = fixture.Validate();
@@ -296,7 +300,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void UnknownDocTypeIsSPEC002()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -316,7 +320,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void UnknownStatusIsSPEC002()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -336,7 +340,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void NonIsoLastReviewedIsSPEC002()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -356,7 +360,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void ArchitectureWithoutCodeRefsIsSPEC003()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().WithSourceRoot("1-Presentation/Api")
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().WithSourceRoot("1-Presentation/Api")
             .Write("6-Docs/api/architecture.md", """
                 ---
                 id: api/architecture
@@ -380,7 +384,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void ProcessOnlyRunbookWithoutSourceRootNeedsNoCodeRefs()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/operations/process.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/operations/process.md", """
             ---
             id: operations/process
             title: A Process Runbook
@@ -401,7 +405,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void RunbookWithSourceRootRequiresCodeRefs()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().WithSourceRoot("1-Presentation/Api")
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().WithSourceRoot("1-Presentation/Api")
             .Write("6-Docs/operations/component.md", """
                 ---
                 id: operations/component
@@ -425,7 +429,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void UncatalogedComponentIsSPEC004()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -446,7 +450,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void UncatalogedOwnerIsSPEC004()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -466,7 +470,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void NonexistentSourceRootIsSPEC005()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/api/onboarding.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/api/onboarding.md", """
             ---
             id: api/onboarding
             title: API Onboarding
@@ -487,7 +491,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void DuplicateIdIsSPEC006()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/one.md", ValidReference)
             .Write("6-Docs/reference/two.md", ValidReference);
 
@@ -500,7 +504,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void UnresolvableDecidedByIsSPEC006()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -522,7 +526,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void ArchivedDocumentsAreOutOfScope()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/archive/old.md", "# No frontmatter here\n");
 
         Assert.Empty(fixture.LoadSubjects());
@@ -531,7 +535,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void VendoredDevOpsSkillFilesAreOutOfScope()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/DevOps/incremental-build.md", "---\nname: upstream/skill\n---\n");
 
         Assert.Empty(fixture.LoadSubjects());
@@ -540,7 +544,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void HyphenatedKeysBindToModel()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().WithSourceRoot("1-Presentation/Api")
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().WithSourceRoot("1-Presentation/Api")
             .Write("6-Docs/api/architecture.md", """
                 ---
                 id: api/architecture
@@ -570,7 +574,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void KeywordsDeserializeIntoModel()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/thing.md", """
                 ---
                 id: reference/thing
@@ -597,7 +601,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void AliasesDeserializeIntoKeywordsWhenKeywordsOmitted()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/thing.md", """
                 ---
                 id: reference/thing
@@ -624,7 +628,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void ValidKeywordsProduceNoDiagnostics()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/thing.md", """
                 ---
                 id: reference/thing
@@ -651,7 +655,7 @@ public class DocSpecValidatorTests
     [InlineData("   ")]
     public void EmptyOrWhitespaceKeywordIsSPEC002(string keyword)
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/thing.md", $"""
                 ---
                 id: reference/thing
@@ -676,7 +680,7 @@ public class DocSpecValidatorTests
     [Fact]
     public void NullKeywordEntryIsSPEC002()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/reference/thing.md", """
                 ---
                 id: reference/thing
@@ -732,7 +736,7 @@ public class DocDriftLinterTests
     [Fact]
     public void MissingIndexIsReportedAsCriticalNotSilentlyPassed()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().Write("6-Docs/reference/thing.md", """
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().Write("6-Docs/reference/thing.md", """
             ---
             id: reference/thing
             title: A Thing
@@ -747,10 +751,18 @@ public class DocDriftLinterTests
 
         // No .codegraph/ in the fixture tree: an unverifiable drift check must fail loudly
         // rather than report a clean run.
-        CodeGraphResolverAdapter resolver = DocsPorts.CodeGraph(fixture.Root);
+        ScriptedProcessExecutor sqlite = new(_ => new ProcessResult(0, string.Empty, string.Empty));
+        CodeGraphResolverAdapter resolver = new(
+            Path.Combine(fixture.Root, ".codegraph", "codegraph.db"),
+            fixture.Memory!,
+            fixture.Paths,
+            fixture.Environment,
+            sqlite,
+            new CodeGraphIndexStaleness(fixture.Memory!, new ScriptedProcessRunner()));
         DiagnosticReport report = new DocDriftLinter(resolver).Validate(fixture.Load());
 
         Assert.False(resolver.IsAvailable);
+        Assert.Empty(sqlite.Calls);
         Assert.True(report.HasCritical);
     }
 }
@@ -778,7 +790,7 @@ public sealed class DocGovernanceTests
     [Fact]
     public void DocumentationImpactAndImpactComponentsBindToTheModel()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog().WithSourceRoot("1-Presentation/Api")
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog().WithSourceRoot("1-Presentation/Api")
             .Write("6-Docs/api/architecture.md", """
                 ---
                 id: api/architecture
