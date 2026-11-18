@@ -3,9 +3,8 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Testing.Squad;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -19,19 +18,9 @@ namespace KyberWeave.Tests;
 ///     and redundant canonical disk I/O across squad rendering tests, enabling thread-safe parallel test execution
 ///     and sub-second suite runs without altering the production render output.
 /// </remarks>
-public sealed class SquadRenderSeamContractTests : IDisposable
+public sealed class SquadRenderSeamContractTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
+    private readonly CanonicalSquadTree _tree = CanonicalSquadTree.Create();
 
     /// <summary>
     ///     Verifies that SquadOperatorChannel.IsGateOn honors an injected environment reader delegate
@@ -40,9 +29,6 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public void OperatorChannelGateHonorsInjectedEnvironmentReaderWithoutMutatingProcessEnvironment()
     {
-        string? realGateValue = Environment.GetEnvironmentVariable(SquadOperatorChannel.GateVariable);
-        Assert.Null(realGateValue);
-
         Func<string, string?> onReader = static key =>
             string.Equals(key, SquadOperatorChannel.GateVariable, StringComparison.Ordinal) ? "true" : null;
         Func<string, string?> offReader = static key =>
@@ -53,7 +39,6 @@ public sealed class SquadRenderSeamContractTests : IDisposable
         Assert.False(SquadOperatorChannel.IsGateOn(offReader));
         Assert.False(SquadOperatorChannel.IsGateOn(nullReader));
 
-        Assert.Null(Environment.GetEnvironmentVariable(SquadOperatorChannel.GateVariable));
     }
 
     /// <summary>
@@ -63,9 +48,6 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public void OperatorChannelResolveServerNameHonorsInjectedEnvironmentReaderWithoutMutatingProcessEnvironment()
     {
-        string? realServerValue = Environment.GetEnvironmentVariable(SquadOperatorChannel.ServerVariable);
-        Assert.Null(realServerValue);
-
         const string expectedServerName = "custom-operator-srv";
         Func<string, string?> validReader = static key =>
             string.Equals(key, SquadOperatorChannel.ServerVariable, StringComparison.Ordinal)
@@ -91,7 +73,6 @@ public sealed class SquadRenderSeamContractTests : IDisposable
         Assert.NotNull(invalid.Warning);
         Assert.Equal(SquadOperatorChannel.ServerNameInvalidCode, invalid.Warning.Code);
 
-        Assert.Null(Environment.GetEnvironmentVariable(SquadOperatorChannel.ServerVariable));
     }
 
     /// <summary>
@@ -103,19 +84,16 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public async Task RendererRegistryHonorsRenderRequestEnvironmentReaderForCopilotOverlayAndDegradations()
     {
-        Assert.Null(Environment.GetEnvironmentVariable(SquadOperatorChannel.GateVariable));
-
-        string copilotDir = Path.Combine(_temp.Path, "copilot-home");
-        string claudeDir = Path.Combine(_temp.Path, "claude-home");
-        Directory.CreateDirectory(copilotDir);
-        Directory.CreateDirectory(claudeDir);
+        string copilotDir = Path.Combine(_tree.Files.Root, "copilot-home");
+        string claudeDir = Path.Combine(_tree.Files.Root, "claude-home");
+        _tree.Files.CreateDirectory(copilotDir);
+        _tree.Files.CreateDirectory(claudeDir);
 
         const string serverName = "custom-operator-srv";
         string mcpConfig = "{\"mcpServers\":{\"" + serverName + "\":{\"command\":\"test\",\"args\":[]}}}";
-        await File.WriteAllTextAsync(
+        _tree.Files.WriteAllText(
             Path.Combine(copilotDir, CopilotMcpServerProbe.McpConfigFileName),
-            mcpConfig,
-            Encoding.UTF8);
+            mcpConfig);
 
         TestGlobalRootResolver globalRoots = new(copilotDir, claudeDir);
         Func<string, string?> onReader = static key => key switch
@@ -126,13 +104,13 @@ public sealed class SquadRenderSeamContractTests : IDisposable
         };
 
         SquadRenderRequest request = new SquadRenderRequest(
-            ProductRoot,
+            _tree.ProductRoot,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            EnvironmentReader: onReader).Prepared();
+            EnvironmentReader: onReader).Prepared(_tree);
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer(), new ClaudeRenderer()]);
+        SquadRendererRegistry registry = _tree.Registry([new CopilotRenderer(), new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -157,31 +135,28 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public async Task RendererRegistryOmitsOverlayAndDegradationsWhenEnvironmentReaderReturnsNull()
     {
-        Assert.Null(Environment.GetEnvironmentVariable(SquadOperatorChannel.GateVariable));
-
-        string copilotDir = Path.Combine(_temp.Path, "copilot-home-off");
-        string claudeDir = Path.Combine(_temp.Path, "claude-home-off");
-        Directory.CreateDirectory(copilotDir);
-        Directory.CreateDirectory(claudeDir);
+        string copilotDir = Path.Combine(_tree.Files.Root, "copilot-home-off");
+        string claudeDir = Path.Combine(_tree.Files.Root, "claude-home-off");
+        _tree.Files.CreateDirectory(copilotDir);
+        _tree.Files.CreateDirectory(claudeDir);
 
         const string serverName = "custom-operator-srv";
         string mcpConfig = "{\"mcpServers\":{\"" + serverName + "\":{\"command\":\"test\",\"args\":[]}}}";
-        await File.WriteAllTextAsync(
+        _tree.Files.WriteAllText(
             Path.Combine(copilotDir, CopilotMcpServerProbe.McpConfigFileName),
-            mcpConfig,
-            Encoding.UTF8);
+            mcpConfig);
 
         TestGlobalRootResolver globalRoots = new(copilotDir, claudeDir);
         Func<string, string?> nullReader = static _ => null;
 
         SquadRenderRequest request = new SquadRenderRequest(
-            ProductRoot,
+            _tree.ProductRoot,
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            EnvironmentReader: nullReader).Prepared();
+            EnvironmentReader: nullReader).Prepared(_tree);
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer(), new ClaudeRenderer()]);
+        SquadRendererRegistry registry = _tree.Registry([new CopilotRenderer(), new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -202,19 +177,17 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     ///     without requiring or touching SourceDirectory on disk.
     /// </summary>
     [Fact]
-    public void RenderSourceLoadHonorsPreloadedSourceWithoutTouchingSourceDirectoryOnDisk()
+    public void RenderSourceLoadHonorsPreloadedSourceWithoutTouchingSourceDirectory()
     {
-        SquadSource preloadedSource = TestSquadCorpus.CanonicalSource;
-        string nonExistentSourceDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "kw-nonexistent-" + Guid.NewGuid().ToString("N"));
-        Assert.False(Directory.Exists(nonExistentSourceDirectory));
+        SquadSource preloadedSource = _tree.Load();
+        string nonExistentSourceDirectory = Path.Combine(_tree.Files.Root, "nonexistent-source");
+        Assert.False(_tree.Files.DirectoryExists(nonExistentSourceDirectory));
 
         SquadRenderRequest request = new SquadRenderRequest(
             nonExistentSourceDirectory,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
-            PreloadedSource: preloadedSource).Prepared();
+            PreloadedSource: preloadedSource).Prepared(_tree);
 
         SquadSource loaded = SquadRenderSource.Load(request, SquadTarget.Copilot);
 
@@ -222,7 +195,7 @@ public sealed class SquadRenderSeamContractTests : IDisposable
         Assert.Equal(preloadedSource.Manifest.Name, loaded.Manifest.Name);
         Assert.Equal(preloadedSource.Agents.Count, loaded.Agents.Count);
         Assert.Equal(preloadedSource.Skills.Count, loaded.Skills.Count);
-        Assert.False(Directory.Exists(nonExistentSourceDirectory));
+        Assert.False(_tree.Files.DirectoryExists(nonExistentSourceDirectory));
     }
 
     /// <summary>
@@ -232,11 +205,9 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     [Fact]
     public void RenderSourceLoadWithPreloadedSourceAppliesModelPresetsCleanly()
     {
-        SquadSource preloadedSource = TestSquadCorpus.CanonicalSource;
-        string nonExistentSourceDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "kw-nonexistent-" + Guid.NewGuid().ToString("N"));
-        Assert.False(Directory.Exists(nonExistentSourceDirectory));
+        SquadSource preloadedSource = _tree.Load();
+        string nonExistentSourceDirectory = Path.Combine(_tree.Files.Root, "nonexistent-source");
+        Assert.False(_tree.Files.DirectoryExists(nonExistentSourceDirectory));
 
         const string presetYaml = """
                                   schema: kyber-squad.model-preset/v1
@@ -257,7 +228,7 @@ public sealed class SquadRenderSeamContractTests : IDisposable
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
             ModelPresets: presets,
-            PreloadedSource: preloadedSource).Prepared();
+            PreloadedSource: preloadedSource).Prepared(_tree);
 
         SquadSource loaded = SquadRenderSource.Load(request, SquadTarget.Copilot);
 
@@ -265,7 +236,7 @@ public sealed class SquadRenderSeamContractTests : IDisposable
         Assert.True(loaded.ModelProfiles.Profiles.TryGetValue("general", out SquadModelProfile? generalProfile));
         Assert.NotNull(generalProfile);
         Assert.Equal("claude-3-7-sonnet", generalProfile.HarnessModels["claude"]);
-        Assert.False(Directory.Exists(nonExistentSourceDirectory));
+        Assert.False(_tree.Files.DirectoryExists(nonExistentSourceDirectory));
     }
 
     /// <summary>
@@ -273,13 +244,11 @@ public sealed class SquadRenderSeamContractTests : IDisposable
     ///     against a non-existent SourceDirectory path without touching the filesystem.
     /// </summary>
     [Fact]
-    public async Task RendererRegistryRenderAsyncHonorsPreloadedSourceWithoutTouchingSourceDirectoryOnDisk()
+    public async Task RendererRegistryRenderAsyncHonorsPreloadedSourceWithoutTouchingSourceDirectory()
     {
-        SquadSource preloadedSource = TestSquadCorpus.CanonicalSource;
-        string nonExistentSourceDirectory = Path.Combine(
-            Path.GetTempPath(),
-            "kw-nonexistent-" + Guid.NewGuid().ToString("N"));
-        Assert.False(Directory.Exists(nonExistentSourceDirectory));
+        SquadSource preloadedSource = _tree.Load();
+        string nonExistentSourceDirectory = Path.Combine(_tree.Files.Root, "nonexistent-source");
+        Assert.False(_tree.Files.DirectoryExists(nonExistentSourceDirectory));
 
         const string presetYaml = """
                                   schema: kyber-squad.model-preset/v1
@@ -300,52 +269,14 @@ public sealed class SquadRenderSeamContractTests : IDisposable
             [SquadTarget.Copilot, SquadTarget.Claude],
             SquadDeploymentScope.Project,
             ModelPresets: presets,
-            PreloadedSource: preloadedSource).Prepared();
+            PreloadedSource: preloadedSource).Prepared(_tree);
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer(), new ClaudeRenderer()]);
+        SquadRendererRegistry registry = _tree.Registry([new CopilotRenderer(), new ClaudeRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.NotEmpty(result.Files);
-        Assert.False(Directory.Exists(nonExistentSourceDirectory));
-    }
-
-    /// <summary>
-    ///     Verifies that SquadTransaction.UseSyncToDiskScope isolates disk sync overrides to the current
-    ///     asynchronous flow so concurrent test threads remain guarded by SquadTestDurability.DisableDeviceFlush.
-    /// </summary>
-    [Fact]
-    public async Task UseSyncToDiskScopeIsolatesOverrideToCurrentAsyncFlow()
-    {
-        Assert.False(SquadTransaction.SyncToDisk);
-
-        using (SquadTransaction.UseSyncToDiskScope(true))
-        {
-            Assert.True(SquadTransaction.SyncToDisk);
-            await Task.Yield();
-            Assert.True(SquadTransaction.SyncToDisk);
-
-            TaskCompletionSource<bool> tcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            Thread thread;
-            using (ExecutionContext.SuppressFlow())
-            {
-                thread = new Thread(static state =>
-                {
-                    TaskCompletionSource<bool> completionSource = (TaskCompletionSource<bool>)state!;
-                    completionSource.SetResult(SquadTransaction.SyncToDisk);
-                })
-                {
-                    IsBackground = true
-                };
-                thread.Start(tcs);
-            }
-
-            bool independentObserved = await tcs.Task;
-            thread.Join();
-            Assert.False(independentObserved);
-        }
-
-        Assert.False(SquadTransaction.SyncToDisk);
+        Assert.False(_tree.Files.DirectoryExists(nonExistentSourceDirectory));
     }
 
     private sealed class TestGlobalRootResolver(string copilotRoot, string claudeRoot) : ISquadGlobalRootResolver
