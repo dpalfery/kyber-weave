@@ -329,7 +329,7 @@ does not yet meet that: 15 non-adapter classes open a `FileStream` directly. The
 `Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,
-`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
+`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.
 
 Two more framework members are used directly but are not in the exception list because a seam

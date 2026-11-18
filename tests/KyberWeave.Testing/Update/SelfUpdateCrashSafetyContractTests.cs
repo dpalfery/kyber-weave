@@ -7,8 +7,9 @@ namespace KyberWeave.Testing.Update;
 /// <summary>One crash-safety symptom of the self-update that is known and not yet fixed.</summary>
 /// <param name="Flow">The flow it shows in, as the failure names it.</param>
 /// <param name="DetailContains">The symptom this weakness records; another symptom stays unexplained.</param>
+/// <param name="Count">How many stop points show it. A different count, more or fewer, fails the run, so a new instance cannot hide in an old entry.</param>
 /// <param name="Reason">One line saying what goes wrong and why.</param>
-public sealed record SelfUpdateKnownWeakness(string Flow, string DetailContains, string Reason);
+public sealed record SelfUpdateKnownWeakness(string Flow, string DetailContains, int Count, string Reason);
 
 /// <summary>
 /// The crash-safety contract of the self-update's replace and rollback: kill the process at every file operation,
@@ -39,17 +40,17 @@ public abstract class SelfUpdateCrashSafetyContractTests
     /// <summary>The symptoms that fail today, each a gap the update cannot close without a journal or a new seam member.</summary>
     protected virtual IReadOnlyList<SelfUpdateKnownWeakness> KnownWeaknesses { get; } =
     [
-        new("update/windows", "does not exist, so the next process cannot start",
+        new("update/windows", "does not exist, so the next process cannot start", 2,
             "Windows moves the installed image aside and then moves the new one in; a stop between the two moves leaves no image at the installed path, and only a rerun from another binary or the install script can put one back."),
-        new("rollback/windows", "does not exist, so the next process cannot start",
+        new("rollback/windows", "does not exist, so the next process cannot start", 5,
             "The same gap, reached again when the rollback restores an image that was moved aside."),
-        new("update/windows", ".old' is left over",
+        new("update/windows", ".old' is left over", 1,
             "A stop after the new image is in place and before the old image is deleted leaves the old image beside it; an update that finds the new version already running does not touch it, and the next update that replaces the binary removes it."),
-        new("handled/windows", ".old' is left over",
+        new("handled/windows", ".old' is left over", 2,
             "The old image is removed best-effort because the running one stays locked on Windows; when its delete fails the update still succeeds and the next update removes it."),
-        new("handled/windows", "'.kyber-weave-update-probe' is left over",
+        new("handled/windows", "'.kyber-weave-update-probe' is left over", 1,
             "The write probe is removed best-effort; when its delete fails the update still succeeds and the next probe removes it."),
-        new("handled/unix", "'.kyber-weave-update-probe' is left over",
+        new("handled/unix", "'.kyber-weave-update-probe' is left over", 1,
             "The write probe is removed best-effort; when its delete fails the update still succeeds and the next probe removes it."),
     ];
 
@@ -244,11 +245,12 @@ public abstract class SelfUpdateCrashSafetyContractTests
             !KnownWeaknesses.Any(weakness => weakness.Flow == flow && failure.Detail.Contains(weakness.DetailContains, StringComparison.Ordinal)))];
         List<string> stale = [.. KnownWeaknesses
             .Where(weakness => weakness.Flow == flow)
-            .Where(weakness => !failures.Any(failure => failure.Detail.Contains(weakness.DetailContains, StringComparison.Ordinal)))
-            .Select(weakness => $"'{weakness.DetailContains}' no longer fails")];
+            .Select(weakness => (Weakness: weakness, Actual: failures.Count(failure => failure.Detail.Contains(weakness.DetailContains, StringComparison.Ordinal))))
+            .Where(entry => entry.Actual != entry.Weakness.Count)
+            .Select(entry => $"'{entry.Weakness.DetailContains}' shows at {entry.Actual} stop point(s), not the {entry.Weakness.Count} listed")];
         Assert.True(
             unexplained.Count == 0 && stale.Count == 0,
-            $"{flow} has {unexplained.Count} crash-safety failure(s) that no known weakness explains and {stale.Count} stale known weakness(es):\n" +
+            $"{flow} has {unexplained.Count} crash-safety failure(s) that no known weakness explains and {stale.Count} known weakness(es) whose count no longer matches:\n" +
             string.Join("\n", unexplained.Select(failure => string.Create(CultureInfo.InvariantCulture, $"{flow} at operation {failure.Point}: {failure.Detail}"))) +
             string.Join("\n", stale));
 
