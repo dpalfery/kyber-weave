@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
@@ -19,7 +20,7 @@ public sealed class SquadHookJsonBlockTests
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
 
     private SquadHookJsonFile Hooks =>
-        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Base));
+        new(_files, new FakeProcessEnvironment(currentDirectory: Base));
 
     private static string Harness(SquadHookBlockFormat format) =>
         format switch
@@ -123,6 +124,36 @@ public sealed class SquadHookJsonBlockTests
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, null),
         };
         return root.ToJsonString() + "\n";
+    }
+
+    [Theory]
+    [InlineData(NormalizationForm.FormD)]
+    [InlineData(NormalizationForm.FormC)]
+    public void SpliceAndRemoveActOnTheExistingFileWhateverUnicodeFormItsFolderNameUses(NormalizationForm form)
+    {
+        // The in-memory file system compares names ordinally, as ext4 and NTFS do, so a decomposed name and its
+        // composed twin are two different folders.
+        const SquadHookBlockFormat format = SquadHookBlockFormat.Cursor;
+        string path = Path.Combine(Base, "caf\u00e9".Normalize(form), SquadHookJsonBlock.RelativePath(format));
+        string twin = Path.Combine(
+            Base,
+            "caf\u00e9".Normalize(form == NormalizationForm.FormD ? NormalizationForm.FormC : NormalizationForm.FormD),
+            SquadHookJsonBlock.RelativePath(format));
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        string userContent = UserFileContent(format);
+        _files.WriteAllText(path, userContent);
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
+
+        Hooks.SpliceFile(format, path, pre, post);
+
+        Assert.NotEqual(userContent, _files.ReadAllText(path));
+        Assert.False(_files.FileExists(twin));
+
+        Hooks.RemoveFile(format, path);
+
+        Assert.Equal(
+            JsonNode.Parse(userContent)!.ToJsonString(),
+            JsonNode.Parse(_files.ReadAllText(path))!.ToJsonString());
     }
 
     private static JsonNode Clone(JsonNode node) =>

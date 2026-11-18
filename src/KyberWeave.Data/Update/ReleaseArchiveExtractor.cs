@@ -34,10 +34,16 @@ internal sealed class ReleaseArchiveExtractor(
 
     private void ExtractZip(Stream archive, string destination)
     {
+        (string root, string prefix, StringComparison comparison) = Containment(destination);
         using ZipArchive zip = new(archive, ZipArchiveMode.Read, leaveOpen: true);
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
-            string target = Contained(destination, planner.Resolve(destination, entry.FullName), entry.FullName);
+            _ = planner.Resolve(destination, entry.FullName);
+            // The planner refused any escaping name; the written path is re-derived here with Path.GetFullPath against the
+            // extraction root and checked by prefix, the containment form code scanners recognise at the sink.
+            string target = Path.GetFullPath(entry.FullName.Replace('/', Path.DirectorySeparatorChar), root);
+            if (!target.StartsWith(prefix, comparison) && !string.Equals(target, root, comparison))
+                throw Escaped(entry.FullName);
             if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
             {
                 files.CreateDirectory(target);
@@ -51,6 +57,7 @@ internal sealed class ReleaseArchiveExtractor(
 
     private void ExtractTarGz(Stream archive, string destination)
     {
+        (string root, string prefix, StringComparison comparison) = Containment(destination);
         using GZipStream gzip = new(archive, CompressionMode.Decompress, leaveOpen: true);
         using TarReader reader = new(gzip, leaveOpen: true);
         while (reader.GetNextEntry() is { } entry)
@@ -58,7 +65,10 @@ internal sealed class ReleaseArchiveExtractor(
             if (entry.EntryType == TarEntryType.GlobalExtendedAttributes)
                 continue;
 
-            string target = Contained(destination, planner.Resolve(destination, entry.Name), entry.Name);
+            _ = planner.Resolve(destination, entry.Name);
+            string target = Path.GetFullPath(entry.Name.Replace('/', Path.DirectorySeparatorChar), root);
+            if (!target.StartsWith(prefix, comparison) && !string.Equals(target, root, comparison))
+                throw Escaped(entry.Name);
             switch (entry.EntryType)
             {
                 case TarEntryType.Directory:
@@ -75,21 +85,19 @@ internal sealed class ReleaseArchiveExtractor(
         }
     }
 
-    // The planner already refuses an escaping entry through the path seam. This repeats the containment check where
-    // the entry is written, with the framework calls a static analyser recognises, so the guard is visible at the sink.
-    private static string Contained(string destination, string target, string entryName)
+    private static (string Root, string Prefix, StringComparison Comparison) Containment(string destination)
     {
+        // The destination is fully qualified (the planner requires it), so this GetFullPath reads no working directory.
         string root = Path.GetFullPath(destination);
-        string full = Path.GetFullPath(target, root);
         string prefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
         StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
-        if (!string.Equals(full, root, comparison) && !full.StartsWith(prefix, comparison))
-            throw new SelfUpdateException($"the archive entry '{entryName}' was refused: it resolves outside the extraction directory.");
-
-        return full;
+        return (root, prefix, comparison);
     }
+
+    private static SelfUpdateException Escaped(string entryName) =>
+        new($"the archive entry '{entryName}' was refused: it resolves outside the extraction directory.");
 
     private void WriteFile(string target, Stream content)
     {
