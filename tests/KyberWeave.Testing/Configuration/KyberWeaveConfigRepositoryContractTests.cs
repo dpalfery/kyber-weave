@@ -171,6 +171,26 @@ public abstract class KyberWeaveConfigRepositoryContractTests : IDisposable
     }
 
     [Fact]
+    public void AConfigTheParserCannotBindFailsTheAttemptRatherThanThrowing()
+    {
+        string root = NewRoot();
+        WriteRepositoryConfig(root, """
+            ontology:
+              required-keys:
+                ~:
+                  - audience
+            """);
+        IKyberWeaveConfigRepository repository = CreateRepository();
+
+        KyberWeaveConfigLoadResult result = repository.TryLoad(root);
+
+        Assert.False(result.Success);
+        Assert.Null(result.Config);
+        Assert.NotNull(result.Error);
+        Assert.Equal(RepositoryConfigPath(root), result.ConfigPath);
+    }
+
+    [Fact]
     public void FindConfigPathReportsTheFileAWriterWouldEdit()
     {
         string root = NewRoot();
