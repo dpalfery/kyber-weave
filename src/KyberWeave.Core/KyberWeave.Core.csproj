@@ -15,25 +15,15 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The legacy engine's remaining code sits on the shared layers and references nothing above them
-         (LayerReferenceTests). Code that needs Data or Application belongs in the host or in that layer. -->
+    <!-- This project holds no source files; see AGENTS.md. The reference set is what LayerReferenceTests pins:
+         nothing above these layers, so code that needs Data or Application belongs in the host or that layer. -->
     <ProjectReference Include="..\KyberWeave.Kernel\KyberWeave.Kernel.csproj" />
     <ProjectReference Include="..\KyberWeave.Domain\KyberWeave.Domain.csproj" />
     <ProjectReference Include="..\KyberWeave.Contracts\KyberWeave.Contracts.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- The forwarders left here (review config merge, section readers) are unit-tested directly
-         rather than only through the public command surface. -->
-    <InternalsVisibleTo Include="KyberWeave.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.Testing" />
-    <!--
-      Core.Docs reads two internals of the forwarders left here: ProjectRootDetector and ReviewConfigLoader.Merge.
-      Core.Squad holds no source any more; CoreAssemblySplitTests pins its project reference. The grant is
-      assembly-wide, so it exposes every Core internal to them; reach for another only by stating why here.
-    -->
-    <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
-  </ItemGroup>
+  <!-- No InternalsVisibleTo: the project declares no internal member to expose. Add one with the first
+       internal type, not in advance. -->
+
 
 </Project>
