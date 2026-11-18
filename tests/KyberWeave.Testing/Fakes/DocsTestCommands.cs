@@ -9,6 +9,7 @@ using KyberWeave.Mcp;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Application;
+using Spectre.Console;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -37,6 +38,34 @@ internal static class DocsTestCommands
         services.AddSingleton<IPlanTaskAgentPickerFactory>(new NoPickerFactory());
         configure?.Invoke(services);
         return services.AddWeaveApplication().BuildServiceProvider();
+    }
+
+    /// <summary>
+    /// <c>docs init</c> over the container's real services, with the doctor and console a test supplies. A test that
+    /// reads the report passes a capturing console; one that only checks exit codes takes the default.
+    /// </summary>
+    public static DocsInitCommand Init(
+        IRepositoryDoctor doctor,
+        IAnsiConsole? console = null,
+        IServiceProvider? services = null,
+        IProcessExecutor? executor = null,
+        string? mcpExecutable = null)
+    {
+        IServiceProvider provider = services ?? Services();
+        return new DocsInitCommand(
+            McpWiringTestServices.Wiring,
+            provider.GetRequiredService<IDocsScaffoldingService>(),
+            doctor,
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            console ?? AnsiConsole.Console,
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IBoundedProcessExecutor>())
+        {
+            Executor = executor,
+            McpExecutable = mcpExecutable,
+        };
     }
 
     public static DocsCloseoutCommand Closeout(IServiceProvider? services = null)

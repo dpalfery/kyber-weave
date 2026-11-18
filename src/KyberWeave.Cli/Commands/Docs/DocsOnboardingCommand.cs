@@ -1,10 +1,10 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
-using KyberWeave.Core.FileSystem;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -48,7 +48,17 @@ public sealed class DocsOnboardingSettings : CommandSettings
 /// written.
 /// </para>
 /// </remarks>
-public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) : Command<DocsOnboardingSettings>
+/// <param name="configs">Finds and reloads the repository's host configuration.</param>
+/// <param name="console">Where the command writes its report.</param>
+/// <param name="files">The file system the configuration and <c>AGENTS.md</c> are read and written through.</param>
+/// <param name="paths">Resolves the repository root against the working directory.</param>
+/// <param name="environment">Names the working directory a relative root is resolved against.</param>
+public sealed class DocsOnboardingCommand(
+    IKyberWeaveConfigRepository configs,
+    IAnsiConsole console,
+    IWritableFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : Command<DocsOnboardingSettings>
 {
     /// <summary>The verb as the operator types it, for messages.</summary>
     private const string CommandName = "kyber-weave docs onboarding";
@@ -76,7 +86,7 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         string answer = settings.Answer?.Trim() ?? string.Empty;
         if (!ConfigRegConfig.OnboardingAnswers.Contains(answer, StringComparer.Ordinal))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(answer)}' is not an " +
                 $"onboarding answer. Use '{ConfigRegConfig.OnboardingDone}' once the onboarding skill has " +
                 $"been applied, or '{ConfigRegConfig.OnboardingDeclined}' to record that this repository " +
@@ -87,31 +97,31 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         string root;
         try
         {
-            root = Path.GetFullPath(settings.Path);
+            root = paths.GetFullPath(settings.Path, environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(settings.Path)}' is not a valid path: {Markup.Escape(ex.Message)}");
             return RefusedInput;
         }
 
-        if (!Directory.Exists(root))
+        if (!files.DirectoryExists(root))
         {
-            string message = File.Exists(root)
+            string message = files.FileExists(root)
                 ? $"'{Markup.Escape(root)}' is a file, not a directory."
                 : $"directory '{Markup.Escape(root)}' does not exist.";
-            AnsiConsole.MarkupLine($"[red]{Markup.Escape(CommandName)}: error:[/] {message}");
+            console.MarkupLine($"[red]{Markup.Escape(CommandName)}: error:[/] {message}");
             return RefusedInput;
         }
 
         string? configPath = configs.FindConfigPath(root);
         if (configPath is null)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] no host configuration was found under " +
                 $"'{Markup.Escape(root)}', so there is nowhere to record the answer.");
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[grey]→ run 'kyber-weave docs init .' to create .kyber-weave/kyber-weave.yml. A repository " +
                 "without one is never stopped for onboarding, so nothing is missing until it is configured.[/]");
             return Failed;
@@ -121,7 +131,7 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         if (written != 0)
             return written;
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"onboarding: [bold]{Markup.Escape(answer)}[/] recorded in " +
             $"[grey]{Markup.Escape(Path.GetRelativePath(root, configPath))}[/]");
 
@@ -130,11 +140,11 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
 
     /// <summary>Writes the answer into the configuration file, and reports whether it changed.</summary>
     /// <returns><c>0</c> when the file now holds the answer, or <see cref="Failed"/>.</returns>
-    private static int RecordAnswer(string configPath, string answer)
+    private int RecordAnswer(string configPath, string answer)
     {
         if (IsSymlink(configPath))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(configPath)}' is a symbolic link. " +
                 "Refusing to write through a link.");
             return Failed;
@@ -143,14 +153,14 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         string existing;
         try
         {
-            existing = File.ReadAllText(configPath);
+            existing = files.ReadAllText(configPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(configPath)}' could not be " +
                 $"read: {Markup.Escape(ex.Message)}");
-            AnsiConsole.MarkupLine("[grey]→ check that the file is readable, then run the command again.[/]");
+            console.MarkupLine("[grey]→ check that the file is readable, then run the command again.[/]");
             return Failed;
         }
 
@@ -161,7 +171,7 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         }
         catch (InvalidDataException ex)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(configPath)}' has an invalid " +
                 $"onboarding configuration: {Markup.Escape(ex.Message)}");
             return Failed;
@@ -171,14 +181,14 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
 
         try
         {
-            AtomicFile.WriteAllText(configPath, updated);
+            files.WriteAllTextAtomic(configPath, updated);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] '{Markup.Escape(configPath)}' could not be " +
                 $"written: {Markup.Escape(ex.Message)}");
-            AnsiConsole.MarkupLine("[grey]→ check that the file is writable, then run the command again.[/]");
+            console.MarkupLine("[grey]→ check that the file is writable, then run the command again.[/]");
             return Failed;
         }
 
@@ -196,9 +206,9 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
     private int RefreshRegistry(string root)
     {
         string agentsPath = Path.Combine(root, AgentsFile);
-        if (!File.Exists(agentsPath))
+        if (!files.FileExists(agentsPath))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[yellow]warn[/] {AgentsFile} does not exist, so no Config Reg block was written. Agents " +
                 "read the setting from that block: run 'kyber-weave docs init .' to create it.");
             return 0;
@@ -206,7 +216,7 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
 
         if (IsSymlink(agentsPath))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] the answer was recorded, but '{Markup.Escape(agentsPath)}' " +
                 "is a symbolic link. Refusing to write through a link.");
             return Failed;
@@ -215,7 +225,7 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         KyberWeaveConfigLoadResult loaded = configs.TryLoad(root);
         if (!loaded.Success || loaded.Config is null)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] the configuration could not be reloaded, so the Config Reg block in " +
                 $"{AgentsFile} was left as it was: {Markup.Escape(loaded.Error ?? "unknown error")}");
             return Failed;
@@ -225,7 +235,7 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         string updated;
         try
         {
-            existing = File.ReadAllText(agentsPath);
+            existing = files.ReadAllText(agentsPath);
             KyberWeaveConfig config = loaded.Config;
             updated = ConfigRegMarkdown.Splice(
                 existing,
@@ -235,10 +245,10 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] the answer was recorded, but the Config Reg " +
                 $"block in {AgentsFile} could not be refreshed: {Markup.Escape(ex.Message)}");
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[grey]→ fix what the message names and run 'kyber-weave docs init .', which rewrites the " +
                 "block from the configuration.[/]");
             return Failed;
@@ -249,36 +259,35 @@ public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) :
 
         try
         {
-            AtomicFile.WriteAllText(agentsPath, updated);
+            files.WriteAllTextAtomic(agentsPath, updated);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(CommandName)}: error:[/] the answer was recorded, but {AgentsFile} " +
                 $"could not be written: {Markup.Escape(ex.Message)}");
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[grey]→ check that the file is writable, then run 'kyber-weave docs init .' to refresh the " +
                 "Config Reg block.[/]");
             return Failed;
         }
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"Config Reg block in [grey]{AgentsFile}[/] refreshed, so agents read " +
             $"<{ConfigRegConfig.OnboardingProperty}> from it.");
         return 0;
     }
 
-    private static bool IsSymlink(string path)
+    private bool IsSymlink(string path)
     {
         try
         {
-            FileInfo info = new(path);
-            if (info.LinkTarget is not null)
+            if (files.GetLinkTarget(path) is not null)
                 return true;
 
-            if (File.Exists(path))
+            if (files.FileExists(path))
             {
-                FileAttributes attributes = File.GetAttributes(path);
+                FileAttributes attributes = files.GetAttributes(path);
                 return attributes.HasFlag(FileAttributes.ReparsePoint);
             }
 

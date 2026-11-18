@@ -55,7 +55,7 @@ public sealed class DocsInitProvisionTests : IDisposable
     public void DocsInit_WithProvision_UsesTheInjectedDoctor()
     {
         FakeRepositoryDoctor doctor = new();
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor, ConfigFileReader.Repository);
+        DocsInitCommand command = DocsTestCommands.Init(doctor);
         DocsInitSettings settings = new()
         {
             Path = _repo.Path,
@@ -84,11 +84,7 @@ public sealed class DocsInitProvisionTests : IDisposable
     {
         ScriptedProcessExecutor executor = new(_ => DoctorHarness.Ok());
         FakeRepositoryDoctor doctor = new();
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor, ConfigFileReader.Repository)
-        {
-            Executor = executor,
-            McpExecutable = "kyber-weave-mcp-stub",
-        };
+        DocsInitCommand command = DocsTestCommands.Init(doctor, executor: executor, mcpExecutable: "kyber-weave-mcp-stub");
         DocsInitSettings settings = new()
         {
             Path = _repo.Path,
@@ -105,8 +101,7 @@ public sealed class DocsInitProvisionTests : IDisposable
         Assert.Equal("codegraph", run.Options.CodeGraphExecutable);
         Assert.Equal("kyber-weave-mcp-stub", run.Options.McpExecutable);
         Assert.Same(executor, run.Executor);
-        Func<string, string?> expectedEnvironment = Environment.GetEnvironmentVariable;
-        Assert.Equal(expectedEnvironment, run.Environment);
+        Assert.Equal(Environment.GetEnvironmentVariable("PATH"), run.Environment("PATH"));
         Assert.Null(run.LockDirectory);
     }
 
@@ -122,7 +117,7 @@ public sealed class DocsInitProvisionTests : IDisposable
                 3,
                 [new DoctorCheck("codegraph.binary", false, "codegraph is missing", "install codegraph")]),
         };
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor, ConfigFileReader.Repository);
+        DocsInitCommand command = DocsTestCommands.Init(doctor);
         DocsInitSettings settings = new()
         {
             Path = _repo.Path,
@@ -153,11 +148,7 @@ public sealed class DocsInitProvisionTests : IDisposable
         using TempDirectory stubs = new();
         string repo = _repo.Path;
         ScriptedProcessExecutor executor = DoctorHarness.Executor(repo);
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, DoctorTestServices.Doctor, ConfigFileReader.Repository)
-        {
-            Executor = executor,
-            McpExecutable = DoctorHarness.HealthyStub(stubs.Path, repo),
-        };
+        DocsInitCommand command = DocsTestCommands.Init(DoctorTestServices.Doctor, executor: executor, mcpExecutable: DoctorHarness.HealthyStub(stubs.Path, repo));
         DocsInitSettings settings = new()
         {
             Path = repo,
