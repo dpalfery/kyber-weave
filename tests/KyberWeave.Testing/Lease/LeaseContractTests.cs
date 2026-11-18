@@ -79,29 +79,6 @@ public abstract class LeaseContractTests
     }
 
     [Fact]
-    public void TakesALeaseReleasedInsideTheTimeout()
-    {
-        ILease lease = CreateLease();
-        string name = NewName();
-        IDisposable held = lease.Acquire(name, GenerousTimeout);
-        Thread releaser = new(() =>
-        {
-            Thread.Sleep(TimeSpan.FromMilliseconds(50));
-            held.Dispose();
-        })
-        {
-            IsBackground = true
-        };
-
-        releaser.Start();
-        using (lease.Acquire(name, GenerousTimeout))
-        {
-        }
-
-        _ = releaser.Join(TimeSpan.FromSeconds(30));
-    }
-
-    [Fact]
     public void RefusesALeaseThatASecondSeamInstanceHolds()
     {
         (ILease holder, ILease contender) = CreateTwoLeasesOnOneMachine();

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using KyberWeave.Contracts.Host;
 
 namespace KyberWeave.Tests.Fakes;
@@ -9,45 +10,11 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 public sealed class InProcessLeaseHost
 {
-    private readonly object _gate = new();
-    private readonly HashSet<string> _held = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, byte> _held = new(StringComparer.Ordinal);
 
-    internal bool TryTake(string name, TimeSpan timeout)
-    {
-        lock (_gate)
-        {
-            if (_held.Add(name))
-            {
-                return true;
-            }
+    internal bool TryTake(string name) => _held.TryAdd(name, 0);
 
-            long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
-            while (_held.Contains(name))
-            {
-                long remaining = deadline - Environment.TickCount64;
-                if (remaining <= 0)
-                {
-                    return false;
-                }
-
-                _ = Monitor.Wait(_gate, TimeSpan.FromMilliseconds(remaining));
-            }
-
-            _ = _held.Add(name);
-            return true;
-        }
-    }
-
-    internal void Release(string name)
-    {
-        lock (_gate)
-        {
-            if (_held.Remove(name))
-            {
-                Monitor.PulseAll(_gate);
-            }
-        }
-    }
+    internal bool TryRelease(string name) => _held.TryRemove(name, out _);
 }
 
 /// <summary>The one fake for <see cref="ILease"/>: a lease table shared by every instance built from one host.</summary>
@@ -58,7 +25,9 @@ public sealed class InProcessLeaseHost
 /// instances built without a host share nothing, so tests that run in parallel cannot block or refuse each other.
 /// </para>
 /// <para>
-/// A request waits for the current owner to release, up to its timeout, as <see cref="ILease"/> documents.
+/// A request from an instance whose peer on the same host holds the name is refused at once, as the adapter refuses a
+/// request from the process that already holds the name. Only an owner in another process makes the adapter wait out
+/// the timeout, and a unit test cannot model that second process.
 /// </para>
 /// </remarks>
 public sealed class InProcessLease : ILease
@@ -85,7 +54,7 @@ public sealed class InProcessLease : ILease
         _ = LeaseNames.Validate(name);
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
 
-        if (!_host.TryTake(name, timeout))
+        if (!_host.TryTake(name))
         {
             throw new LeaseTimeoutException(name, timeout);
         }
@@ -100,7 +69,7 @@ public sealed class InProcessLease : ILease
     public IDisposable Hold(string name)
     {
         _ = LeaseNames.Validate(name);
-        return _host.TryTake(name, TimeSpan.Zero)
+        return _host.TryTake(name)
             ? new HeldLease(_host, name)
             : throw new InvalidOperationException($"The lease '{name}' is already held.");
     }
@@ -117,7 +86,7 @@ public sealed class InProcessLease : ILease
             }
 
             _disposed = true;
-            host.Release(name);
+            _ = host.TryRelease(name);
         }
     }
 }
