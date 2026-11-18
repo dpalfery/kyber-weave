@@ -114,6 +114,9 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
     /// <summary>The confidence recorded for every answered rule without an explicit score; null records no score.</summary>
     internal double? Confidence { get; init; }
 
+    /// <summary>The score recorded for every answered rule without an explicit score; wins over <see cref="Confidence"/>.</summary>
+    internal ArbiterStep1Score? ScoreForAll { get; init; }
+
     /// <summary>The threshold recorded in a computed score; the rule's own floor or ceiling when null.</summary>
     internal double? Threshold { get; init; }
 
@@ -203,6 +206,11 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
         if (Scores.TryGetValue(rule.Id, out ArbiterStep1Score? explicitScore))
         {
             return explicitScore;
+        }
+
+        if (ScoreForAll is not null)
+        {
+            return ScoreForAll;
         }
 
         return Confidence is { } confidence

@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -33,27 +34,6 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     }
 
     private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
-
-    /// <summary>Records every batch it receives and answers each question within the task.</summary>
-    private sealed class RecordingProvider : IArbiterProvider
-    {
-        private readonly List<int> _batchSizes = [];
-
-        public IReadOnlyList<int> BatchSizes => _batchSizes;
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            _batchSizes.Add(rules.Count);
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => "within-task", StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true));
-        }
-    }
 
     /// <summary>Supplies the list fact the rule expands over.</summary>
     private sealed class FileListPlanReader : IArbiterPlanReader
@@ -118,7 +98,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     [Fact]
     public async Task ForEachOverListFact_ExpandsToOneQuestionPerItemInOneBatch()
     {
-        RecordingProvider provider = new();
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering("within-task");
         ArbiterEvaluator evaluator = new(
             provider,
             _ => null,
@@ -141,7 +121,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     public async Task ForEachEntries_EachRecordsItsCandidateInListOrder()
     {
         ArbiterEvaluator evaluator = new(
-            new RecordingProvider(),
+            FakeArbiterProvider.Answering("within-task"),
             _ => null,
             new InFlightLedger(ArbiterDirectory),
             new DecisionLog(ArbiterDirectory),

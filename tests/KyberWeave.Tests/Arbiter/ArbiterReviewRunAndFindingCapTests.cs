@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -52,28 +53,6 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
-
-    /// <summary>Answers every step-1 question with one answer per finding id, and counts the requests made.</summary>
-    private sealed class PerFindingAnswers(string answerForAll) : IArbiterProvider
-    {
-        public int CallCount { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            CallCount++;
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => answerForAll, StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => new ArbiterStep1Score(null, 0.9, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true, scores));
-        }
-    }
 
     private sealed class PassThroughGitFacts : IArbiterGitFacts
     {
@@ -154,7 +133,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     [Fact]
     public async Task ALensReturnWithNoReviewRunHeaderIsJudgedAndNotedWithoutPersisting()
     {
-        PerFindingAnswers provider = new(Nitpick);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85);
 
         await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturn(string.Empty, MinorFinding), Config());
 
@@ -197,7 +176,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     [Fact]
     public async Task TheSameReviewRunSharesOneStoreAndADifferentOneDoesNot()
     {
-        PerFindingAnswers provider = new(Substantive);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Substantive, 0.9, threshold: 0.85);
         ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
 
         await evaluator.EvaluateAsync(LensReturnWithRun(ReviewRun, MinorFinding), Config());
@@ -210,7 +189,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
 
     private async Task AssertStoredUnderOwnKeyAsync(string reviewRun)
     {
-        PerFindingAnswers provider = new(Substantive);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Substantive, 0.9, threshold: 0.85);
 
         await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(reviewRun, MinorFinding), Config());
 
@@ -233,7 +212,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     {
         int total = StateBudget.MaxQuestions + 3;
         string findings = string.Join("\n", Enumerable.Range(1, total).Select(Finding));
-        PerFindingAnswers provider = new(Nitpick);
+        FakeArbiterProvider provider = FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85);
 
         await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(ReviewRun, findings), Config());
 

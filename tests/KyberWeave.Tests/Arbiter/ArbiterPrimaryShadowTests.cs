@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -37,25 +38,6 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
     }
 
     private string ArbiterDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
-
-    /// <summary>Answers per rule id from a fixed script; the step-1 questions are the only provider calls.</summary>
-    private sealed class ScriptedProvider : IArbiterProvider
-    {
-        public IReadOnlyDictionary<string, string> AnswerByRuleId { get; init; } =
-            new Dictionary<string, string>(StringComparer.Ordinal);
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = rules
-                .Where(rule => AnswerByRuleId.ContainsKey(rule.Id))
-                .ToDictionary(rule => rule.Id, rule => AnswerByRuleId[rule.Id], StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true));
-        }
-    }
 
     /// <summary>Adds the review facts a git read would add to a lens spawn: a Markdown-only change.</summary>
     private sealed class MarkdownOnlyGitFacts : IArbiterGitFacts
@@ -161,10 +143,7 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
     [Fact]
     public async Task ShadowPrimaryChoiceRule_DoesNotEscalateAndRecordsWouldEffect()
     {
-        ScriptedProvider provider = new()
-        {
-            AnswerByRuleId = new Dictionary<string, string>(StringComparer.Ordinal) { [ChoiceRuleId] = "bad" },
-        };
+        FakeArbiterProvider provider = new() { Answers = { [ChoiceRuleId] = "bad" } };
         KyberWeaveConfig config = ConfigWith([
             ChoiceRule(ChoiceRuleId, "bad", RuleEffects.Escalate, shadow: true),
         ]);
@@ -191,7 +170,7 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
     {
         KyberWeaveConfig config = LensOnlyConfig(shadow: true);
 
-        ArbiterEvaluationResult result = await CreateEvaluator(new ScriptedProvider(), new MarkdownOnlyGitFacts())
+        ArbiterEvaluationResult result = await CreateEvaluator(new FakeArbiterProvider(), new MarkdownOnlyGitFacts())
             .EvaluateAsync(LensEvent(), config);
 
         Assert.NotEqual(RuleEffects.Skip, result.Outcome);
@@ -212,7 +191,7 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
     {
         KyberWeaveConfig config = LensOnlyConfig(shadow: false);
 
-        ArbiterEvaluationResult result = await CreateEvaluator(new ScriptedProvider(), new MarkdownOnlyGitFacts())
+        ArbiterEvaluationResult result = await CreateEvaluator(new FakeArbiterProvider(), new MarkdownOnlyGitFacts())
             .EvaluateAsync(LensEvent(), config);
 
         Assert.Equal(RuleEffects.Skip, result.Outcome);

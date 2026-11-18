@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -39,37 +40,12 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     /// </summary>
     private const string Asked = ArbiterStep1BatchResult.NotEvaluated;
 
-    /// <summary>Answers the scripted rules with high confidence and leaves every other question unevaluated.</summary>
-    private sealed class ScriptedProvider : IArbiterProvider
+    private readonly FakeArbiterProvider _provider = new()
     {
-        public Dictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
-
-        /// <summary>The facts sent with each call, in call order.</summary>
-        public List<ArbiterFactSet> FactsSent { get; } = [];
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            FactsSent.Add(facts);
-            return Task.FromResult(new ArbiterStep1BatchResult(
-                rules.ToDictionary(
-                    rule => rule.Id,
-                    rule => Answers.TryGetValue(rule.Id, out string? answer) ? answer : ArbiterStep1BatchResult.NotEvaluated,
-                    StringComparer.Ordinal),
-                "stub",
-                null,
-                true,
-                rules.ToDictionary(
-                    rule => rule.Id,
-                    rule => new ArbiterStep1Score(null, 0.95, rule.Ask?.ConfidenceAtLeast),
-                    StringComparer.Ordinal)));
-        }
-    }
-
-    private readonly ScriptedProvider _provider = new();
+        DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+        Confidence = 0.95,
+        Model = "stub",
+    };
 
     private sealed class NoGitFacts : IArbiterGitFacts
     {

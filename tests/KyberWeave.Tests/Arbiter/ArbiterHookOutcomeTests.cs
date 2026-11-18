@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -39,25 +40,6 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     public void Dispose() => _repo.Dispose();
 
     private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
-
-    /// <summary>Answers every step-1 question with one answer and one confidence, so each finding's answer is the same.</summary>
-    private sealed class UniformProvider(string answer, double confidence, double floor) : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => answer, StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => new ArbiterStep1Score(null, confidence, floor), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true, scores));
-        }
-    }
 
     private sealed class PassThroughGitFacts : IArbiterGitFacts
     {
@@ -108,7 +90,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public void AnEnforcedTriageAnswerDeniesTheWorkerWithItsSubstituteDigest()
     {
-        HookOutcome outcome = Engine(new UniformProvider(Trivial, 0.95, 0.9)).DecidePreDispatch(
+        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Trivial, 0.95, threshold: 0.9)).DecidePreDispatch(
             "claude",
             "bug-crusher",
             "bug-crusher-investigator",
@@ -125,7 +107,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public void AShadowTriageAnswerAllowsTheInvestigatorUnchanged()
     {
-        HookOutcome outcome = Engine(new UniformProvider(Trivial, 0.95, 0.9)).DecidePreDispatch(
+        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Trivial, 0.95, threshold: 0.9)).DecidePreDispatch(
             "claude",
             "bug-crusher",
             "bug-crusher-investigator",
@@ -148,7 +130,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     public void ADelegateEscalationWithAModelTargetingSecondaryIsStillDenied()
     {
         ArbiterRule difficulty = Raw("KW-ARB-DIFFICULTY-001");
-        HookOutcome outcome = Engine(new UniformProvider("names-plan", 0.95, 0.8)).DecidePreDispatch(
+        HookOutcome outcome = Engine(FakeArbiterProvider.Answering("names-plan", 0.95, threshold: 0.8)).DecidePreDispatch(
             "copilot-cli",
             "conductor",
             "dev-medium",
@@ -167,7 +149,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public void AnEnforcedDropNamesEveryDroppedFindingInItsPostDispatchLine()
     {
-        HookOutcome outcome = Engine(new UniformProvider(Nitpick, 0.9, 0.85)).DecidePostDispatch(
+        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85)).DecidePostDispatch(
             "claude",
             "code-reviewer",
             "review-lens",
@@ -188,7 +170,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public void AShadowNitpickRuleAnnotatesNothing()
     {
-        HookOutcome outcome = Engine(new UniformProvider(Nitpick, 0.9, 0.85)).DecidePostDispatch(
+        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85)).DecidePostDispatch(
             "claude",
             "code-reviewer",
             "review-lens",
@@ -210,7 +192,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         ArbiterRunStore store = new(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
-        HookOutcome outcome = Engine(new UniformProvider(SameDefect, 0.95, 0.9)).DecidePreDispatch(
+        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
             "claude",
             "code-reviewer",
             "review-lens",
@@ -230,7 +212,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         ArbiterRunStore store = new(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
-        HookOutcome outcome = Engine(new UniformProvider(SameDefect, 0.95, 0.9)).DecidePreDispatch(
+        HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
             "claude",
             "code-reviewer",
             "review-lens",
