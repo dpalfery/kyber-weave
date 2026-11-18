@@ -212,6 +212,19 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
+    public void MacWriteRejectsANonAsciiKeyBeforeRunningSecurity()
+    {
+        FakeCredentialProcessRunner runner = new();
+        MacKeychainCredentialStore store = new(runner);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => store.Write("https://api.typesafe.ai", "sk-ünïcø∂é"));
+
+        Assert.Empty(runner.Calls);
+        Assert.Contains("ASCII", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void MacReadUsesExactArgvAndReturnsTrimmedStdout()
     {
         FakeCredentialProcessRunner runner = new();

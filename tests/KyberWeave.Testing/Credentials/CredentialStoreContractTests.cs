@@ -94,6 +94,34 @@ public abstract class CredentialStoreContractTests : IDisposable
     }
 
     [Fact]
+    public void ReadsBackAnyKeyItAccepts()
+    {
+        ICredentialStore store = NewStore();
+        string[] candidates =
+        [
+            "sk-plain-0005",
+            "sk-live \"a b\" \\c-d_e",
+            "sk-ünïcø∂é",
+        ];
+
+        foreach (string key in candidates)
+        {
+            string origin = NewOrigin();
+            try
+            {
+                store.Write(origin, key);
+            }
+            catch (ArgumentException)
+            {
+                // A store may refuse a key it cannot carry; it must never accept one it cannot read back.
+                continue;
+            }
+
+            Assert.Equal(key, store.Read(origin));
+        }
+    }
+
+    [Fact]
     public void WritingASecondKeyForOneOriginReplacesTheFirst()
     {
         ICredentialStore store = NewStore();
