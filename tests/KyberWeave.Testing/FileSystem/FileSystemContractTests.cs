@@ -320,6 +320,16 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void GetFinalLinkTargetOfADanglingLinkIsNull()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string dangling = At(root, "dangling.txt");
+        files.CreateFileLink(dangling, At(root, "missing-target.txt"));
+
+        Assert.Null(files.GetFinalLinkTarget(dangling));
+    }
+
+    [Fact]
     public void WriteAllTextReplacesAnEarlierFile()
     {
         IWritableFileSystem files = Starting(out string root);

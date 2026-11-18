@@ -163,7 +163,8 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
 
         try
         {
-            return info.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
+            FileSystemInfo? target = info.ResolveLinkTarget(returnFinalTarget: true);
+            return target is not null && Path.Exists(target.FullName) ? target.FullName : null;
         }
         catch (IOException)
         {

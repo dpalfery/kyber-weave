@@ -69,7 +69,15 @@ internal sealed class PhysicalTestFileSystem : IFileSystem
             }
         }
 
-        return info.ResolveLinkTarget(returnFinalTarget: true)?.FullName;
+        try
+        {
+            FileSystemInfo? target = info.ResolveLinkTarget(returnFinalTarget: true);
+            return target is not null && Path.Exists(target.FullName) ? target.FullName : null;
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive, bool followLinks) =>
