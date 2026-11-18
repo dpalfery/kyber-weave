@@ -35,22 +35,33 @@ public sealed class FakeConsole : IConsole
     public string? ReadLine() => _input.Count > 0 ? _input.Dequeue() : null;
 
     /// <summary>Supplies the lines <see cref="ReadLine"/> returns, in order, before it reports the end of input.</summary>
-    /// <param name="text">The input text; each <c>\n</c> ends a line and a leading <c>\r</c> is dropped.</param>
+    /// <param name="text">The input text. A carriage return, a line feed or the pair ends a line, as a real console does.</param>
     /// <returns>This fake, for chaining.</returns>
     public FakeConsole ScriptInput(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
 
-        string[] lines = text.Split('\n');
-        int count = lines.Length;
-        if (count > 0 && lines[count - 1].Length == 0)
+        int start = 0;
+        for (int index = 0; index < text.Length; index++)
         {
-            count--;
+            char current = text[index];
+            if (current is not ('\r' or '\n'))
+            {
+                continue;
+            }
+
+            _input.Enqueue(text[start..index]);
+            if (current == '\r' && index + 1 < text.Length && text[index + 1] == '\n')
+            {
+                index++;
+            }
+
+            start = index + 1;
         }
 
-        for (int index = 0; index < count; index++)
+        if (start < text.Length)
         {
-            _input.Enqueue(lines[index].TrimEnd('\r'));
+            _input.Enqueue(text[start..]);
         }
 
         return this;

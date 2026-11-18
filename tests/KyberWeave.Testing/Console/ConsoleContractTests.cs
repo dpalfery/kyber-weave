@@ -92,6 +92,18 @@ public abstract class ConsoleContractTests : IDisposable
         Assert.Equal("only", console.ReadLine());
         Assert.Null(console.ReadLine());
     }
+
+    [Fact]
+    public void ReadsLinesEndedByEveryKindOfLineBreak()
+    {
+        IConsole console = CreateConsole();
+        FeedInput(console, "carriage\rnewline\nboth\r\n");
+
+        Assert.Equal("carriage", console.ReadLine());
+        Assert.Equal("newline", console.ReadLine());
+        Assert.Equal("both", console.ReadLine());
+        Assert.Null(console.ReadLine());
+    }
 }
 
 /// <summary>What reached each of the console's two writers.</summary>
