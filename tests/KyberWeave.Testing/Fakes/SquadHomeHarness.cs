@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Rendering;
@@ -24,7 +25,7 @@ internal sealed class SquadHomeHarness : IDisposable
         Directory.CreateDirectory(Home);
         Directory.CreateDirectory(GlobalRootsDirectory);
         UserPaths = FakeSquadUserPaths.UnderTemp(ApplicationData, Home);
-        Store = new SquadStateStore(UserPaths);
+        Store = RealSquadState.Store(UserPaths);
         ReleaseSource = new SyntheticValidSquadReleaseSource();
         GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
     }

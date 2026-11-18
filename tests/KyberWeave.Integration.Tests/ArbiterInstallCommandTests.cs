@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Cli;
@@ -364,7 +365,7 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-e2e"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using ArbiterTestHost e2eHost = ArbiterTestHost.Create(services =>
         {
             RegisterFakes(services);
@@ -654,7 +655,7 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
             "squad.receipt.json");
         Assert.True(File.Exists(receiptPath), $"Expected one global receipt at '{receiptPath}'.");
 
-        SquadStateStore reader = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "cli-receipt-reader")));
+        SquadStateStore reader = RealSquadState.Store(new FakeSquadUserPaths(Path.Combine(_temp.Path, "cli-receipt-reader")));
         SquadReceipt receipt = reader.DeserializeReceipt(File.ReadAllText(receiptPath));
 
         Assert.Equal(SquadDeploymentScope.Global, receipt.Scope);

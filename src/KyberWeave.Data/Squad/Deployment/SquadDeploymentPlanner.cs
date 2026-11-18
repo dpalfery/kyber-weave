@@ -456,10 +456,10 @@ public static class SquadDeploymentPlanner
         // so it serializes byte-identical to every block-less receipt. A global receipt
         // that keeps at least one block stays on v3.
         string retainedSchema = retainedBlocks.Count > 0
-            ? SquadStateStore.ReceiptSchemaV3
+            ? SquadStateSchemas.ReceiptSchemaV3
             : scope == SquadDeploymentScope.Global
-                ? SquadStateStore.ReceiptSchemaV2
-                : SquadStateStore.ReceiptSchemaV1;
+                ? SquadStateSchemas.ReceiptSchemaV2
+                : SquadStateSchemas.ReceiptSchemaV1;
         SquadReceipt retainedReceipt = receipt with
         {
             Files = retained,
@@ -657,7 +657,7 @@ public static class SquadDeploymentPlanner
     /// <summary>
     ///     Builds the receipt a plan will write. A project receipt records the canonical physical root it
     ///     was planned against. A global receipt cannot, because the home anchor is known only to the
-    ///     store, so it carries <see cref="SquadStateStore.UnanchoredTargetRoot" /> until the transaction
+    ///     store, so it carries <see cref="SquadStateSchemas.UnanchoredTargetRoot" /> until the transaction
     ///     anchors it at write time.
     /// </summary>
     private static SquadReceipt NewReceipt(
@@ -673,12 +673,12 @@ public static class SquadDeploymentPlanner
         // regardless of whether the scope is project or global; everything else keeps the
         // pre-block schema (v1, with Global upgrading to v2 at write time).
         string schema = blocks.Count > 0 && scope != SquadDeploymentScope.Instance
-            ? SquadStateStore.ReceiptSchemaV3
-            : SquadStateStore.ReceiptSchemaV1;
+            ? SquadStateSchemas.ReceiptSchemaV3
+            : SquadStateSchemas.ReceiptSchemaV1;
         return new SquadReceipt(
             schema,
             scope,
-            scope == SquadDeploymentScope.Global ? SquadStateStore.UnanchoredTargetRoot : physicalRoot,
+            scope == SquadDeploymentScope.Global ? SquadStateSchemas.UnanchoredTargetRoot : physicalRoot,
             timeProvider.GetUtcNow(),
             degradations.ToArray(),
             ownedFiles.ToArray())
@@ -712,7 +712,7 @@ public static class SquadDeploymentPlanner
         {
             throw new SquadDeploymentConflictException(
                 $"Squad hook blocks cannot be {operation} under '{scope}' scope: " +
-                $"'{SquadStateStore.ReceiptSchemaV3}' receipts are written for project and global scope only.");
+                $"'{SquadStateSchemas.ReceiptSchemaV3}' receipts are written for project and global scope only.");
         }
     }
 

@@ -1,3 +1,5 @@
+using KyberWeave.Data.Hooks;
+using KyberWeave.Testing.Squad;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
@@ -799,7 +801,7 @@ public sealed class SquadStateMigrationTests
         File.SetUnixFileMode(path, UnixFileMode.None);
         try
         {
-            SquadMigrationLedger ledger = SquadMigrationLedger.Read(path, out string? unreadableReason);
+            SquadMigrationLedger ledger = SquadMigrationLedger.Read(new PhysicalFileSystem(), path, out string? unreadableReason);
 
             Assert.NotNull(unreadableReason);
             Assert.Empty(ledger.GlobalMigratedFrom);
@@ -822,8 +824,8 @@ public sealed class SquadStateMigrationTests
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(home);
         FakeSquadUserPaths userPaths = new(applicationData, home);
-        SquadStateStore store = new(userPaths);
-        return new MigrationScenario(home, applicationData, store, new SquadStateMigration(store, userPaths));
+        SquadStateStore store = RealSquadState.Store(userPaths);
+        return new MigrationScenario(home, applicationData, store, RealSquadState.Migration(store, userPaths));
     }
 
     private static string LegacyGlobalDirectory(MigrationScenario scenario, string root) =>
@@ -893,7 +895,7 @@ public sealed class SquadStateMigrationTests
 
     private static SquadReceipt GlobalReceipt(SquadReceiptLayout layout, params SquadOwnedFile[] files) =>
         new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Global,
             ".",
             InstalledAt,
@@ -905,7 +907,7 @@ public sealed class SquadStateMigrationTests
 
     private static SquadReceipt ProjectReceipt(params SquadOwnedFile[] files) =>
         new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Project,
             ".",
             InstalledAt,

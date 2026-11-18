@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad;
@@ -29,7 +30,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
@@ -66,7 +67,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedDeployment(targetDir, stateStore, (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
         SquadUpdateCommand command = SquadTestCommands.Update(
@@ -107,7 +108,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
@@ -141,7 +142,7 @@ public sealed class SquadArbiterCliTests : IDisposable
     {
         string targetRoot = NewDir("arbiter-lifecycle-global");
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -201,7 +202,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
@@ -245,7 +246,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
@@ -279,7 +280,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedDeployment(targetDir, stateStore, (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
         SquadUpdateCommand command = SquadTestCommands.Update(
@@ -460,7 +461,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedReceipt(workingDir, stateStore, SquadDeploymentScope.Global);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
@@ -491,7 +492,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedReceipt(workingDir, stateStore, SquadDeploymentScope.Project);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()

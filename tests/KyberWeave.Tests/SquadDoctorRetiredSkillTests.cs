@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -86,7 +87,7 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
         string workingDir = Path.Combine(_temp.Path, "doctor-retired-corrupt");
         Directory.CreateDirectory(workingDir);
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         string receiptPath = stateStore.ResolveReceiptPath(workingDir, SquadDeploymentScope.Project);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         File.WriteAllText(receiptPath, "{ not json", Encoding.UTF8);
@@ -120,7 +121,7 @@ public sealed class SquadDoctorRetiredSkillTests : IDisposable
     private void SeedProjectReceipt(string targetRoot, string relativePath, byte[] content)
     {
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Project);
         string lockPath = stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Project);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);

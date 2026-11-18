@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -285,7 +286,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"decline-{verb}-user"));
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         if (verb == "update")
         {
             SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -377,7 +378,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"echo-root-{verb}-user"));
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         if (verb is "update" or "uninstall")
         {
             SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -507,7 +508,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         Directory.CreateDirectory(claudeGlobalRoot);
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"global-echo-{verb}-user"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         if (verb is "update" or "uninstall")
         {
             // Update and uninstall cannot reach their gates without an existing global

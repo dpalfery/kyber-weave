@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -352,7 +353,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
         FakeGlobalRootResolver globalRoots = new(globalHome);
         FakeSquadLinkFileSystem linkFileSystem = new();
         SquadModelPresetStore presetStore = new(userPaths);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         FakeSquadReleaseSource releaseSource = new()
         {

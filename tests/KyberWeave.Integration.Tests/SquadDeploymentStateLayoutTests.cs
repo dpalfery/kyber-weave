@@ -47,7 +47,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
 
         // The planner cannot know the home anchor, so it records the unanchored marker. The transaction
         // stamps the physical home on the plan as it writes, which is what this test asserts afterwards.
-        Assert.Equal(SquadStateStore.UnanchoredTargetRoot, plan.Receipt.TargetRoot);
+        Assert.Equal(SquadStateSchemas.UnanchoredTargetRoot, plan.Receipt.TargetRoot);
         new SquadTransaction(store).Execute(plan);
 
         string stateDirectory = store.ResolveStateDirectory(
@@ -177,7 +177,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         // persisted and re-read differs from the plan's own v1-labeled in-memory receipt only
         // in that one field.
         AssertReceiptEqual(
-            plan.Receipt with { Schema = SquadStateStore.ReceiptSchemaV2 },
+            plan.Receipt with { Schema = SquadStateSchemas.ReceiptSchemaV2 },
             Assert.IsType<SquadReceipt>(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Global)));
 
         SquadStatusCommand command = SquadTestCommands.Status(stateStore: store, globalRoots: globalRoots);

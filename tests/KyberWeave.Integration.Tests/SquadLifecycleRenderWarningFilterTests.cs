@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -433,7 +434,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 
             FakeSquadRenderer renderer = FakeSquadRenderer.Wrapping(SquadTestRegistry.Create([new CopilotRenderer()]));
             FakeSquadUserPaths userPaths = new(userHome);
-            SquadStateStore store = new(userPaths);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             using ISquadReleaseSource releaseSource = ReleaseSource(kind, paddingCharacters);
             SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
                 releaseSource,
@@ -590,7 +591,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
                 SquadInstallCopy.Canonical(harness.UserHome));
             SquadInstallCopy.ReRoot(stateDirectory, templateCopilotHome, copyCopilotHome);
 
-            SquadStateStore store = new(new FakeSquadUserPaths(harness.UserHome));
+            SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(harness.UserHome));
             _ = SquadInstallCopy.ReRootDeployed(
                 harness.CopilotHome,
                 store.ResolveReceiptPath(harness.Anchor, SquadDeploymentScope.Global),
@@ -608,7 +609,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             Anchor = anchor;
             CopilotHome = copilotHome;
             UserHome = userHome;
-            Store = new SquadStateStore(new FakeSquadUserPaths(userHome));
+            Store = RealSquadState.Store(new FakeSquadUserPaths(userHome));
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
             Renderer = FakeSquadRenderer.Wrapping(SquadTestRegistry.Create([new CopilotRenderer()]));
             Oversized = PaddedCorpus(OversizedPadding());

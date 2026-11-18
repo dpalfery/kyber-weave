@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -55,7 +56,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
         Directory.CreateDirectory(home);
 
         FakeSquadUserPaths userPaths = new(applicationData, home);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         TempGlobalRoots roots = new(globalRootsDirectory);
         string guidancePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
 
@@ -175,7 +176,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
             File.WriteAllBytes(guidancePath, homeGuidance);
 
             FakeSquadUserPaths userPaths = new(applicationData, home);
-            SquadStateStore store = new(userPaths);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             TempGlobalRoots roots = new(globalRoots);
             using FakeSquadReleaseSource prior = SeededPriorRelease();
             SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(
@@ -247,7 +248,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
                 SquadInstallCopy.Canonical(home),
                 SquadInstallCopy.Canonical(userPaths.HomeDirectory));
 
-            SquadStateStore store = new(userPaths);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             string receiptPath = store.ResolveReceiptPath(destinationAnchor, SquadDeploymentScope.Global);
             foreach (SquadTarget target in Targets)
             {

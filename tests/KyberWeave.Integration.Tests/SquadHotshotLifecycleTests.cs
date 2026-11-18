@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -50,7 +51,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
 
         string obsoleteFile = ResolveTargetPath(targetRoot, ObsoletePath);
         Assert.True(File.Exists(obsoleteFile));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadReceipt priorReceipt = Assert.IsType<SquadReceipt>(
             stateStore.ReadReceipt(targetRoot, SquadDeploymentScope.Project));
         Assert.Contains(priorReceipt.Files, file =>
@@ -118,7 +119,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
             string projectRoot = Path.Combine(directory.Path, "project");
             Directory.CreateDirectory(projectRoot);
             FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user-data"));
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             using FakeSquadReleaseSource releaseSource = new();
             SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
                 releaseSource,

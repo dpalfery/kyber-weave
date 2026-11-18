@@ -185,7 +185,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     public override string Root => _temp.Path;
 
     /// <inheritdoc />
-    public override SquadStateStore StateStore => new(new FakeSquadUserPaths(Root));
+    public override SquadStateStore StateStore => RealSquadState.Store(new FakeSquadUserPaths(Root));
 
     /// <inheritdoc />
     public override SquadDeploymentScope Scope => SquadDeploymentScope.Project;
@@ -383,7 +383,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 
     private SquadReceipt BaselineReceipt() =>
         new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Project,
             ".",
             InstalledAt,

@@ -71,7 +71,7 @@ public sealed class FileSquadDeploymentPlanner : ISquadDeploymentPlanner
 
 /// <summary>Creates deployment transactions over the state store.</summary>
 /// <param name="stateStore">The state store the transactions journal in.</param>
-public sealed class SquadTransactionFactory(SquadStateStore stateStore) : ISquadTransactionFactory
+public sealed class SquadTransactionFactory(ISquadStateStore stateStore) : ISquadTransactionFactory
 {
     /// <inheritdoc />
     public ISquadTransaction Create(ISquadTransactionObserver? observer) => new SquadTransaction(stateStore, observer);

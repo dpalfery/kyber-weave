@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -54,7 +55,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         WritePreset(userPaths, "zai", SamplePresetYaml);
         string digest = ComputeDigest(SamplePresetYaml);
@@ -92,7 +93,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, null,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
@@ -122,7 +123,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         WritePreset(userPaths, "zai", SamplePresetYaml);
         string initialDigest = ComputeDigest(SamplePresetYaml);
@@ -162,7 +163,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         Dictionary<SquadTarget, SquadAppliedPreset> presets = new()
         {
@@ -196,7 +197,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Directory.CreateDirectory(tempHome);
 
         FakeSquadUserPaths userPaths = new(tempHome);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         WritePreset(userPaths, "zai", SamplePresetYaml);
         string digest = ComputeDigest(SamplePresetYaml);
@@ -249,7 +250,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Directory.CreateDirectory(tempHome);
 
         FakeSquadUserPaths userPaths = new(tempHome);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         WritePreset(userPaths, "zai", SamplePresetYaml);
         string digest = ComputeDigest(SamplePresetYaml);
@@ -302,7 +303,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, null,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
@@ -366,14 +367,14 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         }
 
         SquadReceipt receipt = new(
-            scope == SquadDeploymentScope.Global ? SquadStateStore.ReceiptSchemaV2 : SquadStateStore.ReceiptSchemaV1,
+            scope == SquadDeploymentScope.Global ? SquadStateSchemas.ReceiptSchemaV2 : SquadStateSchemas.ReceiptSchemaV1,
             scope,
             targetRoot,
             DateTimeOffset.UtcNow,
             [],
             ownedFiles);
 
-        string schema = presets is { Count: > 0 } ? SquadStateStore.LockSchemaV2 : SquadStateStore.LockSchemaV1;
+        string schema = presets is { Count: > 0 } ? SquadStateSchemas.LockSchemaV2 : SquadStateSchemas.LockSchemaV1;
 
         SquadLock squadLock = new(
             schema,

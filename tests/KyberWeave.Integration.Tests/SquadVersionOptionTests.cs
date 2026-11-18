@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Net;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -37,7 +38,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
@@ -69,7 +70,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedDeployment(targetDir, stateStore);
         SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
@@ -102,7 +103,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
@@ -133,7 +134,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedDeployment(targetDir, stateStore);
         SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
@@ -180,7 +181,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,
@@ -230,7 +231,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedDeployment(targetDir, stateStore);
         SquadUpdateCommand command = SquadTestCommands.Update(
             userPaths: userPaths,
@@ -267,7 +268,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         using GitHubSquadReleaseSource releaseSource = RealSquadReleaseSource.Create(handler, ApiRoot);
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadInstallCommand command = SquadTestCommands.Install(
             userPaths: userPaths,
             stateStore: stateStore,

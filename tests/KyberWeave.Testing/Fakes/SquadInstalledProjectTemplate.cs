@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 
@@ -52,7 +53,7 @@ public sealed class SquadInstalledProjectTemplate : IDisposable
             _ = Directory.CreateDirectory(projectRoot);
 
             FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user-data"));
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             using FakeSquadReleaseSource releaseSource = new();
             SquadLifecycleService service =
                 SquadHostDefaults.CreateLifecycleService(releaseSource, new FakeSquadRenderer(), stateStore);

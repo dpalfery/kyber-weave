@@ -48,7 +48,12 @@ internal static class SquadHostDefaults
     public static SquadStateStore ResolveStateStore(
         ISquadUserPaths? userPaths = null,
         Func<string, string?>? environmentReader = null) =>
-        new(userPaths ?? ResolveUserPaths(null, environmentReader));
+        new(
+            userPaths ?? ResolveUserPaths(null, environmentReader),
+            new PhysicalFileSystem(),
+            SquadFileSystemPathSemantics.Instance,
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment());
 
     /// <summary>Creates the per-target global root resolver over the environment.</summary>
     public static ISquadGlobalRootResolver ResolveGlobalRoots(Func<string, string?>? environmentReader = null)

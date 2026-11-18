@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 using KyberWeave.Application.Squad;
 using KyberWeave.Cli.Commands.Squad;
@@ -83,7 +84,7 @@ public sealed class InstalledSquadHome : IDisposable
         {
             seed?.Invoke(directory.Path);
 
-            SquadStateStore store = new(new SquadHostDefaults.CliSquadUserPaths(directory.Path, directory.Path));
+            SquadStateStore store = RealSquadState.Store(new SquadHostDefaults.CliSquadUserPaths(directory.Path, directory.Path));
             ISquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(
                 SquadReleaseSources.LocalCheckout(CheckoutSourceRoot()),
                 SquadHostDefaults.ResolveRenderer(),
@@ -174,7 +175,7 @@ public sealed class InstalledSquadHome : IDisposable
     }
 
     private static SquadStateStore Store(string root) =>
-        new(new SquadHostDefaults.CliSquadUserPaths(root, root));
+        RealSquadState.Store(new SquadHostDefaults.CliSquadUserPaths(root, root));
 
     private string ResolveReceiptPath(string root) => ResolveReceiptPath(root, Scope);
 

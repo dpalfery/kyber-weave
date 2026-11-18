@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Diagnostics;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -846,7 +847,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             Directory.CreateDirectory(home);
             Directory.CreateDirectory(GlobalRootsDirectory);
             _userPaths = new FakeSquadUserPaths(applicationData, home);
-            _store = new SquadStateStore(_userPaths);
+            _store = RealSquadState.Store(_userPaths);
             _globalRoots = globalRoots ?? new TempGlobalRoots(GlobalRootsDirectory);
         }
 

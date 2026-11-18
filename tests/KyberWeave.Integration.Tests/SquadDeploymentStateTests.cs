@@ -554,7 +554,7 @@ public sealed class SquadDeploymentStateTests : SquadDeploymentStateTestBase
         // directly with the v1 literal, so the round-tripped schema is expected to differ from
         // what was passed to SerializeReceipt.
         AssertReceiptEqual(
-            receipt with { Schema = SquadStateStore.ReceiptSchemaV2 },
+            receipt with { Schema = SquadStateSchemas.ReceiptSchemaV2 },
             store.DeserializeReceipt(json));
     }
 
@@ -780,7 +780,7 @@ public sealed class SquadDeploymentStateTests : SquadDeploymentStateTestBase
                 // A Global receipt always serializes on the v2 schema (A3); Project stays on
                 // whatever schema the fixture already carries.
                 SquadReceipt expected = scope == SquadDeploymentScope.Global
-                    ? receipt with { Schema = SquadStateStore.ReceiptSchemaV2 }
+                    ? receipt with { Schema = SquadStateSchemas.ReceiptSchemaV2 }
                     : receipt;
                 AssertReceiptEqual(expected, store.DeserializeReceipt(serialized));
             }

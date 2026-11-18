@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Globalization;
 using System.Text;
@@ -7,22 +8,16 @@ using System.Text.Json.Serialization;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
+using static KyberWeave.Core.Squad.Deployment.SquadStateSchemas;
+
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Reads and writes the portable lock and ownership receipt for Squad deployments.</summary>
 public sealed class SquadStateStore : ISquadStateStore
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
-
     private const string LockFileName = "squad.lock.yml";
     private const string ReceiptFileName = "squad.receipt.json";
     private const string TransactionDirectoryName = ".squad-transaction";
-
-    /// <summary>Schema identifier for Squad lock v1 (unmodified portable locks without model presets).</summary>
-    public const string LockSchemaV1 = "kyber-squad.lock/v1";
-
-    /// <summary>Schema identifier for Squad lock v2 (recording active model presets per target).</summary>
-    public const string LockSchemaV2 = "kyber-squad.lock/v2";
 
     /// <summary>
     ///     The registry schema. Its entries are keyed by root key, so a registry rebuilt from
@@ -48,33 +43,6 @@ public sealed class SquadStateStore : ISquadStateStore
     /// </summary>
     private const string JournalRelativePath = ".kyber-weave/" + TransactionDirectoryName;
 
-    /// <summary>
-    ///     The receipt <c>targetRoot</c> a plan records before the transaction anchors it. Global
-    ///     receipts are anchored on the home, which only the store knows, so the planner writes this
-    ///     portable marker and the transaction replaces it at write time. Legacy receipts carry it too.
-    /// </summary>
-    public const string UnanchoredTargetRoot = ".";
-
-    /// <summary>
-    ///     The one receipt schema source (#91 / A3): project receipts stay on this schema forever,
-    ///     and it is also what a legacy Global receipt written before #91 carries.
-    /// </summary>
-    public const string ReceiptSchemaV1 = "kyber-squad.receipt/v1";
-
-    /// <summary>
-    ///     Written for Global receipts only, additive over v1 with a required <c>layout</c> field.
-    ///     An older CLI that predates this schema refuses it outright rather than misreading it.
-    /// </summary>
-    public const string ReceiptSchemaV2 = "kyber-squad.receipt/v2";
-
-    /// <summary>
-    /// Written for project receipts that own at least one hook-file block, additive over the
-    /// v1 project field set with a required <c>blocks</c> field. Receipts without blocks
-    /// stay byte-identical v1 or v2, as ADR 0024 requires. An older CLI that predates this
-    /// schema refuses it outright rather than misreading it.
-    /// </summary>
-    public const string ReceiptSchemaV3 = "kyber-squad.receipt/v3";
-
     private static readonly JsonWriterOptions ReceiptWriterOptions = new()
     {
         Indented = true,
@@ -91,10 +59,34 @@ public sealed class SquadStateStore : ISquadStateStore
     private static readonly IReadOnlyDictionary<string, SquadTarget> TargetsByCanonicalToken =
         SquadTargetCatalog.All.ToDictionary(SquadTargetCatalog.GetToken, t => t, StringComparer.Ordinal);
 
-    public SquadStateStore(ISquadUserPaths userPaths)
+    private readonly IWritableFileSystem _files;
+    private readonly IFileSystemPathSemantics _semantics;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+
+    /// <summary>Creates a store over the user paths, the file-system and path seams, and the process environment.</summary>
+    /// <param name="userPaths">The home and application-data directories the state is anchored to.</param>
+    /// <param name="files">The file system every state read and write goes through.</param>
+    /// <param name="semantics">The canonical spelling and alias rules the state locations are resolved with.</param>
+    /// <param name="paths">Turns a configured spelling into a full path.</param>
+    /// <param name="environment">The process environment; its working directory resolves a relative spelling.</param>
+    public SquadStateStore(
+        ISquadUserPaths userPaths,
+        IWritableFileSystem files,
+        IFileSystemPathSemantics semantics,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(semantics);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         UserPaths = userPaths;
+        _files = files;
+        _semantics = semantics;
+        _paths = paths;
+        _environment = environment;
     }
 
     /// <summary>
@@ -198,7 +190,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
-        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, Semantics));
+        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, _semantics));
         return ListProjectsWithoutRebuild()
             .FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
     }
@@ -223,13 +215,13 @@ public sealed class SquadStateStore : ISquadStateStore
                 continue;
 
             string receiptPath = Path.Combine(projectDirectory, ReceiptFileName);
-            if (!File.Exists(receiptPath))
+            if (!_files.FileExists(receiptPath))
                 continue;
 
             SquadReceipt receipt;
             try
             {
-                receipt = DeserializeReceipt(File.ReadAllText(receiptPath, Encoding.UTF8));
+                receipt = DeserializeReceipt(_files.ReadAllText(receiptPath));
             }
             catch (InvalidDataException)
             {
@@ -265,7 +257,7 @@ public sealed class SquadStateStore : ISquadStateStore
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(targets);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, _semantics);
         Dictionary<string, RegistryRecord> registry = ReadRegistry();
         registry[identity.Key] = new RegistryRecord(
             identity.PhysicalPath,
@@ -282,7 +274,7 @@ public sealed class SquadStateStore : ISquadStateStore
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
         string key = SquadPhysicalRootIdentity.KeyOf(
-            SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, Semantics));
+            SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, _semantics));
         Dictionary<string, RegistryRecord> registry = ReadRegistry();
         if (!registry.Remove(key))
             return false;
@@ -651,8 +643,8 @@ public sealed class SquadStateStore : ISquadStateStore
     public SquadReceipt? ReadReceipt(string targetRoot, SquadDeploymentScope scope)
     {
         string path = ResolveStateFile(targetRoot, scope, ReceiptFileName);
-        return File.Exists(path)
-            ? DeserializeReceipt(File.ReadAllText(path, Encoding.UTF8))
+        return _files.FileExists(path)
+            ? DeserializeReceipt(_files.ReadAllText(path))
             : null;
     }
 
@@ -660,8 +652,8 @@ public sealed class SquadStateStore : ISquadStateStore
     public SquadLock? ReadLock(string targetRoot, SquadDeploymentScope scope)
     {
         string path = ResolveStateFile(targetRoot, scope, LockFileName);
-        return File.Exists(path)
-            ? DeserializeLock(File.ReadAllText(path, Encoding.UTF8))
+        return _files.FileExists(path)
+            ? DeserializeLock(_files.ReadAllText(path))
             : null;
     }
 
@@ -686,12 +678,12 @@ public sealed class SquadStateStore : ISquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
-                SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath,
-                JournalRelativePath, Semantics),
-            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), JournalRelativePath, Semantics),
+                SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath,
+                JournalRelativePath, _semantics),
+            SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), JournalRelativePath, _semantics),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
                 ResolveInstanceStateDirectory(targetRoot),
-                TransactionDirectoryName, Semantics),
+                TransactionDirectoryName, _semantics),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
     }
@@ -736,7 +728,7 @@ public sealed class SquadStateStore : ISquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project =>
-                SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath,
+                SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath,
             SquadDeploymentScope.Global => ResolveHomeCreationBoundary(),
             SquadDeploymentScope.Instance =>
                 ResolveInstanceAuthorityRoot(targetRoot),
@@ -755,7 +747,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         return scope switch
         {
-            SquadDeploymentScope.Project => SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).Key,
+            SquadDeploymentScope.Project => SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).Key,
             SquadDeploymentScope.Global => SquadPhysicalRootIdentity.KeyOf(ResolveHomeRoot()),
             SquadDeploymentScope.Instance => ResolveInstanceLeaseIdentity(targetRoot),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
@@ -769,7 +761,7 @@ public sealed class SquadStateStore : ISquadStateStore
     public string ResolveHomeRoot()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(UserPaths.HomeDirectory);
-        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(UserPaths.HomeDirectory, Semantics);
+        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(UserPaths.HomeDirectory, _semantics);
     }
 
     /// <summary>
@@ -781,7 +773,7 @@ public sealed class SquadStateStore : ISquadStateStore
     private string ResolveHomeStateRoot()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(UserPaths.HomeDirectory);
-        return Path.TrimEndingDirectorySeparator(Path.GetFullPath(UserPaths.HomeDirectory));
+        return Path.TrimEndingDirectorySeparator(FullPath(UserPaths.HomeDirectory));
     }
 
     /// <summary>
@@ -797,7 +789,7 @@ public sealed class SquadStateStore : ISquadStateStore
 
     private string ResolveProjectStateDirectory(string targetRoot)
     {
-        string key = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).Key;
+        string key = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).Key;
         return ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}");
     }
 
@@ -805,10 +797,10 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         if (!string.IsNullOrWhiteSpace(targetRoot))
         {
-            string candidateRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot));
+            string candidateRoot = Path.TrimEndingDirectorySeparator(FullPath(targetRoot));
             string candidateDir = Path.Combine(candidateRoot, GlobalStateRelativeDirectory);
-            if (File.Exists(Path.Combine(candidateDir, ReceiptFileName)) ||
-                File.Exists(Path.Combine(candidateDir, LockFileName)))
+            if (_files.FileExists(Path.Combine(candidateDir, ReceiptFileName)) ||
+                _files.FileExists(Path.Combine(candidateDir, LockFileName)))
             {
                 return ResolveDirectoryUnder(candidateRoot, GlobalStateRelativeDirectory);
             }
@@ -832,9 +824,9 @@ public sealed class SquadStateStore : ISquadStateStore
                 $"Instance root '{targetRoot}' must be a fully qualified path.",
                 nameof(targetRoot));
 
-        string normalizedTargetRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(targetRoot));
+        string normalizedTargetRoot = Path.TrimEndingDirectorySeparator(FullPath(targetRoot));
         string instancesBase = Path.TrimEndingDirectorySeparator(
-            Path.GetFullPath(Path.Combine(ResolveHomeStateRoot(), ".kyber-weave", "squad", "instances")));
+            FullPath(Path.Combine(ResolveHomeStateRoot(), ".kyber-weave", "squad", "instances")));
 
         string relative = Path.GetRelativePath(instancesBase, normalizedTargetRoot);
         if (relative.StartsWith("..", StringComparison.Ordinal) ||
@@ -842,7 +834,7 @@ public sealed class SquadStateStore : ISquadStateStore
             Path.IsPathFullyQualified(relative))
         {
             string canonicalInstancesBase = Path.TrimEndingDirectorySeparator(
-                Path.GetFullPath(Path.Combine(ResolveHomeRoot(), ".kyber-weave", "squad", "instances")));
+                FullPath(Path.Combine(ResolveHomeRoot(), ".kyber-weave", "squad", "instances")));
             if (!string.Equals(canonicalInstancesBase, instancesBase, StringComparison.Ordinal))
                 relative = Path.GetRelativePath(canonicalInstancesBase, normalizedTargetRoot);
         }
@@ -866,26 +858,35 @@ public sealed class SquadStateStore : ISquadStateStore
     private string ResolveInstanceAuthorityRoot(string targetRoot)
     {
         ValidateInstanceRoot(targetRoot);
-        return Directory.Exists(targetRoot)
-            ? SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath
-            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, Semantics);
+        return _files.DirectoryExists(targetRoot)
+            ? SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath
+            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, _semantics);
     }
 
     private string ResolveInstanceLeaseIdentity(string targetRoot)
     {
         ValidateInstanceRoot(targetRoot);
-        string canonical = Directory.Exists(targetRoot)
-            ? SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath
-            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, Semantics);
+        string canonical = _files.DirectoryExists(targetRoot)
+            ? SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath
+            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, _semantics);
         return SquadPhysicalRootIdentity.KeyOf(canonical);
     }
 
-    private static string ResolveDirectoryUnder(string root, string relativeDirectory)
+    private string ResolveDirectoryUnder(string root, string relativeDirectory)
     {
-        string sentinel = SquadPathPolicy.ResolveFile(root, $"{relativeDirectory}/.state-sentinel", Semantics);
+        string sentinel = SquadPathPolicy.ResolveFile(root, $"{relativeDirectory}/.state-sentinel", _semantics);
         return Path.GetDirectoryName(sentinel)
                ?? throw new InvalidOperationException("Could not resolve a Squad state directory.");
     }
+
+    /// <summary>
+    ///     Turns a spelling into a full path. A relative one is resolved against the process working
+    ///     directory, which is read only then, so an absolute spelling never depends on it.
+    /// </summary>
+    private string FullPath(string path) =>
+        _paths.GetFullPath(
+            path,
+            Path.IsPathFullyQualified(path) ? Path.GetPathRoot(path)! : _environment.CurrentDirectory);
 
     private string ResolveStateFile(
         string targetRoot,
@@ -896,13 +897,13 @@ public sealed class SquadStateStore : ISquadStateStore
         {
             SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
                 ResolveProjectStateDirectory(targetRoot),
-                fileName, Semantics),
+                fileName, _semantics),
             SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(
                 ResolveGlobalStateDirectory(targetRoot),
-                fileName, Semantics),
+                fileName, _semantics),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
                 ResolveInstanceStateDirectory(targetRoot),
-                fileName, Semantics),
+                fileName, _semantics),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
     }
@@ -920,16 +921,21 @@ public sealed class SquadStateStore : ISquadStateStore
     private IEnumerable<string> EnumerateProjectStateDirectories()
     {
         string projectsDirectory = ResolveDirectoryUnder(ResolveHomeRoot(), ProjectsRelativeDirectory);
-        if (!Directory.Exists(projectsDirectory))
+        if (!_files.DirectoryExists(projectsDirectory))
             return [];
 
-        return new DirectoryInfo(projectsDirectory)
-            .EnumerateFileSystemInfos("*",
-                new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 })
-            .OfType<DirectoryInfo>()
-            .Where(entry => entry.LinkTarget is null && IsRootKey(entry.Name))
-            .Select(entry => entry.FullName)
-            .ToArray();
+        try
+        {
+            return _files.EnumerateEntries(projectsDirectory)
+                .Where(entry => entry.IsDirectory && !entry.IsLink && IsRootKey(Path.GetFileName(entry.Path)))
+                .Select(entry => entry.Path)
+                .ToArray();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // The walk once skipped what it could not read, so a projects directory the process may not list is an empty one.
+            return [];
+        }
     }
 
     private static bool IsRootKey(string value)
@@ -944,13 +950,13 @@ public sealed class SquadStateStore : ISquadStateStore
             reasons.Add("registered root key is malformed");
         else if (string.IsNullOrEmpty(record.Path) || !Path.IsPathFullyQualified(record.Path))
             reasons.Add("registered project path is not recorded");
-        else if (!Directory.Exists(record.Path))
+        else if (!_files.DirectoryExists(record.Path))
             reasons.Add("registered project path no longer exists");
         else if (!RegisteredKeyMatchesPath(key, record.Path))
             reasons.Add("registered root key no longer matches the physical key of its path");
 
         if (IsRootKey(key) &&
-            !File.Exists(Path.Combine(ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}"),
+            !_files.FileExists(Path.Combine(ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}"),
                 ReceiptFileName)))
             reasons.Add("project receipt is missing");
 
@@ -963,11 +969,11 @@ public sealed class SquadStateStore : ISquadStateStore
             reasons.Count > 0 ? string.Join("; ", reasons) : null);
     }
 
-    private static bool RegisteredKeyMatchesPath(string key, string path)
+    private bool RegisteredKeyMatchesPath(string key, string path)
     {
         try
         {
-            return string.Equals(SquadPhysicalRootIdentity.Resolve(path, Semantics).Key, key, StringComparison.Ordinal);
+            return string.Equals(SquadPhysicalRootIdentity.Resolve(path, _semantics).Key, key, StringComparison.Ordinal);
         }
         catch (SquadDeploymentConflictException)
         {
@@ -988,12 +994,12 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         Dictionary<string, RegistryRecord> registry = new(StringComparer.Ordinal);
         string path = RegistryPath();
-        if (!File.Exists(path))
+        if (!_files.FileExists(path))
             return registry;
 
         try
         {
-            JsonNode document = JsonNode.Parse(File.ReadAllText(path, Encoding.UTF8))
+            JsonNode document = JsonNode.Parse(_files.ReadAllText(path))
                                 ?? throw new InvalidDataException("Squad registry is empty.");
             if (document is not JsonObject root ||
                 !string.Equals(root["schema"]?.GetValue<string>(), RegistrySchema, StringComparison.Ordinal) ||
@@ -1050,7 +1056,6 @@ public sealed class SquadStateStore : ISquadStateStore
     private void WriteRegistry(IReadOnlyDictionary<string, RegistryRecord> registry)
     {
         string squadDirectory = ResolveHomeStateDirectory();
-        Directory.CreateDirectory(squadDirectory);
 
         JsonObject projects = new();
         foreach (KeyValuePair<string, RegistryRecord> entry in registry.OrderBy(pair => pair.Key,
@@ -1070,23 +1075,7 @@ public sealed class SquadStateStore : ISquadStateStore
         };
         string text = document.ToJsonString(JsonOptions) + "\n";
 
-        string temporaryPath = Path.Combine(squadDirectory, $"{RegistryFileName}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            using (FileStream stream = new(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                byte[] bytes = new UTF8Encoding(false).GetBytes(text);
-                stream.Write(bytes);
-                stream.Flush(SquadTransaction.SyncToDisk);
-            }
-
-            File.Move(temporaryPath, Path.Combine(squadDirectory, RegistryFileName), true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
+        _files.WriteAllTextAtomic(Path.Combine(squadDirectory, RegistryFileName), text, SquadTransaction.SyncToDisk);
     }
 
     private static void AppendScalar(
