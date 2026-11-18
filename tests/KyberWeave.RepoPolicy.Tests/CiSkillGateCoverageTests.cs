@@ -48,7 +48,7 @@ public sealed class CiSkillGateCoverageTests
     [Fact]
     public void EverySkillFolderHasAValidateLintAndScanGate()
     {
-        string config = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml"));
+        string config = Corpus.ReadText(".kyber-weave/kyber-weave.yml");
         string[] skills = SkillFolders();
         Assert.NotEmpty(skills);
 
