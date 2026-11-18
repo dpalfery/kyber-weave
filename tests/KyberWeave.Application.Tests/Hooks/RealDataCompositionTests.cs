@@ -36,10 +36,10 @@ public sealed class RealDataCompositionTests : IDisposable
     {
         ServiceCollection services = [];
         _ = services.AddSingleton<IProcessRunner>(runner);
-        _ = services.AddSingleton<IProcessEnvironment>(FakeProcessEnvironment.UseRunningProcess(
-            variables: name => name is "HOME" or "USERPROFILE" ? UserHome : null,
+        _ = services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
             currentDirectory: UserHome,
-            homeDirectory: UserHome));
+            homeDirectory: UserHome,
+            readVariable: name => name is "HOME" or "USERPROFILE" ? UserHome : null));
         _ = services.AddWeaveApplication();
         return services.BuildServiceProvider();
     }
@@ -87,10 +87,10 @@ public sealed class RealDataCompositionTests : IDisposable
                 run: [kyber-weave-no-such-command-xyz, "{file}"]
             """);
         ServiceCollection services = [];
-        _ = services.AddSingleton<IProcessEnvironment>(FakeProcessEnvironment.UseRunningProcess(
-            variables: name => name is "HOME" or "USERPROFILE" ? UserHome : null,
+        _ = services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
             currentDirectory: UserHome,
-            homeDirectory: UserHome));
+            homeDirectory: UserHome,
+            readVariable: name => name is "HOME" or "USERPROFILE" ? UserHome : null));
         _ = services.AddWeaveApplication();
         using ServiceProvider provider = services.BuildServiceProvider();
 

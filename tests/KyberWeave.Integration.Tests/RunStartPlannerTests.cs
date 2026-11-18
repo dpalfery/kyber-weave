@@ -697,17 +697,17 @@ internal sealed class RunStartProbe : IDisposable
     private ProbeResult RunStartOn(string path, params string[] arguments)
     {
         List<string> argv = ["run", "start", .. arguments];
-        FakeProcessEnvironment environment = FakeProcessEnvironment.UseRunningProcess(
-            variables: name => name switch
+        FakeProcessEnvironment environment = new(
+            currentDirectory: Root,
+            homeDirectory: _home,
+            tempDirectory: _tmp,
+            readVariable: name => name switch
             {
                 "PATH" => path,
                 "HOME" or "USERPROFILE" => _home,
                 "TMPDIR" or "TEMP" or "TMP" => _tmp,
                 _ => Environment.GetEnvironmentVariable(name)
-            },
-            currentDirectory: Root,
-            homeDirectory: _home,
-            tempDirectory: _tmp);
+            });
         ProbeGit git = new(this, path);
         ProbeExecutor executor = new(this, path);
 

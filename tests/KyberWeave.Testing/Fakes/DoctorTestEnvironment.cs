@@ -11,5 +11,5 @@ internal static class DoctorTestEnvironment
     /// <param name="read">Answers each environment variable.</param>
     /// <returns>The environment.</returns>
     internal static IProcessEnvironment Create(bool terminal, Func<string, string?> read) =>
-        FakeProcessEnvironment.UseRunningProcess(read, isInputRedirected: !terminal);
+        new FakeProcessEnvironment(isInputRedirected: !terminal, readVariable: read);
 }

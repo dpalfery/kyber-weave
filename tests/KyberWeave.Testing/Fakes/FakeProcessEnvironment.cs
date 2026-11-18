@@ -5,8 +5,7 @@ namespace KyberWeave.Tests.Fakes;
 /// <summary>A process environment a test configures: its directories, its platform facts and its variables.</summary>
 /// <remarks>
 /// Every value has a safe default that touches nothing real, so a unit test that only cares about one fact
-/// states that fact and gets the rest from the defaults. Use <see cref="UseRunningProcess" /> for the rare test
-/// that exercises the real host.
+/// states that fact and gets the rest from the defaults. No value is read from the running host.
 /// </remarks>
 public sealed class FakeProcessEnvironment : IProcessEnvironment
 {
@@ -91,50 +90,6 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
     /// <inheritdoc />
     public bool IsInputRedirected { get; }
 
-    /// <summary>Creates a fake that reports the running process, with chosen values where a test isolates one.</summary>
-    /// <param name="variables">Reads an environment variable; defaults to the running process's variables.</param>
-    /// <param name="currentDirectory">The current directory; defaults to the running process's.</param>
-    /// <param name="homeDirectory">The home directory; defaults to the running process's.</param>
-    /// <param name="tempDirectory">The temporary directory; defaults to the running process's.</param>
-    /// <param name="isInputRedirected">Whether input is redirected; defaults to the running process's state.</param>
-    /// <returns>The fake.</returns>
-    public static FakeProcessEnvironment UseRunningProcess(
-        Func<string, string?>? variables = null,
-        string? currentDirectory = null,
-        string? homeDirectory = null,
-        string? tempDirectory = null,
-        bool? isInputRedirected = null) =>
-        new(
-            currentDirectory: currentDirectory ?? Environment.CurrentDirectory,
-            homeDirectory: homeDirectory ?? Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-            tempDirectory: tempDirectory ?? Path.GetTempPath(),
-            userName: Environment.UserName,
-            machineName: Environment.MachineName,
-            operatingSystem: RunningOperatingSystem(),
-            isFileSystemCaseInsensitive: !System.OperatingSystem.IsLinux(),
-            isInputRedirected: isInputRedirected ?? Console.IsInputRedirected,
-            readVariable: variables ?? Environment.GetEnvironmentVariable);
-
     /// <inheritdoc />
     public string? GetVariable(string name) => _readVariable?.Invoke(name);
-
-    private static OperatingSystemKind RunningOperatingSystem()
-    {
-        if (System.OperatingSystem.IsWindows())
-        {
-            return OperatingSystemKind.Windows;
-        }
-
-        if (System.OperatingSystem.IsMacOS())
-        {
-            return OperatingSystemKind.MacOS;
-        }
-
-        if (System.OperatingSystem.IsLinux())
-        {
-            return OperatingSystemKind.Linux;
-        }
-
-        return System.OperatingSystem.IsFreeBSD() ? OperatingSystemKind.FreeBSD : OperatingSystemKind.Unknown;
-    }
 }

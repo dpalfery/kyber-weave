@@ -105,9 +105,7 @@ internal static class SquadTestCommands
 
     public static SquadPackCommand Pack(string? workingDirectory = null) =>
         new(new SquadPackService(
-            FakeProcessEnvironment.UseRunningProcess(
-                variables: Environment.GetEnvironmentVariable,
-                currentDirectory: workingDirectory ?? Environment.CurrentDirectory),
+            new FakeProcessEnvironment(currentDirectory: workingDirectory ?? "/kw/work"),
             new FileSquadSourceLocator(),
             new FileSquadPackager()));
 
@@ -165,7 +163,7 @@ internal static class SquadTestCommands
             new SquadModelPresetStore(store.UserPaths),
             new FileSquadDeploymentPlanner(),
             new FileSquadResponseGuidanceStore(),
-            FakeProcessEnvironment.UseRunningProcess(environmentReader),
+            new FakeProcessEnvironment(readVariable: environmentReader),
             new FileSquadSourceLocator(),
             new FileSquadSourceLoader(),
             new FileSquadSkillShadowing(),

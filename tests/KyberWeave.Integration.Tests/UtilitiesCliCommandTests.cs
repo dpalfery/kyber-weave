@@ -594,10 +594,11 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             [PiCodingAgentDirectoryVariable] = Path.Combine(_home, ".pi", "agent"),
             ["PATH"] = pathVariable
         };
-        FakeProcessEnvironment environment = FakeProcessEnvironment.UseRunningProcess(
-            variables: name => variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name),
+        FakeProcessEnvironment environment = new(
             currentDirectory: workingDirectory,
-            homeDirectory: _home);
+            homeDirectory: _home,
+            tempDirectory: Path.GetTempPath(),
+            readVariable: name => variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name));
         UtilitiesStatusLineProcessRunner versionProbe = (startInfo, _) =>
         {
             // A child resolves its program against this process's PATH, so the stub on the case's PATH is named in full.

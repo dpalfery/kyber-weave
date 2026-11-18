@@ -30,7 +30,7 @@ internal static class UpdateCommandTestServices
         ServiceCollection services = [];
         services.AddSingleton<Func<SelfUpdateHost>>(() => host);
         services.AddSingleton(handler);
-        services.AddSingleton<IProcessEnvironment>(FakeProcessEnvironment.UseRunningProcess(_ => null));
+        services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(readVariable: _ => null));
         services.AddSingleton<ISelfUpdateSystem>(new HandOffSystem(finishingProcess));
         if (arbiterHookRefresher is not null)
             services.AddSingleton<IArbiterHookRefresherFactory>(new FixedRefresherFactory(arbiterHookRefresher));

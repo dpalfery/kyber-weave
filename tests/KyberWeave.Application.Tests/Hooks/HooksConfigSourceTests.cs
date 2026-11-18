@@ -36,10 +36,10 @@ public sealed class HooksConfigSourceTests : IDisposable
     }
 
     private HooksConfig Load() =>
-        new YamlHooksConfigSource(new PhysicalFileSystem(), FakeProcessEnvironment.UseRunningProcess(
-                variables: name => name is "HOME" or "USERPROFILE" ? _home : null,
+        new YamlHooksConfigSource(new PhysicalFileSystem(), new FakeProcessEnvironment(
                 currentDirectory: _home,
-                homeDirectory: _home)).Load(_repository);
+                homeDirectory: _home,
+                readVariable: name => name is "HOME" or "USERPROFILE" ? _home : null)).Load(_repository);
 
     [Fact]
     public void ARepositoryRuleThatNamesACommandIsRefusedWithAWarningThatNamesTheUserFile()
