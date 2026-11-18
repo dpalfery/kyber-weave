@@ -130,6 +130,9 @@ internal static class PlanTaskFileProbe
     /// <summary>A corpus holding the plan index and the plan, and no task file.</summary>
     internal static DocFixture Corpus(string? planMarkdown = null) => Populate(new DocFixture(), planMarkdown);
 
+    /// <summary>The same corpus written into an existing fixture, for a checkout beside another on one in-memory file system.</summary>
+    internal static DocFixture CorpusIn(DocFixture fixture, string? planMarkdown = null) => Populate(fixture, planMarkdown);
+
     /// <summary>The same corpus on an in-memory file system, for a unit test.</summary>
     internal static DocFixture CorpusInMemory(string? planMarkdown = null) => Populate(DocFixture.CreateInMemory(), planMarkdown);
 
@@ -366,6 +369,10 @@ internal static class PlanTaskFileProbe
 
         return (string)executionDigest!.Invoke(null, [PlanDocumentParser.Parse(markdown)])!;
     }
+
+    /// <summary>Reads a task file's text through the product's format, for a test outside the assembly that owns it.</summary>
+    internal static KyberWeave.Core.Docs.Validation.PlanTaskFile? Deserialize(string path, string text) =>
+        KyberWeave.Core.Docs.Validation.PlanTaskFileFormat.Deserialize(path, text);
 
     /// <summary>The fully qualified class names every prompt's runner command asks for.</summary>
     internal static IEnumerable<string> PromptClassNames()

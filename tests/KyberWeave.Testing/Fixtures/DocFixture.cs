@@ -52,10 +52,19 @@ internal sealed class DocFixture : IDisposable
         Environment = DocsPorts.Environment;
     }
 
-    private DocFixture(InMemoryFileSystem memory)
+    /// <summary>Creates a fixture for another checkout (a worktree) on the same in-memory file system as <paramref name="sibling"/>.</summary>
+    /// <param name="sibling">The in-memory fixture whose file system the new checkout shares.</param>
+    /// <param name="folder">The new checkout's folder name beside the sibling's.</param>
+    public static DocFixture CreateInMemoryBeside(DocFixture sibling, string folder)
+    {
+        ArgumentNullException.ThrowIfNull(sibling);
+        return new DocFixture(sibling._memory ?? throw new InvalidOperationException("The sibling must be in memory."), folder);
+    }
+
+    private DocFixture(InMemoryFileSystem memory, string folder = "docs-repo")
     {
         _memory = memory;
-        Root = Path.Combine(memory.Root, "docs-repo");
+        Root = Path.Combine(memory.Root, folder);
         memory.CreateDirectory(Path.Combine(Root, "6-Docs"));
         Store = new InMemoryRepositoryFileStore(memory);
         Paths = new FakePathResolver(memory);

@@ -1,9 +1,10 @@
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests.Fakes;
+using Spectre.Console.Testing;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -21,8 +22,8 @@ public sealed class DocsTasksCommandTests
 
     private static DocFixture Plan(string? markdown = null)
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus(markdown);
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(markdown);
+        _ = fixture.EnsureDirectory(".git");
         return fixture;
     }
 
@@ -30,19 +31,23 @@ public sealed class DocsTasksCommandTests
     {
         DocsTasksSettings settings = new()
         {
-            Path = Path.Combine(fixture.Root, artifact.Replace('/', Path.DirectorySeparatorChar)),
+            Path = fixture.FullPath(artifact),
             Format = "json",
             Write = write,
             Check = check
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Tasks().Execute(null!, settings, CancellationToken.None));
-        return (execution.Result, execution.Output);
+        return Execute(fixture, settings);
     }
 
-    private static string TaskFileOf(DocFixture fixture, string taskFilePath) =>
-        File.ReadAllText(Path.Combine(fixture.Root, taskFilePath.Replace('/', Path.DirectorySeparatorChar)));
+    private static (int Exit, string Output) Execute(DocFixture fixture, DocsTasksSettings settings)
+    {
+        TestConsole console = new() { EmitAnsiSequences = false };
+        int exit = DocsTestCommands.Tasks(DocsMemoryServicesD.Services(fixture), console).Execute(null!, settings, CancellationToken.None);
+        return (exit, console.Output);
+    }
+
+    private static string TaskFileOf(DocFixture fixture, string taskFilePath) => fixture.ReadText(taskFilePath);
 
     /// <summary>The plan may be named by its slug, with or without the date prefix, or by a name or path from any directory.</summary>
     [Theory]
@@ -58,14 +63,13 @@ public sealed class DocsTasksCommandTests
             Path = typed,
             Format = "json",
             Check = false,
-            WorkingDirectory = Path.Combine(fixture.Root, workingDirectory.Replace('/', Path.DirectorySeparatorChar))
+            WorkingDirectory = fixture.FullPath(workingDirectory)
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Tasks().Execute(null!, settings, CancellationToken.None));
+        (int exit, string output) = Execute(fixture, settings);
 
-        Assert.True(execution.Result == 0, execution.Output);
-        using JsonDocument report = JsonDocument.Parse(execution.Output);
+        Assert.True(exit == 0, output);
+        using JsonDocument report = JsonDocument.Parse(output);
         Assert.Equal(PlanTaskFileProbe.PlanPath, report.RootElement.GetProperty("metrics").GetProperty("plan").GetString());
     }
 
@@ -81,7 +85,7 @@ public sealed class DocsTasksCommandTests
         Assert.True(exit == 0, output);
         Assert.DoesNotContain("KW-DOC-TASKS", validated.Output, StringComparison.Ordinal);
 
-        PlanTaskFile? file = PlanTaskFileFormat.Deserialize(
+        PlanTaskFile? file = PlanTaskFileProbe.Deserialize(
             PlanTaskFileProbe.TaskFilePath,
             TaskFileOf(fixture, PlanTaskFileProbe.TaskFilePath));
         Assert.NotNull(file);
@@ -97,16 +101,17 @@ public sealed class DocsTasksCommandTests
     {
         using DocFixture fixture = Plan();
         Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
-        string path = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar));
-        string first = File.ReadAllText(path);
-        DateTime stamp = new(2020, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        File.SetLastWriteTimeUtc(path, stamp);
+        string path = fixture.FullPath(PlanTaskFileProbe.TaskFilePath);
+        string first = fixture.ReadText(PlanTaskFileProbe.TaskFilePath);
+        // Any write to the task file from here on fails the run, so an unchanged file proves it was not rewritten.
+        fixture.Memory!.FailWhen(
+            operation => operation.Path == path && operation.Name.StartsWith("Write", StringComparison.Ordinal),
+            new IOException("the task file was rewritten"));
 
-        (int exit, _) = Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
+        (int exit, string output) = Run(fixture, PlanTaskFileProbe.PlanPath, write: true);
 
-        Assert.Equal(0, exit);
-        Assert.Equal(first, File.ReadAllText(path));
-        Assert.Equal(stamp, File.GetLastWriteTimeUtc(path));
+        Assert.True(exit == 0, output);
+        Assert.Equal(first, fixture.ReadText(PlanTaskFileProbe.TaskFilePath));
     }
 
     /// <summary>
@@ -180,7 +185,7 @@ public sealed class DocsTasksCommandTests
         Assert.Contains("T1", output, StringComparison.Ordinal);
         Assert.Contains("T2", output, StringComparison.Ordinal);
         Assert.Contains(CommandName, output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.False(fixture.Exists(PlanTaskFileProbe.TaskFilePath));
     }
 
     /// <summary>
@@ -211,13 +216,13 @@ public sealed class DocsTasksCommandTests
     [Fact]
     public void ASpecificationTaskFileIsGeneratedAndValidates()
     {
-        using DocFixture fixture = SpecTaskFileProbe.Corpus();
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using DocFixture fixture = SpecTaskFileProbe.CorpusInMemory();
+        _ = fixture.EnsureDirectory(".git");
 
         (int exit, _) = Run(fixture, SpecTaskFileProbe.TasksPath, write: true);
 
         Assert.Equal(0, exit);
-        Assert.True(File.Exists(Path.Combine(fixture.Root, SpecTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.True(fixture.Exists(SpecTaskFileProbe.TaskFilePath));
         Assert.DoesNotContain("KW-DOC-TASKS", new ReportedFindings(fixture).Output, StringComparison.Ordinal);
     }
 
