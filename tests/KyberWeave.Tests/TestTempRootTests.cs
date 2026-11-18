@@ -243,4 +243,38 @@ public sealed class TestTempRootTests
             ownProcessId: 999,
             _ => true);
     }
+
+    /// <summary>An 8-character checkout key uses the short-key form instead of throwing <see cref="ArgumentOutOfRangeException"/>.</summary>
+    [Fact]
+    public void ShortCheckoutKeyUsesShortKeyFallback()
+    {
+        string root = TestTempRoot.ResolveRoot("/tmp", "abcdef12", 4242);
+        Assert.Equal("/tmp/kw-abcdef12/4242", root);
+    }
+
+    /// <summary>A checkout key shorter than the minimum length throws <see cref="InvalidOperationException"/>.</summary>
+    [Fact]
+    public void TooShortCheckoutKeyThrowsInvalidOperation()
+    {
+        _ = Assert.Throws<InvalidOperationException>(
+            () => TestTempRoot.ResolveRoot("/tmp", "abc", 4242));
+    }
+
+    /// <summary>When a minimum age is supplied, recent sibling folders are spared to avoid recycled-PID races.</summary>
+    [Fact]
+    public void DeadSiblingCleanupRespectsMinimumAge()
+    {
+        using TempDirectory temp = new();
+        string parent = Path.Combine(temp.Path, "kw-" + Key);
+        string recent = Path.Combine(parent, "111");
+        string stale = Path.Combine(parent, "222");
+        Directory.CreateDirectory(recent);
+        Directory.CreateDirectory(stale);
+        Directory.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddMinutes(-15));
+
+        TestTempRoot.RemoveDeadSiblings(parent, ownProcessId: 999, _ => false, minAge: TimeSpan.FromMinutes(5));
+
+        Assert.True(Directory.Exists(recent));
+        Assert.False(Directory.Exists(stale));
+    }
 }
