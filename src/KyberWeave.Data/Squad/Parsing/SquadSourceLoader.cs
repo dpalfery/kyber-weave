@@ -50,7 +50,7 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
         FallbackProfilesSchemaDocument
     ];
 
-    public static readonly HashSet<string> ModelProfileFields = new(StringComparer.Ordinal)
+    public static readonly IReadOnlySet<string> ModelProfileFields = new HashSet<string>(StringComparer.Ordinal)
     {
         "default", "codex", "cursor", "claude", "copilot", "opencode", "kilo",
         "antigravity", "warp", "factory", "pi", "zcode", "devin", "commandcode"
