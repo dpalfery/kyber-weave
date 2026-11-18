@@ -1,6 +1,7 @@
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -8,8 +9,8 @@ using Xunit;
 namespace KyberWeave.Tests.Squad;
 
 /// <summary>
-/// Proves <see cref="SquadSourceLoader"/> through the in-memory file system: the synthetic Squad source is copied into
-/// memory once per test, so loading, link containment and encoding checks never touch a real directory after the copy.
+/// Proves <see cref="SquadSourceLoader"/> through the in-memory file system: the fixture tree is written into memory,
+/// so loading, link containment and encoding checks read no real directory.
 /// </summary>
 public sealed class SquadSourceLoaderUnitTests
 {
@@ -26,7 +27,7 @@ public sealed class SquadSourceLoaderUnitTests
             _files,
             new FakePathResolver(_files),
             new FakeProcessEnvironment(currentDirectory: Path.Combine(_files.Root, "kw", "work")));
-        Copy(SyntheticValidSquadReleaseSource.SyntheticCorpusRoot, _root);
+        InMemorySquadSourceTree.Write(_files, _root);
         _files.CreateDirectory(_outside);
     }
 
@@ -43,8 +44,10 @@ public sealed class SquadSourceLoaderUnitTests
     [Fact]
     public void RootThatDoesNotExistIsRefusedWithAMessageNamingIt()
     {
+        string missing = Path.Combine(_files.Root, "kw", "missing");
+
         SquadSourceValidationException failure =
-            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(Path.Combine(_files.Root, "kw", "missing")));
+            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(missing));
 
         Assert.Contains("/kw/missing", failure.Message, StringComparison.Ordinal);
     }
@@ -116,19 +119,5 @@ public sealed class SquadSourceLoaderUnitTests
 
         Assert.Equal(plain.Toolchain.RequiredFeatures, decorated.Toolchain.RequiredFeatures);
         Assert.Equal(plain.Toolchain.ValidatedRelease, decorated.Toolchain.ValidatedRelease);
-    }
-
-    private void Copy(string realDirectory, string memoryDirectory)
-    {
-        _files.CreateDirectory(memoryDirectory);
-        foreach (string directory in Directory.EnumerateDirectories(realDirectory))
-        {
-            Copy(directory, Path.Combine(memoryDirectory, Path.GetFileName(directory)));
-        }
-
-        foreach (string file in Directory.EnumerateFiles(realDirectory))
-        {
-            _files.WriteAllBytes(Path.Combine(memoryDirectory, Path.GetFileName(file)), File.ReadAllBytes(file));
-        }
     }
 }
