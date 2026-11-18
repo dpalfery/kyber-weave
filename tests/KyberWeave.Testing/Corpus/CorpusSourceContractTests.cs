@@ -101,6 +101,28 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void NamesTheRelativePathItCouldNotRead()
+    {
+        ICorpusSource corpus = CreateCorpus();
+        const string Missing = "products/no-such-product/no-such-file.md";
+
+        FileNotFoundException fromText = Assert.Throws<FileNotFoundException>(() => corpus.ReadText(Missing));
+        FileNotFoundException fromBytes = Assert.Throws<FileNotFoundException>(() => corpus.ReadBytes(Missing));
+
+        Assert.Equal(Missing, fromText.FileName);
+        Assert.Equal(Missing, fromBytes.FileName);
+    }
+
+    [Fact]
+    public void ThrowsTheSameErrorWhenThePathNamesADirectory()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        Assert.Throws<FileNotFoundException>(() => corpus.ReadText(SampleDirectory));
+        Assert.Throws<FileNotFoundException>(() => corpus.ReadBytes(SampleDirectory));
+    }
+
+    [Fact]
     public void ListsTheFilesUnderADirectoryRecursively()
     {
         ICorpusSource corpus = CreateCorpus();

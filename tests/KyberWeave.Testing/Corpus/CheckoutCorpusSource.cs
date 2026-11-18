@@ -37,33 +37,24 @@ public sealed class CheckoutCorpusSource : ICorpusSource
     }
 
     /// <inheritdoc />
-    public string ReadText(string relativePath)
-    {
-        string path = CorpusPath.Resolve(Root, CorpusPath.Normalize(relativePath));
-
-        try
-        {
-            return _files.ReadAllText(path);
-        }
-        catch (DirectoryNotFoundException exception)
-        {
-            throw new FileNotFoundException($"The corpus holds no file at '{relativePath}'.", path, exception);
-        }
-    }
+    public string ReadText(string relativePath) => _files.ReadAllText(ResolveFile(relativePath));
 
     /// <inheritdoc />
-    public byte[] ReadBytes(string relativePath)
-    {
-        string path = CorpusPath.Resolve(Root, CorpusPath.Normalize(relativePath));
+    public byte[] ReadBytes(string relativePath) => _files.ReadAllBytes(ResolveFile(relativePath));
 
-        try
-        {
-            return _files.ReadAllBytes(path);
-        }
-        catch (DirectoryNotFoundException exception)
-        {
-            throw new FileNotFoundException($"The corpus holds no file at '{relativePath}'.", path, exception);
-        }
+    /// <summary>Resolves a readable file, raising the seam's one "no such file" error for anything else.</summary>
+    /// <param name="relativePath">The file's path relative to <see cref="Root"/>.</param>
+    /// <returns>The absolute path.</returns>
+    /// <exception cref="FileNotFoundException">The corpus holds no file at the path, or the path names a directory.</exception>
+    private string ResolveFile(string relativePath)
+    {
+        string canonical = CorpusPath.Normalize(relativePath);
+        string path = CorpusPath.Resolve(Root, canonical);
+
+        if (!_files.FileExists(path))
+            throw new FileNotFoundException($"The corpus holds no file at '{relativePath}'.", canonical);
+
+        return path;
     }
 
     /// <inheritdoc />
