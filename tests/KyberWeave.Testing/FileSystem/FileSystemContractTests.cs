@@ -624,6 +624,27 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void FlushDirectoryAcceptsAnExistingDirectoryAfterARenameIntoIt()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string source = At(root, "source.txt");
+        files.WriteAllText(source, "content");
+        files.MoveFile(source, At(root, "published.txt"));
+
+        files.FlushDirectory(root);
+
+        Assert.Equal("content", files.ReadAllText(At(root, "published.txt")));
+    }
+
+    [Fact]
+    public void FlushDirectoryRefusesAMissingDirectory()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.ThrowsAny<IOException>(() => files.FlushDirectory(At(root, "absent")));
+    }
+
+    [Fact]
     public void OpenExclusiveCanBeTakenAgainOnceTheFirstIsDisposed()
     {
         IWritableFileSystem files = Starting(out string root);

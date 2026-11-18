@@ -180,6 +180,96 @@ public sealed class SquadTransactionWeaknessTests
         Assert.Equal("a file someone else just wrote", fixture.Files.ReadAllText(foreign));
     }
 
+    [Fact]
+    public void EveryJournalRenameIsFollowedByAFlushOfItsFolder()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Install);
+        List<FileSystemOperation> operations = [];
+        fixture.Files.KillWhen(operation =>
+        {
+            operations.Add(operation);
+            return false;
+        });
+
+        // The suites switch the device flush off for speed; this case is about the flush itself.
+        using (SquadTransaction.UseSyncToDiskScope(true))
+        {
+            fixture.Transaction().Execute(fixture.Plan(SquadCrashFlow.Install));
+        }
+
+        int renames = 0;
+        for (int index = 0; index < operations.Count; index++)
+        {
+            if (operations[index].Name != "MoveFile"
+                || !operations[index].DestinationPath!.EndsWith("intent.json", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            renames++;
+            FileSystemOperation next = operations[index + 1];
+            Assert.Equal("FlushDirectory", next.Name);
+            Assert.Equal(Path.GetDirectoryName(operations[index].DestinationPath), next.Path);
+        }
+
+        Assert.True(renames > 0, "The journal was never renamed into place.");
+    }
+
+    [Fact]
+    public void AKillAnywhereInAnUpdateOfASymbolicLinkedFileRecoversTheLinkOrTheNewFile()
+    {
+        SquadCrashFlow flow = SquadCrashFlow.Update;
+        int mutating = 0;
+        IReadOnlyDictionary<string, SquadTreeEntry> oldTree;
+        IReadOnlyDictionary<string, SquadTreeEntry> newTree;
+        using (InMemorySquadCrashSafetyFixture clean = new())
+        {
+            LinkTheConductor(clean);
+            oldTree = clean.Capture();
+            clean.Files.KillWhen(operation =>
+            {
+                mutating += InMemorySquadCrashSafetyFixture.IsMutating(operation) ? 1 : 0;
+                return false;
+            });
+            clean.Transaction().Execute(clean.Plan(flow));
+            clean.Files.ClearFaults();
+            newTree = clean.Capture();
+        }
+
+        List<string> failures = [];
+        for (int point = 1; point <= mutating; point++)
+        {
+            using InMemorySquadCrashSafetyFixture fixture = new();
+            LinkTheConductor(fixture);
+            SquadDeploymentPlan plan = fixture.Plan(flow);
+            int seen = 0;
+            int target = point;
+            fixture.Files.KillWhen(operation => InMemorySquadCrashSafetyFixture.IsMutating(operation) && ++seen == target);
+            _ = Record.Exception(() => fixture.Transaction().Execute(plan));
+            fixture.Files.ClearFaults();
+            fixture.Recover();
+
+            IReadOnlyDictionary<string, SquadTreeEntry> recovered = fixture.Capture();
+            if (SquadTreeComparison.Difference(oldTree, recovered) is { } old
+                && SquadTreeComparison.Difference(newTree, recovered) is { } fresh)
+            {
+                failures.Add($"op:{point}: {old} / {fresh}");
+            }
+        }
+
+        Assert.Empty(failures);
+    }
+
+    private static void LinkTheConductor(InMemorySquadCrashSafetyFixture fixture)
+    {
+        fixture.CreateBaseline(SquadCrashFlow.Update);
+        string conductor = Path.Combine(fixture.Root, SquadCrashSafetyFixture.ConductorPath);
+        string real = Path.Combine(fixture.Root, "notes", "conductor-real.toml");
+        fixture.Files.MoveFile(conductor, real);
+        fixture.Files.CreateFileLink(conductor, real);
+    }
+
     private static bool IsTransactionDelete(FileSystemOperation operation) =>
         operation.Name.StartsWith("Delete", StringComparison.Ordinal)
         && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);

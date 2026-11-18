@@ -545,6 +545,17 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public void FlushDirectory(string directoryPath)
+    {
+        Enter(nameof(FlushDirectory), directoryPath);
+        Node node = Resolve(directoryPath, followFinal: true) ?? throw Missing(directoryPath);
+        if (!node.IsDirectory)
+        {
+            throw new IOException($"The path '{directoryPath}' is not a directory.");
+        }
+    }
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => CreateLink(linkPath, targetPath, namesDirectory: false);
 
     /// <inheritdoc />

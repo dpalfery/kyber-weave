@@ -76,6 +76,9 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public void DeleteEmptyDirectory(string directoryPath) => _inner.DeleteEmptyDirectory(directoryPath);
 
     /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) => _inner.FlushDirectory(directoryPath);
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => _inner.CreateFileLink(linkPath, targetPath);
 
     /// <inheritdoc />

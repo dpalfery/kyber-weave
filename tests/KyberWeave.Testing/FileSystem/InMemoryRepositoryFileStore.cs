@@ -169,6 +169,9 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public void DeleteEmptyDirectory(string directoryPath) => _fs.DeleteEmptyDirectory(directoryPath);
 
     /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) => _fs.FlushDirectory(directoryPath);
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => _fs.CreateFileLink(linkPath, targetPath);
 
     /// <inheritdoc />

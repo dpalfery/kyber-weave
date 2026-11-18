@@ -2443,6 +2443,11 @@ public sealed class SquadTransaction : ISquadTransaction
             WriteNewFile(temporaryPath, content);
 
             _files.MoveFile(temporaryPath, destinationPath, overwrite);
+
+            // The rename lives in the folder, not in the file: without this a power loss after the call returns can
+            // lose the journal's name although its bytes reached the device.
+            if (SyncToDisk)
+                _files.FlushDirectory(Path.GetDirectoryName(destinationPath)!);
         }
         finally
         {

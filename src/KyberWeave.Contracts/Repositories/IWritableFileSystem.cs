@@ -152,6 +152,22 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">Another open already holds the file in a way that conflicts.</exception>
     Stream OpenGuarded(string path);
 
+    /// <summary>
+    ///     Flushes a directory's entries to the device, so a file created in it or renamed into it by an earlier call
+    ///     survives a power loss. File content is flushed by the write; the name that points at it lives in the
+    ///     directory, and is lost with the directory entry if the directory is not flushed.
+    /// </summary>
+    /// <param name="directoryPath">The directory whose entries to flush.</param>
+    /// <remarks>
+    ///     Unix file systems need this after a rename. Windows does not: NTFS journals its metadata, and a directory
+    ///     cannot be opened for flushing there, so the implementation does nothing. An in-memory implementation has no
+    ///     device and does nothing either. The default does nothing, for implementations that wrap no device.
+    /// </remarks>
+    /// <exception cref="DirectoryNotFoundException">The directory does not exist.</exception>
+    void FlushDirectory(string directoryPath)
+    {
+    }
+
     /// <summary>Moves a directory and everything under it to a path that must be free, as one rename.</summary>
     /// <param name="sourcePath">The directory to move.</param>
     /// <param name="destinationPath">Where it goes; nothing may be there, and its parent directory must exist.</param>

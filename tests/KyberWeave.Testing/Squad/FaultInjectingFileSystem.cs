@@ -171,6 +171,10 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
         Do(nameof(DeleteEmptyDirectory), directoryPath, () => inner.DeleteEmptyDirectory(directoryPath));
 
     /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) =>
+        Do(nameof(FlushDirectory), directoryPath, () => inner.FlushDirectory(directoryPath));
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) =>
         Do(nameof(CreateFileLink), linkPath, () => inner.CreateFileLink(linkPath, targetPath));
 

@@ -1,10 +1,11 @@
 using KyberWeave.Contracts.Repositories;
+using System.Runtime.InteropServices;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Data.Hooks;
 
 /// <summary>Reads and writes the real file system.</summary>
-public sealed class PhysicalFileSystem : IWritableFileSystem
+public sealed partial class PhysicalFileSystem : IWritableFileSystem
 {
     private static readonly HashSet<string> SkippedDirectories = new(StringComparer.Ordinal)
     {
@@ -86,6 +87,54 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     /// <inheritdoc />
     public Stream OpenGuarded(string path) =>
         new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+    /// <inheritdoc />
+    /// <remarks>
+    ///     Unix opens the directory read-only and calls fsync on it. Windows does nothing: NTFS journals its metadata,
+    ///     and a directory handle there cannot be flushed.
+    /// </remarks>
+    public void FlushDirectory(string directoryPath)
+    {
+        if (!Directory.Exists(directoryPath))
+            throw new DirectoryNotFoundException($"The directory '{directoryPath}' does not exist.");
+
+        if (OperatingSystem.IsWindows())
+            return;
+
+        int descriptor = OpenDirectory(directoryPath, 0);
+        if (descriptor < 0)
+            throw new IOException(
+                $"The directory '{directoryPath}' could not be opened to flush it.",
+                new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+
+        try
+        {
+            // EINVAL means the file system keeps no separate directory data (some network and FUSE mounts); there is
+            // nothing to flush there, so only a real I/O failure is raised.
+            if (Fsync(descriptor) < 0 && Marshal.GetLastPInvokeError() != EInval)
+                throw new IOException(
+                    $"The directory '{directoryPath}' could not be flushed.",
+                    new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+        }
+        finally
+        {
+            _ = Close(descriptor);
+        }
+    }
+
+    private const int EInval = 22;
+
+    [LibraryImport("libc", EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial int OpenDirectory(string path, int flags);
+
+    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial int Fsync(int descriptor);
+
+    [LibraryImport("libc", EntryPoint = "close")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial int Close(int descriptor);
 
     /// <inheritdoc />
     public Stream OpenAppendShared(string path) =>
