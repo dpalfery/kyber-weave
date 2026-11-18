@@ -3,11 +3,13 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Domain.CopilotPrompt;
-using KyberWeave.Contracts.Paths;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Paths;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Kernel.FileSystem;
+using KyberWeave.Tests.Doctor;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Spectre.Console.Cli;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests.CopilotPrompt;
@@ -18,10 +20,10 @@ namespace KyberWeave.Tests.CopilotPrompt;
 /// <remarks>
 /// The override entry is inserted into each detected build's default-profile <c>settings.json</c> as text,
 /// so every byte outside the insertion must survive: comments, trailing commas and a byte-order mark included.
-/// A foreign <c>*</c> entry is never overwritten. Every test runs against a temp home, so none can touch the
+/// A foreign <c>*</c> entry is never overwritten. Every test runs over an in-memory home, so none can touch the
 /// real VS Code settings or the real home directory.
 /// </remarks>
-public sealed class CopilotPromptSettingsMergeTests : IDisposable
+public sealed class CopilotPromptSettingsMergeTests
 {
     private const string ModelOverridesSetting = VsCodeUserSettingsPaths.SettingId;
     private const string StarEntry = "*";
@@ -34,17 +36,28 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         CommentHandling = JsonCommentHandling.Skip,
     };
 
-    private readonly TempDirectory _home = new();
+    private static readonly string Home = Path.Combine(new InMemoryFileSystem().Root, "home");
 
-    public void Dispose() => _home.Dispose();
+    private readonly InMemoryFileSystem _memory = new();
+    private readonly InMemoryDoctorFileSystem _reads;
+    private readonly FakePathResolver _paths;
+    private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
 
-    private string Home => _home.Path;
+    public CopilotPromptSettingsMergeTests()
+    {
+        _reads = new InMemoryDoctorFileSystem(_memory);
+        _paths = new FakePathResolver(_memory);
+        _ansi.Profile.Width = 400;
+    }
+
+    /// <summary>What a command returned and what it printed.</summary>
+    private sealed record Execution(int Result, string Output);
 
     private string PromptPath => CopilotPromptFile.InstalledPath(Home);
 
     /// <summary>An environment rooted at the temp home, so no command can resolve the real home or VS Code settings.</summary>
     private CopilotPromptEnvironment NewEnvironment(bool interactive) =>
-        new(Home, null, OSPlatform.OSX, interactive, _ => false, new PhysicalPathResolver(new PhysicalFileSystem()), Home);
+        new(Home, null, OSPlatform.OSX, interactive, _ => false, _paths, Home);
 
     private string SettingsPath(VsCodeFlavour flavour) =>
         VsCodeUserSettingsPaths.SettingsFile(flavour, Home, null, OSPlatform.OSX);
@@ -53,7 +66,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         Path.GetDirectoryName(SettingsPath(flavour))!;
 
     private void DetectFlavour(VsCodeFlavour flavour) =>
-        Directory.CreateDirectory(UserDirectory(flavour));
+        _memory.CreateDirectory(UserDirectory(flavour));
 
     private void WriteSettings(VsCodeFlavour flavour, string text) =>
         WriteSettings(flavour, Encoding.UTF8.GetBytes(text));
@@ -61,13 +74,13 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     private void WriteSettings(VsCodeFlavour flavour, byte[] bytes)
     {
         DetectFlavour(flavour);
-        File.WriteAllBytes(SettingsPath(flavour), bytes);
+        _memory.WriteAllBytes(SettingsPath(flavour), bytes);
     }
 
-    private CapturedConsoleExecution<int> Install(CopilotPromptSettings settings, bool interactive = true)
+    private Execution Install(CopilotPromptSettings settings, bool interactive = true)
     {
-        CopilotPromptInstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
-        return ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive), _reads, _memory, ShippedCopilotPrompt.Resources, Console());
+        return Run(command, settings);
     }
 
     /// <summary>
@@ -88,19 +101,26 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
               }
             }
             """);
-        CopilotPromptInstallCommand command = new(NewEnvironment(interactive: true), files, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive: true), files, _memory, ShippedCopilotPrompt.Resources, Console());
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
+        Execution execution = Run(command, new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(1, execution.Result);
         Assert.Contains("not Kyber-Weave's", execution.Output, StringComparison.Ordinal);
     }
 
-    private CapturedConsoleExecution<int> Uninstall(CopilotPromptSettings settings, bool interactive = true)
+    private Execution Uninstall(CopilotPromptSettings settings, bool interactive = true)
     {
-        CopilotPromptUninstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files, new PhysicalFileSystem(), SquadTestCommands.ProcessCapturedConsole());
-        return ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
+        CopilotPromptUninstallCommand command = new(NewEnvironment(interactive), _reads, _memory, Console());
+        return Run(command, settings);
+    }
+
+    private SquadConsole Console() => new(_ansi, new FakeConsole(isInputRedirected: false));
+
+    private Execution Run(Command<CopilotPromptSettings> command, CopilotPromptSettings settings)
+    {
+        int result = command.Execute(null!, settings, CancellationToken.None);
+        return new Execution(result, _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal));
     }
 
     private static bool HasByteOrderMark(byte[] bytes) =>
@@ -156,11 +176,11 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     {
         DetectFlavour(VsCodeFlavour.Stable);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(0, execution.Result);
-        Assert.True(File.Exists(SettingsPath(VsCodeFlavour.Stable)), "settings.json must be created when the User directory exists");
-        Assert.Equal(PromptPath, OverrideFileOf(File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable))));
+        Assert.True(_memory.FileExists(SettingsPath(VsCodeFlavour.Stable)), "settings.json must be created when the User directory exists");
+        Assert.Equal(PromptPath, OverrideFileOf(_memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable))));
     }
 
     [Fact]
@@ -168,10 +188,10 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     {
         WriteSettings(VsCodeFlavour.Stable, "{}");
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(PromptPath, OverrideFileOf(File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable))));
+        Assert.Equal(PromptPath, OverrideFileOf(_memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable))));
     }
 
     [Fact]
@@ -181,9 +201,9 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         byte[] original = [.. ByteOrderMark, .. Encoding.UTF8.GetBytes(text)];
         WriteSettings(VsCodeFlavour.Stable, original);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
-        byte[] updated = File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
+        byte[] updated = _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
         Assert.Equal(0, execution.Result);
         Assert.Equal(ByteOrderMark, updated.AsSpan(0, ByteOrderMark.Length).ToArray());
         Assert.True(IsPureInsertion(original, updated), "install may only insert bytes; an original byte was changed or removed");
@@ -197,9 +217,9 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
             VsCodeFlavour.Stable,
             "{\n  \"chat.agentHost.copilot.modelCapabilityOverrides\": {\n    \"gpt-5\": { \"temperature\": 1 }\n  }\n}\n");
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
-        byte[] updated = File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
+        byte[] updated = _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
         Assert.Equal(0, execution.Result);
         List<string> modelIds = ModelIdsOf(updated);
         Assert.Contains("gpt-5", modelIds);
@@ -212,12 +232,12 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     {
         WriteSettings(VsCodeFlavour.Stable, "{}");
         Install(new CopilotPromptSettings { Yes = true });
-        byte[] afterFirst = File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
+        byte[] afterFirst = _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
 
-        CapturedConsoleExecution<int> second = Install(new CopilotPromptSettings { Yes = true });
+        Execution second = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(0, second.Result);
-        Assert.Equal(afterFirst, File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.Equal(afterFirst, _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
     }
 
     [Theory]
@@ -226,12 +246,12 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_ForeignStarEntry_RefusesWithExit1NamesEntryAndLeavesBytesUnchanged(string text)
     {
         WriteSettings(VsCodeFlavour.Stable, text);
-        byte[] original = File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
+        byte[] original = _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(1, execution.Result);
-        Assert.Equal(original, File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.Equal(original, _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
         Assert.Contains(StarEntry, execution.Output, StringComparison.Ordinal);
     }
 
@@ -241,10 +261,10 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         byte[] original = Encoding.UTF8.GetBytes("{\n  \"editor.fontSize\": 14,\n  \"chat.agentHost.copilot.modelCapabilityOverrides\": {");
         WriteSettings(VsCodeFlavour.Stable, original);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(1, execution.Result);
-        Assert.Equal(original, File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.Equal(original, _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
     }
 
     [Fact]
@@ -252,18 +272,18 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     {
         WriteSettings(VsCodeFlavour.Stable, "// keep me\n{\n  \"editor.fontSize\": 14, // size\n}\n");
         Install(new CopilotPromptSettings { Yes = true });
-        Assert.True(File.Exists(PromptPath), "precondition: install must have written the prompt file");
+        Assert.True(_memory.FileExists(PromptPath), "precondition: install must have written the prompt file");
 
-        CapturedConsoleExecution<int> execution = Uninstall(new CopilotPromptSettings { Yes = true });
+        Execution execution = Uninstall(new CopilotPromptSettings { Yes = true });
 
-        byte[] after = File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
+        byte[] after = _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable));
         string text = Encoding.UTF8.GetString(after);
         Assert.Equal(0, execution.Result);
         Assert.Null(OverrideFileOf(after));
         Assert.Contains("// keep me", text, StringComparison.Ordinal);
         Assert.Contains("// size", text, StringComparison.Ordinal);
         Assert.Contains("editor.fontSize", text, StringComparison.Ordinal);
-        Assert.False(File.Exists(PromptPath), "uninstall must delete the installed prompt file");
+        Assert.False(_memory.FileExists(PromptPath), "uninstall must delete the installed prompt file");
     }
 
     [Fact]
@@ -275,7 +295,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
 
         Uninstall(new CopilotPromptSettings { Yes = true });
 
-        Assert.Equal(original, File.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.Equal(original, _memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Stable)));
     }
 
     [Fact]
@@ -283,12 +303,12 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     {
         DetectFlavour(VsCodeFlavour.Stable);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(0, execution.Result);
-        Assert.True(File.Exists(SettingsPath(VsCodeFlavour.Stable)));
-        Assert.False(Directory.Exists(UserDirectory(VsCodeFlavour.Insiders)), "an undetected build must not gain a User directory");
-        Assert.False(File.Exists(SettingsPath(VsCodeFlavour.Insiders)));
+        Assert.True(_memory.FileExists(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.False(_memory.DirectoryExists(UserDirectory(VsCodeFlavour.Insiders)), "an undetected build must not gain a User directory");
+        Assert.False(_memory.FileExists(SettingsPath(VsCodeFlavour.Insiders)));
     }
 
     [Fact]
@@ -297,11 +317,11 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         DetectFlavour(VsCodeFlavour.Stable);
         DetectFlavour(VsCodeFlavour.Insiders);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Flavour = "insiders", Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Flavour = "insiders", Yes = true });
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(PromptPath, OverrideFileOf(File.ReadAllBytes(SettingsPath(VsCodeFlavour.Insiders))));
-        Assert.False(File.Exists(SettingsPath(VsCodeFlavour.Stable)), "--flavour insiders must not write the stable build");
+        Assert.Equal(PromptPath, OverrideFileOf(_memory.ReadAllBytes(SettingsPath(VsCodeFlavour.Insiders))));
+        Assert.False(_memory.FileExists(SettingsPath(VsCodeFlavour.Stable)), "--flavour insiders must not write the stable build");
     }
 
     [Fact]
@@ -311,8 +331,8 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
 
         Install(new CopilotPromptSettings { DryRun = true, Yes = true });
 
-        Assert.False(File.Exists(SettingsPath(VsCodeFlavour.Stable)));
-        Assert.False(File.Exists(PromptPath));
+        Assert.False(_memory.FileExists(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.False(_memory.FileExists(PromptPath));
     }
 
     [Fact]
@@ -320,11 +340,11 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     {
         DetectFlavour(VsCodeFlavour.Stable);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings(), interactive: false);
+        Execution execution = Install(new CopilotPromptSettings(), interactive: false);
 
         Assert.Equal(2, execution.Result);
-        Assert.False(File.Exists(SettingsPath(VsCodeFlavour.Stable)));
-        Assert.False(File.Exists(PromptPath));
+        Assert.False(_memory.FileExists(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.False(_memory.FileExists(PromptPath));
     }
 
     [Theory]
@@ -392,48 +412,46 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Detect_Linux_FindsBuildUnderXdgConfigHome()
     {
         string xdgConfigHome = Path.Combine(Home, "xdg-config");
-        Directory.CreateDirectory(Path.Combine(xdgConfigHome, "Code"));
+        _memory.CreateDirectory(Path.Combine(xdgConfigHome, "Code"));
 
-        Assert.Equal([VsCodeFlavour.Stable], VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, Directory.Exists, xdgConfigHome));
-        Assert.Empty(VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, Directory.Exists));
+        Assert.Equal([VsCodeFlavour.Stable], VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, _memory.DirectoryExists, xdgConfigHome));
+        Assert.Empty(VsCodeUserSettingsPaths.Detect(Home, null, OSPlatform.Linux, _memory.DirectoryExists));
     }
 
     [Fact]
     public void Install_SymlinkedSettingsFile_WritesThroughToTargetAndKeepsLink()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
         string dotfiles = Path.Combine(Home, "dotfiles");
-        Directory.CreateDirectory(dotfiles);
+        _memory.CreateDirectory(dotfiles);
         string target = Path.Combine(dotfiles, "vscode-settings.json");
-        File.WriteAllText(target, "{}");
+        _memory.WriteAllText(target, "{}");
         DetectFlavour(VsCodeFlavour.Stable);
-        File.CreateSymbolicLink(SettingsPath(VsCodeFlavour.Stable), target);
+        _memory.CreateFileLink(SettingsPath(VsCodeFlavour.Stable), target);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(target, new FileInfo(SettingsPath(VsCodeFlavour.Stable)).LinkTarget);
-        Assert.Equal(PromptPath, OverrideFileOf(File.ReadAllBytes(target)));
-        Assert.Single(Directory.GetFiles(dotfiles));
+        Assert.Equal(target, _memory.GetLinkTarget(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.Equal(PromptPath, OverrideFileOf(_memory.ReadAllBytes(target)));
+        Assert.Single(_memory.EnumerateFiles(dotfiles, "*", recursive: false));
     }
 
     [Fact]
     public void Uninstall_SymlinkedSettingsFile_WritesThroughToTargetAndKeepsLink()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
         string dotfiles = Path.Combine(Home, "dotfiles");
-        Directory.CreateDirectory(dotfiles);
+        _memory.CreateDirectory(dotfiles);
         string target = Path.Combine(dotfiles, "vscode-settings.json");
-        File.WriteAllText(target, "{}");
+        _memory.WriteAllText(target, "{}");
         DetectFlavour(VsCodeFlavour.Stable);
-        File.CreateSymbolicLink(SettingsPath(VsCodeFlavour.Stable), target);
+        _memory.CreateFileLink(SettingsPath(VsCodeFlavour.Stable), target);
         Assert.Equal(0, Install(new CopilotPromptSettings { Yes = true }).Result);
 
-        CapturedConsoleExecution<int> execution = Uninstall(new CopilotPromptSettings { Yes = true });
+        Execution execution = Uninstall(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(target, new FileInfo(SettingsPath(VsCodeFlavour.Stable)).LinkTarget);
-        Assert.DoesNotContain(StarEntry, ModelIdsOf(File.ReadAllBytes(target)));
+        Assert.Equal(target, _memory.GetLinkTarget(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.DoesNotContain(StarEntry, ModelIdsOf(_memory.ReadAllBytes(target)));
     }
 
     [Fact]
@@ -448,7 +466,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
         };
 
         CopilotPromptEnvironment environment = CopilotPromptCommandSupport.EnvironmentFrom(
-            name => variables.GetValueOrDefault(name), OSPlatform.Linux, false, _ => false, new PhysicalPathResolver(new PhysicalFileSystem()), Home);
+            name => variables.GetValueOrDefault(name), OSPlatform.Linux, false, _ => false, _paths, Home);
 
         Assert.Equal(Home, environment.HomeDirectory);
         Assert.Equal(CopilotPromptHome.FromEnvironment(name => variables.GetValueOrDefault(name)), environment.HomeDirectory);
@@ -468,39 +486,37 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     [Fact]
     public void Install_SymlinkedSettingsFileWithMissingTarget_CreatesTargetAndKeepsLink()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
         string dotfiles = Path.Combine(Home, "dotfiles");
-        Directory.CreateDirectory(dotfiles);
+        _memory.CreateDirectory(dotfiles);
         string target = Path.Combine(dotfiles, "vscode-settings.json");
         DetectFlavour(VsCodeFlavour.Stable);
-        File.CreateSymbolicLink(SettingsPath(VsCodeFlavour.Stable), target);
+        _memory.CreateFileLink(SettingsPath(VsCodeFlavour.Stable), target);
 
-        CapturedConsoleExecution<int> execution = Install(new CopilotPromptSettings { Yes = true });
+        Execution execution = Install(new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(0, execution.Result);
-        Assert.Equal(target, new FileInfo(SettingsPath(VsCodeFlavour.Stable)).LinkTarget);
-        Assert.Equal(PromptPath, OverrideFileOf(File.ReadAllBytes(target)));
+        Assert.Equal(target, _memory.GetLinkTarget(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.Equal(PromptPath, OverrideFileOf(_memory.ReadAllBytes(target)));
     }
 
     [Fact]
     public void Install_NoHomeDirectory_RefusesAndWritesNothing()
     {
         DetectFlavour(VsCodeFlavour.Stable);
-        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false, new PhysicalPathResolver(new PhysicalFileSystem()), Home), DoctorTestServices.Files, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
+        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false, _paths, Home), _reads, _memory, ShippedCopilotPrompt.Resources, Console());
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
+        Execution execution = Run(command, new CopilotPromptSettings { Yes = true });
 
         Assert.Equal(2, execution.Result);
-        Assert.False(File.Exists(SettingsPath(VsCodeFlavour.Stable)));
-        Assert.False(File.Exists(PromptPath));
+        Assert.False(_memory.FileExists(SettingsPath(VsCodeFlavour.Stable)));
+        Assert.False(_memory.FileExists(PromptPath));
     }
 
     [Fact]
     public void EnvironmentFrom_NoAbsoluteHome_LeavesHomeNullRatherThanFallingBack()
     {
         CopilotPromptEnvironment environment = CopilotPromptCommandSupport.EnvironmentFrom(
-            name => name == "HOME" ? "relative/home" : null, OSPlatform.Linux, false, _ => false, new PhysicalPathResolver(new PhysicalFileSystem()), Home);
+            name => name == "HOME" ? "relative/home" : null, OSPlatform.Linux, false, _ => false, _paths, Home);
 
         Assert.Null(environment.HomeDirectory);
     }
@@ -509,32 +525,32 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_RefusesANullFileSystemAtConstruction()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptInstallCommand((IDoctorFileSystem)null!, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, new FakeProcessEnvironment(), new PhysicalPathResolver(new PhysicalFileSystem()), SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptInstallCommand((IDoctorFileSystem)null!, _memory, ShippedCopilotPrompt.Resources, new FakeProcessEnvironment(), _paths, Console()));
 
         Assert.Equal("files", exception.ParamName);
         _ = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptInstallCommand(NewEnvironment(interactive: true), null!, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptInstallCommand(NewEnvironment(interactive: true), null!, _memory, ShippedCopilotPrompt.Resources, Console()));
     }
 
     [Fact]
     public void Uninstall_RefusesANullFileSystemAtConstruction()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptUninstallCommand((IDoctorFileSystem)null!, new PhysicalFileSystem(), new FakeProcessEnvironment(), new PhysicalPathResolver(new PhysicalFileSystem()), SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptUninstallCommand((IDoctorFileSystem)null!, _memory, new FakeProcessEnvironment(), _paths, Console()));
 
         Assert.Equal("files", exception.ParamName);
         _ = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptUninstallCommand(NewEnvironment(interactive: true), null!, new PhysicalFileSystem(), SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptUninstallCommand(NewEnvironment(interactive: true), null!, _memory, Console()));
     }
 
     [Fact]
     public void Status_RefusesANullFileSystemAtConstruction()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptStatusCommand((IDoctorFileSystem)null!, new FakeProcessEnvironment(), new PhysicalPathResolver(new PhysicalFileSystem()), SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptStatusCommand((IDoctorFileSystem)null!, new FakeProcessEnvironment(), _paths, Console()));
 
         Assert.Equal("files", exception.ParamName);
         _ = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptStatusCommand(NewEnvironment(interactive: true), null!, SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptStatusCommand(NewEnvironment(interactive: true), null!, Console()));
     }
 }
