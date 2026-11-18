@@ -354,10 +354,15 @@ For every task in phase 4:
     that forced them, take fakes; one task per seam group as listed in the tests inventory.
   - **Acceptance criteria:** each converted test class touches no resource and sits in the unit project
     of the code it tests.
-  - **Result (2026-11-18):** the old catch-all `tests/KyberWeave.Tests` is gone. Every test class that
-    proves product behaviour runs in memory in its project's unit test project
+  - **Result (2026-11-18), scoped:** the old catch-all `tests/KyberWeave.Tests` is gone, and every
+    class this task moved runs in memory in its project's unit test project
     (`KyberWeave.Application.Tests`, `.Cli.Tests`, `.Data.Tests`, `.Kernel.Tests`, `.Mcp.Tests`,
-    `.Arbiter.Tests`, `.Hooks.Tests`) over the shared fakes in `tests/KyberWeave.Testing`.
+    `.Arbiter.Tests`, `.Hooks.Tests`) over the shared fakes in `tests/KyberWeave.Testing`. This tick
+    covers those classes only. Fifteen classes whose subject is logic still sit in
+    `KyberWeave.Integration.Tests`; task 5.3 names them, the owner is converting them one per run,
+    and the open ones are tracked in
+    [`docs/todo/interface-driven-test-follow-ups.md`](../../todo/interface-driven-test-follow-ups.md).
+    The owner accepted this split for the archive on 2026-11-18.
   - **Depends on:** the phase 3 or 4 task that made the product class testable
   - _Requirements: 5.1, 5.2_
 
