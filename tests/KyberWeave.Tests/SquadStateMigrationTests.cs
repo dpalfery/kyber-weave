@@ -584,7 +584,7 @@ public sealed class SquadStateMigrationTests
         string leaseKey = scenario.Store.ResolveLeaseIdentity(scenario.Home, SquadDeploymentScope.Global);
 
         SquadMigrationReport whileHeld;
-        using (TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
+        using (IDisposable held = new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero))
         {
             whileHeld = scenario.Migration.MigrateGlobal(invokingCwd: null);
         }
@@ -612,10 +612,10 @@ public sealed class SquadStateMigrationTests
 
         using (new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero))
         {
-            _ = Assert.Throws<InvalidOperationException>(() => SquadTransaction.AcquireLease(leaseKey));
+            _ = Assert.ThrowsAny<InvalidOperationException>(() => new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero));
         }
 
-        using TransactionLease afterRelease = SquadTransaction.AcquireLease(leaseKey);
+        using IDisposable afterRelease = new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero);
     }
 
     /// <summary>
@@ -633,7 +633,7 @@ public sealed class SquadStateMigrationTests
         string leaseKey = scenario.Store.ResolveLeaseIdentity(repo, SquadDeploymentScope.Project);
 
         SquadMigrationReport whileHeld;
-        using (TransactionLease held = SquadTransaction.AcquireLease(leaseKey))
+        using (IDisposable held = new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero))
         {
             whileHeld = scenario.Migration.ImportProject(repo);
         }

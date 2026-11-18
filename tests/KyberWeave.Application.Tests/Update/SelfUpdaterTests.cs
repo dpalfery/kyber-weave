@@ -19,16 +19,17 @@ namespace KyberWeave.Application.Tests.Update;
 /// </remarks>
 public sealed class SelfUpdaterTests
 {
-    private const string InstallDirectory = "/kw/install";
-    private const string ProcessPath = InstallDirectory + "/kyber-weave";
-    private const string McpPath = InstallDirectory + "/kyber-weave-mcp";
+    private static readonly string Root = new InMemoryFileSystem().Root;
+    private static readonly string InstallDirectory = Path.Combine(Root, "kw", "install");
+    private static readonly string ProcessPath = Path.Combine(InstallDirectory, "kyber-weave");
+    private static readonly string McpPath = Path.Combine(InstallDirectory, "kyber-weave-mcp");
     private const string Tag = "v0.2.0";
 
     private readonly InMemoryFileSystem _files = new();
     private readonly FakePathResolver _paths;
     private readonly FakeProcessEnvironment _environment = new(
-        currentDirectory: "/kw/work",
-        homeDirectory: "/kw/home",
+        currentDirectory: Path.Combine(Root, "kw", "work"),
+        homeDirectory: Path.Combine(Root, "kw", "home"),
         readVariable: _ => null);
     private readonly FakeSelfUpdateSystem _system;
     private readonly List<string> _log = [];
@@ -64,8 +65,8 @@ public sealed class SelfUpdaterTests
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal(2, _system.ExtractedArchives.Count);
-        Assert.All(_system.ExtractedArchives, archive => Assert.StartsWith("/kw-memfs-tmp/", archive, StringComparison.Ordinal));
-        Assert.Empty(_files.EnumerateDirectories("/kw-memfs-tmp"));
+        Assert.All(_system.ExtractedArchives, archive => Assert.StartsWith(Path.Combine(Root, "kw-memfs-tmp") + Path.DirectorySeparatorChar, archive, StringComparison.Ordinal));
+        Assert.Empty(_files.EnumerateDirectories(Path.Combine(Root, "kw-memfs-tmp")));
         Assert.Equal(2, _files.EnumerateFiles(InstallDirectory, "*", recursive: false).Count());
     }
 
@@ -131,7 +132,7 @@ public sealed class SelfUpdaterTests
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Equal("already on 0.1.7-rc.20", outcome.Message);
-        Assert.Contains(_log, line => line.Contains("/kw/home/.kyberdash/tray.json", StringComparison.Ordinal));
+        Assert.Contains(_log, line => line.Contains(Path.Combine(Root, "kw", "home", ".kyberdash", "tray.json"), StringComparison.Ordinal));
     }
 
     /// <summary>

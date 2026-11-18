@@ -207,20 +207,21 @@ public sealed class SquadDeploymentStateRestoreTests : SquadDeploymentStateTestB
 
         Assert.Contains("ReadOnlyMemory<byte>", source, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(compare, "CaptureVerifiedRestorePayload("));
-        Assert.DoesNotContain("File.ReadAll", compare, StringComparison.Ordinal);
-        Assert.DoesNotContain("File.ReadAll", restore, StringComparison.Ordinal);
+        Assert.DoesNotContain("_files.ReadAll", compare, StringComparison.Ordinal);
+        Assert.DoesNotContain("_files.ReadAll", restore, StringComparison.Ordinal);
         Assert.DoesNotContain("VerifyRestoreArtifact", restore, StringComparison.Ordinal);
         Assert.Contains("payload", restore, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("GetEntryKind", capture, StringComparison.Ordinal);
         Assert.True(
             CountOccurrences(capture, "GetEntryKind") >= 2,
             "Restore payload capture must verify the source node kind before and after its single read.");
-        Assert.Equal(1, CountOccurrences(capture, "File.ReadAllBytes(backupPath)"));
-        Assert.Equal(1, CountOccurrences(capture, "File.ReadAllBytes(linkMetadataPath)"));
-        Assert.Contains("FileMode.CreateNew", restore, StringComparison.Ordinal);
+        Assert.Equal(1, CountOccurrences(capture, "_files.ReadAllBytes(backupPath)"));
+        Assert.Equal(1, CountOccurrences(capture, "_files.ReadAllBytes(linkMetadataPath)"));
+        Assert.Contains("WriteNewFile", restore, StringComparison.Ordinal);
+        Assert.Contains("OpenWriteNew", ExtractMethod(source, "WriteNewFile"), StringComparison.Ordinal);
         Assert.DoesNotContain("FileMode.Create,", restore, StringComparison.Ordinal);
         Assert.DoesNotContain("FileMode.Create)", restore, StringComparison.Ordinal);
-        Assert.Contains("CreateSymbolicLink", restore, StringComparison.Ordinal);
+        Assert.Contains("CreateFileLink", restore, StringComparison.Ordinal);
         Assert.Contains("GetEntryKind(targetPath)", restore, StringComparison.Ordinal);
         int liveRecheck = restore.LastIndexOf(
             "GetEntryKind(targetPath)",

@@ -138,7 +138,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
         int applyStart = source.IndexOf("private void ApplyFiles", StringComparison.Ordinal);
         int restoreStart =
-            source.IndexOf("private static IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
+            source.IndexOf("private IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
         Assert.True(applyStart >= 0 && restoreStart > applyStart);
         string liveApplySource = source[applyStart..restoreStart];
 
@@ -195,6 +195,28 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     }
 
     [Fact]
+    public void RecoverToleratesAnEmptyUndescribedFolderInTheTransactionTree()
+    {
+        using TransactionFixture fixture = TransactionFixture.Create();
+        string fixturePath = fixture.Path;
+        SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfterCheckpoint(
+            fixture,
+            SquadTransactionCheckpointKind.Prepared);
+        RestoreTree(fixturePath, interrupted);
+        string transactionDirectory = Path.Combine(fixturePath, ".kyber-weave", ".squad-transaction");
+
+        // What a kill between a stage move and the removal of its now-empty folders leaves.
+        Directory.CreateDirectory(Path.Combine(transactionDirectory, "staging", "emptied-by-a-kill"));
+
+        Exception? exception = Record.Exception(() => Transaction(fixturePath).Recover(
+            fixturePath,
+            SquadDeploymentScope.Project));
+
+        Assert.Null(exception);
+        Assert.False(Directory.Exists(transactionDirectory));
+    }
+
+    [Fact]
     public void RecoverValidCreatedDirectoryAuthorityRemovesOnlyDeclaredEmptyDirectoriesDeepestFirst()
     {
         using TempDirectory fixture = new();
@@ -209,7 +231,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
             fixture.Path,
             SquadTransactionCheckpointKind.Prepared);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            new SquadTransaction(store, observer).Execute(CreateGlobalInstallPlan(targetRoot)));
+            RealSquadDeployment.Transaction(store, observer).Execute(CreateGlobalInstallPlan(targetRoot)));
         RestoreTree(
             fixture.Path,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
@@ -222,7 +244,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         JsonArray createdDirectories = Assert.IsType<JsonArray>(intent["createdDirectories"]);
         AssertCreatedDirectoryAuthorityIsCanonical(createdDirectories);
 
-        new SquadTransaction(store).Recover(targetRoot, SquadDeploymentScope.Global);
+        RealSquadDeployment.Transaction(store).Recover(targetRoot, SquadDeploymentScope.Global);
 
         AssertTreesEqual(before, CaptureTree(fixture.Path));
     }
@@ -269,7 +291,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
             fixture.Path,
             checkpoint,
             recoveryScenario.Subject);
-        SquadTransaction transaction = new(store, observer);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             transaction.Execute(recoveryScenario.Plan));

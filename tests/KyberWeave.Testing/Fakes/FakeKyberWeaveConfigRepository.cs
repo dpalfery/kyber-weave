@@ -19,6 +19,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
     private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Exception> _readFailures = new(StringComparer.Ordinal);
     private readonly HashSet<string> _directories = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _symlinkEscapes = new(StringComparer.Ordinal);
     private readonly List<string> _roots = [];
 
     /// <summary>Creates the fake, with its tree probe answering from the files and directories it is given.</summary>
@@ -44,6 +45,17 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
     /// <summary>Creates a directory, so a gate's <c>working-directory</c> can name one that exists.</summary>
     /// <param name="fullPath">The full path of the directory.</param>
     public void CreateDirectory(string fullPath) => _directories.Add(FullDirectory(fullPath));
+
+    /// <summary>
+    /// States that a repository-relative path passes through a symbolic link that leads outside the root, as the real
+    /// tree probe reports one. The default is no escape, so a fake arranged with text alone answers as it did before.
+    /// </summary>
+    /// <param name="relativePath">The repository-relative path, spelled as a gate's <c>working-directory</c> is.</param>
+    public void EscapeThroughSymlink(string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+        _symlinkEscapes.Add(Relative(relativePath));
+    }
 
     /// <summary>Writes a repository's <c>.kyber-weave/kyber-weave.yml</c>.</summary>
     /// <param name="repoRoot">The repository root.</param>
@@ -268,6 +280,9 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
 
     private static string FullDirectory(string path) => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
 
+    private static string Relative(string path) =>
+        path.Replace('\\', '/').Trim('/');
+
     private void ThrowIfUnreadable(string fullPath)
     {
         if (_readFailures.TryGetValue(fullPath, out Exception? error))
@@ -286,6 +301,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
 
         public bool DirectoryExists(string path) => owner.DirectoryExists(path);
 
-        public bool LeadsOutsideThroughSymlink(string root, string path) => false;
+        public bool LeadsOutsideThroughSymlink(string root, string path) =>
+            owner._symlinkEscapes.Contains(Relative(path));
     }
 }

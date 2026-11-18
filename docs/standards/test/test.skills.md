@@ -23,8 +23,8 @@ dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.cspro
 dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build \
   --filter "FullyQualifiedName~<Class>"
 
-# Skill, agent and instruction wording.
-dotnet test tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj -c Release \
+# Shipped content: skills, agents, standards and documents.
+dotnet test tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj -c Release \
   --filter "FullyQualifiedName~<Class>"
 ```
 

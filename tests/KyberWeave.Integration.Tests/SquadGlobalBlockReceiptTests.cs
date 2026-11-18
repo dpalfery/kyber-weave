@@ -66,7 +66,7 @@ public sealed class SquadGlobalBlockReceiptTests
             globalRoots: globalRoots,
             blocks: [HooksBlock(SquadTarget.Cursor), HooksBlock(SquadTarget.Codex)]);
 
-        new SquadTransaction(store).Execute(two);
+        RealSquadDeployment.Transaction(store).Execute(two);
 
         SquadReceipt afterTwo = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(targetRoot, SquadDeploymentScope.Global));
@@ -93,7 +93,7 @@ public sealed class SquadGlobalBlockReceiptTests
                 HooksBlock(SquadTarget.Factory),
             ]);
 
-        new SquadTransaction(store).Execute(three);
+        RealSquadDeployment.Transaction(store).Execute(three);
 
         SquadReceipt afterThree = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(targetRoot, SquadDeploymentScope.Global));

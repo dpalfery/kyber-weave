@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
@@ -15,6 +16,29 @@ public static class RealSquadDeployment
     public static SquadDeploymentPlanner Planner { get; } = new(
         new PhysicalFileSystem(),
         SquadFileSystemPathSemantics.Instance,
-        new PhysicalPathResolver(new PhysicalFileSystem()),
-        new ProcessEnvironment());
+        new PhysicalPathResolver(new PhysicalFileSystem()));
+
+    /// <summary>A transaction over the physical file system, the operating-system mutex and the real path rules.</summary>
+    /// <param name="store">The state store the transaction journals in.</param>
+    /// <param name="observer">Told of each durable step; none when null.</param>
+    /// <returns>The transaction.</returns>
+    public static SquadTransaction Transaction(ISquadStateStore store, ISquadTransactionObserver? observer = null) =>
+        new(
+            store,
+            new PhysicalFileSystem(),
+            SquadFileSystemPathSemantics.Instance,
+            new MutexLease(),
+            new SystemIdGenerator(),
+            observer);
+
+    /// <summary>A transaction factory over the same real adapters.</summary>
+    /// <param name="store">The state store the transactions journal in.</param>
+    /// <returns>The factory.</returns>
+    public static SquadTransactionFactory TransactionFactory(ISquadStateStore store) =>
+        new(
+            store,
+            new PhysicalFileSystem(),
+            SquadFileSystemPathSemantics.Instance,
+            new MutexLease(),
+            new SystemIdGenerator());
 }

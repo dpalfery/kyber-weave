@@ -55,63 +55,58 @@ internal static class CommandAppFixture
     /// with parsing left lax so an argument the command rejects reaches the command rather than
     /// being refused by the parser first.
     /// </summary>
-    public static CommandApp DocsInit() => Build(strictParsing: false, DocsInitBranch);
+    public static CommandApp DocsInit() => Build(strictParsing: false, null, null, DocsInitBranch);
 
     /// <summary>
     /// The council <c>review gates</c> boundary: the <c>review</c> branch and its single
     /// <c>gates</c> command, stricter than the product's own entry point so an option the command
     /// does not declare fails the case instead of being ignored.
     /// </summary>
-    public static CommandApp ReviewGates() => Build(strictParsing: true, ReviewGatesBranch);
+    public static CommandApp ReviewGates(Action<IServiceCollection>? configure = null, IAnsiConsole? console = null) =>
+        Build(strictParsing: true, configure, console, ReviewGatesBranch);
 
     /// <summary>
     /// The <c>review catalogue</c> boundary: the <c>review</c> branch and its single
     /// <c>catalogue</c> command, strict for the same reason as <see cref="ReviewGates"/>.
     /// </summary>
-    public static CommandApp ReviewCatalogue() => Build(strictParsing: true, ReviewCatalogueBranch);
+    public static CommandApp ReviewCatalogue(Action<IServiceCollection>? configure = null, IAnsiConsole? console = null) =>
+        Build(strictParsing: true, configure, console, ReviewCatalogueBranch);
 
     /// <summary>
     /// The <c>review suppressions</c> boundary: the <c>review</c> branch and its single
     /// <c>suppressions</c> command, strict for the same reason as <see cref="ReviewGates"/>.
     /// </summary>
-    public static CommandApp ReviewSuppressions() => Build(strictParsing: true, ReviewSuppressionsBranch);
+    public static CommandApp ReviewSuppressions() => Build(strictParsing: true, null, null, ReviewSuppressionsBranch);
 
     /// <summary>The <c>arbiter tune</c> boundary: the <c>arbiter</c> branch with its single <c>tune</c> command.</summary>
-    public static CommandApp ArbiterTune() => Build(strictParsing: true, ArbiterTuneBranch);
+    public static CommandApp ArbiterTune() => Build(strictParsing: true, null, null, ArbiterTuneBranch);
 
     /// <summary>
     /// The <c>docs standards migrate</c> boundary: the <c>docs</c> branch with the standards
     /// migration command, strict so an option the command does not declare fails the case.
     /// </summary>
     public static CommandApp DocsStandardsMigrate() =>
-        Build(strictParsing: true, DocsStandardsMigrateBranch);
+        Build(strictParsing: true, null, null, DocsStandardsMigrateBranch);
 
     /// <summary>
     /// The <c>docs standards diff</c> boundary, strict for the same reason as
     /// <see cref="DocsStandardsMigrate"/>.
     /// </summary>
     public static CommandApp DocsStandardsDiff() =>
-        Build(strictParsing: true, DocsStandardsDiffBranch);
+        Build(strictParsing: true, null, null, DocsStandardsDiffBranch);
 
     /// <summary>
     /// Both branches at once, strict: <c>docs init</c> and the council <c>review gates</c> in one
     /// app, which is what a case needs when it scaffolds a repository and then gates it.
     /// </summary>
     public static CommandApp DocsInitWithReviewGates() =>
-        Build(strictParsing: true, DocsInitBranch, ReviewGatesBranch);
+        Build(strictParsing: true, null, null, DocsInitBranch, ReviewGatesBranch);
 
     /// <summary>
     /// The one place a command app is assembled: the application name, whether parsing is strict,
     /// and the branches to register.
     /// </summary>
-    private static CommandApp Build(bool strictParsing, params Action<IConfigurator>[] branches) =>
-        Build(null, null, strictParsing, branches);
-
-    /// <summary>
-    /// The same assembly over a container whose first registrations a test chooses, so a command-driving case
-    /// can run over in-memory seams: every application registration uses <c>TryAdd</c> and keeps what was added first.
-    /// </summary>
-    private static CommandApp Build(Action<IServiceCollection>? configure, IAnsiConsole? console, bool strictParsing, params Action<IConfigurator>[] branches)
+    private static CommandApp Build(bool strictParsing, Action<IServiceCollection>? configure, IAnsiConsole? console, params Action<IConfigurator>[] branches)
     {
         ServiceCollection services = [];
         configure?.Invoke(services);
@@ -165,17 +160,17 @@ internal static class CommandAppFixture
     /// <param name="configure">Registers the seams the case replaces.</param>
     /// <param name="console">The console the app and its commands write to.</param>
     public static CommandApp DocsInit(Action<IServiceCollection> configure, IAnsiConsole console) =>
-        Build(configure, console, strictParsing: false, DocsInitBranch);
+        Build(strictParsing: false, configure, console, DocsInitBranch);
 
     /// <summary><see cref="DocsStandardsMigrate()"/> over a container whose first registrations the test chooses.</summary>
     /// <param name="configure">Registers the seams the case replaces.</param>
     /// <param name="console">The console the app and its commands write to.</param>
     public static CommandApp DocsStandardsMigrate(Action<IServiceCollection> configure, IAnsiConsole console) =>
-        Build(configure, console, strictParsing: true, DocsStandardsMigrateBranch);
+        Build(strictParsing: true, configure, console, DocsStandardsMigrateBranch);
 
     /// <summary><see cref="DocsStandardsDiff()"/> over a container whose first registrations the test chooses.</summary>
     /// <param name="configure">Registers the seams the case replaces.</param>
     /// <param name="console">The console the app and its commands write to.</param>
     public static CommandApp DocsStandardsDiff(Action<IServiceCollection> configure, IAnsiConsole console) =>
-        Build(configure, console, strictParsing: true, DocsStandardsDiffBranch);
+        Build(strictParsing: true, configure, console, DocsStandardsDiffBranch);
 }

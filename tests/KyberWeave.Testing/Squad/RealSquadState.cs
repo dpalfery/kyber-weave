@@ -22,7 +22,8 @@ public static class RealSquadState
             new PhysicalFileSystem(),
             SquadFileSystemPathSemantics.Instance,
             new PhysicalPathResolver(new PhysicalFileSystem()),
-            new ProcessEnvironment());
+            new ProcessEnvironment(),
+            new MutexLease());
 
     /// <summary>The migration over a store, with the real file system, lease and clock.</summary>
     /// <param name="store">The store the migration resolves its locations from.</param>

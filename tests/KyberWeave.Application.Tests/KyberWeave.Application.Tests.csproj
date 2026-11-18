@@ -23,10 +23,23 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Fixture files that moved classes read are embedded, so a unit test holds them in memory. The files stay
+         where KyberWeave.Tests also reads them. -->
+    <EmbeddedResource Include="..\KyberWeave.Tests\Fixtures\arbiter-hooks\**\*.json" LogicalName="fixtures/arbiter-hooks/%(RecursiveDir)%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\KyberWeave.Tests\Fixtures\review-seats\*.md" LogicalName="fixtures/review-seats/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\KyberWeave.Tests\Fixtures\arbiter-plans\*.md" LogicalName="fixtures/arbiter-plans/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\KyberWeave.Application\KyberWeave.Application.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Contracts\KyberWeave.Contracts.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Domain\KyberWeave.Domain.csproj" />
     <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Recorded gate reports the RED tests judge: compiled in, so a test reads them without the disk. -->
+    <EmbeddedResource Include="Fixtures\red-gate-reports\*.json" LogicalName="red-gate-reports/%(Filename)%(Extension)" />
   </ItemGroup>
 
 </Project>

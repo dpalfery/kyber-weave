@@ -54,7 +54,8 @@ internal static class SquadHostDefaults
             new PhysicalFileSystem(),
             SquadFileSystemPathSemantics.Instance,
             new PhysicalPathResolver(new PhysicalFileSystem()),
-            new ProcessEnvironment());
+            new ProcessEnvironment(),
+            new MutexLease());
 
     /// <summary>Creates the per-target global root resolver over the environment.</summary>
     public static ISquadGlobalRootResolver ResolveGlobalRoots(Func<string, string?>? environmentReader = null)
@@ -85,7 +86,7 @@ internal static class SquadHostDefaults
         SquadStateStore? stateStore = null,
         ISquadUserPaths? userPaths = null,
         ISquadTransactionObserver? observer = null) =>
-        new(stateStore ?? ResolveStateStore(userPaths), observer);
+        RealSquadDeployment.Transaction(stateStore ?? ResolveStateStore(userPaths), observer);
 
     /// <summary>Creates a lifecycle service over the physical adapters, replacing whichever collaborators are given.</summary>
     [SuppressMessage(
@@ -138,7 +139,7 @@ internal static class SquadHostDefaults
             RealSquadServices.SourceLoader(),
             RealSquadServices.PresetValidator(),
             RealSquadDeployment.Planner,
-            new SquadTransactionFactory(stateStore),
+            RealSquadDeployment.TransactionFactory(stateStore),
             new SquadResponseGuidanceReader(new PhysicalFileSystem()),
             new FactoryHooksShadowing(new PhysicalFileSystem()),
             new SquadCanonicalProfileStore(stateStore.UserPaths),

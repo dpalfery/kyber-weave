@@ -48,7 +48,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         // The planner cannot know the home anchor, so it records the unanchored marker. The transaction
         // stamps the physical home on the plan as it writes, which is what this test asserts afterwards.
         Assert.Equal(SquadStateSchemas.UnanchoredTargetRoot, plan.Receipt.TargetRoot);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         string stateDirectory = store.ResolveStateDirectory(
             fixture.Path,
@@ -94,7 +94,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt));
 
-        new SquadTransaction(store).Execute(firstPlan);
+        RealSquadDeployment.Transaction(store).Execute(firstPlan);
 
         SquadReceipt firstReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
             firstRoot,
@@ -169,7 +169,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             new FixedTimeProvider(InstalledAt),
             globalRoots);
 
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         Assert.Equal("claude conductor", Read(claudeRoot, "agents/conductor.md"));
         Assert.Equal("codex conductor", Read(codexRoot, "agents/conductor.md"));
@@ -231,7 +231,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             SquadDeploymentPlan plan = CreateGlobalInstallPlan(targetRoot);
             SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
             FailingObserver failure = new(fixture.Path, failureSequence);
-            SquadTransaction transaction = new(store, failure);
+            SquadTransaction transaction = RealSquadDeployment.Transaction(store, failure);
 
             Assert.Throws<InjectedSquadTransactionFailure>(() => transaction.Execute(plan));
             AssertTreesEqual(before, CaptureTree(fixture.Path));
@@ -369,7 +369,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        SquadTransaction activeTransaction = new(store, blocker);
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
         Task activeExecution = BlockedTransaction.Start(() => activeTransaction.Execute(activePlan));
         BlockedTransaction.WaitForStep(
             blocker.Reached,
@@ -379,7 +379,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Exception? siblingException;
         try
         {
-            SquadTransaction siblingTransaction = new(store);
+            SquadTransaction siblingTransaction = RealSquadDeployment.Transaction(store);
             siblingException = Record.Exception(() => siblingTransaction.Execute(siblingPlan));
         }
         finally
@@ -442,7 +442,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        SquadTransaction activeTransaction = new(store, blocker);
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
         Task activeExecution = BlockedTransaction.Start(() => activeTransaction.Execute(activePlan));
         BlockedTransaction.WaitForStep(
             blocker.Reached,
@@ -452,7 +452,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Exception? aliasException;
         try
         {
-            SquadTransaction aliasTransaction = new(store);
+            SquadTransaction aliasTransaction = RealSquadDeployment.Transaction(store);
             aliasException = Record.Exception(() => aliasTransaction.Execute(aliasPlan));
         }
         finally
@@ -488,7 +488,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
 
         Exception? exception = Record.Exception(() =>
-            new SquadTransaction(Store(applicationData)).Execute(plan));
+            RealSquadDeployment.Transaction(Store(applicationData)).Execute(plan));
 
         SquadDeploymentConflictException
             conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
@@ -822,7 +822,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             legacyReceipt,
             globalRoots);
 
-        new SquadTransaction(Store(applicationData)).Execute(uninstallPlan);
+        RealSquadDeployment.Transaction(Store(applicationData)).Execute(uninstallPlan);
 
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".codex/agents/conductor.toml")));
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".github/agents/reviewer.agent.md")));
@@ -894,7 +894,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             legacyReceipt,
             globalRoots);
 
-        new SquadTransaction(stateStore).Execute(uninstallPlan);
+        RealSquadDeployment.Transaction(stateStore).Execute(uninstallPlan);
 
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".codex/agents/conductor.toml")));
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".github/agents/reviewer.agent.md")));

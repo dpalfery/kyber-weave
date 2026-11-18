@@ -110,6 +110,26 @@ public abstract class LeaseContractTests
     }
 
     [Fact]
+    public void WaitsForALeaseASecondSeamInstanceReleasesWithinTheTimeout()
+    {
+        (ILease holder, ILease contender) = CreateTwoLeasesOnOneMachine();
+        string name = NewName();
+        IDisposable held = holder.Acquire(name, GenerousTimeout);
+        Thread release = new(() =>
+        {
+            Thread.Sleep(150);
+            held.Dispose();
+        });
+        release.Start();
+
+        using (contender.Acquire(name, GenerousTimeout))
+        {
+        }
+
+        release.Join();
+    }
+
+    [Fact]
     public void ReleasingALeaseTwiceIsHarmless()
     {
         ILease lease = CreateLease();

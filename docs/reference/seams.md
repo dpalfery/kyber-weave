@@ -217,8 +217,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadDeploymentAdapters` (`Squad/Deployment/SquadDeploymentAdapters.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadMigrationLedger` (`Squad/Deployment/SquadMigrationLedger.cs`) | file system | 3.5 |
 | `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadTransaction` (`Squad/Deployment/SquadTransaction.cs`) | file system, paths, identifiers, lease | 3.4 |
-| `TransactionLease` (`Squad/Deployment/TransactionLease.cs`) | file system, lease | 3.4 |
 | `FileSquadPackager` (`Squad/Packaging/FileSquadPackager.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadCanonicalProfileStore` (`Squad/Presets/SquadCanonicalProfileStore.cs`) | file system, identifiers | 3.5 |
 | `SquadModelPresetStore` (`Squad/Presets/SquadModelPresetStore.cs`) | file system | 3.5 |
@@ -231,6 +229,11 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   `OpenExclusive` (a read-write open that keeps every other opener out until disposed) and
   `OpenAppendShared` (an append that other appenders and readers share), proven on the fake and on
   `PhysicalFileSystem` by the file-system contract suite.
+- Task 3.4 moved `SquadTransaction` and `TransactionLease` onto the seams. The file-system seam gained
+  `DeleteEmptyDirectory` (removes a directory only when nothing is in it) and `OpenGuarded` (a read-only open
+  that keeps others from changing or deleting a file), both proven by the same contract suite, and later
+  `FlushDirectory` (flushes a directory's entries, so a rename survives a power loss; a no-op on Windows and in
+  memory).
 - `SelfUpdateSystem` is converted. It takes the file-system, path and bounded-process seams by constructor, and
   splits the work: `ArchiveEntryPlanner` decides where an archive entry may go and refuses an absolute, climbing or
   link-escaping one, `ReleaseArchiveExtractor` reads the archive as a stream and writes each entry through the file
@@ -302,12 +305,12 @@ the behaviour: where a test observes the value, the seam still wraps it.
 | `SHA256` | A pure hash over bytes. Two calls on the same bytes return the same digest, so a test never needs to replace it | 40 files, 51 sites, from `Arbiter` through `Squad` to `SelfUpdater` | The bytes hashed; the digest is asserted directly |
 | `ProcessStartInfo` | A sealed data transfer object handed to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a delegate. It starts nothing by itself; the runner does | 39 files, 66 sites; production process starts remain in `Kernel/Processes/ProcessRunner.cs` and `StdioSession` | A scripted fake asserts the program, arguments, working directory and environment it receives |
 | `HttpClient` | A sealed network client. The transport is the seam: an injected `HttpMessageHandler` or `IArbiterHttpHandlers`, or a named network adapter | 9 files, 16 sites: the four network adapters (`SystemOneClient`, `GitHubReleaseClient`, `GitHubSquadReleaseSource`, `OpenAiCompatibleEmbeddingGenerator`), `OllamaProbe` over `IArbiterHttpHandlers`, `SelfUpdater` over an injected handler, and two factories that pass the handler on | The handler or the network adapter; no test opens a socket |
-| `FileStream` | The stream type at the bottom of the file-system adapter. It is an exception only **inside** an adapter, where it is the adapter's whole job | 27 files, 37 sites. Adapter uses: `PhysicalFileSystem`, `PhysicalDoctorFileSystem`, `ExclusiveFileWriter`, `FileBoundedFileReader`, `FileCodeGraphIndexWorkspace` (lease) and Kernel `BoundedFileReader`; `TransactionLease` is adapter-shaped but task 3.4 moves it onto `ILease` | The file-system seam: `InMemoryFileSystem`, proven by the file-system contract suite |
+| `FileStream` | The stream type at the bottom of the file-system adapter. It is an exception only **inside** an adapter, where it is the adapter's whole job | 27 files, 37 sites. Adapter uses: `PhysicalFileSystem`, `PhysicalDoctorFileSystem`, `ExclusiveFileWriter`, `FileBoundedFileReader`, `FileCodeGraphIndexWorkspace` (lease) and Kernel `BoundedFileReader`; `TransactionLease` now holds its journal through the seam's `OpenGuarded` | The file-system seam: `InMemoryFileSystem`, proven by the file-system contract suite |
 
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
 `Application/Update/SelfUpdater.cs`,
-`Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
+`Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,
 `Data/Squad/Rendering/CopilotMcpServerProbe.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.

@@ -120,10 +120,10 @@ public sealed class PhysicalSquadStateCrashWorkspace : SquadStateCrashWorkspace
         FakeSquadUserPaths userPaths = new(applicationData, home);
         PhysicalPathResolver paths = new(_faulting);
         SquadFileSystemPathSemantics semantics = new(paths);
-        SquadStateStore store = new(userPaths, _faulting, semantics, paths, new ProcessEnvironment());
+        SquadStateStore store = new(userPaths, _faulting, semantics, paths, new ProcessEnvironment(), new MutexLease());
         _migration = new SquadStateMigration(store, userPaths, _faulting, semantics, new MutexLease(), new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero)));
         _layout = new SquadStateTestLayout(
-            new SquadStateStore(userPaths, _disk, semantics, new PhysicalPathResolver(_disk), new ProcessEnvironment()),
+            new SquadStateStore(userPaths, _disk, semantics, new PhysicalPathResolver(_disk), new ProcessEnvironment(), new MutexLease()),
             _disk,
             new SquadFileSystemPathSemantics(new PhysicalPathResolver(_disk)));
     }

@@ -132,6 +132,9 @@ internal sealed class FakeRepositoryFileStore(IRepositoryFileStore? inner = null
     public Stream OpenExclusive(string path) => _inner.OpenExclusive(path);
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) => _inner.OpenGuarded(path);
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path) => _inner.OpenAppendShared(path);
 
     /// <inheritdoc />
@@ -142,6 +145,12 @@ internal sealed class FakeRepositoryFileStore(IRepositoryFileStore? inner = null
 
     /// <inheritdoc />
     public void DeleteTreeNoFollow(string directoryPath) => _inner.DeleteTreeNoFollow(directoryPath);
+
+    /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) => _inner.DeleteEmptyDirectory(directoryPath);
+
+    /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) => _inner.FlushDirectory(directoryPath);
 
     /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => _inner.CreateFileLink(linkPath, targetPath);

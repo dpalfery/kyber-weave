@@ -43,7 +43,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
                 false,
                 new FixedTimeProvider(InstalledAt));
 
-            new SquadTransaction(store).Execute(plan);
+            RealSquadDeployment.Transaction(store).Execute(plan);
 
             Assert.Equal(
                 "durable",

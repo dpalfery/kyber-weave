@@ -1,11 +1,12 @@
 using System.Text;
 using KyberWeave.Contracts.Repositories;
+using System.Runtime.InteropServices;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Data.Hooks;
 
 /// <summary>Reads and writes the real file system.</summary>
-public sealed class PhysicalFileSystem : IWritableFileSystem
+public sealed partial class PhysicalFileSystem : IWritableFileSystem
 {
     private static readonly HashSet<string> SkippedDirectories = new(StringComparer.Ordinal)
     {
@@ -85,6 +86,64 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
         new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) =>
+        new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+    /// <inheritdoc />
+    /// <remarks>
+    ///     Unix opens the directory read-only and calls fsync on it. Windows does nothing: a directory handle cannot be
+    ///     flushed there. NTFS journals its metadata, which keeps the volume consistent after a crash; it does not
+    ///     promise that a just-renamed name has reached the device, so durability of the rename there rests on the
+    ///     file flush alone.
+    /// </remarks>
+    public void FlushDirectory(string directoryPath)
+    {
+        if (!Directory.Exists(directoryPath))
+            throw new DirectoryNotFoundException($"The directory '{directoryPath}' does not exist.");
+
+        if (OperatingSystem.IsWindows())
+            return;
+
+        // O_RDONLY, plus close-on-exec so a child process started meanwhile does not inherit the descriptor. O_DIRECTORY
+        // is left out: its value differs by Linux architecture, and the directory was checked just above.
+        int descriptor = OpenDirectory(directoryPath, OperatingSystem.IsMacOS() ? ReadOnlyCloseOnExecMac : ReadOnlyCloseOnExecLinux);
+        if (descriptor < 0)
+            throw new IOException(
+                $"The directory '{directoryPath}' could not be opened to flush it.",
+                new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+
+        try
+        {
+            // EINVAL means the file system keeps no separate directory data (some network and FUSE mounts); there is
+            // nothing to flush there, so only a real I/O failure is raised.
+            if (Fsync(descriptor) < 0 && Marshal.GetLastPInvokeError() != EInval)
+                throw new IOException(
+                    $"The directory '{directoryPath}' could not be flushed.",
+                    new System.ComponentModel.Win32Exception(Marshal.GetLastPInvokeError()));
+        }
+        finally
+        {
+            _ = Close(descriptor);
+        }
+    }
+
+    private const int EInval = 22;
+    private const int ReadOnlyCloseOnExecLinux = 0x80000;
+    private const int ReadOnlyCloseOnExecMac = 0x1000000;
+
+    [LibraryImport("libc", EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial int OpenDirectory(string path, int flags);
+
+    [LibraryImport("libc", EntryPoint = "fsync", SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial int Fsync(int descriptor);
+
+    [LibraryImport("libc", EntryPoint = "close")]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]
+    private static partial int Close(int descriptor);
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path) =>
         new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
 
@@ -132,6 +191,9 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
 
         Directory.Delete(directoryPath, false);
     }
+
+    /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) => Directory.Delete(directoryPath, false);
 
     /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath)

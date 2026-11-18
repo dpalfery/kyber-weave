@@ -94,10 +94,6 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     /// </summary>
     public abstract SquadDeploymentScope Scope { get; }
 
-    /// <summary>Writes the tree the flow starts from, including the state the flow reads.</summary>
-    /// <param name="flow">The flow about to run.</param>
-    public abstract void CreateBaseline(SquadCrashFlow flow);
-
     /// <summary>Runs the flow with no fault and returns every fault point it passed.</summary>
     /// <param name="flow">The flow to run.</param>
     /// <returns>
@@ -136,10 +132,149 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     /// <param name="tree">The snapshot to write.</param>
     public abstract void Restore(IReadOnlyDictionary<string, SquadTreeEntry> tree);
 
+    /// <summary>Gets the planner that builds each flow's plan.</summary>
+    protected abstract SquadDeploymentPlanner Planner { get; }
+
+    /// <summary>Creates the root and checks the layout the kill snapshot relies on.</summary>
+    protected abstract void PrepareRoot();
+
+    /// <summary>Writes a file, creating its parent directories.</summary>
+    /// <param name="path">The absolute path.</param>
+    /// <param name="content">The UTF-8 text.</param>
+    protected abstract void WriteText(string path, string content);
+
+    /// <inheritdoc />
+    public void CreateBaseline(SquadCrashFlow flow)
+    {
+        PrepareRoot();
+        Write(ForeignPath, "operator note");
+
+        if (flow == SquadCrashFlow.Install)
+        {
+            Write(AdoptedPath, "adopted body");
+            return;
+        }
+
+        Write(ConductorPath, "installed body");
+        Write(TwoPath, "installed two");
+        Write(AdoptedPath, "adopted body");
+        Write(EditedPath, "locally edited body");
+        SquadStateStore store = StateStore;
+        WriteText(store.ResolveLockPath(Root, Scope), store.SerializeLock(Lock("1.2.4")));
+        WriteText(store.ResolveReceiptPath(Root, Scope), store.SerializeReceipt(BaselineReceipt()));
+    }
+
     /// <summary>The baseline paths this flow must never change, whatever fault stopped it.</summary>
     /// <param name="flow">The flow under test.</param>
     /// <returns>The paths, keyed as <see cref="Capture"/> keys them.</returns>
-    public abstract IReadOnlyList<string> UntouchedPaths(SquadCrashFlow flow);
+    public IReadOnlyList<string> UntouchedPaths(SquadCrashFlow flow) => flow switch
+    {
+        SquadCrashFlow.Install => [RelativeKey(ForeignPath), RelativeKey(AdoptedPath)],
+        SquadCrashFlow.Update => [RelativeKey(ForeignPath), RelativeKey(AdoptedPath), RelativeKey(EditedPath)],
+
+        // Uninstall removes the adopted file as it removes every file the install owns and the host has not changed.
+        SquadCrashFlow.Uninstall => [RelativeKey(ForeignPath), RelativeKey(EditedPath)],
+        _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
+    };
+
+    /// <summary>Builds the plan the flow commits.</summary>
+    /// <param name="flow">The flow to plan.</param>
+    /// <returns>The plan.</returns>
+    protected SquadDeploymentPlan CreatePlan(SquadCrashFlow flow) => flow switch
+    {
+        SquadCrashFlow.Install => Planner.CreateInstall(
+            Root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [
+                Rendered(ConductorPath, "installed body"),
+                Rendered(AdoptedPath, "adopted body"),
+                Rendered(EditedPath, "installed edited body")
+            ],
+            [],
+            adopt: true,
+            new FixedTimeProvider(InstalledAt)),
+        SquadCrashFlow.Update => Planner.CreateUpdate(
+            Root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.5"),
+            [
+                Rendered(ConductorPath, "updated body"),
+                Rendered(TwoPath, "updated two"),
+                Rendered(AdoptedPath, "adopted body"),
+                Rendered(EditedPath, "updated edited body")
+            ],
+            BaselineReceipt(),
+            [],
+            replaceManaged: false,
+            new FixedTimeProvider(InstalledAt.AddDays(1))),
+        SquadCrashFlow.Uninstall => Planner.CreateUninstall(
+            Root,
+            SquadDeploymentScope.Project,
+            BaselineReceipt()),
+        _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
+    };
+
+    /// <summary>The path of a baseline file under <see cref="Root"/>.</summary>
+    /// <param name="relativePath">The '/'-separated path.</param>
+    /// <returns>The absolute path.</returns>
+    protected string PathOf(string relativePath) =>
+        Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    private void Write(string relativePath, string content) => WriteText(PathOf(relativePath), content);
+
+    /// <summary>A snapshot key for a '/'-separated path.</summary>
+    /// <param name="relativePath">The path.</param>
+    /// <returns>The key.</returns>
+    protected static string RelativeKey(string relativePath) =>
+        relativePath.Replace(Path.DirectorySeparatorChar, '/');
+
+    /// <summary>The number of directories above a snapshot key.</summary>
+    /// <param name="relativePath">The key.</param>
+    /// <returns>The depth.</returns>
+    protected static int Depth(string relativePath) =>
+        relativePath.Count(character => character == '/');
+
+    private static string Digest(string content) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+
+    private static SquadDeploymentFile Rendered(string relativePath, string content) =>
+        new(relativePath, Encoding.UTF8.GetBytes(content), "codex");
+
+    private static SquadLock Lock(string version) =>
+        new(
+            "kyber-squad.lock/v1",
+            version,
+            version,
+            version,
+            "full",
+            ["codex"],
+            [],
+            "best-effort",
+            Digest("bundle"),
+            Digest("asset"),
+            new SquadApmIdentity(version, "0123456789abcdef", Digest("apm")));
+
+    private static SquadReceipt BaselineReceipt() =>
+        new(
+            SquadStateSchemas.ReceiptSchemaV1,
+            SquadDeploymentScope.Project,
+            ".",
+            InstalledAt,
+            [],
+            [
+                new SquadOwnedFile(ConductorPath, Digest("installed body"), "codex", false),
+                new SquadOwnedFile(TwoPath, Digest("installed two"), "codex", false),
+                new SquadOwnedFile(AdoptedPath, Digest("adopted body"), "codex", true),
+                new SquadOwnedFile(EditedPath, Digest("installed edited body"), "codex", false)
+            ]);
+
+    private static readonly DateTimeOffset InstalledAt = new(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
+
+    private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => value;
+    }
 
     /// <inheritdoc />
     public abstract void Dispose();
@@ -177,8 +312,6 @@ public sealed class SquadCrashInjectedException : Exception
 /// <summary>The real-disk workspace for the crash-safety contract suite.</summary>
 public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 {
-    private static readonly DateTimeOffset InstalledAt = new(2026, 11, 17, 12, 0, 0, TimeSpan.Zero);
-
     private readonly TempDirectory _temp = new();
 
     /// <inheritdoc />
@@ -191,30 +324,27 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     public override SquadDeploymentScope Scope => SquadDeploymentScope.Project;
 
     /// <inheritdoc />
-    public override void CreateBaseline(SquadCrashFlow flow)
+    protected override SquadDeploymentPlanner Planner => RealSquadDeployment.Planner;
+
+    /// <inheritdoc />
+    protected override void PrepareRoot()
     {
         RequireEveryStatePathUnderRoot();
         Directory.CreateDirectory(Root);
-        Write(ForeignPath, "operator note");
+    }
 
-        if (flow == SquadCrashFlow.Install)
-        {
-            Write(AdoptedPath, "adopted body");
-            return;
-        }
-
-        Write(ConductorPath, "installed body");
-        Write(TwoPath, "installed two");
-        Write(AdoptedPath, "adopted body");
-        Write(EditedPath, "locally edited body");
-        WriteState();
+    /// <inheritdoc />
+    protected override void WriteText(string path, string content)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, content, new UTF8Encoding(false));
     }
 
     /// <inheritdoc />
     public override IReadOnlyList<string> ExecuteClean(SquadCrashFlow flow)
     {
         RecordingObserver observer = new(Capture);
-        new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
+        RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
         return observer.FaultPoints;
     }
 
@@ -225,7 +355,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         string? problem = null;
         try
         {
-            new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
+            RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
             problem = "The flow completed without reaching the fault point.";
         }
         catch (SquadCrashInjectedException)
@@ -250,7 +380,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         RecordingObserver observer = new(failAt: faultPoint);
         try
         {
-            new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
+            RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
             return "The flow completed without reaching the fault point.";
         }
         catch (SquadCrashInjectedException)
@@ -266,8 +396,8 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     /// <inheritdoc />
     public override void Recover()
     {
-        new SquadTransaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
-        new SquadTransaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
+        RealSquadDeployment.Transaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
+        RealSquadDeployment.Transaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
     }
 
     /// <inheritdoc />
@@ -329,15 +459,6 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     }
 
     /// <inheritdoc />
-    public override IReadOnlyList<string> UntouchedPaths(SquadCrashFlow flow) => flow switch
-    {
-        SquadCrashFlow.Install => [RelativeKey(ForeignPath), RelativeKey(AdoptedPath)],
-        SquadCrashFlow.Update or SquadCrashFlow.Uninstall =>
-            [RelativeKey(ForeignPath), RelativeKey(AdoptedPath), RelativeKey(EditedPath)],
-        _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
-    };
-
-    /// <inheritdoc />
     public override void Dispose()
     {
         Dispose(disposing: true);
@@ -354,81 +475,6 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 
         base.Dispose(disposing);
     }
-
-    private static string RelativeKey(string relativePath) =>
-        relativePath.Replace(Path.DirectorySeparatorChar, '/');
-
-    private static int Depth(string relativePath) =>
-        relativePath.Count(character => character == '/');
-
-    private static string Digest(string content) =>
-        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-
-    private static SquadDeploymentFile Rendered(string relativePath, string content) =>
-        new(relativePath, Encoding.UTF8.GetBytes(content), "codex");
-
-    private static SquadLock Lock(string version) =>
-        new(
-            "kyber-squad.lock/v1",
-            version,
-            version,
-            version,
-            "full",
-            ["codex"],
-            [],
-            "best-effort",
-            Digest("bundle"),
-            Digest("asset"),
-            new SquadApmIdentity(version, "0123456789abcdef", Digest("apm")));
-
-    private SquadReceipt BaselineReceipt() =>
-        new(
-            SquadStateSchemas.ReceiptSchemaV1,
-            SquadDeploymentScope.Project,
-            ".",
-            InstalledAt,
-            [],
-            [
-                new SquadOwnedFile(ConductorPath, Digest("installed body"), "codex", false),
-                new SquadOwnedFile(TwoPath, Digest("installed two"), "codex", false),
-                new SquadOwnedFile(AdoptedPath, Digest("adopted body"), "codex", true),
-                new SquadOwnedFile(EditedPath, Digest("installed edited body"), "codex", false)
-            ]);
-
-    private SquadDeploymentPlan CreatePlan(SquadCrashFlow flow) => flow switch
-    {
-        SquadCrashFlow.Install => RealSquadDeployment.Planner.CreateInstall(
-            Root,
-            SquadDeploymentScope.Project,
-            Lock("1.2.4"),
-            [
-                Rendered(ConductorPath, "installed body"),
-                Rendered(AdoptedPath, "adopted body"),
-                Rendered(EditedPath, "installed edited body")
-            ],
-            [],
-            adopt: true,
-            new FixedTimeProvider(InstalledAt)),
-        SquadCrashFlow.Update => RealSquadDeployment.Planner.CreateUpdate(
-            Root,
-            SquadDeploymentScope.Project,
-            Lock("1.2.5"),
-            [
-                Rendered(ConductorPath, "updated body"),
-                Rendered(TwoPath, "updated two"),
-                Rendered(AdoptedPath, "adopted body"),
-                Rendered(EditedPath, "updated edited body")
-            ],
-            BaselineReceipt(),
-            [],
-            replaceManaged: false,
-            new FixedTimeProvider(InstalledAt.AddDays(1))),
-        SquadCrashFlow.Uninstall => RealSquadDeployment.Planner.CreateUninstall(
-            Root,
-            SquadDeploymentScope.Project,
-            BaselineReceipt()),
-        _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
-    };
 
     /// <summary>
     /// Proves the assumption the kill snapshot rests on: every path the transaction writes state or
@@ -462,28 +508,6 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
             }
         }
     }
-
-    private void WriteState()
-    {
-        SquadStateStore store = StateStore;
-        string lockPath = store.ResolveLockPath(Root, SquadDeploymentScope.Project);
-        string receiptPath = store.ResolveReceiptPath(Root, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
-        File.WriteAllText(lockPath, store.SerializeLock(Lock("1.2.4")), new UTF8Encoding(false));
-        File.WriteAllText(receiptPath, store.SerializeReceipt(BaselineReceipt()), new UTF8Encoding(false));
-    }
-
-    private void Write(string relativePath, string content)
-    {
-        string path = PathOf(relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content, new UTF8Encoding(false));
-    }
-
-    private string PathOf(string relativePath) =>
-        Path.Combine(
-            Root,
-            relativePath.Replace('/', Path.DirectorySeparatorChar));
 
     private void CaptureDirectory(DirectoryInfo directory, string root, IDictionary<string, SquadTreeEntry> tree)
     {
@@ -545,11 +569,6 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
                 entry.Delete();
             }
         }
-    }
-
-    private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => value;
     }
 
     /// <summary>

@@ -140,6 +140,34 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">An exclusive opener holds the file, or the file could not be opened.</exception>
     Stream OpenAppendShared(string path);
 
+    /// <summary>Opens an existing file for reading and keeps anyone else from changing or deleting it while the stream is open.</summary>
+    /// <param name="path">The file to guard.</param>
+    /// <returns>A read-only stream; disposing it ends the guard.</returns>
+    /// <remarks>
+    /// Other readers still read the file. Another <see cref="OpenExclusive(string)"/> on it is refused, and on a
+    /// platform that enforces sharing a write or a delete of it is refused too. The file's content is never changed by
+    /// this stream.
+    /// </remarks>
+    /// <exception cref="FileNotFoundException">The file does not exist.</exception>
+    /// <exception cref="IOException">Another open already holds the file in a way that conflicts.</exception>
+    Stream OpenGuarded(string path);
+
+    /// <summary>
+    ///     Flushes a directory's entries to the device, so a file created in it or renamed into it by an earlier call
+    ///     survives a power loss. File content is flushed by the write; the name that points at it lives in the
+    ///     directory, and is lost with the directory entry if the directory is not flushed.
+    /// </summary>
+    /// <param name="directoryPath">The directory whose entries to flush.</param>
+    /// <remarks>
+    ///     Unix file systems need this after a rename. Windows does not: NTFS journals its metadata, and a directory
+    ///     cannot be opened for flushing there, so the implementation does nothing. An in-memory implementation has no
+    ///     device and does nothing either. The default does nothing, for implementations that wrap no device.
+    /// </remarks>
+    /// <exception cref="DirectoryNotFoundException">The directory does not exist.</exception>
+    void FlushDirectory(string directoryPath)
+    {
+    }
+
     /// <summary>Moves a directory and everything under it to a path that must be free, as one rename.</summary>
     /// <param name="sourcePath">The directory to move.</param>
     /// <param name="destinationPath">Where it goes; nothing may be there, and its parent directory must exist.</param>
@@ -164,6 +192,15 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="UnauthorizedAccessException">The process may not delete part of the tree.</exception>
     /// <exception cref="IOException">Part of the tree could not be deleted, for example because a file is open.</exception>
     void DeleteTreeNoFollow(string directoryPath);
+
+    /// <summary>Deletes a directory only when nothing is in it.</summary>
+    /// <param name="directoryPath">The directory to delete.</param>
+    /// <remarks>
+    /// Unlike <see cref="DeleteTreeNoFollow" /> this never removes content: a caller that has just decided a directory
+    /// is empty does not lose a file that appeared since. A directory link is removed as a link.
+    /// </remarks>
+    /// <exception cref="IOException">The directory is not empty, or does not exist.</exception>
+    void DeleteEmptyDirectory(string directoryPath);
 
     /// <summary>Creates a symbolic link to an existing file.</summary>
     /// <param name="linkPath">The link to create; its parent directory is created when missing.</param>

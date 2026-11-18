@@ -951,7 +951,11 @@ public abstract class SquadDeploymentStateTestBase
                     "missing-link-target");
                 break;
             case "undeclared-directory":
+                // An empty undescribed folder is what a kill leaves and recovery removes; one holding a file is not.
                 Directory.CreateDirectory(Path.Combine(transactionDirectory, "undeclared-directory"));
+                File.WriteAllText(
+                    Path.Combine(transactionDirectory, "undeclared-directory", "stray.txt"),
+                    "stray");
                 break;
             case "duplicate-identity":
                 artifacts.Add(first.DeepClone());
@@ -1300,7 +1304,7 @@ public abstract class SquadDeploymentStateTestBase
         string targetRoot = Path.Combine(fixture.Path, "target");
         Directory.CreateDirectory(targetRoot);
         RecordingObserver observer = new(targetRoot);
-        new SquadTransaction(
+        RealSquadDeployment.Transaction(
             Store(Path.Combine(fixture.Path, "application-data")),
             observer).Execute(CreateGlobalInstallPlan(targetRoot));
         return observer.Steps.Count;
@@ -1513,7 +1517,7 @@ public abstract class SquadDeploymentStateTestBase
         string applicationData,
         ISquadTransactionObserver? observer = null)
     {
-        return new SquadTransaction(Store(applicationData), observer);
+        return RealSquadDeployment.Transaction(Store(applicationData), observer);
     }
 
     internal static bool IsHeldWithExclusiveFileShare(string path)

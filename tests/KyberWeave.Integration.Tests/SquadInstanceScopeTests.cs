@@ -152,7 +152,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             adopt: false,
             new FixedTimeProvider(InstalledAt));
 
-        SquadTransaction transaction = new(store);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store);
         transaction.Execute(plan);
 
         string deployedFile = Path.Combine(instanceRoot, "agents", "conductor.md");
@@ -203,7 +203,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             adopt: false,
             new FixedTimeProvider(InstalledAt));
 
-        SquadTransaction transaction = new(store);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store);
         transaction.Execute(plan);
 
         IReadOnlyList<SquadProjectRegistryEntry> projects = store.ListProjects();

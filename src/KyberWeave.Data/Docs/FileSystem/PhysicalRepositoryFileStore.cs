@@ -73,6 +73,12 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public void DeleteTreeNoFollow(string directoryPath) => _inner.DeleteTreeNoFollow(directoryPath);
 
     /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) => _inner.DeleteEmptyDirectory(directoryPath);
+
+    /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) => _inner.FlushDirectory(directoryPath);
+
+    /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => _inner.CreateFileLink(linkPath, targetPath);
 
     /// <inheritdoc />
@@ -103,6 +109,9 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
 
     /// <inheritdoc />
     public Stream OpenExclusive(string path) => _inner.OpenExclusive(path);
+
+    /// <inheritdoc />
+    public Stream OpenGuarded(string path) => _inner.OpenGuarded(path);
 
     /// <inheritdoc />
     public Stream OpenAppendShared(string path) => _inner.OpenAppendShared(path);
