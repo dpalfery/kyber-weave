@@ -23,7 +23,7 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// The command forms a technology's Arbiter rules file allows are also stated in the technology's rules part of the
-/// task prompt, built from the shipped standards folder over real documents.
+/// task prompt, built from the shipped standards folder over the documents in memory.
 /// </summary>
 public sealed class ArbiterCommandAllowListPromptTests
 {
@@ -48,7 +48,7 @@ public sealed class ArbiterCommandAllowListPromptTests
     /// <summary>The <c>technology-rules</c> part of a prompt built for <paramref name="technology"/> from the shipped folder.</summary>
     private static string RulesPartOfThePrompt(string technology)
     {
-        using DocFixture fixture = new();
+        using DocFixture fixture = DocFixture.CreateInMemory();
         fixture.Write("6-Docs/standards/shared-rules.md", ShippedStandardsFile("shared-rules.md"));
         foreach (string name in new[] { $"{technology}.standards.md", $"{technology}.rules.md", $"{technology}.skills.md" })
         {
@@ -57,9 +57,9 @@ public sealed class ArbiterCommandAllowListPromptTests
 
         KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(
             $"ontology:\n  docs-root: 6-Docs\n  technologies: [{technology}]\n");
-        IServiceProvider provider = DocsTestCommands.Services();
+        IServiceProvider provider = DocsMemoryServicesD.Services(fixture);
         DocumentIndex index = DocumentIndex.Build(
-            RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+            fixture.Loader(config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
         TaskPromptService service = new(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
