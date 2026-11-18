@@ -491,7 +491,7 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new ProcessResult(0, "kyber-weave-mcp 1.2.3\n", string.Empty));
-        McpProcessProbe probe = new McpProcessProbe(executor);
+        McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
         ToolProbeResult result = probe.Probe();
 
@@ -510,7 +510,7 @@ public sealed class SquadReleaseClientTests : IDisposable
         string standardOutput)
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(new ProcessResult(0, standardOutput, string.Empty));
-        McpProcessProbe probe = new McpProcessProbe(executor);
+        McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
         ToolProbeResult result = probe.Probe();
 
@@ -525,7 +525,7 @@ public sealed class SquadReleaseClientTests : IDisposable
     {
         RecordingProcessExecutor executor = new RecordingProcessExecutor(
             new Win32Exception($"PATH={Secret}; Authorization=Bearer {Secret}"));
-        McpProcessProbe probe = new McpProcessProbe(executor);
+        McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
         ToolProbeResult result = probe.Probe();
 
@@ -543,7 +543,7 @@ public sealed class SquadReleaseClientTests : IDisposable
                 17,
                 $"GH_TOKEN={Secret}",
                 $"Authorization: Bearer {Secret}"));
-        McpProcessProbe probe = new McpProcessProbe(executor);
+        McpProcessProbe probe = new McpProcessProbe(executor, new FakeProcessEnvironment());
 
         ToolProbeResult result = probe.Probe();
 

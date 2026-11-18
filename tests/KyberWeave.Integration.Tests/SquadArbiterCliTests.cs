@@ -171,7 +171,7 @@ public sealed class SquadArbiterCliTests : IDisposable
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-arbiter", "kyber-weave-arbiter 1.2.3\n");
-        var probe = SquadCommandComposition.ResolveArbiterProbe(executor);
+        var probe = SquadCommandComposition.ResolveArbiterProbe(executor, new FakeProcessEnvironment());
 
         var result = probe.Probe();
 
@@ -184,7 +184,7 @@ public sealed class SquadArbiterCliTests : IDisposable
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithFailure("kyber-weave-arbiter", "missing");
-        var probe = SquadCommandComposition.ResolveArbiterProbe(executor);
+        var probe = SquadCommandComposition.ResolveArbiterProbe(executor, new FakeProcessEnvironment());
 
         var result = probe.Probe();
 

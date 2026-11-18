@@ -164,23 +164,14 @@ internal static class SquadCommandComposition
     }
 
     /// <summary>Resolves the Kyber-Weave MCP process probe using the specified process executor.</summary>
-    public static McpProcessProbe ResolveProbe(IProcessExecutor? executor)
+    public static McpProcessProbe ResolveProbe(IProcessExecutor? executor, IProcessEnvironment environment)
     {
-        return new McpProcessProbe(executor ?? ProcessExecutor.Instance);
-    }
-
-    /// <summary>Resolves the Kyber-Weave MCP process probe using the default process executor.</summary>
-    public static McpProcessProbe ResolveProbe()
-    {
-        return ResolveProbe(null);
+        return new McpProcessProbe(executor ?? ProcessExecutor.Instance, environment);
     }
 
     /// <summary>Resolves the Kyber-Weave Arbiter process probe using the specified process executor.</summary>
-    public static ArbiterProcessProbe ResolveArbiterProbe(IProcessExecutor? executor) =>
-        new(executor ?? ProcessExecutor.Instance);
-
-    /// <summary>Resolves the Kyber-Weave Arbiter process probe using the default process executor.</summary>
-    public static ArbiterProcessProbe ResolveArbiterProbe() => ResolveArbiterProbe(null);
+    public static ArbiterProcessProbe ResolveArbiterProbe(IProcessExecutor? executor, IProcessEnvironment environment) =>
+        new(executor ?? ProcessExecutor.Instance, environment);
 
     /// <summary>
     /// Carries the host's Arbiter settings into a render: the enabled flag verbatim and the
