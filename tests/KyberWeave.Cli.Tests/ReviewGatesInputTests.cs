@@ -13,24 +13,24 @@ public sealed class ReviewGatesInputTests : IDisposable
     private const int ClientInputExitCode = 2;
     private const string Marker = "ran.marker";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
     private readonly string _repo;
 
     public ReviewGatesInputTests()
     {
-        _repo = Path.Combine(_temp.Path, "repo");
-        Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
+        _repo = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
 
         // The gate writes a marker when it runs, so a refusal that comes too late is visible as the marker's existence.
-        File.WriteAllText(
+        _services.Files.WriteAllText(
             Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"),
             "review:\n  gates:\n    - id: probe\n      run: [touch, " + Marker + "]\n");
     }
 
-    /// <summary>Deletes the temporary repository.</summary>
+    /// <summary>Releases the services.</summary>
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     [Theory]
@@ -48,12 +48,13 @@ public sealed class ReviewGatesInputTests : IDisposable
             ? ["review", "gates", value, "--format", "json"]
             : ["review", "gates", _repo, option, value, "--format", "json"];
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => CommandAppFixture.ReviewGates().Run(arguments));
+        _services.ScriptProgram("touch", TimeSpan.Zero);
+
+        CapturedConsoleExecution<int> run = _services.Run(_services.ReviewGatesApp(), arguments);
 
         Assert.Equal(ClientInputExitCode, run.Result);
         Assert.Contains(InvalidInput, run.Output, StringComparison.Ordinal);
         Assert.Contains(option, run.Output, StringComparison.Ordinal);
-        Assert.False(File.Exists(Path.Combine(_repo, Marker)), "A gate ran after an empty operand was refused.");
+        Assert.Empty(_services.Processes.Calls);
     }
 }

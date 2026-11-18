@@ -1,5 +1,5 @@
-using KyberWeave.Tests.Configuration;
 using KyberWeave.Cli.Commands;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Xunit;
@@ -12,21 +12,21 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReviewGateKeysCliWarningTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
 
-    /// <summary>Deletes the temporary repository.</summary>
+    /// <summary>Releases the services.</summary>
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     [Fact]
     public void CombinedTryLoadSurfacesAnUnknownGateKeyAsKwConfig002Warning()
     {
-        string configDirectory = System.IO.Path.Combine(_temp.Path, ".kyber-weave");
-        Directory.CreateDirectory(configDirectory);
+        string configDirectory = System.IO.Path.Combine(_services.Root, ".kyber-weave");
+        _services.Files.CreateDirectory(configDirectory);
         string configPath = System.IO.Path.Combine(configDirectory, "kyber-weave.yml");
-        File.WriteAllText(
+        _services.Files.WriteAllText(
             configPath,
             """
             review:
@@ -38,7 +38,7 @@ public sealed class ReviewGateKeysCliWarningTests : IDisposable
             """);
 
         DiagnosticReport report = new DiagnosticReport();
-        bool success = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _temp.Path, null, report, out KyberWeaveConfig config);
+        bool success = CommandHelpers.TryLoadConfig(_services.Get<IKyberWeaveConfigRepository>(), _services.Root, null, report, out KyberWeaveConfig config);
 
         Assert.True(success);
         Diagnostic diagnostic = Assert.Single(report.Items);
