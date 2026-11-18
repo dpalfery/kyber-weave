@@ -60,7 +60,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
-        services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
+        services.TryAddSingleton<IReviewEvidenceStore>(sp => new FileReviewEvidenceStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IProjectFileLocator>(sp => new FileProjectFileLocator(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),

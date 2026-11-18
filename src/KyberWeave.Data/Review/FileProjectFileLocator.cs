@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Paths;
 
 namespace KyberWeave.Data.Review;
 
@@ -14,8 +15,8 @@ public sealed class FileProjectFileLocator(IFileSystem files, IPathResolver path
             return null;
         }
 
-        string root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
-        string? directory = Path.GetDirectoryName(paths.GetFullPath(file, root));
+        string root = TrailingSeparator.Keep(repositoryRoot, paths.GetFullPath(repositoryRoot, environment.CurrentDirectory));
+        string? directory = Path.GetDirectoryName(TrailingSeparator.Keep(file, paths.GetFullPath(file, root)));
         while (directory is not null && directory.StartsWith(root, StringComparison.Ordinal))
         {
             if (files.DirectoryExists(directory))

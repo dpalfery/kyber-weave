@@ -33,7 +33,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 
 | Seam | Interface(s) | Covers | Adapter (project, file) | Fake (`tests/KyberWeave.Testing`) | Contract suite |
 |---|---|---|---|---|---|
-| File system | `IFileSystem`, `IWritableFileSystem` (`Contracts/Repositories`) | Text, bytes, lines, streams, length, last-write time, attributes; enumerate with a no-follow option; create directory; write; atomic write; atomic move with and without overwrite; exclusive create; open a new file for writing; move a directory; delete file and tree without following links; create link; one-hop and final link target; temporary directory | `PhysicalFileSystem` (`KyberWeave.Data`, `Hooks/PhysicalFileSystem.cs`) | `InMemoryFileSystem` (`FileSystem/InMemoryFileSystem.cs`) | `FileSystemContractTests` and `FileSystemFaultContractTests`: fake in `KyberWeave.Tests/FileSystem/InMemoryFileSystemTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalFileSystemContractTests.cs` |
+| File system | `IFileSystem`, `IWritableFileSystem` (`Contracts/Repositories`) | Text, bytes, lines, streams, length, last-write time, attributes; enumerate with a no-follow option; create directory; write; atomic write; atomic move with and without overwrite; exclusive create; open a new file for writing; open a file exclusively (a lock file); open a file for a shared append; move a directory; delete file and tree without following links; create link; one-hop and final link target; temporary directory | `PhysicalFileSystem` (`KyberWeave.Data`, `Hooks/PhysicalFileSystem.cs`) | `InMemoryFileSystem` (`FileSystem/InMemoryFileSystem.cs`) | `FileSystemContractTests` and `FileSystemFaultContractTests`: fake in `KyberWeave.Tests/FileSystem/InMemoryFileSystemTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalFileSystemContractTests.cs` |
 | Paths | `IPathResolver` (`Contracts/Paths`) | Full path against an explicit base; are-same; is-within; canonical spelling (case and links); physical root. No member reads the process working directory | `PhysicalPathResolver` (`KyberWeave.Data`, `Paths/PhysicalPathResolver.cs`) over `FileSystemPathResolver` | `FakePathResolver` (`Fakes/FakePathResolver.cs`) | `PathResolverContractTests`: fake in `KyberWeave.Tests/Paths/InMemoryPathResolverTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalPathResolverContractTests.cs` |
 | Process | `IProcessRunner`; `IProcessExecutor`, `IProgramRunner` and `IBoundedProcessExecutor` stay as role views | Run with arguments, working directory, environment, timeout and input; captured output; is-alive; find on path | `KernelProcessRunner` (`KyberWeave.Data`, `Hooks/KernelProcessRunner.cs`) over `KyberWeave.Kernel/Processes/ProcessRunner.cs` | `ScriptedProcessRunner` (`Fakes/ScriptedProcessRunner.cs`); `ScriptedProcessExecutor` (`Fakes/ScriptedProcessExecutor.cs`) for the role view | `ProcessRunnerContractTests`: fake in `KyberWeave.Tests/Processes/ScriptedProcessRunnerContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/KernelProcessRunnerContractTests.cs` |
 | Environment and platform | `IProcessEnvironment` (`Contracts/Repositories`) | Environment variables; current, home and temporary directories; user and machine name; operating-system kind; case-insensitive file system; input redirected | `ProcessEnvironment` (`KyberWeave.Data`, `Host/ProcessEnvironment.cs`) | `FakeProcessEnvironment` (`Fakes/FakeProcessEnvironment.cs`) | `ProcessEnvironmentContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
@@ -262,11 +262,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
-| `FileHookSnapshotStore` (`Hooks/Arbiter/FileHookSnapshotStore.cs`) | file system, clock, identifiers | 4.4 |
-| `FileWorkerBudgetStore` (`Hooks/Arbiter/FileWorkerBudgetStore.cs`) | file system | 4.4 |
 | `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
-| `FileReviewEvidenceStore` (`Review/FileReviewEvidenceStore.cs`) | file system | 4.4 |
-| `FileSeatFolder` (`Review/FileSeatFolder.cs`) | file system | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
 | `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
@@ -300,10 +296,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 
-- `FileHookSnapshotStore` and `FileWorkerBudgetStore` need two operations the file-system seam does not
-  have: an exclusive-lock open (`FileShare.None`) and a shared append. Neither is replaceable by `MutexLease`
-  or by an atomic write without changing what parallel hook processes see, so the seam needs the two members
-  first.
+- `FileHookSnapshotStore` and `FileWorkerBudgetStore` are converted: the file-system seam gained
+  `OpenExclusive` (a read-write open that keeps every other opener out until disposed) and
+  `OpenAppendShared` (an append that other appenders and readers share), proven on the fake and on
+  `PhysicalFileSystem` by the file-system contract suite.
 - `SelfUpdateSystem` replaces the running binary and extracts archives, so requirement 10.2 applies: it
   moves with crash-safety contract tests and a second reviewer, with task 4.1's `SelfUpdater`.
 - `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are built with `new` or
@@ -311,8 +307,14 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   edits those projects' composition code (tasks 4.5 and 4.2).
 - `SystemOneClient`, `SocketArbiterHttpHandlers`, `SystemOneProviderFactory` and
   `OpenAiCompatibleEmbeddingGenerator` reach the network; no network seam exists yet.
-- `PresentFile`, `DocsRootWalk`, `FileCoverageReportSource`, `FileReviewEvidenceStore`, `FileSeatFolder` and
-  `ZipSkillArchiveWriter` are not converted yet.
+- `PresentFile` and `DocsRootWalk` are static helpers of the adapter `PhysicalRepositoryFileStore`
+  (the bounded one-step read and the link-refusing walk). `DocsRootWalk` is also called as a static by
+  `Application/Docs/Delivery/PullRequestDescription.cs` and `Application/Docs/Search/DocumentIndexHost.cs`,
+  so converting it edits `Application/Docs`, which another task owns.
+- `FileCoverageReportSource` lives in `Application/Review`, which another task owns.
+- `ZipSkillArchiveWriter` is the adapter of `ISkillArchiveWriter`. `ZipFile.CreateEntryFromFile` records the
+  source file's Unix permission bits in the archive; the file-system seam has no member that reads them, so
+  reading entries through `OpenRead` would change the archive's contents.
 
 #### KyberWeave.Domain (24 classes)
 
@@ -362,7 +364,6 @@ the behaviour: where a test observes the value, the seam still wraps it.
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
 `Application/Docs/Scaffolding/StandardsFolderMigration.cs`, `Application/Update/SelfUpdater.cs`,
-`Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and `FileWorkerBudgetStore.cs`,
 `Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,

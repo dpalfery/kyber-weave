@@ -147,6 +147,12 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
     public Stream OpenWriteNew(string path) => Do(nameof(OpenWriteNew), path, () => inner.OpenWriteNew(path));
 
     /// <inheritdoc />
+    public Stream OpenExclusive(string path) => Do(nameof(OpenExclusive), path, () => inner.OpenExclusive(path));
+
+    /// <inheritdoc />
+    public Stream OpenAppendShared(string path) => Do(nameof(OpenAppendShared), path, () => inner.OpenAppendShared(path));
+
+    /// <inheritdoc />
     public void MoveDirectory(string sourcePath, string destinationPath) =>
         Do(nameof(MoveDirectory), sourcePath, () => inner.MoveDirectory(sourcePath, destinationPath));
 

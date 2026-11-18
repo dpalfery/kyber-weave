@@ -38,6 +38,14 @@ public sealed class PlanPathResolverInMemoryTests
     public void ADetourThatStaysInsideResolves() =>
         Assert.Equal(Path.Combine(Repo, "docs", "plans", "plan.md"), _resolver.Resolve("docs/../docs/plans/plan.md", Repo));
 
+    [Fact]
+    public void ARootSpelledWithATrailingSeparatorRejectsEveryRelativePlan() =>
+        Assert.Null(_resolver.Resolve("docs/plans/plan.md", Repo + Path.DirectorySeparatorChar));
+
+    [Fact]
+    public void ARootSpelledWithATrailingSeparatorAcceptsItselfSpelledTheSameWay() =>
+        Assert.Equal(Repo + Path.DirectorySeparatorChar, _resolver.Resolve("./", Repo + Path.DirectorySeparatorChar));
+
     [Theory]
     [InlineData("../outside/secret.md")]
     [InlineData("docs/../../outside/secret.md")]

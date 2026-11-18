@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
+using KyberWeave.Data.Paths;
 
 namespace KyberWeave.Data.Review;
 
@@ -34,7 +35,7 @@ public sealed class FileReviewDecisionCacheStore(IWritableFileSystem files, IPat
     {
         try
         {
-            files.CreateDirectory(Path.GetDirectoryName(paths.GetFullPath(path, environment.CurrentDirectory))!);
+            files.CreateDirectory(Path.GetDirectoryName(TrailingSeparator.Keep(path, paths.GetFullPath(path, environment.CurrentDirectory)))!);
             files.WriteAllText(path, JsonSerializer.Serialize(answers));
             return true;
         }

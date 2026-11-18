@@ -115,6 +115,31 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">The file or a directory already exists at the path, or the file could not be created.</exception>
     Stream OpenWriteNew(string path);
 
+    /// <summary>Opens a file for reading and writing, creating it when missing, and keeps every other opener out until the stream is disposed.</summary>
+    /// <param name="path">The file.</param>
+    /// <returns>A read-write stream positioned at the start of the file; disposing it releases the file. The caller owns the stream.</returns>
+    /// <remarks>
+    /// Used for a lock file or a file whose read-modify-write must not interleave with another process. A second
+    /// open of the same path, by this or any other process, fails while the stream is held; the caller decides how
+    /// long to wait and retry. An existing file keeps its content.
+    /// </remarks>
+    /// <exception cref="DirectoryNotFoundException">A directory on the path does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not open the file, or a directory is in its place.</exception>
+    /// <exception cref="IOException">Another opener holds the file, or the file could not be opened.</exception>
+    Stream OpenExclusive(string path);
+
+    /// <summary>Opens a file for appending, creating it when missing, while other appenders and readers keep access.</summary>
+    /// <param name="path">The file.</param>
+    /// <returns>A write-only stream positioned at the end of the file; its bytes are in the file once it is disposed. The caller owns the stream.</returns>
+    /// <remarks>
+    /// Several processes may hold the file open for appending together, so a log or counter file shared by parallel
+    /// hook processes needs no lock. A file held by <see cref="OpenExclusive(string)"/> cannot be appended to.
+    /// </remarks>
+    /// <exception cref="DirectoryNotFoundException">A directory on the path does not exist.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not open the file, or a directory is in its place.</exception>
+    /// <exception cref="IOException">An exclusive opener holds the file, or the file could not be opened.</exception>
+    Stream OpenAppendShared(string path);
+
     /// <summary>Moves a directory and everything under it to a path that must be free, as one rename.</summary>
     /// <param name="sourcePath">The directory to move.</param>
     /// <param name="destinationPath">Where it goes; nothing may be there, and its parent directory must exist.</param>

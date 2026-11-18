@@ -29,6 +29,24 @@ public sealed class CheckoutProductRootLocatorTests
     }
 
     [Fact]
+    public void AProductPathSpelledWithATrailingSeparatorKeepsIt()
+    {
+        _files.CreateDirectory(Path.Combine(Root, "src", "Product"));
+        _files.WriteAllText(Path.Combine(Root, "KyberWeave.sln"), string.Empty);
+
+        Assert.Equal(Path.Combine(Root, "src", "Product") + Path.DirectorySeparatorChar, _locator.Locate(Root + Path.DirectorySeparatorChar, "src/Product/"));
+    }
+
+    [Fact]
+    public void AProductPathSpelledWithoutATrailingSeparatorHasNone()
+    {
+        _files.CreateDirectory(Path.Combine(Root, "src", "Product"));
+        _files.WriteAllText(Path.Combine(Root, "KyberWeave.sln"), string.Empty);
+
+        Assert.Equal(Path.Combine(Root, "src", "Product"), _locator.Locate(Root + Path.DirectorySeparatorChar, "src/Product"));
+    }
+
+    [Fact]
     public void AMissingSolutionFileLocatesNothing()
     {
         _files.CreateDirectory(Path.Combine(Root, "src", "Product"));
