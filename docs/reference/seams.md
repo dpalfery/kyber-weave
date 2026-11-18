@@ -268,17 +268,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DoctorCommand` (`Commands/Doctor/DoctorCommand.cs`) | paths, console | 4.5 |
 | `DoctorReportRenderer` (`Commands/Doctor/DoctorReportRenderer.cs`) | console | 4.5 |
 | `PlanArguments` (`Commands/PlanArguments.cs`) | file system, paths | 4.5 |
-| `ReviewCatalogueCommand` (`Commands/Review/ReviewCatalogueCommand.cs`) | console | 4.5 |
-| `ReviewCycleCommand` (`Commands/Review/ReviewCycleCommand.cs`) | console | 4.5 |
-| `ReviewGatesCommand` (`Commands/Review/ReviewGatesCommand.cs`) | console | 4.5 |
-| `ReviewMigrateTaskGatesCommand` (`Commands/Review/ReviewMigrateTaskGatesCommand.cs`) | file system, paths | 4.5 |
-| `ReviewSeatsCommand` (`Commands/Review/ReviewSeatsCommand.cs`) | console | 4.5 |
-| `ReviewSuppressionsCommand` (`Commands/Review/ReviewSuppressionsCommand.cs`) | console | 4.5 |
-| `ReviewVerdictCommand` (`Commands/Review/ReviewVerdictCommand.cs`) | console | 4.5 |
 | `RunDeliverCommand` (`Commands/Run/RunDeliverCommand.cs`) | paths | 4.5 |
 | `RunStartCommand` (`Commands/Run/RunStartCommand.cs`) | console | 4.5 |
-| `CatalogCommand` (`Commands/Skills/CatalogCommand.cs`) | console | 4.5 |
-| `RouteCommand` (`Commands/Skills/RouteCommand.cs`) | console | 4.5 |
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
 | `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
 | `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |

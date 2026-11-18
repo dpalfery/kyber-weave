@@ -2,6 +2,7 @@ using System.ComponentModel;
 
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
@@ -16,7 +17,11 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     one developer agent's gates under <c>review.task-gates</c> against the change that agent made.
 /// </summary>
 /// <remarks>The use case is <see cref="IReviewGatesService"/>; this command parses its options and renders what it returns.</remarks>
-public sealed class ReviewGatesCommand(IReviewGatesService service, IProcessExecutor? indexExecutor = null) : Command<ReviewGatesSettings>
+public sealed class ReviewGatesCommand(
+    IReviewGatesService service,
+    IConsole standard,
+    IAnsiConsole ansi,
+    IProcessExecutor? indexExecutor = null) : Command<ReviewGatesSettings>
 {
     private const int ClientInputExitCode = ReviewCommandResult.ClientInputExitCode;
 
@@ -89,7 +94,7 @@ public sealed class ReviewGatesCommand(IReviewGatesService service, IProcessExec
         ReviewCommandResult result = service.Run(
             Request(settings),
             indexExecutor ?? ProcessExecutor.WithTimeout(IndexTimeout),
-            Console.Out,
+            standard.Out,
             cancellationToken);
 
         if (result.ClientError is not null)
@@ -99,16 +104,16 @@ public sealed class ReviewGatesCommand(IReviewGatesService service, IProcessExec
         }
 
         if (result.Report is not null)
-            CommandHelpers.Finish(result.Report, settings, "review gates", "Gate");
+            CommandHelpers.Finish(ansi, result.Report, settings, "review gates", "Gate");
 
         foreach (string line in result.Epilogue ?? [])
-            Console.WriteLine(line);
-        Console.Out.Flush();
+            standard.Out.WriteLine(line);
+        standard.Out.Flush();
 
         return result.ExitCode;
     }
 
-    private static ReviewGatesRequest Request(ReviewGatesSettings settings) => new(
+    private ReviewGatesRequest Request(ReviewGatesSettings settings) => new(
         settings.Path,
         settings.Config,
         settings.Out,
@@ -125,10 +130,10 @@ public sealed class ReviewGatesCommand(IReviewGatesService service, IProcessExec
         settings.Fix,
         settings.Red,
         ReportRenderer.IsHuman(settings.ParsedFormat),
-        !Console.IsInputRedirected);
+        !standard.IsInputRedirected);
 
-    private static void WriteClientInputError(string message)
+    private void WriteClientInputError(string message)
     {
-        AnsiConsole.MarkupLine($"[red]kyber-weave review gates: error: {Markup.Escape(message)}[/]");
+        ansi.MarkupLine($"[red]kyber-weave review gates: error: {Markup.Escape(message)}[/]");
     }
 }

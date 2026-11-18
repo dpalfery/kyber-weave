@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.Host;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -142,7 +143,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
     /// <summary>Runs <c>review gates</c> over the repository with the scripted CodeGraph seam, writing the report to --out.</summary>
     private CapturedConsoleExecution<int> Run(ScriptedProcessExecutor executor)
     {
-        CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(ReviewTestServices.ReviewGates, executor)));
+        CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(ReviewTestServices.ReviewGates, new SystemConsole(), AnsiConsole.Console, executor)));
         app.Configure(configuration =>
         {
             configuration.SetApplicationName("kyber-weave");
