@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using KyberWeave.Application;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Hooks;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +18,7 @@ internal static class HooksCli
     /// <param name="stdin">Where the harness writes its hook JSON.</param>
     /// <param name="stdout">Receives the version text, or the JSON that shows notes from an exit-0 run to the agent.</param>
     /// <param name="stderr">Receives feedback text and usage errors; Claude Code shows it to the agent only on exit 2.</param>
-    /// <param name="environment">Reads an environment variable; defaults to the process environment.</param>
+    /// <param name="environment">Reads an environment variable; defaults to the container's process-environment seam.</param>
     /// <param name="configure">Registers services before the application defaults, so they win over them.</param>
     /// <returns>0 to continue, 2 to hand feedback to the agent, 1 for a usage error.</returns>
     public static async Task<int> DispatchAsync(
@@ -55,13 +56,13 @@ internal static class HooksCli
             return 0;
         }
 
-        string? projectDirectory = (environment ?? Environment.GetEnvironmentVariable).Invoke("CLAUDE_PROJECT_DIR");
-        edit = edit with { ProjectDirectory = string.IsNullOrWhiteSpace(projectDirectory) ? null : projectDirectory };
-
         ServiceCollection services = [];
         configure?.Invoke(services);
         _ = services.AddWeaveApplication();
         await using ServiceProvider provider = services.BuildServiceProvider();
+
+        string? projectDirectory = (environment ?? provider.GetRequiredService<IProcessEnvironment>().GetVariable).Invoke("CLAUDE_PROJECT_DIR");
+        edit = edit with { ProjectDirectory = string.IsNullOrWhiteSpace(projectDirectory) ? null : projectDirectory };
 
         HookResult result = await provider.GetRequiredService<IEditHookService>().RunAsync(edit, CancellationToken.None).ConfigureAwait(false);
         if (result.Feedback.Length > 0)

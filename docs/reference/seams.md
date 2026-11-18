@@ -391,7 +391,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `HooksCli` (`HooksCli.cs`) | environment | 4.7 |
 
 #### KyberWeave.Kernel (3 classes)
 
