@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -142,6 +143,11 @@ internal static class DocsTestCommands
             provider.GetRequiredService<ICodeGraphProvisioner>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>(),
             provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IProcessRunner>(),
+            provider.GetRequiredService<IBoundedProcessExecutor>(),
             executor,
             pause);
     }

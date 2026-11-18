@@ -1,5 +1,6 @@
 using KyberWeave.Application;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
@@ -63,12 +64,7 @@ internal static class DocsToolsComposition
 
         // The refresh schedule is a process-wide decision, made once from this process's own argv. The
         // tools receive it by injection so a test that asks them directly gets the default cadence.
-        services.AddSingleton<ICodeGraphFreshnessGate>(provider => new CodeGraphFreshness(
-            repositoryRoot,
-            codeGraphRefreshEnabled,
-            provider.GetRequiredService<ICodeGraphProvisioner>(),
-            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
-            provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<ICodeGraphFreshnessGate>(provider => Freshness(provider, repositoryRoot, codeGraphRefreshEnabled));
         services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
         services.AddSingleton<IDocsQueryService, DocsQueryService>();
         services.AddSingleton<IPlanLifecycleService>(provider => new PlanLifecycleService(
@@ -100,6 +96,26 @@ internal static class DocsToolsComposition
         // tools of their own, built on demand and kept in a small least-recently-used set.
         services.AddSingleton(provider => DocsRootRegistry.ForRepository(repositoryRoot, codeGraphRefreshEnabled, provider));
         return services;
+    }
+
+    /// <summary>The CodeGraph refresh schedule over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
+    /// <param name="provider">The container the ports are resolved from.</param>
+    /// <param name="repositoryRoot">The bound repository root.</param>
+    /// <param name="refreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
+    public static CodeGraphFreshness Freshness(IServiceProvider provider, string repositoryRoot, bool refreshEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return new CodeGraphFreshness(
+            repositoryRoot,
+            refreshEnabled,
+            provider.GetRequiredService<ICodeGraphProvisioner>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IProcessRunner>(),
+            provider.GetRequiredService<IBoundedProcessExecutor>());
     }
 
     /// <summary>The task prompt service over <paramref name="host"/>'s checkout, built from the ports of <paramref name="provider"/>.</summary>

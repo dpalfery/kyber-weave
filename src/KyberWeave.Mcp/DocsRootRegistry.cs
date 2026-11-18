@@ -103,12 +103,7 @@ public sealed class DocsRootRegistry
         return DocsToolsComposition.Create(
             host,
             DocsToolsComposition.AnalysisReader(provider, repoRoot),
-            new CodeGraphFreshness(
-                repoRoot,
-                codeGraphRefreshEnabled,
-                provider.GetRequiredService<ICodeGraphProvisioner>(),
-                provider.GetRequiredService<IKyberWeaveConfigRepository>(),
-                provider.GetRequiredService<TimeProvider>()),
+            DocsToolsComposition.Freshness(provider, repoRoot, codeGraphRefreshEnabled),
             registry,
             services,
             deliveryExecutor,
