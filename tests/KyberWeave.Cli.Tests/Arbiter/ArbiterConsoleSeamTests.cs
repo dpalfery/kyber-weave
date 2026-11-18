@@ -1,21 +1,17 @@
 using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Arbiter;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.RunStart;
-using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
-using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Rendering;
 using Spectre.Console.Testing;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// The Arbiter commands write to the console they were constructed with rather than the process-wide static one, so a
@@ -30,7 +26,7 @@ public sealed class ArbiterConsoleSeamTests
         console.Profile.Width = 200;
         ArbiterRulesCommand command = new(new FixedArbiterConfigs(), console);
 
-        int exitCode = command.Execute(null!, new ArbiterSettings { Path = "/nowhere" });
+        int exitCode = command.Execute(null!, new ArbiterSettings { Path = NoRepository });
 
         Assert.Equal(0, exitCode);
         Assert.Contains("KW-ARB-", console.Output, StringComparison.Ordinal);
@@ -48,7 +44,7 @@ public sealed class ArbiterConsoleSeamTests
         console.Profile.Width = 200;
         ArbiterRulesCommand command = new(new FailingArbiterConfigs(), console);
 
-        int exitCode = command.Execute(null!, new ArbiterSettings { Path = "/nowhere", Format = "json" });
+        int exitCode = command.Execute(null!, new ArbiterSettings { Path = NoRepository, Format = "json" });
 
         Assert.Equal(1, exitCode);
         Assert.Contains(FailingArbiterConfigs.Code, console.Output, StringComparison.Ordinal);
@@ -62,7 +58,7 @@ public sealed class ArbiterConsoleSeamTests
         console.Profile.Width = 200;
         ArbiterValidateCommand command = new(new FailingArbiterConfigs(), console);
 
-        int exitCode = command.Execute(null!, new ArbiterSettings { Path = "/nowhere", Format = "json" });
+        int exitCode = command.Execute(null!, new ArbiterSettings { Path = NoRepository, Format = "json" });
 
         Assert.Equal(1, exitCode);
         Assert.Contains(FailingArbiterConfigs.Code, console.Output, StringComparison.Ordinal);
@@ -129,7 +125,7 @@ public sealed class ArbiterConsoleSeamTests
         ArbiterStatusCommand command = new(
             new FixedArbiterConfigs(),
             new NoKeyService(),
-            new FakeProcessEnvironment(homeDirectory: "/kw/home"),
+            new FakeProcessEnvironment(homeDirectory: ArbiterTestRoots.Under("kw", "home")),
             new NoUserConfigStore(),
             new NoRepositoryLocator(),
             new OneRowGating(),
@@ -173,39 +169,32 @@ public sealed class ArbiterConsoleSeamTests
     [Fact]
     public void Composition_HandsEveryArbiterCommandTheConsoleItRegistered()
     {
-        TestConsole console = new();
-        console.Profile.Width = 200;
-        using ArbiterTestHost host = ArbiterTestHost.Create(services =>
-        {
-            services.AddSingleton<IAnsiConsole>(console);
-            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(homeDirectory: "/kw/home"));
-            services.AddSingleton<IProcessExecutor>(new FakeProcessExecutor());
-            services.AddSingleton<IGitCommandRunner>(
-                new FakeGitCommandRunner((_, _) => new GitOutcome(1, string.Empty, string.Empty)));
-        });
+        using InMemoryArbiterHost host = InMemoryArbiterHost.Create();
+        TestConsole console = host.Console;
+        string noRepository = host.InWork("none");
 
         // Each command runs in a state that prints and changes nothing: a usage error, an unreadable path, or the
         // defaults an empty configuration yields.
         List<(string Command, Func<int> Run)> commands =
         [
             ("arbiter validate", () => host.Command<ArbiterValidateCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository, Format = "json" })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository, Format = "json" })),
             ("arbiter rules", () => host.Command<ArbiterRulesCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository })),
             ("arbiter plan", () => host.Command<ArbiterPlanCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository + "/plan.md", Format = "json" })),
+                .Execute(null!, new ArbiterSettings { Path = Path.Combine(noRepository, "plan.md"), Format = "json" })),
             ("arbiter eval", () => host.Command<ArbiterEvalCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository, Format = "json" })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository, Format = "json" })),
             ("arbiter audit", () => host.Command<ArbiterAuditCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository })),
             ("arbiter tune", () => host.Command<ArbiterTuneCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository })),
             ("arbiter setup", () => host.Command<ArbiterSetupCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository, Provider = "no-such-provider" })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository, Provider = "no-such-provider" })),
             ("arbiter status", () => host.Command<ArbiterStatusCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository })),
             ("arbiter doctor", () => host.Command<ArbiterDoctorCommand>()
-                .Execute(null!, new ArbiterSettings { Path = NoRepository })),
+                .Execute(null!, new ArbiterSettings { Path = noRepository })),
             ("arbiter sections", () => host.Command<ArbiterSectionsCommand>()
                 .Execute(null!, new ArbiterSectionsSettings())),
             ("arbiter comment", () => host.Command<ArbiterCommentCommand>()
@@ -236,7 +225,7 @@ public sealed class ArbiterConsoleSeamTests
     }
 
     /// <summary>A repository path that exists nowhere, so every command takes its not-found path.</summary>
-    private const string NoRepository = "/kw/none";
+    private static readonly string NoRepository = ArbiterTestRoots.Under("kw", "none");
 
     /// <summary>A console a test points at one <see cref="TestConsole"/> and then another, mid-write.</summary>
     private sealed class SwitchingConsole(TestConsole first) : IAnsiConsole

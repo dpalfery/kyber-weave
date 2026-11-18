@@ -1,6 +1,6 @@
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.RunStart;
 using Microsoft.Extensions.DependencyInjection;
+using KyberWeave.Core.RunStart;
 using System.Diagnostics;
 using System.Net;
 using System.Text;
@@ -9,11 +9,10 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Processes;
-using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Task 3.2 contract: <c>arbiter setup | status | doctor</c> manage the per-user
@@ -22,12 +21,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterSetupCommandTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
-    private readonly TempDirectory _home = new();
     private readonly FakeCredentialStore _store = new();
     private ICredentialStore? _storeOverride;
 
-    private readonly ArbiterTestHost _host;
+    private readonly InMemoryArbiterHost _host;
 
     private Func<HttpRequestMessage, HttpResponseMessage> _ollamaResponder = _ => NotFound();
     private string? _keyStdinValue;
@@ -40,9 +37,8 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         // Every collaborator the commands take is registered here as a fake, so a command resolved from this host
         // reads the injected home, store and stubs and never the real home, keychain, network, git or PATH.
-        _host = ArbiterTestHost.Create(services =>
+        _host = InMemoryArbiterHost.Create(services =>
         {
-            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path));
             services.AddSingleton<ICredentialStore>(new ForwardingCredentialStore(() => _storeOverride ?? _store));
             services.AddSingleton<IArbiterKeyInput>(new FakeArbiterKeyInput(() => _keyStdinValue, () => _keyPromptValue));
             services.AddSingleton<IArbiterHttpHandlers>(new FakeArbiterHttpHandlers(() => new StubOllamaHandler(_ollamaResponder)));
@@ -51,12 +47,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         });
     }
 
-    public void Dispose()
-    {
-        _host.Dispose();
-        _temp.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     [Fact]
     public void Setup_WritesOverrideAndStore_NeverEchoing()
@@ -66,7 +57,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         string host = NewDir("setup-cloud");
 
         ArbiterSetupCommand command = _host.Command<ArbiterSetupCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings
             {
@@ -78,7 +69,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        string written = File.ReadAllText(OverridePath());
+        string written = _host.Files.ReadAllText(OverridePath());
         Assert.Contains("systemone", written, StringComparison.Ordinal);
         Assert.Contains("https://api.typesafe.ai/v1", written, StringComparison.Ordinal);
         Assert.DoesNotContain(key, written, StringComparison.Ordinal);
@@ -104,7 +95,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         string host = NewDir("setup-model");
         ArbiterSetupCommand command = _host.Command<ArbiterSetupCommand>();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings
             {
@@ -117,7 +108,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         Assert.Equal(0, execution.ExitCode);
         ArbiterProviderConfig applied = _host.Get<IArbiterUserSettings>().ApplyTo(
             ArbiterConfigDefaults.Product.Provider,
-            _home.Path);
+            _host.HomeDirectory);
         Assert.Equal(model.Trim(), applied.Model);
     }
 
@@ -131,7 +122,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("setup-control");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
             null!,
             new ArbiterSettings
             {
@@ -152,7 +143,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _keyPromptValue = key;
         string host = NewDir("setup-prompt");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
             null!,
             new ArbiterSettings
             {
@@ -173,7 +164,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _ollamaResponder = _ => JsonResponse("""{"version":"0.35.0"}""");
         string host = NewDir("setup-ollama");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
             null!,
             new ArbiterSettings
             {
@@ -195,7 +186,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _ollamaResponder = _ => JsonResponse("""{"version":"0.35.0"}""");
         string host = NewDir("setup-tev1");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
             null!,
             new ArbiterSettings
             {
@@ -215,14 +206,14 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("setup-none");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host, Provider = "none" }));
 
         Assert.Equal(0, execution.ExitCode);
 
         // Quoted: every value setup writes is a single-quoted YAML scalar.
-        Assert.Contains("kind: 'none'", File.ReadAllText(OverridePath()), StringComparison.Ordinal);
+        Assert.Contains("kind: 'none'", _host.Files.ReadAllText(OverridePath()), StringComparison.Ordinal);
         Assert.Empty(_store.Writes);
     }
 
@@ -231,7 +222,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("setup-bad-provider");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host, Provider = "no-such-provider" }));
 
@@ -247,7 +238,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _store.Seed("https://api.typesafe.ai", key);
         string host = NewDir("status-found");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -265,7 +256,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
         string host = NewDir("status-missing");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -278,7 +269,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("doctor-006");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -293,7 +284,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("doctor-advisory-" + target);
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -309,7 +300,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: mystery-model\n");
         string host = NewDir("doctor-007");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -322,7 +313,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  model: nimble\nextra: 1\n");
         string host = NewDir("doctor-009");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -336,7 +327,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  kind: systemone\n  endpoint: http://example.com/v1\n  model: jev-1.13.0\n");
         string host = NewDir("doctor-010");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -350,7 +341,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
         string host = NewDir("doctor-key");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -361,10 +352,10 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     public void Doctor_SecretToolMissing_ReportsKey001WithActionableText()
     {
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
-        _storeOverride = new SecretServiceCredentialStore(new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner());
+        _storeOverride = new SecretServiceCredentialStore(new MissingSecretToolRunner());
         string host = NewDir("doctor-no-secret-tool");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -379,10 +370,10 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     public void Setup_SecretToolMissing_ExitsOneWithActionableText()
     {
         _keyStdinValue = "TS-NOTOOL-KEY-0c1d2e3f";
-        _storeOverride = new SecretServiceCredentialStore(new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner());
+        _storeOverride = new SecretServiceCredentialStore(new MissingSecretToolRunner());
         string host = NewDir("setup-no-secret-tool");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterSetupCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterSetupCommand>().Execute(
             null!,
             new ArbiterSettings
             {
@@ -408,7 +399,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
                 : new GitOutcome(1, string.Empty, "not a repo");
         string host = NewDir("doctor-log");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -421,7 +412,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
         _probeResult = new ProcessResult(1, string.Empty, "missing");
         string host = NewDir("doctor-bin");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -433,7 +424,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         string host = NewDir("doctor-guard");
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterDoctorCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterDoctorCommand>().Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -441,19 +432,14 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     private string OverridePath() =>
-        Path.Combine(_home.Path, ".config", "kyber-weave", "arbiter.yml");
+        Path.Combine(_host.HomeDirectory, ".config", "kyber-weave", "arbiter.yml");
 
-    private void WriteOverride(string yaml)
-    {
-        string dir = Path.Combine(_home.Path, ".config", "kyber-weave");
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "arbiter.yml"), yaml);
-    }
+    private void WriteOverride(string yaml) => _ = _host.Write(OverridePath(), yaml);
 
     private string NewDir(string name)
     {
-        string dir = Path.Combine(_temp.Path, name);
-        Directory.CreateDirectory(dir);
+        string dir = _host.InWork(name);
+        _host.Files.CreateDirectory(dir);
         return dir;
     }
 
@@ -463,14 +449,6 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     };
 
     private static HttpResponseMessage NotFound() => new(HttpStatusCode.NotFound);
-
-    private static CommandExecution Capture(Func<int> execute)
-    {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 
     private sealed class StubOllamaHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
         : HttpMessageHandler
