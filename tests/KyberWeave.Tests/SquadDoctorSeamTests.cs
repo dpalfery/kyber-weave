@@ -99,6 +99,19 @@ public sealed class SquadDoctorSeamTests
         Assert.Equal(Workspace, _migration.ImportedProjectRoot);
     }
 
+    /// <summary>
+    /// A <c>--global</c> run with a named path warns through the injected console and leaves the injected file system
+    /// alone, because the anchor is resolved as a dry run.
+    /// </summary>
+    [Fact]
+    public void Execute_GlobalWithANamedPath_WritesTheIgnoredPathWarningToTheInjectedConsole()
+    {
+        _ = Execute(new SquadDoctorSettings { Path = Workspace, Global = true }, out string output);
+
+        Assert.Contains("is ignored under --global", output, StringComparison.Ordinal);
+    }
+
+
     /// <summary>The state migration runs from the environment seam's current directory, not from the process's.</summary>
     [Fact]
     public void Execute_MigrationRunsFromTheEnvironmentSeamsCurrentDirectory()

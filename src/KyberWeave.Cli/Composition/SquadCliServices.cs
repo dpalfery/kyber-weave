@@ -49,5 +49,5 @@ internal static class SquadCliServices
     /// given the seam passes it instead.
     /// </summary>
     /// <returns>The physical file system.</returns>
-    internal static IFileSystem ProcessFileSystem() => new PhysicalFileSystem();
+    internal static IWritableFileSystem ProcessFileSystem() => new PhysicalFileSystem();
 }

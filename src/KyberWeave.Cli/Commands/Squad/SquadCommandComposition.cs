@@ -418,10 +418,19 @@ internal static class SquadCommandComposition
     /// <param name="stateStore">The store the global receipt is read from. Its user paths name the home.</param>
     /// <param name="suppliedPath">The path the operator gave, or null when none was given.</param>
     /// <param name="dryRun">Whether the run only plans, so the home directory is not created.</param>
-    public static string ResolveGlobalAnchorRoot(ISquadStateStore stateStore, string? suppliedPath, bool dryRun)
+    /// <param name="files">The file system the home is probed and created through; null uses the process's own.</param>
+    /// <param name="console">Where the ignored-path warning is written; null uses the process's own console.</param>
+    public static string ResolveGlobalAnchorRoot(
+        ISquadStateStore stateStore,
+        string? suppliedPath,
+        bool dryRun,
+        IWritableFileSystem? files = null,
+        SquadConsole? console = null)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
 
+        IWritableFileSystem fileSystem = files ?? SquadCliServices.ProcessFileSystem();
+        SquadConsole output = console ?? SquadCliServices.ProcessConsole();
         string home = Path.GetFullPath(stateStore.UserPaths.HomeDirectory);
         SquadReceipt? legacy = TryReadLegacySingleRootHomeReceipt(stateStore, home);
         if (legacy is not null)
@@ -429,7 +438,7 @@ internal static class SquadCommandComposition
             if (Path.IsPathFullyQualified(legacy.TargetRoot))
             {
                 if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
-                    WriteLine(
+                    output.WriteLine(
                         $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
                         $"this legacy single-root deployment is anchored at its recorded root '{Markup.Escape(legacy.TargetRoot)}'.");
 
@@ -443,10 +452,10 @@ internal static class SquadCommandComposition
 
         // The home directory exists on every real profile; creating it here only matters for a fake home,
         // and a dry run writes nothing, so it is left alone there.
-        if (!dryRun && !Directory.Exists(home)) Directory.CreateDirectory(home);
+        if (!dryRun && !fileSystem.DirectoryExists(home)) fileSystem.CreateDirectory(home);
 
         if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
-            WriteLine(
+            output.WriteLine(
                 $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
                 $"global state lives beneath the home directory '{Markup.Escape(home)}'.");
 

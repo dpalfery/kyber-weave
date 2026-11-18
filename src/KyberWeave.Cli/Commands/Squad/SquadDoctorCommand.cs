@@ -42,7 +42,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly IFileSystemPathSemantics _pathSemantics;
     private readonly IKyberWeaveConfigRepository _configs;
     private readonly SquadConsole _console;
-    private readonly IFileSystem _files;
+    private readonly IWritableFileSystem _files;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -81,7 +81,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         IFileSystemPathSemantics pathSemantics,
         IKyberWeaveConfigRepository configs,
         SquadConsole output,
-        IFileSystem files)
+        IWritableFileSystem files)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -153,7 +153,13 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
         // the migration below runs with dryRun: false and may move legacy state into the home.
         ISquadStateStore homeStateStore = _stateStore;
-        if (settings.Global) _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
+        if (settings.Global)
+            _ = SquadCommandComposition.ResolveGlobalAnchorRoot(
+                homeStateStore,
+                effectivePath,
+                true,
+                _files,
+                _console);
 
         _console.Ansi.MarkupLine("[bold]Kyber-Squad Doctor[/]");
         _console.Ansi.WriteLine();

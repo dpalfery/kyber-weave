@@ -175,7 +175,7 @@ internal static class SquadTestCommands
         Func<string, string?>? environmentReader = null,
         IKyberWeaveConfigRepository? configs = null,
         SquadConsole? output = null,
-        IFileSystem? files = null)
+        IWritableFileSystem? files = null)
     {
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadDoctorCommand(
