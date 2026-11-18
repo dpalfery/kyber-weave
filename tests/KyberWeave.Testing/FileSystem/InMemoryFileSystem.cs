@@ -285,7 +285,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     /// <inheritdoc />
     public void MoveFile(string sourcePath, string destinationPath, bool overwrite)
     {
-        Enter(nameof(MoveFile), sourcePath);
+        Enter(nameof(MoveFile), sourcePath, destinationPath);
         Node source = Resolve(sourcePath, followFinal: false) ?? throw Missing(sourcePath);
         if (source.IsDirectory && source.LinkTarget is null)
         {
@@ -433,7 +433,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     private static FileNotFoundException Missing(string path) =>
         new($"Could not find file '{path}'.", path);
 
-    private void Enter(string name, string? path)
+    private void Enter(string name, string? path, string? destinationPath = null)
     {
         if (IsKilled)
         {
@@ -441,7 +441,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         }
 
         int number = ++OperationCount;
-        FileSystemOperation operation = new(name, path);
+        FileSystemOperation operation = new(name, path, destinationPath);
         foreach (FileSystemFault fault in _faults)
         {
             if (!fault.Matches(number, operation))

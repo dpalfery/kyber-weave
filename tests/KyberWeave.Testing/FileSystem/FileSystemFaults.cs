@@ -13,7 +13,8 @@ public enum FileSystemFaultKind
 /// <summary>One call into the file-system seam, as a fault predicate sees it.</summary>
 /// <param name="Name">The seam member's name, such as <c>WriteAllText</c>.</param>
 /// <param name="Path">The path the member was given, when it has one.</param>
-public readonly record struct FileSystemOperation(string Name, string? Path);
+/// <param name="DestinationPath">The path a two-path member writes toward, such as a rename's destination.</param>
+public readonly record struct FileSystemOperation(string Name, string? Path, string? DestinationPath = null);
 
 /// <summary>Raised by a fake that was killed at an operation. Recovery is simulated with <see cref="InMemoryFileSystem.ClearFaults"/>.</summary>
 public sealed class InMemoryFileSystemKilledException : Exception

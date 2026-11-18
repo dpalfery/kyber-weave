@@ -166,6 +166,23 @@ public abstract class FileSystemFaultContractTests
         AssertFaultsAtCall(files => _ = files.ReadLines("/absent.txt"));
     }
 
+    [Fact]
+    public void APredicateCanTargetTheRenameThatReplacesADestination()
+    {
+        InMemoryFileSystem files = CreateFileSystem();
+        string root = files.CreateTemporaryDirectory("kw-fs-fault-");
+        string source = At(root, "source.txt");
+        string destination = At(root, "destination.txt");
+        files.WriteAllText(source, "new");
+        files.WriteAllText(destination, "old");
+        files.FailWhen(operation => operation.Name == nameof(InMemoryFileSystem.MoveFile) && operation.DestinationPath == destination);
+
+        _ = Assert.Throws<IOException>(() => files.MoveFile(source, destination, overwrite: true));
+
+        Assert.Equal("new", files.ReadAllText(source));
+        Assert.Equal("old", files.ReadAllText(destination));
+    }
+
     private void AssertFaultsAtCall(Action<InMemoryFileSystem> call)
     {
         InMemoryFileSystem files = CreateFileSystem();
