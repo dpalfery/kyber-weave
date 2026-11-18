@@ -29,4 +29,9 @@
     <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Recorded gate reports the RED tests judge: compiled in, so a test reads them without the disk. -->
+    <EmbeddedResource Include="Fixtures\red-gate-reports\*.json" LogicalName="red-gate-reports/%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>
