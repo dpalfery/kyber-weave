@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -177,7 +178,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         SquadLifecycleService service = CreateLifecycleService(release);
 
         return await service.InstallAsync(new SquadInstallRequest(
-            KyberWeaveTestPaths.ToolRoot,
+            CheckoutCorpusSource.Checkout.Root,
             SquadDeploymentScope.Global,
             [target],
             Version: "1.2.3",
@@ -193,7 +194,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         SquadLifecycleService service = CreateLifecycleService(release);
 
         return await service.UpdateAsync(new SquadUpdateRequest(
-            KyberWeaveTestPaths.ToolRoot,
+            CheckoutCorpusSource.Checkout.Root,
             SquadDeploymentScope.Global,
             [target],
             Version: "1.2.3",

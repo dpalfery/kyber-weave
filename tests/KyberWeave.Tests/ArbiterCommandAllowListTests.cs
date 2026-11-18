@@ -9,6 +9,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -23,6 +24,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterCommandAllowListTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
     private const string DispatchSession = "sess-1";
@@ -320,12 +323,17 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             return;
         }
 
-        string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", technology);
         string target = Path.Combine(root, "docs", "standards", technology);
         Directory.CreateDirectory(target);
-        foreach (string file in Directory.EnumerateFiles(source))
+        CopyShippedStandards(technology, target);
+    }
+
+    /// <summary>Copies the shipped standards folder for one technology into a scratch repository, byte for byte.</summary>
+    private static void CopyShippedStandards(string technology, string target)
+    {
+        foreach (string file in Corpus.EnumerateFiles($"products/kyber-squad/standards/{technology}", "*", recursive: false))
         {
-            File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+            File.WriteAllBytes(Path.Combine(target, Path.GetFileName(file)), Corpus.ReadBytes(file));
         }
     }
 
@@ -342,13 +350,9 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
 
         foreach (string technology in technologies)
         {
-            string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", technology);
             string target = Path.Combine(root, "docs", "standards", technology);
             Directory.CreateDirectory(target);
-            foreach (string file in Directory.EnumerateFiles(source))
-            {
-                File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
-            }
+            CopyShippedStandards(technology, target);
         }
     }
 
@@ -501,6 +505,5 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     }
 
     private static string ShippedStandardsFile(string relativePath) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", relativePath));
+        Corpus.ReadText($"products/kyber-squad/standards/{relativePath}");
 }

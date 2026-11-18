@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -373,16 +374,9 @@ public sealed class ArbiterGlobalHookRuntimeTests
     /// <summary>A Bash PreToolUse payload from the shipped fixture, run as the architect in the given project.</summary>
     private static string ShellPayload(string projectRoot, string command)
     {
-        string fixturePath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "tests",
-            "KyberWeave.Tests",
-            "Fixtures",
-            "arbiter-hooks",
-            "claude",
-            "pre-bash-denied.json");
+        const string ShellFixture = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-bash-denied.json";
 
-        JsonObject root = JsonNode.Parse(File.ReadAllText(fixturePath))!.AsObject();
+        JsonObject root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(ShellFixture))!.AsObject();
         root["cwd"] = projectRoot;
         root["transcript_path"] = Path.Combine(projectRoot, "transcript.jsonl");
         root["agent_type"] = "architect";
@@ -420,16 +414,9 @@ public sealed class ArbiterGlobalHookRuntimeTests
 
     private static string BuildPayload(string projectRoot)
     {
-        string fixturePath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "tests",
-            "KyberWeave.Tests",
-            "Fixtures",
-            "arbiter-hooks",
-            "claude",
-            "pre-agent-dispatch.json");
+        const string PayloadFixture = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
 
-        JsonNode root = JsonNode.Parse(File.ReadAllText(fixturePath))!.AsObject();
+        JsonNode root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(PayloadFixture))!.AsObject();
         root["cwd"] = projectRoot;
         root["transcript_path"] = Path.Combine(projectRoot, "transcript.jsonl");
         return root.ToJsonString();
@@ -476,16 +463,9 @@ public sealed class ArbiterHookCommandTests
 
     private static string BuildPayload(string projectRoot)
     {
-        string fixturePath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "tests",
-            "KyberWeave.Tests",
-            "Fixtures",
-            "arbiter-hooks",
-            "claude",
-            "pre-agent-dispatch.json");
+        const string PayloadFixture = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
 
-        JsonNode root = JsonNode.Parse(File.ReadAllText(fixturePath))!.AsObject();
+        JsonNode root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(PayloadFixture))!.AsObject();
         root["cwd"] = projectRoot;
         root["transcript_path"] = Path.Combine(projectRoot, "transcript.jsonl");
         return root.ToJsonString();

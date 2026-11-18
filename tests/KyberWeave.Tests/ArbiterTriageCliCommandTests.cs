@@ -5,6 +5,7 @@ using KyberWeave.Data.Arbiter;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -25,7 +26,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
     private readonly string _inRepoScratch = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, ".agent_scratchpad", "arbiter-triage-cli", Guid.NewGuid().ToString("N"));
+        CheckoutCorpusSource.Checkout.Root, ".agent_scratchpad", "arbiter-triage-cli", Guid.NewGuid().ToString("N"));
 
     public void Dispose()
     {

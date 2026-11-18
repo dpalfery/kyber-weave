@@ -9,6 +9,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using ModelContextProtocol.Server;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -23,8 +24,10 @@ public sealed class ArbiterCanonicalSquadTests
     private const string DecisionQuery = "decision.query";
     private const string ArbiterServer = "kw-arbiter";
 
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly string[] AllowedProfiles = ["orchestrator", "reviewer"];
 

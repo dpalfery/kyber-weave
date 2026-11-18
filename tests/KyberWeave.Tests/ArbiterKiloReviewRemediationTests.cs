@@ -16,6 +16,7 @@ using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
@@ -142,16 +143,9 @@ public sealed class ArbiterKiloReviewRemediationTests
         Directory.CreateDirectory(projConfigDir);
         await File.WriteAllTextAsync(Path.Combine(projConfigDir, "kyber-weave.yml"), "invalid: yaml: : content");
 
-        string fixturePath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "tests",
-            "KyberWeave.Tests",
-            "Fixtures",
-            "arbiter-hooks",
-            "claude",
-            "pre-agent-dispatch.json");
+        string fixturePath = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
 
-        JsonNode root = JsonNode.Parse(await File.ReadAllTextAsync(fixturePath))!.AsObject();
+        JsonNode root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(fixturePath))!.AsObject();
         root["cwd"] = projectDir.Path;
         root["transcript_path"] = Path.Combine(projectDir.Path, "transcript.jsonl");
 

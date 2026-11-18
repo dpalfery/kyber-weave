@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using KyberWeave.Arbiter;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -335,15 +336,9 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
 
     private static string Fixture(string root, string relativeFixture, Action<JsonObject> edit)
     {
-        string fixturePath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "tests",
-            "KyberWeave.Tests",
-            "Fixtures",
-            "arbiter-hooks",
-            relativeFixture);
+        string fixturePath = $"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/{relativeFixture.Replace('\\', '/')}";
 
-        JsonObject payload = JsonNode.Parse(File.ReadAllText(fixturePath))!.AsObject();
+        JsonObject payload = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(fixturePath))!.AsObject();
         payload["cwd"] = root;
         payload["transcript_path"] = Path.Combine(root, "transcript.jsonl");
         edit(payload);

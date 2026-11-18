@@ -2,6 +2,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Parsing;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -159,17 +160,12 @@ public sealed class ArbiterRuleFolderSplitTests
 
     private static ArbiterDefaultRulesYaml ParseRole(string role)
     {
-        string path = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "products",
-            "kyber-squad",
-            "standards",
-            role,
-            $"{role}.arbiter-rules.yml");
+        string path = $"products/kyber-squad/standards/{role}/{role}.arbiter-rules.yml";
 
-        Assert.True(File.Exists(path), $"The '{role}' role rules file is missing: {path}.");
+        Assert.True(CheckoutCorpusSource.Checkout.Exists(path), $"The '{role}' role rules file is missing: {path}.");
         ArbiterDefaultRulesYaml? document =
-            MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(File.ReadAllText(path));
+            MarkdownFrontmatterReader.Deserializer.Deserialize<ArbiterDefaultRulesYaml>(
+                CheckoutCorpusSource.Checkout.ReadText(path));
         Assert.NotNull(document);
         return document;
     }

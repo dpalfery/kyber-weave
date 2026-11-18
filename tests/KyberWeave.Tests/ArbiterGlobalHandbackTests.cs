@@ -2,6 +2,7 @@ using System.Text.Json.Nodes;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -84,9 +85,8 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
 
     private static string Handback(string root)
     {
-        string fixturePath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests", "Fixtures", "arbiter-hooks", "claude", "pre-subagent-handback.json");
-        JsonObject payload = JsonNode.Parse(File.ReadAllText(fixturePath))!.AsObject();
+        string fixturePath = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-subagent-handback.json";
+        JsonObject payload = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(fixturePath))!.AsObject();
         payload["cwd"] = root;
         payload["transcript_path"] = Path.Combine(root, "transcript.jsonl");
         return payload.ToJsonString();
