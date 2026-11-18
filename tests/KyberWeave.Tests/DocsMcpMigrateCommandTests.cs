@@ -1181,17 +1181,28 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     [Fact]
     public void TheHomeRefusalResolvesTheSpellingThroughTheSeams()
     {
+        string home = Path.Combine(FakeAnchor, "home");
+
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
             new DocsMcpMigrateCommand(
                 McpWiringTestServices.Wiring,
                 FakePathResolver.OverEmptyFileSystem(),
-                new FakeProcessEnvironment(homeDirectory: "/kw/home")).Execute(
+                new FakeProcessEnvironment(
+                    currentDirectory: Path.Combine(FakeAnchor, "work"),
+                    homeDirectory: home)).Execute(
                 null!,
-                new DocsMcpMigrateSettings { Path = "/kw/home/../home/", Target = Cursor }));
+                new DocsMcpMigrateSettings { Path = Path.Combine(FakeAnchor, "home", "..", "home"), Target = Cursor }));
 
         Assert.Equal(1, execution.Result);
         Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// A fully qualified anchor for the fake paths a case hands the seams, spelled the way the
+    /// platform spells one: the path seam refuses a base the platform does not call fully
+    /// qualified, and a Unix-absolute base is drive-relative on Windows.
+    /// </summary>
+    private static string FakeAnchor => OperatingSystem.IsWindows() ? @"C:\kw" : "/kw";
 
     /// <summary>
     /// A declaration that is a symbolic link is refused before it is read: reading it would read a
