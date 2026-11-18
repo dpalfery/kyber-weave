@@ -335,6 +335,21 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void GetLinkTargetOfALinkWhoseTargetIsMissingStillReportsTheTarget()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string link = At(root, "dangling.txt");
+        string missing = At(root, "missing.txt");
+        files.CreateFileLink(link, missing);
+
+        string? written = files.GetLinkTarget(link);
+
+        Assert.NotNull(written);
+        Assert.Equal(missing, Path.GetFullPath(written, root));
+        Assert.Null(files.GetLinkTarget(missing));
+    }
+
+    [Fact]
     public void GetFinalLinkTargetResolvesEveryHop()
     {
         IWritableFileSystem files = Starting(out string root);

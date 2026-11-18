@@ -110,6 +110,97 @@ public sealed class CopilotPromptCommandsConsoleTests
         Assert.Equal($"Deleted {PromptPath}.\nRestart VS Code to apply it.\n", Output());
     }
 
+    [Fact]
+    public void Install_WritesThePromptAndTheSettingThroughTheWritableSeam()
+    {
+        ArrangeVsCode("{}");
+
+        int exit = Install().Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.True(_writes.FileExists(PromptPath));
+        Assert.Contains(PromptPath, _writes.ReadAllText(SettingsPath), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Install_ASettingsFileThatIsALink_IsUpdatedWhereTheLinkPointsAndStaysALink()
+    {
+        const string Target = "/h/dotfiles/settings.json";
+        ArrangeVsCode("{}");
+        _writes.CreateDirectory("/h/dotfiles");
+        _writes.WriteAllText(Target, "{}");
+        _writes.CreateFileLink(SettingsPath, Target);
+
+        int exit = Install().Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(Target, _writes.GetLinkTarget(SettingsPath));
+        Assert.Contains(PromptPath, _writes.ReadAllText(Target), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Install_ASettingsFileThatIsALinkToAMissingFile_CreatesWhereTheLinkPoints()
+    {
+        const string Target = "/h/dotfiles/missing.json";
+        ArrangeVsCode("{}");
+        _writes.CreateDirectory("/h/dotfiles");
+        _writes.CreateFileLink(SettingsPath, Target);
+
+        int exit = Install().Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(Target, _writes.GetLinkTarget(SettingsPath));
+        Assert.Contains(PromptPath, _writes.ReadAllText(Target), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Install_ASettingsFileThatIsNotALink_IsWrittenInPlace()
+    {
+        ArrangeVsCode("{}");
+
+        _ = Install().Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None);
+
+        Assert.Null(_writes.GetLinkTarget(SettingsPath));
+        Assert.True(_writes.FileExists(SettingsPath));
+    }
+
+    [Fact]
+    public void Install_AWriteThatFails_ExitsOneAndLeavesTheSettingUntouched()
+    {
+        ArrangeVsCode("{}");
+        _writes.AddFault(FileSystemFault.FailWhen(operation => operation.Name == nameof(IWritableFileSystem.WriteAllBytesAtomic), new IOException("disk full")));
+
+        int exit = Install().Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.False(_writes.FileExists(SettingsPath));
+    }
+
+    [Fact]
+    public void Uninstall_ASettingsFileThatIsALink_IsUpdatedWhereTheLinkPoints()
+    {
+        const string Target = "/h/dotfiles/settings.json";
+        string entry = $"{{\"{VsCodeUserSettingsPaths.SettingId}\": {{\"*\": {{\"promptOverrideFile\": \"{PromptPath}\"}}}}}}";
+        ArrangeVsCode(entry);
+        _writes.CreateDirectory("/h/dotfiles");
+        _writes.WriteAllText(Target, entry);
+        _writes.CreateFileLink(SettingsPath, Target);
+
+        int exit = Uninstall().Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Equal(Target, _writes.GetLinkTarget(SettingsPath));
+        Assert.DoesNotContain(PromptPath, _writes.ReadAllText(Target), StringComparison.Ordinal);
+    }
+
+    private void ArrangeVsCode(string settings)
+    {
+        _reads.WithDirectory(Path.GetDirectoryName(Path.GetDirectoryName(SettingsPath))!);
+        _reads.WithDirectory(Path.GetDirectoryName(SettingsPath)!);
+        _reads.WithFile(SettingsPath, settings);
+        _writes.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+    }
+
     private static TestConsole Wide()
     {
         TestConsole console = new() { EmitAnsiSequences = false };
@@ -126,9 +217,9 @@ public sealed class CopilotPromptCommandsConsoleTests
 
     private CopilotPromptStatusCommand Status() => new(_reads, Environment(), Console());
 
-    private CopilotPromptInstallCommand Install() => new(_reads, ShippedCopilotPrompt.Resources, Environment(), Console());
+    private CopilotPromptInstallCommand Install() => new(_reads, _writes, new FakePathResolver(_writes), ShippedCopilotPrompt.Resources, Environment(), Console());
 
-    private CopilotPromptUninstallCommand Uninstall() => new(_reads, _writes, Environment(), Console());
+    private CopilotPromptUninstallCommand Uninstall() => new(_reads, _writes, new FakePathResolver(_writes), Environment(), Console());
 
     private string Output() => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
 }
