@@ -18,10 +18,11 @@
   <!-- The Factory hook payloads and transcript are compiled in, so a unit test reads them without touching the disk. -->
   <ItemGroup>
     <EmbeddedResource Include="Fixtures\arbiter-hooks\factory\*" Exclude="Fixtures\arbiter-hooks\factory\README.md" LogicalName="arbiter-hooks/factory/%(Filename)%(Extension)" />
+    <!-- The receipt the shipped 0.1.8-rc.20 binary wrote, read by the upgrade tests in memory. -->
+    <EmbeddedResource Include="Fixtures\squad-rc20-global\*.json" LogicalName="fixtures/squad-rc20-global/%(Filename)%(Extension)" />
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="KyberWeave.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Kernel.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Mcp.Tests" />

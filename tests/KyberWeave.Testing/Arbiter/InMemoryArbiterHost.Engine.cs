@@ -94,6 +94,25 @@ internal sealed partial class InMemoryArbiterHost
             credentialStoreFactory,
             environment);
 
+    /// <summary>The git facts the hook reads, over the host's in-memory ports.</summary>
+    /// <param name="workingDirectory">The directory the hook runs in.</param>
+    /// <param name="homeDirectory">The home directory the snapshot store lives under; null for none.</param>
+    /// <param name="arbiterDirectory">The arbiter state directory; null for the default.</param>
+    internal HookGitFacts HookGitFacts(string workingDirectory, string? homeDirectory = null, string? arbiterDirectory = null) =>
+        new(
+            Get<IGitRepositoryFacts>(),
+            Get<IPlanFileResolver>(),
+            Get<IHookSnapshotStore>(),
+            Get<IHookFileWindowReader>(),
+            Get<IRunCheckout>(),
+            Get<IRunStateStore>(),
+            Get<IProcessEnvironment>(),
+            Get<IPathResolver>(),
+            Get<TimeProvider>(),
+            workingDirectory,
+            homeDirectory,
+            arbiterDirectory);
+
     /// <summary>The serve tools over a serve context and the host's in-memory file and triage ports.</summary>
     /// <param name="context">The serve context.</param>
     internal ArbiterTools Tools(ArbiterServeContext context) =>

@@ -9,7 +9,9 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Kernel.FileSystem;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Doctor;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
@@ -37,13 +39,13 @@ internal sealed class InMemoryReviewServices : IDisposable
     {
         Time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         Files = files ?? new InMemoryFileSystem(Time, caseSensitive);
-        Root = Path.Combine(Files.RootPath, "work");
+        Root = Path.Combine(Files.Root, "work");
         Files.CreateDirectory(Root);
         Paths = new FakePathResolver(Files);
         Environment = new FakeProcessEnvironment(
             currentDirectory: Root,
-            homeDirectory: Path.Combine(Files.RootPath, "home"),
-            tempDirectory: Path.Combine(Files.RootPath, "temp"));
+            homeDirectory: Path.Combine(Files.Root, "home"),
+            tempDirectory: Path.Combine(Files.Root, "temp"));
         Ids = new FakeIdGenerator();
         Processes = new ScriptedProcessRunner();
         Log = new FakeArbiterLogStore();
@@ -92,6 +94,8 @@ internal sealed class InMemoryReviewServices : IDisposable
         ArgumentNullException.ThrowIfNull(services);
         services.AddSingleton<IWritableFileSystem>(Files);
         services.AddSingleton<IFileSystem>(Files);
+        services.AddSingleton<IDoctorFileSystem>(new InMemoryDoctorFileSystem(Files));
+        services.AddSingleton<ICodeGraphIndexWorkspace>(new FakeCodeGraphIndexWorkspace());
         services.AddSingleton<IPathResolver>(Paths);
         services.AddSingleton<IProcessEnvironment>(Environment);
         services.AddSingleton<IIdGenerator>(Ids);

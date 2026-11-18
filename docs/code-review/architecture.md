@@ -701,7 +701,7 @@ review:
     csharp-dev:
       - id: tests
         include: ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets"]
-        run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        run: [dotnet, test, tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
         timeout: 600
 ```
 

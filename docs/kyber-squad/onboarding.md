@@ -1481,7 +1481,7 @@ mid-run push that carries nothing leaves a resumed run with nothing to read.
 Task packets pre-populate the direct xUnit assembly runner rather than full `dotnet test` invocations:
 
 ```bash
-dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>"
+dotnet tests/KyberWeave.<Project>.Tests/bin/Release/net10.0/KyberWeave.<Project>.Tests.dll -class "<namespace>.<Class>"
 ```
 
 Workers build once (`dotnet build KyberWeave.sln -c Release`), then execute class-filtered tests

@@ -88,7 +88,7 @@ Do not stop at the first stall and report. Keep going until everything in your s
    - `dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal` and `... style --verify-no-changes --severity warn -v minimal`
    - `dotnet test --project tests/KyberWeave.Architecture.Tests -c Release`
    - `dotnet test --project tests/KyberWeave.RepoPolicy.Tests -c Release --filter-class "KyberWeave.Tests.ProcessSpawnSitesTests" --filter-class "KyberWeave.Tests.CoreAssemblySplitTests"`
-   - the product test classes that cover what you moved: `dotnet test --project tests/KyberWeave.Tests -c Release --filter-class "KyberWeave.Tests.<Class>"` (find them by name and grep; never the whole suite)
+   - the product test classes that cover what you moved: `dotnet test --project tests/KyberWeave.<Project>.Tests -c Release --filter-class "<namespace>.<Class>"` (find them by name and grep; never the whole suite)
    Commit one cluster per commit, message `refactor(<area>): <what>`; trailers after a blank line: `Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>` and `Claude-Session: https://claude.ai/code/session_019dANC4GH6AXF82GAgUdBAt` (Haiku agents use `Claude Haiku 5.5`). Never leave a red build in a commit.
 8. The machine has 4 cores shared by about six agents, so builds are slow. Be patient, do not kill other processes, do not run the whole product suite.
 

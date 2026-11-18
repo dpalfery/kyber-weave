@@ -304,7 +304,7 @@ products/
 dash/                     Feature 5 — KyberDash, first-party since a one-time fork of CodeBurn
   src/ dash/                CLI engine, provider parsers, and the web dashboard
   kyber/                    analyzers, OTLP receiver, canon store
-tests/KyberWeave.Tests/
+tests/                    unit test projects (one per product project), content, policy, architecture and integration tests
 .apm/skills/              kyber-docs-authoring — the authoring skill, shipped as an APM package
 samples/                  exemplar and deliberately bad skills; routing eval set
 templates/github-actions/ host gate workflows
@@ -320,7 +320,7 @@ Requires .NET SDK 10 (`global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
+dotnet test --solution KyberWeave.Unit.slnf -c Release --no-build
 ```
 
 KyberDash (`dash/`) and tray commands run directly too — `npm --prefix dash …`,

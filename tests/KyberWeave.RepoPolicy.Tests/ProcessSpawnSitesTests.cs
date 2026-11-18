@@ -11,8 +11,8 @@ namespace KyberWeave.Tests;
 /// Macs, so each spawn site must appear in Fixtures/spawn-sites-allowlist.json with a non-empty
 /// <c>bound</c> that says what stops it (a timeout, a kill in finally, a self-exiting
 /// command, or a fake). A site is keyed by its repository-relative file (prefixed with its scan root,
-/// <c>tests/KyberWeave.Tests/</c>, <c>tests/KyberWeave.Integration.Tests/</c>,
-/// <c>tests/KyberWeave.Mcp.Tests/</c>, <c>tests/KyberWeave.Testing/</c>,
+/// <c>tests/KyberWeave.Application.Tests/</c>, <c>tests/KyberWeave.Integration.Tests/</c>,
+/// <c>tests/KyberWeave.Mcp.Tests/</c> (and the other test projects), <c>tests/KyberWeave.Testing/</c>,
 /// <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
 /// normalized line text with an occurrence count, so unrelated edits above a site do not invalidate
 /// its entry. Unlisted sites fail
@@ -30,10 +30,13 @@ public sealed class ProcessSpawnSitesTests
     // sources; product code under src/ is scanned for C# only. bin and obj are skipped under each root.
     private static readonly (string Root, string[] Extensions)[] ScanRoots =
     [
-        ("tests/KyberWeave.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Application.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Arbiter.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Architecture.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Cli.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Content.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Data.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Hooks.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Kernel.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Mcp.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Integration.Tests", [".cs", ".sh"]),

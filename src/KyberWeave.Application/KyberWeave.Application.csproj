@@ -29,7 +29,6 @@
     <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Content.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Mcp.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
     <!-- The delivery runner reads the host-template seam the description renderer exposes for unreadable files. -->

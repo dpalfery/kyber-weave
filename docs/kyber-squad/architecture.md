@@ -1765,8 +1765,8 @@ Operational contracts remain in
 `conductor` and `bug-crusher` load),
 `products/kyber-squad/agents/dev-medium.md` and
 `products/kyber-squad/agents/devops.md`.
-Regression pins live in `tests/KyberWeave.Tests/SquadCanonicalContentTests.cs` and
-`tests/KyberWeave.Tests/Squad/CopilotRendererTests.cs`.
+Regression pins live in `tests/KyberWeave.Content.Tests/SquadCanonicalContentTests.cs` and
+`tests/KyberWeave.Application.Tests/Squad/CopilotRendererTests.cs`.
 
 ### The tracked task file and the inserted task prompt
 

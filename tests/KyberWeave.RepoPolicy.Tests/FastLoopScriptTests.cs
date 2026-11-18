@@ -69,7 +69,7 @@ public sealed class FastLoopScriptTests
         Assert.DoesNotContain("running the fast tier instead", result.StandardOutput + result.StandardError, StringComparison.Ordinal);
         Assert.Contains("integration classes touched", result.StandardError, StringComparison.Ordinal);
         Assert.DoesNotContain("integration tests (touched)", result.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("KyberWeave.Tests.TouchedUnitTests", log, StringComparison.Ordinal);
+        Assert.Contains("-class KyberWeave.Application.Tests.TouchedUnitTests", log, StringComparison.Ordinal);
         Assert.DoesNotContain("KyberWeave.Integration.Tests.TouchedCase", log, StringComparison.Ordinal);
     }
 
@@ -124,7 +124,7 @@ public sealed class FastLoopScriptTests
 
     /// <summary>
     /// A change to anything but C# source (here a script) runs the repository-policy tests as well
-    /// as the product suite, with the same class list.
+    /// as the unit projects.
     /// </summary>
     [Fact]
     public void ChangedScript_RunsTheRepositoryPolicyTests()
@@ -138,16 +138,13 @@ public sealed class FastLoopScriptTests
         string log = fixture.GetCallLog();
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("KyberWeave.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests", log, StringComparison.Ordinal);
-        Assert.Contains(
-            "KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests",
-            log,
-            StringComparison.Ordinal);
+        Assert.Contains("KyberWeave.Application.Tests.dll -trait- Category=Scale", log, StringComparison.Ordinal);
+        Assert.Contains("KyberWeave.RepoPolicy.Tests.dll -trait- Category=Scale", log, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A C#-only change to product code runs the product suite and, of the repository-policy tests, only
-    /// the two that read source text: the spawn-site audit and the upstream-name scan.
+    /// A C#-only change to product code runs the unit projects and, of the repository-policy tests, only
+    /// the ones that read source text: the spawn-site audit, the upstream-name scan and the domain-purity scan.
     /// </summary>
     [Fact]
     public void ChangedProductCSharpOnly_RunsOnlyThePolicySourceScans()
@@ -161,21 +158,18 @@ public sealed class FastLoopScriptTests
         string log = fixture.GetCallLog();
 
         Assert.Equal(0, result.ExitCode);
-        Assert.Contains("KyberWeave.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests", log, StringComparison.Ordinal);
+        Assert.Contains("KyberWeave.Application.Tests.dll -trait- Category=Scale", log, StringComparison.Ordinal);
         Assert.Contains(
             "KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.ProcessSpawnSitesTests " +
             "-class KyberWeave.Tests.UpstreamSeveranceTests",
             log,
             StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.FastLoopScriptTests",
-            log,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("KyberWeave.RepoPolicy.Tests.dll -trait-", log, StringComparison.Ordinal);
     }
 
     /// <summary>
     /// The source-scan run is checked on its own, so a scan run that matched no tests fails the loop even
-    /// though the product suite ran: a renamed scan class cannot pass as clean.
+    /// though the unit projects ran: a renamed scan class cannot pass as clean.
     /// </summary>
     [Fact]
     public void PolicySourceScansThatRunNoTests_FailTheLoop()
@@ -187,7 +181,7 @@ public sealed class FastLoopScriptTests
             #!/bin/sh
             echo "dotnet $*" >> "$CALL_LOG"
             case "$*" in
-              *tests/KyberWeave.Tests/bin/*)
+              *tests/KyberWeave.Application.Tests/bin/*)
                 echo "Total: 1, Passed: 1"
                 ;;
             esac
@@ -204,11 +198,11 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
-    /// A product-suite failure does not stop the repository-policy run: both run, both statuses are
+    /// A unit-project failure does not stop the repository-policy run: both run, both statuses are
     /// reported, and the loop still fails.
     /// </summary>
     [Fact]
-    public void ProductSuiteFailure_StillRunsThePolicyTestsAndFailsTheLoop()
+    public void UnitProjectFailure_StillRunsThePolicyTestsAndFailsTheLoop()
     {
         SkipIfBashUnavailable();
         using FastLoopFixture fixture = new();
@@ -217,7 +211,7 @@ public sealed class FastLoopScriptTests
             #!/bin/sh
             echo "dotnet $*" >> "$CALL_LOG"
             case "$*" in
-              *tests/KyberWeave.Tests/bin/*)
+              *tests/KyberWeave.Application.Tests/bin/*)
                 echo "Total: 1, Failed: 1"
                 exit 1
                 ;;
@@ -236,22 +230,22 @@ public sealed class FastLoopScriptTests
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("KyberWeave.RepoPolicy.Tests.dll", log, StringComparison.Ordinal);
         Assert.Contains(
-            "tests failed: product suite exit 1, repository-policy tests exit 0",
+            "tests failed: unit projects exit 1, repository-policy tests exit 0",
             result.StandardError,
             StringComparison.Ordinal);
         Assert.DoesNotContain("Fast tier clean", result.StandardOutput, StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// The same holds on the C#-only path: a failing product suite does not stop the policy source scans,
+    /// The same holds on the C#-only path: a failing unit project does not stop the policy source scans,
     /// and both statuses are reported.
     /// </summary>
     [Fact]
-    public void ProductSuiteFailureOnACSharpOnlyChange_StillRunsTheSourceScans()
+    public void UnitProjectFailureOnACSharpOnlyChange_StillRunsTheSourceScans()
     {
         SkipIfBashUnavailable();
         using FastLoopFixture fixture = new();
-        fixture.ReplaceDotnetStub(FailingProductStub(policyReportsTests: true));
+        fixture.ReplaceDotnetStub(FailingUnitStub(policyReportsTests: true));
         fixture.WriteProductSource();
 
         ProcessResult result = fixture.RunFastLoop();
@@ -260,21 +254,21 @@ public sealed class FastLoopScriptTests
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("KyberWeave.RepoPolicy.Tests.dll -class KyberWeave.Tests.ProcessSpawnSitesTests", log, StringComparison.Ordinal);
         Assert.Contains(
-            "tests failed: product suite exit 1, repository-policy tests exit 0",
+            "tests failed: unit projects exit 1, repository-policy tests exit 0",
             result.StandardError,
             StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A source-scan run that matched nothing does not hide a product failure: both are reported before
+    /// A source-scan run that matched nothing does not hide a unit failure: both are reported before
     /// the loop exits.
     /// </summary>
     [Fact]
-    public void EmptySourceScanRunWithAProductFailure_ReportsBoth()
+    public void EmptySourceScanRunWithAUnitFailure_ReportsBoth()
     {
         SkipIfBashUnavailable();
         using FastLoopFixture fixture = new();
-        fixture.ReplaceDotnetStub(FailingProductStub(policyReportsTests: false));
+        fixture.ReplaceDotnetStub(FailingUnitStub(policyReportsTests: false));
         fixture.WriteProductSource();
 
         ProcessResult result = fixture.RunFastLoop();
@@ -282,20 +276,20 @@ public sealed class FastLoopScriptTests
         Assert.Equal(1, result.ExitCode);
         Assert.Contains("the policy source scans ran no tests", result.StandardError, StringComparison.Ordinal);
         Assert.Contains(
-            "tests failed: product suite exit 1, repository-policy tests exit 1",
+            "tests failed: unit projects exit 1, repository-policy tests exit 1",
             result.StandardError,
             StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// A <c>dotnet</c> stub whose product test run fails, and whose policy run reports one passing test or none.
+    /// A <c>dotnet</c> stub whose unit test run fails, and whose policy run reports one passing test or none.
     /// </summary>
-    private static string FailingProductStub(bool policyReportsTests) =>
+    private static string FailingUnitStub(bool policyReportsTests) =>
         $$"""
         #!/bin/sh
         echo "dotnet $*" >> "$CALL_LOG"
         case "$*" in
-          *tests/KyberWeave.Tests/bin/*)
+          *tests/KyberWeave.Application.Tests/bin/*)
             echo "Total: 1, Failed: 1"
             exit 1
             ;;
@@ -398,7 +392,7 @@ public sealed class FastLoopScriptTests
         /// <summary>Writes one changed unit-test file declaring <paramref name="className"/>.</summary>
         public void WriteUnitTestClass(string className)
         {
-            WriteChangedTestClass("KyberWeave.Tests", className);
+            WriteChangedTestClass("KyberWeave.Application.Tests", className);
         }
 
         /// <summary>Writes <paramref name="count"/> changed integration-test files, one class each.</summary>
@@ -433,7 +427,7 @@ public sealed class FastLoopScriptTests
                 #!/bin/sh
                 echo "dotnet $*" >> "$CALL_LOG"
                 case "$*" in
-                  *tests/KyberWeave.Tests/bin/* | *tests/KyberWeave.RepoPolicy.Tests/bin/*)
+                  *tests/KyberWeave.*.Tests/bin/*)
                     echo "Total: 1, Passed: 1"
                     ;;
                 esac
@@ -469,17 +463,17 @@ public sealed class FastLoopScriptTests
             File.WriteAllText(fastLoopDest, Corpus.ReadText("scripts/fast-loop.sh").ReplaceLineEndings("\n"));
             MakeExecutable(fastLoopDest);
 
-            string classListDest = Path.Combine(Root, "scripts", "fast-loop-classes.txt");
-            File.WriteAllText(classListDest, "KyberWeave.Tests.FastLoopScriptTests\n");
-
             string cliBinDir = Path.Combine(Root, "src", "KyberWeave.Cli", "bin", "Release", "net10.0");
             Directory.CreateDirectory(cliBinDir);
             File.WriteAllText(Path.Combine(cliBinDir, "kyber-weave.dll"), "stub");
             File.WriteAllText(Path.Combine(cliBinDir, "KyberWeave.Cli.dll"), "stub");
 
-            string testBinDir = Path.Combine(Root, "tests", "KyberWeave.Tests", "bin", "Release", "net10.0");
-            Directory.CreateDirectory(testBinDir);
-            File.WriteAllText(Path.Combine(testBinDir, "KyberWeave.Tests.dll"), "stub");
+            foreach (string project in new[] { "Application", "Hooks", "Kernel", "Mcp", "Arbiter", "Cli", "Data", "Architecture", "Content", "RepoPolicy" })
+            {
+                string testBinDir = Path.Combine(Root, "tests", $"KyberWeave.{project}.Tests", "bin", "Release", "net10.0");
+                Directory.CreateDirectory(testBinDir);
+                File.WriteAllText(Path.Combine(testBinDir, $"KyberWeave.{project}.Tests.dll"), "stub");
+            }
 
             File.WriteAllText(Path.Combine(Root, "KyberWeave.sln"), "# stub sln\n");
 

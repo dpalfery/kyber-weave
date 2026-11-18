@@ -20,7 +20,7 @@ repository-policy project, which this one sits beside.
   120-second budget.
 - Some wording checks are scheduled to become eval-style: a model grades whether the content states a
   rule, and the wording pins go away. Do not add new wording pins for behaviour that an eval would
-  cover. Prose rules belong in the prose rule catalog (`tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml`).
+  cover. Prose rules belong in the prose rule catalog (`tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml`).
 - Classes keep the `KyberWeave.Tests` namespace, so a fully-qualified class name means the same test
   in either project.
 - To run one class, build once and filter, running `dotnet` directly from the repository root. A filter

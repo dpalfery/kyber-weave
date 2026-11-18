@@ -7,8 +7,8 @@ using Xunit.Sdk;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Refusal rows for the full-suite modes of <c>scripts/fast-loop.sh</c>: <c>--full</c>, <c>--scoped</c> and
-/// <c>--regenerate</c> exit 89 when started by a dev agent, before any build, and name the targeted alternative.
+/// Refusal rows for the full-suite modes of <c>scripts/fast-loop.sh</c>: <c>--full</c> and
+/// <c>--scoped</c> exit 89 when started by a dev agent, before any build, and name the targeted alternative.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -70,27 +70,6 @@ public sealed class FastLoopFullRunRefusalTests
         Assert.Equal(RefusedExitCode, result.ExitCode);
         Assert.Contains("--class", result.StandardError, StringComparison.Ordinal);
         Assert.False(sandbox.Started, $"--scoped started a command before refusing: {sandbox.MarkerText}");
-    }
-
-    /// <summary>
-    /// <c>scripts/fast-loop.sh --regenerate</c>, started non-interactively, exits 89 before the timing run, prints the
-    /// <c>--class</c> alternative, and starts no command.
-    /// </summary>
-    /// <remarks>
-    /// <c>--regenerate</c> runs both test assemblies in full to collect per-test timings. That is a full run, so it is refused
-    /// unless the caller is the council. A refusal before the timing run also keeps the machine-wide slot free.
-    /// </remarks>
-    [Fact]
-    public void RegenerateStartedNonInteractivelyIsRefusedWithExit89BeforeTheTimingRun()
-    {
-        SkipIfBashUnavailable();
-        using FastLoopSandbox sandbox = new();
-
-        ProcessResult result = sandbox.RunFastLoop("--regenerate");
-
-        Assert.Equal(RefusedExitCode, result.ExitCode);
-        Assert.Contains("--class", result.StandardError, StringComparison.Ordinal);
-        Assert.False(sandbox.Started, $"--regenerate started a command before refusing: {sandbox.MarkerText}");
     }
 
     /// <summary>

@@ -26,15 +26,15 @@ would otherwise have to re-argue in review.
 
 **xUnit**, split into these projects:
 
-- `tests/KyberWeave.Tests` — the unit suite. The full run must finish in 120 seconds or less
-  ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)), and
-  the speed rules below are how a test keeps it there.
 - One unit test project per product project that holds logic, named `<Project>.Tests`:
   `KyberWeave.Application.Tests`, `Hooks.Tests`, `Kernel.Tests`, `Mcp.Tests`, `Arbiter.Tests`,
   `Cli.Tests` and `Data.Tests`. A test sits in the project of the class it tests, runs in
   memory, and uses the helpers in `tests/KyberWeave.Testing`. `Domain` holds data only and
-  `Contracts` holds interfaces, so neither has one. `tests/KyberWeave.Tests` keeps the classes
-  not yet moved; they move project by project.
+  `Contracts` holds interfaces, so neither has one. The full run of every unit project, plus the
+  content, policy and architecture projects (`KyberWeave.Unit.slnf` lists them), must finish in 120
+  seconds or less
+  ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)), and
+  the speed rules below are how a test keeps it there.
 - `tests/KyberWeave.Integration.Tests` — the safety net: a test that performs a real Squad
   deployment, starts a real program, or needs a file system beyond its own scratch folder.
   It runs in CI and the review council, not in the unit time budget.
@@ -42,9 +42,9 @@ would otherwise have to re-argue in review.
   durability switch, prepared installs, release fakes, console capture, path helpers and
   shared fixtures). It holds no tests.
 
-The class lists `tests/KyberWeave.Tests` and `tests/KyberWeave.Integration.Tests` both keep the
-namespace root they use for routing (`KyberWeave.Tests` and `KyberWeave.Integration.Tests`), so a
-fully-qualified class name names one test in one project.
+The classes in the content and policy projects keep the `KyberWeave.Tests` namespace root and the
+integration classes keep `KyberWeave.Integration.Tests`, so a fully-qualified class name names one
+test in one project.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
 
@@ -55,8 +55,9 @@ One rule, and it is checkable by reading the test:
 - **`tests/KyberWeave.Integration.Tests`** holds a test that performs a real Squad deployment, starts
   a real program (git, the CLI, `dotnet`, `sqlite3`, node, bun), or needs a real file system beyond
   its own small scratch folder.
-- **`tests/KyberWeave.Tests`** holds everything else. Its full run is the 120-second unit suite, so
-  a real deployment or a real child program in it is a defect, not a slow test to tolerate.
+- **The unit project of the code under test** holds everything else. The unit projects' full run is the
+  120-second suite, so a real deployment or a real child program in one is a defect, not a slow test to
+  tolerate.
 
 **New behaviour gets an in-memory unit test written against an interface.** If the behaviour depends
 on the disk, the clock or another program, the seam is an interface the test replaces: a file-system
@@ -146,7 +147,7 @@ its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinne
   short tokens code parses or emits (`STATUS:` values, `PLAN_FILE:`, `TASK_GATE:`, rule ids, flags).
   Assert a token against its C# constant where one exists.
 - **Meaning is graded by Jev.** Each rule is one entry in the rule catalog,
-  [`tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml`](../../../tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml):
+  [`tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml`](../../../tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml):
   a one-sentence `statement`, the `stated-in` files that must state it, at least one negative `control`
   that must be judged not to, and, where an old rule must not come back, a `retired` statement with the
   files it must stay `absent-from` and an `example` the grader must recognise. The worker rule map's ids
@@ -193,7 +194,7 @@ instead of a grade; if an absent-from file keeps drawing warnings, drop it and s
 endpoint's origin:
 
 ```bash
-KW_PROSE_GRADE=1 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
+KW_PROSE_GRADE=1 dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj \
   -c Release --filter "FullyQualifiedName~ProseRuleGradingTests"
 ```
 
@@ -299,8 +300,8 @@ two static audits (below) keep the list of such sites honest.
 6. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/harness-collection-boot.ts` and `dash/e2e/factory-replay-boot.ts`.
 
 **The allow-list (.NET and repo scripts).** `ProcessSpawnSitesTests` in
-`tests/KyberWeave.RepoPolicy.Tests/ProcessSpawnSitesTests.cs` scans three roots:
-`tests/KyberWeave.Tests`, `tests/KyberWeave.RepoPolicy.Tests` (C# and shell), and `src/` (C#).
+`tests/KyberWeave.RepoPolicy.Tests/ProcessSpawnSitesTests.cs` scans every test project and
+`tests/KyberWeave.Testing` (C# and shell), and `src/` (C#).
 It matches `Process.Start`, `new Process`, `new ProcessStartInfo`, `ProcessRunner.Run`,
 `ProcessRunner.RunInteractive`, and `BuildStartInfo`.
 `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json` keys each entry by
@@ -345,8 +346,8 @@ The integration project (`tests/KyberWeave.Integration.Tests`) is not part of th
 as its own required job, and no developer agent, task gate or council gate runs it.
 
 ```bash
-dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+dotnet build tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release
+dotnet test tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
@@ -365,10 +366,10 @@ two verbs, `whitespace` and `style`, because the council runs both as blocking g
 (`format-whitespace` and `format-style` in [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml));
 a test file that fails either is a finding the council raises and no test catches.
 
-A **full run** is any run of the whole product suite. A bare `dotnet test` (with or without options such as
-`-c Release`), a solution target such as `dotnet test KyberWeave.sln`, a directory, or the `KyberWeave.Tests` project or its
-`.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter` and `--treenode-filter`, in the `=` form too, or any
-`--filter`). `dotnet run` is full when any `--project`, `--project=` or `-p` names `KyberWeave.Tests`, even beside
+A **full run** is any run of the whole unit suite. A bare `dotnet test` (with or without options such as
+`-c Release`), a solution target such as `dotnet test KyberWeave.sln` or `dotnet test --solution KyberWeave.Unit.slnf`, a directory, or
+a unit test project or its `.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter` and `--treenode-filter`, in the `=` form too, or any
+`--filter`). `dotnet run` is full when any `--project`, `--project=` or `-p` names a unit test project, even beside
 another project, and no narrowing flag appears; otherwise it is partial. `--artifacts-path` takes a value.
 `npm test`, `npm t`, `npm run test` and `npm run-script test` with no positional word after `--` are full under any
 `--prefix` (none, relative, absolute, or the tray UI directory), and so is `cargo test` with no positional filter.
@@ -382,7 +383,7 @@ may use. `npm run test:related` and `dotnet build` are never full runs. When a s
 it full. A command wrapped in a shell string (`sh -c '...'`) is not parsed. The refusal lives in the commands
 themselves, not in a wrapper: `kyber-weave review gates` refuses a gate marked `full-suite: true` unless the
 caller passes `--council` or stdin is a terminal (blocking failure `KW-REVIEW-033`, exit 1, nothing started),
-and `scripts/fast-loop.sh --full`, `--scoped` and `--regenerate` exit 89 from a non-interactive shell. Only the
+and `scripts/fast-loop.sh --full` and `--scoped` exit 89 from a non-interactive shell. Only the
 `code-reviewer` council and CI pass `--council`. The full-run definition above is the rule; the docs previously
 exposed it as a `classify` verb on the retired watchdog script, and that verb is gone with the script, so read
 this section as the reference.
@@ -413,13 +414,13 @@ The real closure is a per-harness shell hook that sees each shell call before it
 During task execution and active development, use the direct xUnit assembly runner with class filtering. MSBuild project evaluation and incremental dependency checks add multi-second overhead to every `dotnet test` invocation:
 
 ```bash
-dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>"
+dotnet tests/KyberWeave.<Project>.Tests/bin/Release/net10.0/KyberWeave.<Project>.Tests.dll -class "<namespace>.<Class>"
 ```
 
 `-class` matches the fully qualified name: a short class name runs zero tests and exits 0, so read
 the total and treat zero as nothing verified.
 
-When the build used `--artifacts-path <dir>` with `-c Release`, the direct runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` (the configuration is lowercase there) instead of `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
+When the build used `--artifacts-path <dir>` with `-c Release`, the direct runner reads `<dir>/bin/KyberWeave.<Project>.Tests/release/KyberWeave.<Project>.Tests.dll` (the configuration is lowercase there) instead of `tests/KyberWeave.<Project>.Tests/bin/Release/net10.0/KyberWeave.<Project>.Tests.dll`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
 
 - **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
 - **Reserve the full suite for the review council and CI**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it on the integrated head in the first full review, and for CI. No dev agent runs it, and a cross-cutting change is no exception. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on), run a targeted set: the classes that reference what changed or, for a change every class depends on, a few representative classes. Name what you did not run; the council and CI cover it.

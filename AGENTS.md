@@ -35,15 +35,15 @@ you do write.
 run a targeted set instead. The council's `test` gate and CI run the full suite. To reproduce a CI failure, run the classes or files CI reported.
 Three mechanical refusals back that rule (best-effort; limits in the test standard):
 `kyber-weave review gates` refuses a gate marked `full-suite: true` with `KW-REVIEW-033` unless the caller is the council
-(`--council`) or a person at a terminal; `scripts/fast-loop.sh --full`, `--scoped` and `--regenerate` exit 89 from a
+(`--council`) or a person at a terminal; `scripts/fast-loop.sh --full` and `--scoped` exit 89 from a
 non-interactive shell; and the shipped gate catalogue writes `full-suite: true` on every whole-suite gate.
 
 Inside a Squad run, your task packet names the test command and your agent rules say when to
 run it. Otherwise, run `scripts/fast-loop.sh --touched` while iterating: it inspects modified files and
 routes to targeted checks for .NET, KyberDash, the tray crate, and governed docs. For .NET it runs only the
-product test classes that name a type from a changed C# file, the layer test projects at the same time, and checks
+unit test classes that name a type from a changed C# file, every unit project at the same time, and checks
 format and style on the changed files only (about 45 seconds warm, against several minutes for the whole suite);
-when nothing matches it falls back to the fast tier. `--help` lists
+when nothing matches it runs every unit project whole. `--help` lists
 its modes; `--full` and `--scoped` reach the `test` gate, so they are not for dev agents and exit 89 from a non-terminal shell. It is
 **not** evidence and must never be cited as such ([`REVIEW.md`](REVIEW.md)).
 
@@ -87,8 +87,8 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 
 #### The .NET unit suite completes in 120 seconds or less — a hard limit
 
-The full run — `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`, the `test` gate's command over
-`tests/KyberWeave.Tests` — must complete within 120 seconds of wall-clock time. That is a hard limit, not a target.
+The full run — `dotnet test --solution KyberWeave.Unit.slnf -c Release`, the `test` gate's command over every unit,
+content, policy and architecture project — must complete within 120 seconds of wall-clock time. That is a hard limit, not a target.
 Time every local full run: the runner's closing summary `duration:` line is the number, and whoever ran it, person
 or agent, states it in their report. Any local full run over 120 seconds is escalated at once, whatever else the
 machine was doing — no second run to confirm. The work is not done: escalate with the measured time, the commit,
@@ -101,8 +101,7 @@ read them before you write a test. Do not add a guard script or a timing check f
 author reads, and the classes themselves stay performant.
 
 **Unit tests live in one project per product project**: `tests/KyberWeave.<Project>.Tests` for Application, Hooks, Kernel,
-Mcp, Arbiter, Cli and Data (see [the test standard](docs/standards/test/test.standards.md#stack)); classes not yet moved
-are still in `tests/KyberWeave.Tests`.
+Mcp, Arbiter, Cli and Data (see [the test standard](docs/standards/test/test.standards.md#stack)).
 
 **Integration tests live in `tests/KyberWeave.Integration.Tests`.** A test that performs a real Squad
 deployment, starts a real program, or needs a real file system beyond its own small scratch folder
@@ -201,7 +200,7 @@ Core dependency policy (Markdig, YamlDotNet, sqlite3 CLI for CodeGraph): see
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
 | KyberDash gates (`dash/web` and `dash/tray` are display layers) | [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), [`dash/AGENTS.md`](dash/AGENTS.md) |
 | KyberDash architecture and runbook (`dash/web` and `dash/tray` are display layers) | [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), [`dash/AGENTS.md`](dash/AGENTS.md), [`docs/dash/architecture.md`](docs/dash/architecture.md), [`docs/dash/runbook.md`](docs/dash/runbook.md) |
-| Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
+| Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Testing/AGENTS.md`](tests/KyberWeave.Testing/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-docs-authoring` skill in [`.apm/skills/`](.apm/skills/kyber-docs-authoring/SKILL.md) |
 
 ## House style
