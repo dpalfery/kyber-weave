@@ -1,4 +1,5 @@
 using KyberWeave.Arbiter.Hooks.Adapters;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -21,7 +22,9 @@ internal static class ArbiterDataServiceCollectionExtensions
     {
         services.TryAddSingleton<ICredentialStore>(sp =>
             OperatingSystemCredentialStore.Create(sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();
+        services.TryAddSingleton<IPlanFileResolver>(sp => new PlanPathResolver(
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
         services.TryAddSingleton<IFileStatReader, FileStatReader>();
         services.TryAddSingleton<IDispatchClaimStore, FileDispatchClaimStore>();

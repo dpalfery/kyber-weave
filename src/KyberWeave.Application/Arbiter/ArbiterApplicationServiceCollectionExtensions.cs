@@ -29,7 +29,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(
             sp.GetRequiredService<IArbiterLogStore>(),
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IWritableFileSystem>()));
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<IArbiterEvaluatorFactory, Core.Arbiter.ArbiterEvaluatorFactory>();
         services.TryAddSingleton<ICommentTriageFactory, Core.Arbiter.CommentTriageFactory>();
         services.TryAddSingleton<IArbiterKeyService, Core.Arbiter.ArbiterKeyService>();
@@ -47,8 +48,14 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
-        services.TryAddSingleton<IFileTextFacts>(sp => new FileTextFacts(sp.GetRequiredService<IRepositoryFileStore>()));
-        services.TryAddSingleton<IGateReportFacts>(sp => new GateReportFacts(sp.GetRequiredService<IRepositoryFileStore>()));
+        services.TryAddSingleton<IFileTextFacts>(sp => new FileTextFacts(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<IGateReportFacts>(sp => new GateReportFacts(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IClaudeHookCoverage>(sp => new Core.Arbiter.ClaudeHookCoverage(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IPlanRootResolver>(sp => new Core.Arbiter.Plans.PlanRootResolver(
             sp.GetRequiredService<IGitRepositoryFacts>(),
@@ -141,7 +148,8 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterStateFactory>(sp => new FileArbiterStateFactory(
             sp.GetRequiredService<IArbiterLogStore>(),
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IWritableFileSystem>()));
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<IConductorGuard, ConductorGuard>();
         services.TryAddSingleton<IWorkerGuard, WorkerGuard>();
         return services;

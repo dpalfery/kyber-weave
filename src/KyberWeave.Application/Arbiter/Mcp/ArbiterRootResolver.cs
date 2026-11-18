@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Arbiter.Mcp;
@@ -10,7 +11,13 @@ namespace KyberWeave.Arbiter.Mcp;
 /// so a client can see why it cannot evaluate. The root must exist, because a missing
 /// directory would make every ledger and log path resolve somewhere unintended.
 /// </remarks>
-public sealed class ArbiterRootResolver(IFileSystem files)
+/// <param name="files">Probes the resolved root for a directory.</param>
+/// <param name="paths">Turns the flag, the variable or the working directory into a full path.</param>
+/// <param name="environment">Names the directory a relative value is resolved against.</param>
+public sealed class ArbiterRootResolver(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment)
 {
     /// <summary>The environment variable naming the root when the flag is absent.</summary>
     public const string EnvironmentVariable = "KYBER_WEAVE_REPO_ROOT";
@@ -23,12 +30,12 @@ public sealed class ArbiterRootResolver(IFileSystem files)
         ArgumentNullException.ThrowIfNull(args);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
-        string baseDirectory = Path.GetFullPath(workingDirectory);
+        string baseDirectory = paths.GetFullPath(workingDirectory, environment.CurrentDirectory);
         string? explicitRoot = ExplicitRoot(args);
         string candidate = explicitRoot is not null
-            ? Path.GetFullPath(explicitRoot, baseDirectory)
+            ? paths.GetFullPath(explicitRoot, baseDirectory)
             : !string.IsNullOrWhiteSpace(environmentRoot)
-                ? Path.GetFullPath(environmentRoot, baseDirectory)
+                ? paths.GetFullPath(environmentRoot, baseDirectory)
                 : baseDirectory;
 
         if (!files.DirectoryExists(candidate))

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
@@ -24,7 +25,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// <para>Every file read goes through the repository file-store seam.</para>
 /// </remarks>
 /// <param name="store">The repository checkout the reports are read from.</param>
-public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFacts
+/// <param name="paths">Turns a report, a root or a link target into a full path.</param>
+/// <param name="environment">Names the directory a relative path is resolved against, and the file system's case rule.</param>
+public sealed class GateReportFacts(
+    IRepositoryFileStore store,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IGateReportFacts
 {
     /// <summary>The fact a returned digest's <c>TASK_GATE:</c> claim is verified into.</summary>
     public const string AgreesFact = "gate.report.agrees";
@@ -65,9 +71,8 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
     /// <returns>The report, or <c>null</c> when it is missing or unreadable.</returns>
     public GateReport? TryRead(string repositoryRoot)
     {
-        if (string.IsNullOrWhiteSpace(repositoryRoot))
-            return null;
-        return TryReadFile(Path.Combine(repositoryRoot, "artifacts", "gates.json"));
+        string? fullRoot = FullRoot(repositoryRoot);
+        return fullRoot is null ? null : TryReadFile(Path.Combine(fullRoot, "artifacts", "gates.json"));
     }
 
     /// <summary>Reads a gate report from its file path.</summary>
@@ -159,7 +164,7 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
         if (string.IsNullOrWhiteSpace(returnedText))
             return null;
 
-        DigestClaim? claim = ReadClaim(returnedText);
+        DigestClaim? claim = ReadClaim(returnedText, repositoryRoot);
         if (claim is null)
             return null;
 
@@ -191,7 +196,7 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
         if (Agrees(returnedText, repositoryRoot) is not true)
             return null;
 
-        DigestClaim claim = ReadClaim(returnedText!)!;
+        DigestClaim claim = ReadClaim(returnedText!, repositoryRoot)!;
         string? path = Resolve(claim.ReportPath, repositoryRoot);
         if ((path is null || !store.FileExists(path)) && claim.WholeLinePath is not null)
             path = Resolve(claim.WholeLinePath, repositoryRoot) ?? path;
@@ -205,7 +210,7 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
 
             DateTime passedAt = store.GetLastWriteTimeUtc(path);
             return store.EnumerateFiles(folder, "*.json", recursive: false)
-                .Where(candidate => !string.Equals(Path.GetFullPath(candidate), Path.GetFullPath(path), StringComparison.Ordinal))
+                .Where(candidate => !paths.AreSame(candidate, path))
                 .Any(candidate => store.GetLastWriteTimeUtc(candidate) < passedAt && IsFailingRun(TryReadFile(candidate)));
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -222,7 +227,12 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
             && gate.Summary is not null
             && gate.Summary.StartsWith(RedAcceptedSummaryPrefix, StringComparison.Ordinal));
 
-    private static DigestClaim? ReadClaim(string returnedText)
+    /// <summary>
+    /// The claim a returned digest makes. Report paths are compared after resolving them against
+    /// <paramref name="repositoryRoot"/>, the base the verdict reads them against, so one report cited in a relative
+    /// and in an absolute spelling is recognised as the same file.
+    /// </summary>
+    private DigestClaim? ReadClaim(string returnedText, string? repositoryRoot)
     {
         List<DigestClaim> claims = [];
         foreach (string line in returnedText.Split('\n'))
@@ -261,15 +271,16 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
 
         DigestClaim finalClaim = claims[^1];
 
-        StringComparison pathComparison = OperatingSystem.IsWindows()
+        StringComparison pathComparison = environment.IsFileSystemCaseInsensitive
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-        string finalCanonical = CanonicalReportPath(finalClaim.ReportPath);
+        string? readBase = FullRoot(repositoryRoot);
+        string finalCanonical = CanonicalReportPath(finalClaim.ReportPath, readBase);
 
         // Any claim for the final report path that says non-PASS invalidates a PASS on the same report.
         if (string.Equals(finalClaim.Claimed, PassedStatus, StringComparison.Ordinal) &&
-            claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath), finalCanonical, pathComparison) &&
+            claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath, readBase), finalCanonical, pathComparison) &&
                             !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
         {
             return finalClaim with { Claimed = "FAIL" };
@@ -278,15 +289,32 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
         return finalClaim;
     }
 
-    private static string CanonicalReportPath(string path)
+    private string CanonicalReportPath(string path, string? readBase)
     {
+        string normalized = path.Replace('\\', '/');
         try
         {
-            return Path.GetFullPath(path.Replace('\\', '/'));
+            return paths.GetFullPath(normalized, readBase ?? environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return path.Replace('\\', '/');
+            return normalized;
+        }
+    }
+
+    /// <summary>The repository root as a full path, or null when the caller gave none or it cannot be resolved.</summary>
+    private string? FullRoot(string? repositoryRoot)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryRoot))
+            return null;
+
+        try
+        {
+            return paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
         }
     }
 
@@ -297,15 +325,13 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
 
         try
         {
-            string fullRepo = Path.GetFullPath(repositoryRoot);
-            string resolved = Path.IsPathRooted(reportPath)
-                ? Path.GetFullPath(reportPath)
-                : Path.GetFullPath(Path.Combine(fullRepo, reportPath));
+            string fullRepo = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
+            string resolved = paths.GetFullPath(reportPath, fullRepo);
 
             string normalizedRepo = fullRepo.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar)
                                     + Path.DirectorySeparatorChar;
 
-            StringComparison comparison = OperatingSystem.IsWindows()
+            StringComparison comparison = environment.IsFileSystemCaseInsensitive
                 ? StringComparison.OrdinalIgnoreCase
                 : StringComparison.Ordinal;
 
@@ -320,9 +346,9 @@ public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFac
             {
                 if (store.GetLinkTarget(checkPath) is { } linkTarget)
                 {
-                    string target = Path.IsPathRooted(linkTarget)
-                        ? Path.GetFullPath(linkTarget)
-                        : Path.GetFullPath(Path.Combine(Path.GetDirectoryName(checkPath) ?? fullRepo, linkTarget));
+                    string target = paths.GetFullPath(
+                        linkTarget,
+                        Path.GetDirectoryName(checkPath) ?? fullRepo);
 
                     if (!target.StartsWith(normalizedRepo, comparison) && !string.Equals(target, fullRepo, comparison))
                         return null;

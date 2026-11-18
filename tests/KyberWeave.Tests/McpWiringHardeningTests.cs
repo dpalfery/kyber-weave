@@ -505,7 +505,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             McpWiringReport report = McpWiringTestServices.Wiring.Inspect(
                 Repo,
                 McpWiringFixture.Declare(FirstPartyServer()),
-                new LaunchCommandResolver([Bin]));
+                PhysicalLaunchCommands.Over([Bin]));
 
             McpWiringFinding finding = Assert.Single(report.Findings, candidate => candidate.Harness == VsCode);
 
@@ -1030,7 +1030,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     }
 
     private McpWiringRepairReport Repair(params string[] targets) =>
-        McpWiringTestServices.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), new LaunchCommandResolver([Bin]), targets);
+        McpWiringTestServices.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), PhysicalLaunchCommands.Over([Bin]), targets);
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);

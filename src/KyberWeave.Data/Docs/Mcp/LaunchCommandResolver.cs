@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+
 namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>
@@ -28,13 +31,16 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// resolved against.
 /// </para>
 /// </remarks>
-public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.ILaunchCommandResolver
+public sealed class LaunchCommandResolver : ILaunchCommandResolver
 {
     /// <summary>What Windows searches when a command names no extension.</summary>
     private const string DefaultPathExtensions = ".COM;.EXE;.BAT;.CMD";
 
     private readonly string _baseDirectory;
     private readonly IReadOnlyList<string> _searchPaths;
+    private readonly IFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly string _pathExtensions;
 
     /// <summary>Creates a resolver over one repository's search paths.</summary>
     /// <param name="repositoryRoot">
@@ -45,44 +51,28 @@ public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.IL
     /// Directories in <c>PATH</c> order: the first one holding the command is the one a launch
     /// would use, so a later entry never masks the earlier answer.
     /// </param>
-    public LaunchCommandResolver(string repositoryRoot, IEnumerable<string> searchPaths)
+    /// <param name="files">The file system a candidate's existence is checked on.</param>
+    /// <param name="paths">The path seam a relative root or command is resolved through.</param>
+    /// <param name="environment">The process facts: the working directory a relative root means, and <c>PATHEXT</c>.</param>
+    public LaunchCommandResolver(
+        string repositoryRoot,
+        IEnumerable<string> searchPaths,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(searchPaths);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
 
-        _baseDirectory = Path.GetFullPath(repositoryRoot);
+        _files = files;
+        _paths = paths;
+        _pathExtensions = environment.GetVariable("PATHEXT") ?? DefaultPathExtensions;
+        _baseDirectory = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         _searchPaths = [.. searchPaths];
     }
-
-    /// <summary>
-    /// Creates a resolver that knows only its search paths, taking the process's working directory
-    /// as the directory a relative command resolves against.
-    /// </summary>
-    /// <remarks>
-    /// The overload exists for a caller that has no repository root in hand — a unit test resolving
-    /// a bare name, say. It is not the shape a composition root should use: it is the behaviour the
-    /// repository-root constructor exists to remove, so a caller editing a repository has one entry
-    /// to pass and should pass it.
-    /// </remarks>
-    public LaunchCommandResolver(IEnumerable<string> searchPaths)
-        : this(Directory.GetCurrentDirectory(), searchPaths)
-    {
-    }
-
-    /// <summary>
-    /// A resolver over this process's <c>PATH</c> — the composition-root entry point, for a caller
-    /// that wants the real machine rather than an injected search path.
-    /// </summary>
-    /// <param name="repositoryRoot">The directory a relative command is resolved against.</param>
-    public static LaunchCommandResolver FromEnvironment(string repositoryRoot) =>
-        new(repositoryRoot, SplitSearchPath(Environment.GetEnvironmentVariable("PATH")));
-
-    /// <summary>
-    /// A resolver over this process's <c>PATH</c> with no repository root, resolving a relative
-    /// command against the working directory.
-    /// </summary>
-    public static LaunchCommandResolver FromEnvironment() =>
-        new(SplitSearchPath(Environment.GetEnvironmentVariable("PATH")));
 
     /// <summary>
     /// The full path a launch of <paramref name="command"/> would use, or null when it names no file
@@ -154,7 +144,7 @@ public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.IL
 
         try
         {
-            return Path.GetFullPath(command, _baseDirectory);
+            return _paths.GetFullPath(command, _baseDirectory);
         }
         catch (Exception exception)
             when (exception is ArgumentException or NotSupportedException or PathTooLongException)
@@ -163,11 +153,11 @@ public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.IL
         }
     }
 
-    private static string? FindNear(string command, string? directory)
+    private string? FindNear(string command, string? directory)
     {
         foreach (string candidate in Candidates(command, directory))
         {
-            if (File.Exists(candidate))
+            if (_files.FileExists(candidate))
                 return candidate;
         }
 
@@ -179,7 +169,7 @@ public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.IL
     /// each <c>PATHEXT</c> extension it does not already carry. Mirrors the launcher's rule, since
     /// the check would otherwise report a working Windows install as unlaunchable.
     /// </summary>
-    private static IEnumerable<string> Candidates(string command, string? directory)
+    private IEnumerable<string> Candidates(string command, string? directory)
     {
         yield return Combine(directory, command);
 
@@ -198,14 +188,26 @@ public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.IL
     private static string Combine(string? directory, string name) =>
         string.IsNullOrEmpty(directory) ? name : Path.Combine(directory, name);
 
-    private static IEnumerable<string> PathExtensions()
-    {
-        string configured = Environment.GetEnvironmentVariable("PATHEXT") ?? DefaultPathExtensions;
-
-        return configured.Split(
+    private IEnumerable<string> PathExtensions() =>
+        _pathExtensions.Split(
             ';',
             StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    }
+}
+
+/// <summary>Builds the launch-command resolver over the process's <c>PATH</c>, read through the environment seam.</summary>
+/// <param name="files">The file system a candidate's existence is checked on.</param>
+/// <param name="paths">The path seam a relative root or command is resolved through.</param>
+/// <param name="environment">The process facts the resolver reads.</param>
+public sealed class EnvironmentLaunchCommandResolverFactory(IFileSystem files, IPathResolver paths, IProcessEnvironment environment)
+    : ILaunchCommandResolverFactory
+{
+    /// <inheritdoc />
+    public ILaunchCommandResolver FromEnvironment(string repositoryRoot) =>
+        new LaunchCommandResolver(repositoryRoot, SplitSearchPath(environment.GetVariable("PATH")), files, paths, environment);
+
+    /// <summary>A resolver over the process's <c>PATH</c> that resolves a relative command against the working directory.</summary>
+    /// <returns>The resolver.</returns>
+    public ILaunchCommandResolver FromEnvironment() => FromEnvironment(environment.CurrentDirectory);
 
     /// <summary>
     /// Splits a <c>PATH</c> value into its entries, keeping every one of them — including an empty
@@ -213,12 +215,4 @@ public sealed class LaunchCommandResolver : KyberWeave.Contracts.Repositories.IL
     /// </summary>
     private static IEnumerable<string> SplitSearchPath(string? searchPath) =>
         searchPath is null ? [] : searchPath.Split(Path.PathSeparator);
-}
-
-/// <summary>Builds the launch-command resolver over this process's own <c>PATH</c>.</summary>
-public sealed class EnvironmentLaunchCommandResolverFactory : KyberWeave.Contracts.Repositories.ILaunchCommandResolverFactory
-{
-    /// <inheritdoc />
-    public KyberWeave.Contracts.Repositories.ILaunchCommandResolver FromEnvironment(string repositoryRoot) =>
-        LaunchCommandResolver.FromEnvironment(repositoryRoot);
 }

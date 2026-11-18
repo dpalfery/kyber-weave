@@ -15,6 +15,6 @@ internal static class RealPlanRoots
     internal static PlanRootResolver Create()
     {
         PhysicalFileSystem files = new();
-        return new PlanRootResolver(RealGitFacts.Create(), new PlanPathResolver(), files, new PhysicalPathResolver(files));
+        return new PlanRootResolver(RealGitFacts.Create(), PhysicalPlanPaths.Create(), files, new PhysicalPathResolver(files));
     }
 }

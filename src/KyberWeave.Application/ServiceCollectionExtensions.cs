@@ -189,6 +189,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IKyberWeaveConfigRepository>(),
             sp.GetRequiredService<IRepositoryFileLister>(),
             sp.GetRequiredService<IRepositoryTreeProbe>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
@@ -224,7 +226,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
+        services.TryAddSingleton<IReviewEvidenceService>(sp => new ReviewEvidenceService(
+            sp.GetRequiredService<IGitChangeReader>(),
+            sp.GetRequiredService<IReviewEvidenceStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();
         services.TryAddSingleton<IGateRunService, GateRunService>();
@@ -237,20 +243,27 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IReviewCatalogueService>(sp => new ReviewCatalogueService(
             sp.GetRequiredService<IConfigLoadService>(),
             sp.GetRequiredService<IRepositoryFileLister>(),
-            sp.GetRequiredService<IFileSystem>()));
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewDuplicatesService>(sp => new ReviewDuplicatesService(
             sp.GetRequiredService<IDuplicateDetectionService>(),
             sp.GetRequiredService<ICodeGraphPortsFactory>(),
             sp.GetRequiredService<IConfigLoadService>(),
-            sp.GetRequiredService<IWritableFileSystem>()));
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewSuppressionsService>(sp => new ReviewSuppressionsService(
             sp.GetRequiredService<ISuppressionScanService>(),
-            sp.GetRequiredService<IFileSystem>()));
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewCycleService>(sp => new ReviewCycleService(
             sp.GetRequiredService<IReviewWorkTreeService>(),
             sp.GetRequiredService<IReviewCycleStore>(),
             sp.GetRequiredService<IReviewCycleSelector>(),
-            sp.GetRequiredService<IConfigLoadService>()));
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewSeatsService>(sp => new ReviewSeatsService(
             sp.GetRequiredService<IReviewWorkTreeService>(),
             sp.GetRequiredService<IReviewCycleStore>(),
@@ -277,6 +290,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IWorktreeIndexGuard>(),
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IReviewCycleSelector>(),
             sp.GetRequiredService<IConfigLoadService>(),
             sp.GetRequiredService<ITaskGateSelectionService>(),

@@ -12,7 +12,7 @@ namespace KyberWeave.Data.Hooks.Arbiter;
 /// harness-supplied text reaches the file system. A record is written to a temporary file and moved into place, so a
 /// reader never sees half of one. Records older than a week are pruned, at most once an hour.
 /// </summary>
-public sealed class FileBackgroundDispatchStore : IBackgroundDispatchStore
+public sealed class FileBackgroundDispatchStore(IWritableFileSystem files, TimeProvider time, IIdGenerator ids) : IBackgroundDispatchStore
 {
     private const string FolderName = "background";
     private const string PruneMarker = ".last-prune";
@@ -20,20 +20,18 @@ public sealed class FileBackgroundDispatchStore : IBackgroundDispatchStore
 
     private static readonly TimeSpan StaleAge = TimeSpan.FromDays(7);
     private static readonly TimeSpan PruneInterval = TimeSpan.FromHours(1);
-    private static readonly UTF8Encoding Utf8 = new(encoderShouldEmitUTF8Identifier: false);
-
     /// <inheritdoc/>
     public void Save(string arbiterDirectory, BackgroundDispatchRecord record)
     {
         ArgumentNullException.ThrowIfNull(arbiterDirectory);
         ArgumentNullException.ThrowIfNull(record);
         string directory = Path.Combine(arbiterDirectory, FolderName);
-        Directory.CreateDirectory(directory);
+        files.CreateDirectory(directory);
         PruneStale(directory);
         string path = Path.Combine(directory, FileNameOf(record.Dispatch.SessionId, record.Dispatch.AgentId));
-        string temp = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
-        File.WriteAllText(temp, JsonSerializer.Serialize(record), Utf8);
-        File.Move(temp, path, overwrite: true);
+        string temp = Path.Combine(directory, $".{ids.NewGuid():N}.tmp");
+        files.WriteAllText(temp, JsonSerializer.Serialize(record));
+        files.MoveFile(temp, path, overwrite: true);
     }
 
     /// <inheritdoc/>
@@ -51,23 +49,23 @@ public sealed class FileBackgroundDispatchStore : IBackgroundDispatchStore
         ArgumentNullException.ThrowIfNull(arbiterDirectory);
         ArgumentNullException.ThrowIfNull(sessionId);
         string directory = Path.Combine(arbiterDirectory, FolderName);
-        if (!Directory.Exists(directory))
+        if (!files.DirectoryExists(directory))
         {
             return [];
         }
 
-        return [.. Directory.EnumerateFiles(directory, SessionKey(sessionId) + "-*.json")
+        return [.. files.EnumerateFiles(directory, SessionKey(sessionId) + "-*.json", recursive: false)
             .Order(StringComparer.Ordinal)
             .Select(Read)
             .OfType<BackgroundDispatchRecord>()
             .Where(record => string.Equals(record.Dispatch.SessionId, sessionId, StringComparison.Ordinal))];
     }
 
-    private static BackgroundDispatchRecord? Read(string path)
+    private BackgroundDispatchRecord? Read(string path)
     {
         try
         {
-            return JsonSerializer.Deserialize<BackgroundDispatchRecord>(File.ReadAllText(path, Utf8));
+            return JsonSerializer.Deserialize<BackgroundDispatchRecord>(files.ReadAllText(path));
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException or JsonException)
         {
@@ -86,31 +84,31 @@ public sealed class FileBackgroundDispatchStore : IBackgroundDispatchStore
 
     // Pruning is housekeeping: a file that cannot be deleted now is retried on a later save, and it must not stop
     // the dispatch being recorded.
-    private static void PruneStale(string directory)
+    private void PruneStale(string directory)
     {
         string marker = Path.Combine(directory, PruneMarker);
         try
         {
-            if (File.Exists(marker) && DateTime.UtcNow - File.GetLastWriteTimeUtc(marker) < PruneInterval)
+            if (files.FileExists(marker) && time.GetUtcNow().UtcDateTime - files.GetLastWriteTimeUtc(marker) < PruneInterval)
             {
                 return;
             }
 
-            File.WriteAllText(marker, string.Empty);
+            files.WriteAllText(marker, string.Empty);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return;
         }
 
-        DateTime cutoff = DateTime.UtcNow - StaleAge;
-        foreach (string file in Directory.EnumerateFiles(directory))
+        DateTime cutoff = time.GetUtcNow().UtcDateTime - StaleAge;
+        foreach (string file in files.EnumerateFiles(directory, "*", recursive: false))
         {
             try
             {
-                if (File.GetLastWriteTimeUtc(file) < cutoff)
+                if (files.GetLastWriteTimeUtc(file) < cutoff)
                 {
-                    File.Delete(file);
+                    files.DeleteFile(file);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

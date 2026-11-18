@@ -257,7 +257,7 @@ public class LegacyHostMigrationTests : IDisposable
         WriteLegacyStandards();
 
         StandardsFolderMigrationResult result =
-            new StandardsFolderMigration(_repo.Path, config.Ontology).Run();
+            DocsPorts.StandardsMigration(_repo.Path, config.Ontology).Run();
 
         foreach (string technology in Technologies)
         {
@@ -286,11 +286,11 @@ public class LegacyHostMigrationTests : IDisposable
     {
         KyberWeaveConfig config = DeclareTechnologies();
         WriteLegacyStandards();
-        new StandardsFolderMigration(_repo.Path, config.Ontology).Run();
+        DocsPorts.StandardsMigration(_repo.Path, config.Ontology).Run();
 
         string once = File.ReadAllText(PathOf("6-Docs/standards/csharp/csharp.standards.md"));
         StandardsFolderMigrationResult second =
-            new StandardsFolderMigration(_repo.Path, config.Ontology).Run();
+            DocsPorts.StandardsMigration(_repo.Path, config.Ontology).Run();
 
         Assert.Empty(second.Changes);
         Assert.Empty(second.Moves);

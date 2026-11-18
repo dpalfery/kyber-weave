@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Review;
@@ -41,12 +43,25 @@ public static class TaskGatePlanning
     /// <summary>
     /// Checks one changed path, whether given by <c>--paths</c> or listed by git, before it can reach argv.
     /// </summary>
+    /// <remarks>
+    /// Containment is the path seam's answer rather than a comparison of spellings: the seam follows a symbolic link
+    /// and folds case the way the volume does, so a path that names a file outside the root by either is refused.
+    /// </remarks>
+    /// <param name="paths">Resolves the root and the path, and decides whether the path stays inside the root.</param>
+    /// <param name="environment">Names the working directory a relative root resolves against.</param>
     /// <param name="root">The repository root the path must stay inside.</param>
     /// <param name="path">The repository-relative path to check.</param>
     /// <returns>The reason it is refused, or <see langword="null"/> when the path is safe to pass on.</returns>
     /// <param name="leadsOutsideThroughSymlink">Whether the path, or a directory above it, is a symbolic link leading outside the root.</param>
-    public static string? ValidatePath(string root, string path, Func<string, string, bool> leadsOutsideThroughSymlink)
+    public static string? ValidatePath(
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        string root,
+        string path,
+        Func<string, string, bool> leadsOutsideThroughSymlink)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(leadsOutsideThroughSymlink);
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
@@ -63,17 +78,29 @@ public static class TaskGatePlanning
         if (normalized.Split('/').Contains(".."))
             return $"Changed path '{path}' leaves the repository root.";
 
-        // The segment check above catches the spelling; GetRelativePath catches what remains,
-        // such as a path that resolves outside the root through a platform-specific form.
-        string full = Path.GetFullPath(Path.Combine(root, normalized));
-        string relative = Path.GetRelativePath(root, full);
-        if (relative == ".")
+        // The segment check above catches the spelling; resolving against the seam catches what remains, such as a
+        // path that resolves outside the root through a platform-specific form. A spelling the seam refuses is a
+        // refusal like any other: the caller plans no gate rather than crashing on a path git listed.
+        string rootFull;
+        string full;
+        try
+        {
+            rootFull = paths.GetFullPath(root, environment.CurrentDirectory);
+            full = paths.GetFullPath(normalized, rootFull);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                       or PathTooLongException or System.Security.SecurityException)
+        {
+            return $"Changed path '{path}' cannot be resolved against the repository root: {ex.Message}";
+        }
+
+        if (paths.AreSame(rootFull, full))
             return $"Changed path '{path}' names the repository root, not a file.";
 
-        if (!IsWithin(root, full))
+        if (!paths.IsWithin(rootFull, full))
             return $"Changed path '{path}' leaves the repository root.";
 
-        if (leadsOutsideThroughSymlink(root, path))
+        if (leadsOutsideThroughSymlink(rootFull, path))
             return $"Changed path '{path}' passes through a symbolic link that leads outside the repository root.";
 
         return null;
