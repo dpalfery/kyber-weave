@@ -77,13 +77,14 @@ internal static class ArbiterContainer
     }
 }
 
-/// <summary>Loads the host configuration through the legacy loader, which has no layer port yet.</summary>
-internal sealed class CoreHostConfigLoader : IHostConfigLoader
+/// <summary>Loads the host configuration for the Arbiter guards through the configuration repository.</summary>
+/// <param name="configs">The repository the host config is read from.</param>
+internal sealed class CoreHostConfigLoader(IKyberWeaveConfigRepository configs) : IHostConfigLoader
 {
     /// <inheritdoc/>
     public HostConfigLoadResult TryLoad(string repoRoot)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repoRoot);
+        KyberWeaveConfigLoadResult loaded = configs.TryLoad(repoRoot);
         return new HostConfigLoadResult(loaded.Success, loaded.Config, loaded.ConfigPath, loaded.Error);
     }
 }
