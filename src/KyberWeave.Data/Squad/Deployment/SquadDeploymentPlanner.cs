@@ -265,6 +265,16 @@ public static class SquadDeploymentPlanner
             if (!File.Exists(fullPath))
                 continue;
 
+            // An adopted entry is a file the host already had whose bytes equalled the release when Squad
+            // recorded them: the receipt says Squad never wrote them. Requirement 13.6 removes only what
+            // the Squad wrote, so a path a later release stops rendering stays on disk under its recorded
+            // hash, and the record is kept so a host that edits it later is still reported.
+            if (previous.Adopted)
+            {
+                nextOwnedFiles.Add(previous);
+                continue;
+            }
+
             byte[] previousBytes;
             try
             {

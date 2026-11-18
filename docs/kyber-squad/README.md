@@ -4,7 +4,7 @@ title: Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
 doc-type: index
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-10
+last-reviewed: 2026-11-17
 ---
 
 # Kyber-Squad — Multi-Harness Agent & Skill Deployment Control Plane
@@ -25,7 +25,7 @@ and registered today: `copilot`, `cursor`, `claude`, `codex`, `antigravity`, `op
 Deploying multi-agent workflows across modern engineering environments breaks down in three key ways:
 
 ### 1. The Multi-Harness Fragmentation Tax
-Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 24 specialized agent roles and 28 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
+Every coding harness uses its own configuration format, folder layout, and prompt syntax (`.cursorrules`, `.claude/agents`, `.github/copilot-instructions.md`, TOML, JSON). Manually duplicating 15 specialized agent roles and 28 skills across multiple tools guarantees silent configuration drift, outdated prompts, and inconsistent behaviors across developers.
 
 ### 2. Differing Capability Boundaries & Tool Permissions
 Harnesses have wildly different capabilities: some support restricted subagent spawning or granular MCP permissions; others allow only flat prompt injection. Without a formalized capability lattice, agents fail unexpectedly or gain unintended permissions when deployed to less restrictive harnesses.
@@ -39,7 +39,7 @@ Modifying local developer environments or repository-level agent configurations 
 
 | Capability | How It Solves the Problem | Command |
 |---|---|---|
-| **Canonical AgentIR Compilation** | Compiles 24 canonical agents and the canonical skills — each projecting its validated resource closure beside the rendered principal — for all thirteen registered renderers while retaining a governed thirteen-target catalog. | `kyber-weave squad install` |
+| **Canonical AgentIR Compilation** | Compiles 15 canonical agents and the canonical skills — each projecting its validated resource closure beside the rendered principal — for all thirteen registered renderers while retaining a governed thirteen-target catalog. | `kyber-weave squad install` |
 | **Transactional Engine & Atomic Rollback** | Creates pre-execution rollback manifests and tracks deployed files in the lock and receipt under `~/.kyber-weave/squad/`, with a registry of project installs—restores clean state on any failure. | `kyber-weave squad install` · `uninstall` |
 | **Capability Lattice & Degradation** | Intelligently maps subagent hierarchies, permissions, and tool access to each harness's exact feature set, emitting structured degradation warnings when a feature is unsupported. | `kyber-weave squad doctor` |
 | **Distributed Concurrency Leases** | Uses cross-process mutex leasing to ensure concurrent CI jobs or IDE instances cannot corrupt deployment state. | Integrated in all `squad` verbs |
@@ -95,3 +95,7 @@ Explore the full Kyber-Squad documentation suite:
 * **[Requirements & Degradation Matrix](requirements.md)** — Detailed KS-001 through KS-008 specifications, harness feature matrices, degradation taxonomy, and the circuit-breaker harvest.
 * **[Skill-Resource Dispositions](skill-resource-dispositions.md)** — The content-preservation audit and policy-line ledger for every retained skill resource.
 * **[Worker Rule Map](worker-rule-map.md)** — One row per duplicated worker rule: where it lives now, its single home after the text trim, and the check that still enforces it.
+
+* **[Technology Agent Rule Inventory](agent-rule-inventory.md)** — Every technology-specific rule in the thirteen technology agent bodies, mapped to the template file and heading that states it now.
+
+* **[Roster Comparison Runbook](roster-comparison-runbook.md)** — Superseded on 2026-11-17, kept for history: the comparison it describes was never completed, and the old agents were removed without it ([ADR 0088](../adr/0088-the-old-technology-agents-are-removed-without-a-comparison.md)).

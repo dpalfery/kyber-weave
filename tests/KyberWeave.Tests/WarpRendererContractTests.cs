@@ -88,7 +88,10 @@ public sealed class WarpRendererContractTests : IDisposable
         SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
         HashSet<string> collisions = DeriveCollisions(source);
-        Assert.NotEmpty(collisions);
+        // The removal left no distinct-body collision: every agent identity a canonical skill also carries is a
+        // declared shared identity, so none lowers to a role-prefixed skill. A collision added later is derived
+        // here, and the loop below asserts the projection it demands.
+        Assert.Empty(collisions);
 
         SquadRenderResult result = await SquadTestRegistry.Create([new WarpRenderer()]).RenderAsync(
             new SquadRenderRequest(ProductRoot, [SquadTarget.Warp], SquadDeploymentScope.Project).Prepared());

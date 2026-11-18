@@ -2,29 +2,20 @@ schema: kyber-squad.bundle/v1
 name: full
 agents:
   - architect
-  - azure-reader
   - bug-crusher
   - bug-crusher-investigator
   - code-reviewer
   - conductor
-  - csharp-dev
-  - dal-dev
+  - dev-easy
+  - dev-hard
+  - dev-medium
+  - devops
   - docs-dev
-  - github-devops
-  - go-dev
-  - maui-dev
+  - platform-researcher
   - product-owner
-  - pulumi-dev
-  - python-dev
-  - react-dev
   - research-agent
   - review-lens
   - review-triage
-  - rust-dev
-  - sql-database-architect
-  - tauri-dev
-  - test-dev
-  - typescript-dev
 skills:
   - app-docs-standard
   - architecture-decision-record
@@ -53,5 +44,4 @@ skills:
   - security-review
   - setup-dev-environment
   - task-gate
-  - testing
   - typescript-dev

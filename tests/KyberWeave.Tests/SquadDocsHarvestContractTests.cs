@@ -234,10 +234,9 @@ public sealed class SquadDocsHarvestContractTests
             ?.Trim();
 
         Assert.Equal(
-            "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', 'csharp-dev', 'dal-dev', " +
-            "'docs-dev', 'github-devops', 'go-dev', 'maui-dev', 'pulumi-dev', 'python-dev', 'react-dev', " +
-            "'review-lens', 'review-triage', 'rust-dev', 'sql-database-architect', 'tauri-dev', 'test-dev', " +
-            "'typescript-dev']",
+            "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', " +
+            "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
+            "'review-lens', 'review-triage']",
             actual);
     }
 

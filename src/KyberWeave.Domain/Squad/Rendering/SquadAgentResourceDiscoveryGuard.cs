@@ -48,7 +48,14 @@ public static class SquadAgentResourceDiscoveryGuard
     /// A resource-less agent has no closure to drive the rewrite, so its body passes
     /// through untouched.
     /// </summary>
-    public static string RewriteBody(SquadAgent agent)
+    /// <param name="agent">The agent whose resource closure drives the rewrite.</param>
+    /// <param name="linkDirectory">
+    /// The directory the deployed principal sits in, relative to the root the harness resolves a tool's paths
+    /// from. A link is written from that root, so <c>conductor/references/plan-path.md</c> becomes
+    /// <c>.opencode/agents/conductor/references/plan-path.markdown</c>. Null keeps the authored path, for a
+    /// caller that has no principal directory to compose.
+    /// </param>
+    public static string RewriteBody(SquadAgent agent, string? linkDirectory = null)
     {
         if (agent.Resources.Count == 0)
         {
@@ -58,10 +65,13 @@ public static class SquadAgentResourceDiscoveryGuard
         HashSet<string> resourcePaths = agent.Resources
             .Select(resource => resource.RelativePath)
             .ToHashSet(StringComparer.Ordinal);
+        Func<string, string> map = string.IsNullOrEmpty(linkDirectory)
+            ? MapResourcePath
+            : pathPart => $"{linkDirectory}/{MapResourcePath(pathPart)}";
         return SquadResourceLinkRewriter.Rewrite(
             agent.InstructionBody,
             resourcePaths,
-            MapResourcePath,
+            map,
             out _);
     }
 

@@ -1,3 +1,4 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
@@ -51,7 +52,7 @@ public sealed class DocsPacketCommandTests
         (int exit, string output) = Packet(fixture, typed);
 
         Assert.True(exit == 0, output);
-        Assert.StartsWith("Task T1", output, StringComparison.Ordinal);
+        Assert.StartsWith("<task>\nTask T1", output, StringComparison.Ordinal);
         Assert.Contains("Worktree: " + fixture.Root, output, StringComparison.Ordinal);
         Assert.DoesNotContain("{worktree}", output, StringComparison.Ordinal);
         Assert.DoesNotContain("{prior_results}", output, StringComparison.Ordinal);
@@ -59,11 +60,26 @@ public sealed class DocsPacketCommandTests
         Assert.DoesNotContain("Task T2", output, StringComparison.Ordinal);
     }
 
+    /// <summary>The packet carries the task's resolved test command, so the worker neither fills placeholders nor guesses.</summary>
     [Fact]
-    public void PriorResultsFromAFileFillTheirSection()
+    public void ThePacketPrintsTheTasksResolvedTestCommand()
     {
         using DocFixture fixture = Ready();
-        string results = Path.Combine(fixture.Root, "results.txt");
+
+        (int exit, string output) = Packet(fixture, "T1");
+
+        Assert.True(exit == 0, output);
+        Assert.Contains(PacketTestCommandRenderer.Heading, output, StringComparison.Ordinal);
+        Assert.Contains("FullyQualifiedName~PlanTaskFileValidatorTests", output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PriorResultsFromAFileInTheScratchAreaFillTheirSection()
+    {
+        using DocFixture fixture = Ready();
+        string scratch = Path.Combine(fixture.Root, TaskPromptService.ScratchFolder);
+        Directory.CreateDirectory(scratch);
+        string results = Path.Combine(scratch, "results.txt");
         File.WriteAllText(results, "T1 reported: built, 4 tests green.");
 
         (int exit, string output) = Packet(fixture, "T2", prior: results);
@@ -71,6 +87,25 @@ public sealed class DocsPacketCommandTests
         Assert.True(exit == 0, output);
         Assert.Contains("T1 reported: built, 4 tests green.", output, StringComparison.Ordinal);
         Assert.DoesNotContain(PlanTaskPacket.NoPriorResults, output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A prior-results file outside the run's scratch area is refused by this command under its own code, not
+    /// reported as a stale task file after the prompt service refuses it.
+    /// </summary>
+    [Fact]
+    public void APriorResultsFileOutsideTheScratchAreaIsRefusedUnderItsOwnCode()
+    {
+        using DocFixture fixture = Ready();
+        string results = Path.Combine(fixture.Root, "results.txt");
+        File.WriteAllText(results, "a file outside the scratch area");
+
+        (int exit, string output) = Packet(fixture, "T2", prior: results);
+
+        Assert.Equal(1, exit);
+        Assert.Contains(DocsPacketCommand.PriorResultsUnreadable, output, StringComparison.Ordinal);
+        Assert.Contains(TaskPromptService.ScratchFolder, output, StringComparison.Ordinal);
+        Assert.DoesNotContain(DocsPacketCommand.TaskFileStale, output, StringComparison.Ordinal);
     }
 
     [Fact]

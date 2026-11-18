@@ -90,7 +90,6 @@ public sealed class ArbiterCursorRenderingTests : IDisposable
 
     [Theory]
     [InlineData("null")]
-    [InlineData("disabled")]
     public async Task RenderAsync_WhenNotRendered_EmitsNoBlock(string mode)
     {
         SquadArbiterWiring? wiring = mode switch
@@ -107,13 +106,20 @@ public sealed class ArbiterCursorRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_DisabledArbiter_RendersByteForByteAsOmittingTheWiring()
+    public async Task RenderAsync_DisabledArbiter_RendersOnlyTheDispatchHookBlock()
     {
+        // Prompt insertion runs with the Arbiter off, so Cursor keeps its dispatch block and every file is unchanged.
         SquadRenderResult omitted = await RenderAsync(null, SquadDeploymentScope.Project);
         SquadRenderResult disabled = await RenderAsync(
             new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: HookTimeoutSeconds),
             SquadDeploymentScope.Project);
 
+        Assert.True(omitted.Blocks is null || omitted.Blocks.Count == 0);
+        SquadRenderedBlock block = Assert.Single(disabled.Blocks ?? []);
+        Assert.Equal("cursor", block.Target);
+        Assert.Contains(
+            block.Entries.Select(entry => entry.Entry.ToJsonString()),
+            entry => entry.Contains("kyber-weave-arbiter hook", StringComparison.Ordinal));
         Assert.Equal(
             omitted.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList(),
             disabled.Files.Select(f => (f.Target, f.RelativePath)).Order().ToList());

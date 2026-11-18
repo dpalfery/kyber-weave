@@ -55,6 +55,12 @@ internal sealed class KyberWeaveYamlDocument
     /// the setting, not a type-conversion failure.
     /// </summary>
     public string? WorktreeIndexHook { get; set; }
+
+    /// <summary>Raw <c>worker-roster:</c> value; absent means <c>tiered</c>.</summary>
+    public string? WorkerRoster { get; set; }
+
+    /// <summary>Raw <c>task-prompt-budget:</c> value; absent means the shipped 60,000 characters.</summary>
+    public string? TaskPromptBudget { get; set; }
 }
 
 /// <summary>

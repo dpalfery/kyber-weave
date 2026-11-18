@@ -14,10 +14,10 @@ namespace KyberWeave.Arbiter.Hooks.Adapters;
 /// </summary>
 /// <remarks>
 /// A call is denied when any of its dispatches escalates, and every dispatch is
-/// evaluated so each one is recorded. The harness has no rewrite field in
-/// <c>hooks.json</c>, so header stripping does not apply and an allowed call writes
-/// the empty document. <c>allow</c> is never written: it would auto-approve the call
-/// and bypass the user's approval prompts. The call id is
+/// evaluated so each one is recorded. The harness's <c>overwrite</c> field replaces <c>toolCall.args</c> by a
+/// shallow top-level merge, so the inserted prompt resends the whole <c>Subagents</c> array with each element kept and
+/// only its <c>Prompt</c> replaced. <c>allow</c> is never written: it would auto-approve the call
+/// and bypass the user's approval prompts, so the insertion document carries <c>decision: ask</c>. The call id is
 /// <c>&lt;conversationId&gt;:&lt;stepIdx&gt;</c> and the repository root is
 /// <c>workspacePaths[0]</c>. The hook is project-wide with no caller identity, so the
 /// rendered <c>--caller</c> is honoured when present and the caller is otherwise
@@ -85,6 +85,18 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
         // Events outside the two known event names still take the classified path, so
         // an unknown name keeps failing closed.
         return classified && !IsDispatchTool(ToolNameOf(payload)) ? EmptyDocument() : null;
+    }
+
+    /// <inheritdoc/>
+    public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = renderedCaller;
+
+        return string.Equals(GetString(payload, "hook_event_name"), "PreToolUse", StringComparison.Ordinal)
+            && IsDispatchTool(ToolNameOf(payload))
+                ? InsertionDocument(payload, context)
+                : null;
     }
 
     /// <inheritdoc/>
@@ -158,7 +170,61 @@ public sealed class AntigravityHookAdapter : IHarnessHookAdapter
             }
         }
 
-        return denial is null ? EmptyDocument() : RenderDeny(denial);
+        return denial is not null
+            ? RenderDeny(denial)
+            : InsertionDocument(payload, context) ?? EmptyDocument();
+    }
+
+    /// <summary>
+    /// The allow document that carries every dispatch's inserted prompt. Antigravity merges <c>overwrite</c> into
+    /// <c>toolCall.args</c> at the top level, so the whole <c>Subagents</c> array is resent, every element kept and
+    /// only its <c>Prompt</c> replaced. <c>decision</c> is required, and <c>ask</c> keeps the user's approval prompt.
+    /// </summary>
+    /// <param name="payload">The dispatch event.</param>
+    /// <param name="context">The hook context carrying the prompt service.</param>
+    /// <returns>The overwrite document, a deny when a prompt cannot be built, or null when no dispatch needs one.</returns>
+    private static string? InsertionDocument(JsonElement payload, HookContext context)
+    {
+        if (!payload.TryGetProperty("toolCall", out JsonElement toolCall)
+            || toolCall.ValueKind != JsonValueKind.Object
+            || !toolCall.TryGetProperty("args", out JsonElement args)
+            || args.ValueKind != JsonValueKind.Object
+            || !args.TryGetProperty("Subagents", out JsonElement subagents)
+            || subagents.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        JsonArray rewritten = [];
+        bool inserted = false;
+        foreach (JsonElement subagent in subagents.EnumerateArray())
+        {
+            JsonObject copy = JsonNode.Parse(subagent.GetRawText()) as JsonObject
+                ?? throw new InvalidOperationException(
+                    "Malformed Antigravity hook event: a Subagents element is not an object.");
+            DispatchInsertion insertion = DispatchPromptInsertion.Expand(
+                GetString(subagent, "Prompt") ?? string.Empty, context);
+            if (insertion.Kind == DispatchInsertionKind.Stopped)
+            {
+                return RenderDeny(insertion.Reason!);
+            }
+
+            if (insertion.Kind == DispatchInsertionKind.Inserted)
+            {
+                copy["Prompt"] = insertion.Text;
+                inserted = true;
+            }
+
+            rewritten.Add(copy);
+        }
+
+        return inserted
+            ? new JsonObject
+            {
+                ["decision"] = "ask",
+                ["overwrite"] = new JsonObject { ["Subagents"] = rewritten },
+            }.ToJsonString()
+            : null;
     }
 
     private string HandlePost(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)

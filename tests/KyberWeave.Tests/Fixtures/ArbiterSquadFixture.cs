@@ -15,9 +15,9 @@ internal sealed class ArbiterSquadFixture : IDisposable
     public const string Architect = "architect";
     public const string ProductOwner = "product-owner";
     public const string CodeReviewer = "code-reviewer";
-    public const string CsharpDev = "csharp-dev";
-    public const string TestDev = "test-dev";
-    public const string GithubDevops = "github-devops";
+    public const string CsharpDev = "dev-easy";
+    public const string TestDev = "dev-medium";
+    public const string GithubDevops = "devops";
     public const string DocsDev = "docs-dev";
     public const string ResearchAgent = "research-agent";
 
@@ -54,9 +54,9 @@ internal sealed class ArbiterSquadFixture : IDisposable
               - architect
               - product-owner
               - code-reviewer
-              - csharp-dev
-              - test-dev
-              - github-devops
+              - dev-easy
+              - dev-medium
+              - devops
               - docs-dev
               - research-agent
             skills: []
@@ -133,7 +133,7 @@ internal sealed class ArbiterSquadFixture : IDisposable
 
         fixture.WriteAgent(Architect, "architect", "architect", "[research-agent]");
         fixture.WriteAgent(CodeReviewer, "reviewer", "reviewer", "[research-agent]");
-        fixture.WriteAgent(Conductor, "orchestrator", "orchestrator", "[architect, csharp-dev, docs-dev, test-dev]");
+        fixture.WriteAgent(Conductor, "orchestrator", "orchestrator", "[architect, dev-easy, dev-medium, docs-dev]");
         fixture.WriteAgent(ProductOwner, "product-planning", "product-planning", "[research-agent]");
         fixture.WriteAgent(CsharpDev, "worker", "worker", "[]");
         fixture.WriteAgent(DocsDev, "documentation", "documentation", "[]");

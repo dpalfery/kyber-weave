@@ -77,6 +77,35 @@ dotnet publish src/KyberWeave.Cli/KyberWeave.Cli.csproj -c Release \
 
 More detail: [README.md](README.md) and [docs/](docs/).
 
+## Contributing a technology template
+
+A template is one folder under `products/kyber-squad/standards/<name>/` holding four files,
+every one named after the folder:
+
+| File | What it holds |
+|---|---|
+| `<name>.standards.md` | The standard's decisions, under exactly these six headings in this order: Naming and layout; Coding standards; Testing; Commands; Security and data handling; Done checklist. |
+| `<name>.rules.md` | Prose rules a model reads. They outrank the standard. |
+| `<name>.skills.md` | How to do the work: sign-in, tools and tool servers, query patterns, output shape, and the hand-off. |
+| `<name>.arbiter-rules.yml` | Machine rules the Arbiter evaluates. An empty list (`rules: []`) is valid. |
+
+Scope is one key: `technology: <name>` for a technology or platform, `role: <name>` for a
+role. A standard may name one parent with `builds-on: <technology>`; the parent's rules and
+skills then reach every task in the child, and a chain longer than one level is an error.
+
+**The one completeness check** is `docs validate`, which reports a folder missing one of the
+four files (`KW-DOC-SPEC-012`) and a standard whose headings are missing or out of order
+(`KW-DOC-SPEC-013`). The shipped template shape test is the same check over the embedded
+copies. To add a template:
+
+1. Add the four files; use an existing folder as the shape, not as the content.
+2. Register the name in `KyberStandardsTemplates` (and `Docs.props` for the embedded files).
+3. Run `dotnet test tests/KyberWeave.Tests --filter "FullyQualifiedName~KyberStandardsTemplateShapeTests"`.
+4. Run `dotnet run --project src/KyberWeave.Cli -- docs validate .`.
+
+A contribution that restates a language's own documentation is noise. Write the decisions a
+repository has to make and would otherwise re-argue.
+
 ## Pull request checklist
 
 - [ ] Change is focused and explained

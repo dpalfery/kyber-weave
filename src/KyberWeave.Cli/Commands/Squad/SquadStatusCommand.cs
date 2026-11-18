@@ -155,7 +155,12 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
             string actualSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
             if (!string.Equals(actualSha256, file.Sha256, StringComparison.Ordinal))
             {
-                AnsiConsole.MarkupLine(StatusLine("yellow", "drift", file, scope) + " (modified)");
+                // The receipt holds only the digest of the bytes Squad shipped, so a mismatch cannot
+                // say whether an update kept an earlier edit or someone edited the file afterwards.
+                // Both are reported the same way, naming the flag that ends the difference.
+                AnsiConsole.MarkupLine(
+                    StatusLine("yellow", "modified locally", file, scope)
+                    + " (kept at update; run [bold]squad update --replace-managed[/] to take the shipped file)");
                 hasIssues = true;
                 continue;
             }

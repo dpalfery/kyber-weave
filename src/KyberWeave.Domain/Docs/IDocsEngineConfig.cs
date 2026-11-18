@@ -18,4 +18,7 @@ public interface IDocsEngineConfig
 
     /// <summary>Gets the documentation-analysis section, including the managed glossary path.</summary>
     DocsAnalysisConfig DocsAnalysis { get; }
+
+    /// <summary>Gets the worker roster this repository dispatches from: <c>technology</c> or <c>tiered</c>.</summary>
+    string WorkerRoster { get; }
 }

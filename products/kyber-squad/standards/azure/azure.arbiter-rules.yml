@@ -1,0 +1,78 @@
+# Machine rules the Arbiter evaluates for the 'azure' folder.
+#
+# AZURE-READONLY-001 is the command allow-list for a dispatch whose capability profile can run
+# commands but not write files (platform-reader, which platform-researcher uses). A command with a
+# mutating verb in its head is refused even when a read pattern also matches it. One `az` command
+# whose form ends in a list or show verb is allowed. Every other command that names `az` anywhere —
+# a mutating verb, an absolute path, a quoted program, a wrapper, a subshell, a redirect or a
+# compound command — is refused where the worker guard sees the call (Claude Code and Copilot CLI),
+# and is an instruction only on the other harnesses, where the same forms are stated in
+# azure.rules.md.
+#
+# A folder that declares no rule refuses nothing: an event with no matching rule leaves the
+# command alone, and an answer the Arbiter cannot reach allows (ADR 0072).
+
+rules:
+  - id: AZURE-READONLY-001
+    trigger: worker.command
+    question: Is this command one of the read-only Azure CLI forms this folder allows?
+    answers: [listed-read, mutating, outside-list]
+    decide:
+      # Refusal wins. A mutating verb anywhere before the first option is refused even when a read pattern
+      # also matches, which closes `az group delete list`: the form ends in `list`, but `delete` is the verb.
+      - when:
+          all:
+            - { fact: worker.capability-profile, equals: platform-reader }
+            - fact: command.head
+              intersects:
+                - delete*
+                - create*
+                - update*
+                - set*
+                - start*
+                - stop*
+                - restart*
+                - deallocate*
+                - purge*
+                - remove*
+                - rm*
+                - mv*
+                - cp*
+                - sync*
+                - put*
+                - attach*
+                - detach*
+                - assign*
+                - grant*
+                - revoke*
+                - run*
+                - invoke*
+                - deploy*
+                - import*
+                - export*
+                - terminate*
+                - modify*
+                - reboot*
+                - replace*
+                - register*
+                - deregister*
+                - enable*
+                - disable*
+                - cancel*
+                - abort*
+                - kill*
+                - launch*
+        answer: mutating
+      # A command that is not one command has no single form, so this clause can never allow a compound command.
+      # The form keeps its leading words only, so `az <group...> list`, `az <group...> show` and the same forms
+      # followed by a resource argument all reach `list**` / `show**`.
+      - when:
+          all:
+            - { fact: command.single, equals: true }
+            - { fact: command.form, matches: ["az * list**", "az * show**"] }
+        answer: listed-read
+      # Every word is read, so the tool is still found behind a wrapper, an absolute path, a quote, a
+      # subshell or a second command in the same line.
+      - when: { all: [{ fact: worker.capability-profile, equals: platform-reader }, { fact: command.words, intersects: [az] }] }
+        answer: outside-list
+    effects: { listed-read: allow, mutating: escalate, outside-list: escalate }

@@ -18,7 +18,7 @@ public sealed class OntologyConfig
     private static readonly string[] DefaultDocTypes =
     [
         "architecture", "onboarding", "requirements", "adr", "plan", "spec", "todo",
-        "runbook", "reference", "rule", "governance", "index", "coding-standard"
+        "runbook", "reference", "rule", "governance", "index", "coding-standard", "skill"
     ];
 
     /// <summary>
@@ -27,6 +27,12 @@ public sealed class OntologyConfig
     /// have, and each one is a governed document its own gates then demand frontmatter for.
     /// </summary>
     private static readonly string[] DefaultTechnologies = [];
+
+    /// <summary>
+    /// No repository has a role folder until it installs one. Role folders are an opt-in
+    /// template, not a shape every host must carry.
+    /// </summary>
+    private static readonly string[] DefaultRoles = [];
 
     private static readonly string[] DefaultStatuses =
         ["current", "draft", "needs-review", "superseded"];
@@ -64,6 +70,13 @@ public sealed class OntologyConfig
     /// registry exposes, and the legal values of a standard's <c>technology</c> key.
     /// </summary>
     public IReadOnlyList<string> Technologies { get; init; } = DefaultTechnologies;
+
+    /// <summary>
+    /// The roles this repository declares a folder for (<c>conductor</c>, <c>architect</c>,
+    /// <c>reviewer</c>, <c>devops</c>). A role names the work a folder shapes rather than a
+    /// stack, and is the second legal scope for a rules or skills document.
+    /// </summary>
+    public IReadOnlyList<string> Roles { get; init; } = DefaultRoles;
 
     /// <summary>
     /// Every documentation root, in configured order. A repository that documents a
@@ -166,6 +179,7 @@ public sealed class OntologyConfig
         IReadOnlyList<string>? docTypes = null,
         IReadOnlyList<string>? statuses = null,
         IReadOnlyList<string>? technologies = null,
+        IReadOnlyList<string>? roles = null,
         IReadOnlyList<string>? baseRequiredKeys = null,
         IReadOnlyDictionary<DocType, IReadOnlyList<string>>? requiredKeysByType = null,
         bool? intake = null) =>
@@ -180,6 +194,7 @@ public sealed class OntologyConfig
             DocTypes = docTypes ?? DocTypes,
             Statuses = statuses ?? Statuses,
             Technologies = technologies ?? Technologies,
+            Roles = roles ?? Roles,
             BaseRequiredKeys = baseRequiredKeys ?? BaseRequiredKeys,
             RequiredKeysByType = requiredKeysByType ?? RequiredKeysByType,
             Intake = intake ?? Intake
@@ -196,9 +211,11 @@ public sealed class OntologyConfig
             [DocType.Spec] = ["component"],
             [DocType.Todo] = ["component"],
 
-            // A standard is scoped by technology, not by component: a C# standard governs
-            // code in every component the catalog lists, so requiring one of them would be
-            // a false claim about which code it covers.
-            [DocType.CodingStandard] = ["technology"]
+            // A standard is scoped by the technology or role whose folder it sits in, not by
+            // component: a C# standard governs code in every component the catalog lists, so
+            // requiring one of them would be a false claim about which code it covers. The
+            // scope key is checked as "technology or role" in ValidateScope, which the
+            // required-key matrix cannot express.
+            [DocType.CodingStandard] = []
         };
 }

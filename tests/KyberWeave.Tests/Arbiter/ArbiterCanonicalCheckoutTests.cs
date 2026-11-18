@@ -118,7 +118,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
 
-        string answer = Guard("copilot-cli", CopilotEdit("dal-dev", Path.Combine(_repo, "src", "Job.cs"), subagent: true));
+        string answer = Guard("copilot-cli", CopilotEdit("dev-medium", Path.Combine(_repo, "src", "Job.cs"), subagent: true));
 
         using JsonDocument document = JsonDocument.Parse(answer);
         Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
@@ -131,9 +131,9 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         StartInWorktree();
         string target = Path.Combine(_repo, "src", "Job.cs");
 
-        Assert.Empty(Guard("copilot-cli", CopilotEdit("dal-dev", target, subagent: false)));
+        Assert.Empty(Guard("copilot-cli", CopilotEdit("dev-medium", target, subagent: false)));
         Assert.Empty(Guard("copilot-cli", CopilotEdit("general-purpose", target, subagent: true)));
-        Assert.Empty(Guard("copilot-cli", CopilotEdit("dal-dev", Path.Combine(_worktree, "src", "Job.cs"), subagent: true)));
+        Assert.Empty(Guard("copilot-cli", CopilotEdit("dev-medium", Path.Combine(_worktree, "src", "Job.cs"), subagent: true)));
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             cwd = _repo,
             hook_event_name = "PreToolUse",
             agent_id = "a1",
-            agent_type = "csharp-dev",
+            agent_type = "dev-medium",
             tool_name = "Write",
             tool_input = new { file_path = Path.Combine(_repo, "src", "Dto.cs"), content = "x" },
         });
@@ -286,7 +286,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
         File.WriteAllText(Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"), "arbiter:\n  enabled: false\n");
 
-        Assert.Empty(Guard("copilot-cli", CopilotEdit("dal-dev", Path.Combine(_repo, "src", "Job.cs"), subagent: true)));
+        Assert.Empty(Guard("copilot-cli", CopilotEdit("dev-medium", Path.Combine(_repo, "src", "Job.cs"), subagent: true)));
     }
 
     [Fact]
@@ -306,7 +306,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         Harness = harness,
         Phase = phase,
-        Target = "dal-dev",
+        Target = "dev-medium",
         Prompt = "Add the job endpoint.",
         HarnessCaller = caller,
         ToolCallId = "call-1",

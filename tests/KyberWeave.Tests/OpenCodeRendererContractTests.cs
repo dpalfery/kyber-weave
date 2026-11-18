@@ -162,9 +162,18 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             string expectedMode = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent";
             Assert.Equal(expectedMode, RequireScalar(frontmatter, "mode", agent.Name));
 
-            // Model resolution: verify against loaded ModelProfiles for target opencode
-            SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
-            if (modelProfile.HarnessModels.TryGetValue("opencode", out string? opencodeHarnessModel))
+            // Model resolution: verify against loaded ModelProfiles for target opencode. The
+            // conductor names no profile and runs on the session's model, so its file has no key.
+            SquadModelProfile? modelProfile = string.IsNullOrWhiteSpace(agent.ModelProfile)
+                ? null
+                : source.ModelProfiles.Profiles[agent.ModelProfile];
+            if (modelProfile is null)
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' names no model profile and must omit 'model'.");
+            }
+            else if (modelProfile.HarnessModels.TryGetValue("opencode", out string? opencodeHarnessModel))
             {
                 if (string.Equals(opencodeHarnessModel, "inherit", StringComparison.Ordinal))
                 {
@@ -325,7 +334,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
                 ["kw-docs_*"] = "allow",
                 ["task"] = new Dictionary<string, string>
                 {
-                    ["azure-reader"] = "allow",
+                    ["platform-researcher"] = "allow",
                     ["research-agent"] = "allow"
                 }
             });
@@ -397,7 +406,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             .ToArray();
 
         Assert.NotEmpty(expectedPublishDegraded);
-        Assert.Contains("github-devops", expectedPublishDegraded);
+        Assert.Contains("devops", expectedPublishDegraded);
 
         foreach (string agentName in expectedPublishDegraded)
         {
@@ -556,7 +565,10 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             result.Files,
             file => file.RelativePath == ".opencode/agents/bug-crusher-investigator.md");
         string body = Encoding.UTF8.GetString(principal.Content.Span);
-        Assert.Contains(ResourceBearingSquadFixture.AgentTextOnlyLink, body, StringComparison.Ordinal);
+        Assert.Contains(
+            $"[Payload](.opencode/agents/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt)",
+            body,
+            StringComparison.Ordinal);
 
         SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
         SquadAgent agent = Assert.Single(

@@ -152,12 +152,12 @@ public sealed class ArbiterExistsFalseRuleTests
             {
                 Harness = "claude",
                 Phase = "pre",
-                Target = "csharp-dev",
+                Target = "dev-medium",
                 HarnessCaller = "conductor",
                 IsDispatch = true,
                 Prompt = promptWithPlan,
             },
-            "csharp-dev",
+            "dev-medium",
             promptWithPlan);
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, promptWithPlan, Config());
 
@@ -173,12 +173,12 @@ public sealed class ArbiterExistsFalseRuleTests
             {
                 Harness = "claude",
                 Phase = "pre",
-                Target = "csharp-dev",
+                Target = "dev-medium",
                 HarnessCaller = "conductor",
                 IsDispatch = true,
                 Prompt = PromptWithoutPlan,
             },
-            "csharp-dev",
+            "dev-medium",
             PromptWithoutPlan);
         return TriggerFactBuilder.Build(classification, PromptWithoutPlan, config);
     }

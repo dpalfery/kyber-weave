@@ -113,6 +113,9 @@ public static partial class SquadResponsePreferencesInjector
 
     private static bool IsCarrierLikePath(string relativePath)
     {
+        if (IsStandardsPath(relativePath))
+            return false;
+
         string? canonicalCarrier = GetCanonicalCarrierName(relativePath);
         if (canonicalCarrier is not null)
             return true;
@@ -181,6 +184,9 @@ public static partial class SquadResponsePreferencesInjector
         if (string.IsNullOrWhiteSpace(path))
             return null;
 
+        if (IsStandardsPath(path))
+            return null;
+
         string fileName = Path.GetFileName(path) ?? string.Empty;
         string? parentName = Path.GetDirectoryName(path) is string directory ? Path.GetFileName(directory) : null;
 
@@ -207,6 +213,23 @@ public static partial class SquadResponsePreferencesInjector
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// True for a file under the render's leading <c>standards</c> folder. A role's standards folder is named after
+    /// the role (<c>standards/conductor/</c>), and its files are standards, not that agent's entry file.
+    /// </summary>
+    /// <remarks>
+    /// Only the leading folder counts: a nested <c>standards</c> segment such as <c>agents/standards/conductor.md</c>
+    /// still names an agent entry file, so shipping it without a block is a defect worth the missing-block throw.
+    /// </remarks>
+    private static bool IsStandardsPath(string relativePath)
+    {
+        string[] segments = relativePath
+            .Replace('\\', '/')
+            .Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return segments.Length > 1
+            && string.Equals(segments[0], "standards", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? NormalizeCarrierName(string candidate)

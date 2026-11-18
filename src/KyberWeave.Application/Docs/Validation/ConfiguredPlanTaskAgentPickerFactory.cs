@@ -20,6 +20,8 @@ public sealed class ConfiguredPlanTaskAgentPickerFactory(ConfiguredArbiterProvid
         if (string.IsNullOrWhiteSpace(home))
             return null;
         IArbiterProvider? provider = providers.TryCreate(config.Arbiter.Provider, home);
-        return provider is null ? null : new PlanTaskAgentPick(provider, PlanTaskAgentPick.ImplementationAgents());
+        return provider is null
+            ? null
+            : new PlanTaskAgentPick(provider, PlanTaskAgentPick.ImplementationAgents(config.WorkerRoster));
     }
 }

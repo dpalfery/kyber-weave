@@ -6,7 +6,7 @@ status: current
 component: DocGraph
 source-root: src/KyberWeave.Core.Docs
 owner: dpalfery
-last-reviewed: 2026-11-08
+last-reviewed: 2026-11-17
 ---
 
 # Adopting DocGraph in an existing repository
@@ -46,10 +46,27 @@ drop. The one key `docs init` will rewrite there is `ontology.docs-root`, in pla
 when `--docs-root` moves it, so the catalog and the validator never end up reading
 different trees. Comments and every other key survive the edit.
 
-Passing `--kyber-standards` scaffolds the 11 rich Kyber Squad coding standards templates
-under `<docs-root>/standards/`, merges their technologies into `ontology.technologies`
-in `.kyber-weave/kyber-weave.yml`, and registers all 11 `<{tech}-coding-standard>` properties
-in Config Reg.
+Passing `--kyber-standards` scaffolds every technology template that ships — fourteen of them —
+under `<docs-root>/standards/`, merges their technologies into `ontology.technologies` in
+`.kyber-weave/kyber-weave.yml`, and registers each `<{tech}-coding-standard>` property in
+Config Reg. Each folder it writes holds four files: `<name>.standards.md`,
+`<name>.rules.md`, `<name>.skills.md` and `<name>.arbiter-rules.yml`, and the shared rules
+file is written once beside them.
+
+`--standards <name,name>` installs only the folders named: a technology or platform name
+joins `ontology.technologies`, a role name joins `ontology.roles`, and a file you already
+have is left byte-for-byte unchanged and reported. The four role folders (`conductor`,
+`architect`, `reviewer`, `devops`) and the four platform folders (`github`, `azure-devops`,
+`gitlab`, `jira`) are installed the same way.
+
+An existing host that holds each standard as `README.md` is not blocked: for two minor releases
+`docs validate` reports the old name and a standard whose headings are not the six as warnings, each
+naming the two commands. `kyber-weave docs standards migrate` renames the files, adds any of the four
+a folder lacks, and reshapes a standard whose headings are not the six — each authored section
+becomes a `###` under the heading it best fits, every move is printed, and no authored text is
+dropped. `docs init` then regenerates the Config Reg block, whose entries may still name the legacy
+files. A standard already under the six headings is left byte for byte alone, and a second run
+changes nothing.
 
 ### Review gates
 
@@ -297,11 +314,12 @@ read or write.
 | Kind | Where it lives | How to see the default |
 |---|---|---|
 | Runnable checks — build, test, format | `review.gates` and `review.task-gates` in `.kyber-weave/kyber-weave.yml` | `kyber-weave review catalogue . --technology <slug>` prints the block a scaffold would write, and writes nothing |
-| Finish commands — what runs when, and why | one `## Completion` section per coding standard under the standards folder | the standard itself, through `docs_get_coding_standard_for_technology(technology, topic: "completion")` |
-| A technology with no standard yet | — | `kyber-weave docs init . --kyber-standards` scaffolds the templates; a technology declared with no standard is a gap, not a default |
+| Finish commands — what runs when, and why | one `## Done checklist` section per coding standard under the standards folder | the standard itself, through `docs_get_coding_standard_for_technology(technology, topic: "done checklist")` |
+| A technology with no standard yet | — | `kyber-weave docs init . --standards <name>` installs the folders named; a technology declared with no standard is a gap, not a default |
 
-A standard has exactly one `## Completion` section and no separate `## Commands` section beside it:
-two sections answering "how do I finish" drift apart the moment one is edited and the other is not.
+A standard has exactly one `## Done checklist` section, and a `## Commands` section beside it
+answers the different question of how to run the work: two sections answering "how do I
+finish" drift apart the moment one is edited and the other is not.
 
 **Record `declined` honestly.** It ends the question exactly as `done` does, and a repository that
 declines is a valid repository: its workers report `TASK_GATE: NONE_DECLARED` and run the

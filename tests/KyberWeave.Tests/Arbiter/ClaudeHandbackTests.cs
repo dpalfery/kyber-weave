@@ -88,12 +88,12 @@ public sealed class ClaudeHandbackTests
         SeedLaunchLink(agentId);
         ScriptedEngine engine = new();
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "csharp-dev", engine);
+        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, engine.PostCalls);
-        Assert.Equal("csharp-dev", engine.SeenPostCaller);
-        Assert.Equal("csharp-dev", engine.SeenPostTarget);
+        Assert.Equal("dev-medium", engine.SeenPostCaller);
+        Assert.Equal("dev-medium", engine.SeenPostTarget);
         Assert.Equal(
             "Implemented the plan parser with tests passing.",
             engine.SeenPostOutput);
@@ -110,7 +110,7 @@ public sealed class ClaudeHandbackTests
         SeedLaunchLink(agentId);
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "csharp-dev", engine);
+        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, engine.PostCalls);
@@ -134,7 +134,7 @@ public sealed class ClaudeHandbackTests
         SeedLaunchLink(agentId);
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "csharp-dev", engine);
+        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -153,7 +153,7 @@ public sealed class ClaudeHandbackTests
         SeedLaunchLink(agentId);
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "csharp-dev", engine);
+        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -169,7 +169,7 @@ public sealed class ClaudeHandbackTests
         string agentId = UniqueAgentId();
         ScriptedEngine engine = new();
 
-        (int exit, string stdout) = Run(HandbackFor(agentId), "csharp-dev", engine);
+        (int exit, string stdout) = Run(HandbackFor(agentId), "dev-medium", engine);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, engine.PostCalls);
@@ -186,7 +186,7 @@ public sealed class ClaudeHandbackTests
         SeedLaunchLink(agentId);
         ScriptedEngine engine = new();
 
-        (int firstExit, string firstStdout) = Run(HandbackFor(agentId), "csharp-dev", engine);
+        (int firstExit, string firstStdout) = Run(HandbackFor(agentId), "dev-medium", engine);
         string completed = Fixture("post-completed.json").Replace(
             "\"agentId\": \"agent-7\"", "\"agentId\": \"" + agentId + "\"", StringComparison.Ordinal);
         (int secondExit, string secondStdout) = Run(completed, "conductor", engine);
@@ -209,7 +209,7 @@ public sealed class ClaudeHandbackTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("claude", "csharp-dev", HandbackFor(UniqueAgentId()), stdout, log);
+        int exit = command.Run("claude", "dev-medium", HandbackFor(UniqueAgentId()), stdout, log);
 
         Assert.Equal(0, exit);
         Assert.Equal(1, loads);

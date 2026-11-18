@@ -96,7 +96,7 @@ public sealed class CodexRenderer : SquadHarnessRenderer
 
     /// <summary>Squad's owned <c>.codex/hooks.json</c> block.</summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context) =>
-        context.AddArbiterMatcherGroupBlock(SquadHookBlockFormat.Codex, ArbiterMatcher);
+        context.AddArbiterMatcherGroupBlock(SquadHookBlockFormat.Codex, ArbiterMatcher, installWhenDisabled: true);
 
     private static SquadDeploymentFile RenderAgentFile(SquadHarnessRenderContext context, SquadAgent agent)
     {

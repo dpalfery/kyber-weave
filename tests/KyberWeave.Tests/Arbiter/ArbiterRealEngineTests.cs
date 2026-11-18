@@ -216,7 +216,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "                  effects: { escalate-now: escalate, within-task: allow }");
         HookCommand command = CreateCommand(new FakeProvider());
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -271,7 +271,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "                  effects: { adds-work: escalate, within-task: allow }");
         HookCommand command = CreateCommand(new FakeProvider());
 
-        (int exit, string stdout, _) = Run(command, Payload("PostToolUse", "csharp-dev", Prompt, "completed"));
+        (int exit, string stdout, _) = Run(command, Payload("PostToolUse", "dev-medium", Prompt, "completed"));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -288,7 +288,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(new FakeProvider(), new ThrowingGitFacts());
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -308,7 +308,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             new FakeProvider(),
             planRoots: new ThrowingPlanRoots());
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -328,7 +328,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
         WriteConfig(DisabledShippedRules());
         HookCommand command = CreateCommand(new FakeProvider(), new ThrowingGitFacts());
 
-        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, _) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -349,7 +349,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
                 new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner()),
             environment: _ => null);
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -373,7 +373,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             credentialStoreFactory: () => new SecretServiceCredentialStore(new ProcessRunnerCredentialProcessRunner()),
             environment: _ => null);
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
@@ -418,7 +418,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
             "                  effects: { adds-work: escalate, within-task: allow }");
         HookCommand command = CreateCommand(new FakeProvider { Throw = true });
 
-        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "csharp-dev", Prompt));
+        (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
 
         // A provider crash leaves the question undecidable, which allows; the failure is logged, never a block.
         Assert.Equal(0, exit);

@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using KyberWeave.Contracts.Services;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
@@ -45,12 +44,11 @@ static async Task<int> ServeAsync(string[] args)
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(args);
         builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
-        _ = builder.Services.AddArbiterHost();
 
         // Every failure resolving the context is a configuration mistake the message already names: the root flag
         // carries no path, or the root is not a directory. Stdout carries protocol frames only, so the message goes
         // to stderr and never a stack trace.
-        builder.Services.AddSingleton(sp => sp.GetRequiredService<IArbiterServeContextFactory>().Create(args, Console.Error));
+        _ = builder.Services.AddArbiterServe(args, Console.Error);
 
         builder.Services
             .AddMcpServer()

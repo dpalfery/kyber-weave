@@ -98,7 +98,9 @@ public sealed class AntigravityRendererContractTests : IDisposable
             new SquadRenderRequest(ProductRoot, [SquadTarget.Antigravity], SquadDeploymentScope.Project).Prepared());
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
-        Assert.NotEmpty(DeriveCollisions(source));
+        // The removal left no distinct-body collision: every shared name is a declared shared identity, so no
+        // agent lowers to a role-prefixed skill here.
+        Assert.Empty(DeriveCollisions(source));
         foreach (SquadAgent agent in source.Agents)
         {
             SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
@@ -298,9 +300,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
         string conductorName = RequireScalar(frontmatter, "name");
         Assert.Equal("conductor", conductorName);
 
-        // Must have model (from antigravity profiles)
-        string model = RequireScalar(frontmatter, "model");
-        Assert.Matches("^(inherit|flash|pro)$", model);
+        // The conductor has no model profile, so no model key is written at all.
+        Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("model")));
 
         // Must have enable_write_tools and enable_subagent_tools
         Assert.True(
@@ -452,8 +453,8 @@ public sealed class AntigravityRendererContractTests : IDisposable
 
         HashSet<string> expectedTrueProfiles =
         [
-            "architect", "documentation", "investigator", "product-planning", "reviewer", "review-seat", "root-fixer",
-            "worker", "publishing-worker"
+            "architect", "documentation", "investigator", "platform-reader", "product-planning", "reviewer", "review-seat",
+            "root-fixer", "worker", "publishing-worker"
         ];
         HashSet<string> expectedFalseProfiles = ["orchestrator", "read-only"];
 
@@ -727,11 +728,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
     }
 
     /// <summary>
-    ///     Pins rendered Antigravity models by agent identity so planners and reviewers use
-    ///     Pro while workers and orchestration remain on Flash, independently of models.yml.
+    ///     Pins rendered Antigravity models by model profile so planners, reviewers and the hard
+    ///     developer tier use Pro while routine workers remain on Flash, independently of models.yml.
     /// </summary>
     [Fact]
-    public async Task AntigravityPlanningAndReviewAgentsRunOnProAndOtherAgentsOnFlash()
+    public async Task AntigravityPlanningReviewAndHardTierUseProAndOtherAgentsUseFlash()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
@@ -751,10 +752,14 @@ public sealed class AntigravityRendererContractTests : IDisposable
                 f => f.RelativePath == $".agents/agents/{agent.Name}/agent.md");
 
             YamlMappingNode frontmatter = ReadFrontmatter(agentFile);
+            if (string.IsNullOrEmpty(agent.ModelProfile))
+            {
+                Assert.False(frontmatter.Children.ContainsKey(new YamlScalarNode("model")));
+                continue;
+            }
+
             string model = RequireScalar(frontmatter, "model");
-            string expectedModel = agent.Name is "architect" or "product-owner" or
-                "sql-database-architect" or "bug-crusher-investigator" or "code-reviewer" or
-                "review-lens" or "review-triage"
+            string expectedModel = agent.ModelProfile is "architect" or "deep-planning" or "reviewer" or "dev-hard"
                 ? "pro"
                 : "flash";
 
@@ -784,7 +789,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
             { "reviewer", "high" },
             { "general", "medium" },
             { "fast", "low" },
-            { "orchestration", "minimal" }
+            { "dev-hard", "high" }
         };
 
         foreach (SquadAgent agent in source.Agents)

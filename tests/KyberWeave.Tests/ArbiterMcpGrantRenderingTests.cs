@@ -57,7 +57,7 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
             Assert.Contains($"  - {tool}\n", codeReviewer, StringComparison.Ordinal);
         }
 
-        foreach (string agent in new[] { "architect", "product-owner", "csharp-dev", "test-dev", "github-devops", "docs-dev", "research-agent" })
+        foreach (string agent in new[] { "architect", "product-owner", "dev-easy", "dev-medium", "devops", "docs-dev", "research-agent" })
         {
             Assert.DoesNotContain(
                 ArbiterPrefix,
@@ -117,7 +117,7 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
     {
         SquadRenderResult result = await RenderAsync(new ZCodeRenderer(), SquadTarget.ZCode);
 
-        foreach (string agent in new[] { "architect", "csharp-dev", "docs-dev", "research-agent" })
+        foreach (string agent in new[] { "architect", "dev-medium", "docs-dev", "research-agent" })
         {
             string content = ContentOf(result, $".zcode/agents/{agent}.md");
             Assert.DoesNotContain(ArbiterPrefix, content, StringComparison.Ordinal);
@@ -129,9 +129,9 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
     {
         SquadRenderResult result = await RenderAsync(new ZCodeRenderer(), SquadTarget.ZCode);
 
-        string csharpDev = ContentOf(result, ".zcode/agents/csharp-dev.md");
-        Assert.Contains($"  - {StandardTool}\n", csharpDev, StringComparison.Ordinal);
-        Assert.DoesNotContain(ArbiterPrefix, csharpDev, StringComparison.Ordinal);
+        string specialist = ContentOf(result, ".zcode/agents/dev-medium.md");
+        Assert.Contains($"  - {StandardTool}\n", specialist, StringComparison.Ordinal);
+        Assert.DoesNotContain(ArbiterPrefix, specialist, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -142,6 +142,34 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
         Assert.DoesNotContain(
             result.Degradations,
             record => (record.Details ?? string.Empty).Contains(ArbiterServer, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task OpenCode_EnabledProjectWiring_GrantsTheArbiterServerOnlyToTheAgentsThatAsk()
+    {
+        SquadRenderResult result = await RenderAsync(
+            new OpenCodeRenderer(), SquadTarget.OpenCode, new SquadArbiterWiring(true, 30));
+
+        Assert.Contains($"kw-arbiter_*: allow", ContentOf(result, ".opencode/agents/conductor.md"), StringComparison.Ordinal);
+        Assert.Contains($"kw-arbiter_*: allow", ContentOf(result, ".opencode/agents/code-reviewer.md"), StringComparison.Ordinal);
+        foreach (string agent in new[] { "architect", "product-owner", "dev-easy", "dev-medium", "devops", "docs-dev", "research-agent" })
+        {
+            Assert.DoesNotContain(
+                "kw-arbiter_*",
+                ContentOf(result, $".opencode/agents/{agent}.md"),
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task OpenCode_WithoutAnEnabledProjectWiring_GrantsNoArbiterServer()
+    {
+        SquadRenderResult result = await RenderAsync(new OpenCodeRenderer(), SquadTarget.OpenCode);
+
+        Assert.DoesNotContain(
+            "kw-arbiter_*",
+            ContentOf(result, ".opencode/agents/conductor.md"),
+            StringComparison.Ordinal);
     }
 
     [Fact]

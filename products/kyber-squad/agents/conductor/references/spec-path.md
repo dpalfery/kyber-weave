@@ -8,6 +8,10 @@ Use this path when the user supplies a specification or selects one from the dir
 - **Partial or Draft:** invoke `product-owner` for the earliest incomplete or reopened phase. Pass the feature identity, exact artifact paths, current approval state, selected development mode, and only the user feedback relevant to that phase.
 - **Completed, Superseded, or archived:** do not execute it. Ask the user for an active artifact or use intake.
 
+## Configuration and its generated registry
+
+The roster and every Config Reg property come from `.kyber-weave/kyber-weave.yml`; the block in `AGENTS.md` is generated from it. When the two disagree the block is stale: follow the configuration, name the stale property, and have `kyber-weave docs init` regenerate it. A stale block never stops a run, and it is never a reason to ask which value to use.
+
 ## Headless phase protocol
 
 `product-owner` never prompts the user. It writes only specification artifacts and returns a structured digest. The conductor handles each result:
@@ -20,7 +24,7 @@ Use this path when the user supplies a specification or selects one from the dir
 
 After `SPEC_READY`, ask the final blocking question as **approve and execute**, stating the declared scale and components so the owner confirms the impact before execution (in autonomous mode, re-invoke `product-owner` with `AUTONOMOUS_APPROVAL: <gate id>` and let it record the approval). On explicit approval, re-invoke `product-owner` to record the specification as Ready and synchronize the index. Begin execution only after it returns `STATUS: SPEC_FINALIZED` with validation evidence, and load the `delivery-execution` skill when it does: that skill, not this path, holds the dispatch, verification, digest, findings and closeout rules.
 
-The specification form of the task file is `<spec-folder>/tasks.json`, beside its `tasks.md`. Validate it before the first dispatch and dispatch each worker by task id, because the worker prints its own packet from it: `tasks.md` is the approved record, not the dispatch source. Before the finalization invocation, run `kyber-weave docs tasks <spec-folder>/tasks.md --write` in the checkout holding the specification (the main session's shell, or dispatch `github-devops` when the conductor holds none); it derives `tasks.json` and its digest, and nobody writes either by hand. If it reports a gap (it names the task and the line to add), do not invoke finalization: reopen the tasks phase under the revision rules below: re-invoke `product-owner` with `PHASE: tasks` and the findings as revision feedback, then run the command again on the revised `tasks.md`. Run it again after any later `tasks.md` edit. Accept `SPEC_FINALIZED` only with its `TASK_FILE:` beside `tasks.md` and no `KW-DOC-TASKS-*` error from validation.
+The specification form of the task file is `<spec-folder>/tasks.yml`, beside its `tasks.md`. Validate it before the first dispatch and dispatch each worker by task id, because the worker prints its own packet from it: `tasks.md` is the approved record, not the dispatch source. Before the finalization invocation, run `kyber-weave docs tasks <spec-folder>/tasks.md --write` in the checkout holding the specification (the main session's shell, or dispatch `devops`, when the conductor holds none); it derives `tasks.yml` and its digest, and nobody writes either by hand. If it reports a gap (it names the task and the line to add), do not invoke finalization: reopen the tasks phase under the revision rules below: re-invoke `product-owner` with `PHASE: tasks` and the findings as revision feedback, then run the command again on the revised `tasks.md`. Run it again after any later `tasks.md` edit. Accept `SPEC_FINALIZED` only with its `TASK_FILE:` beside `tasks.md` and no `KW-DOC-TASKS-*` error from validation.
 
 ## Gate collapse in autonomous mode
 

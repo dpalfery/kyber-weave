@@ -31,7 +31,7 @@ public sealed class ArbiterDecisionRecordSavingsFieldsTests
             "delegate",
             "conductor",
             "hook",
-            "csharp-dev",
+            "dev-medium",
             null,
             null,
             null,

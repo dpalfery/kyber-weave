@@ -31,6 +31,14 @@ host configuration created by `kyber-weave docs init`; the server never walks up
 Git repository and never serves an unbound default corpus. A missing binding is reported on
 stderr with an actionable `kyber-weave docs init` command.
 
+**Every `DocsTools` constructor parameter must be a type the container registers.** The SDK
+constructs the tool type from the container on each call (`ActivatorUtilities.CreateInstance`),
+so a parameter it cannot resolve is an invocation error the client sees as "An error occurred
+invoking ...", while `tools/list` still answers. A bare primitive is never resolvable: the root
+these tools answer for travels as `DocsHostRoot`, which `AddDocsHostServices` registers.
+`McpCompositionRootTests` constructs every tool type from the container the server builds, so a
+new parameter with no registration fails the build rather than the first tool call.
+
 After resolution, an optional client assertion is checked: `--expect-root <path>`, or
 `KYBER_WEAVE_EXPECT_ROOT` when the flag is absent, must name the resolved root or the server
 refuses to serve — `KW-MCP-ROOT-002` on stderr, exit 1. The flag wins over the environment.

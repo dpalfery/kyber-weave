@@ -12,6 +12,10 @@ Before any assessment, read the user's intent from the request. The assessment e
 
 Do not call a stated choice an inference; do not treat a missing choice as one.
 
+## Configuration and its generated registry
+
+The roster and every Config Reg property come from `.kyber-weave/kyber-weave.yml`; the block in `AGENTS.md` is generated from it. When the two disagree the block is stale: follow the configuration, name the stale property, and have `kyber-weave docs init` regenerate it. A stale block never stops a run, and it is never a reason to ask which value to use.
+
 ## Defect diagnosis
 
 Read this contract before dispatching `bug-crusher-investigator`. Pass the concrete failure, exact command or error, existing artifact and task identity if supplied, and `CHOICE: PLAN | SPEC | UNSTATED` preserving the user's explicit choice. Pass the run-start facts as well: `where` the branch sits, its `branch` name, and the three versions — the failing binary's from `--failing-version`, `HEAD`, and the base. Comparing them is how the investigator separates a defect in the commit under review from one the base already carries, so it is given them rather than sent to work them out. The investigator diagnoses only; relay its evidence and `TRIVIAL | NEEDS_ARCHITECT` verdict. If the failure was not reproduced or its root cause is unknown, obtain the missing evidence before proceeding; do not draft a technical fix from symptoms.

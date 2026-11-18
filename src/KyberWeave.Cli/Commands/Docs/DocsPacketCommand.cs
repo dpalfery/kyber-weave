@@ -4,8 +4,11 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using Spectre.Console.Cli;
 using KyberWeave.Core.FileSystem;
@@ -27,13 +30,13 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
     /// <summary>The task file is missing or no longer matches its plan, so the packet would hand out stale work.</summary>
     public const string TaskFileStale = "KW-DOC-TASKS-CLI-004";
 
-    /// <summary>The prior-results file could not be read.</summary>
+    /// <summary>The prior-results file could not be read, or lies outside the run's scratch area.</summary>
     public const string PriorResultsUnreadable = "KW-DOC-TASKS-CLI-005";
 
     /// <summary>
-    /// Prints the packet of the named task: the task file's prompt with <c>{worktree}</c> filled in and the
-    /// prior-results slot filled from <c>--prior-results</c>, or labelled as empty, then the host facts section
-    /// (<see cref="PacketHostFacts" />) and nothing else. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
+    /// Prints the packet of the named task: the built prompt, then the task's resolved test command
+    /// (<see cref="PacketTestCommand" />). The prompt has <c>{worktree}</c> filled in and the prior-results slot
+    /// filled from <c>--prior-results</c>, or labelled as empty. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
     /// folders. When this checkout has none, the repository's other git worktrees are searched for the one active
     /// plan that has the task, so a worker whose shell is not in its worktree still gets its packet. The task file is checked against the plan first, so a stale file is refused with the fix.
     /// Exits 0 after printing; exits 1 with the reason and the next command otherwise.
@@ -87,12 +90,25 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
             return Fail(report);
         }
 
-        string? prior = null;
         if (settings.PriorResults is not null)
         {
+            // Checked here so a refusal is reported under the packet's own code, before any prompt is built;
+            // the service applies the same rule when it reads the file for the <task> part.
+            if (!TaskPromptService.IsScratchFile(root, settings.PriorResults))
+            {
+                report.Add(new Diagnostic(
+                    PriorResultsUnreadable,
+                    Severity.Error,
+                    $"The prior-results file '{settings.PriorResults}' is outside this run's scratch area. " +
+                    $"Write it under {TaskPromptService.ScratchFolder} in the checkout, name it relative to that folder, or leave it out.",
+                    "docs packet",
+                    Hint: $"Keep the file under {TaskPromptService.ScratchFolder} in this checkout."));
+                return Fail(report);
+            }
+
             try
             {
-                prior = files.ReadAllText(Path.GetFullPath(settings.PriorResults, current));
+                _ = files.ReadAllText(Path.GetFullPath(settings.PriorResults, root));
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
@@ -106,20 +122,47 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
             }
         }
 
-        // The test command and host facts are appended at print time, never written into the task file, so the digest is unaffected.
-        string? agent = string.IsNullOrWhiteSpace(settings.Agent) ? entry.Role : settings.Agent.Trim();
-        Console.Out.WriteLine(PlanTaskPacket.Fill(entry, root, prior));
-        Console.Out.WriteLine();
-        if (PacketTestCommand.Render(root, config, agent, entry, PlanTaskTarget.ContractRow(root, plan, entry.Id), OperatingSystem.IsWindows()) is { } tests)
+        // The prompt is built at print time, never written into the task file, so the digest is unaffected.
+        DocumentIndex index = DocumentIndex.Build(
+            new DocumentLoader(root, config.Ontology).Load(),
+            CodeGraphResolvers.ForRepository(root).Resolver);
+        TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor);
+        TaskPromptResult prompt = prompts.Build(
+            new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),
+            config);
+
+        if (!prompt.Built)
         {
-            Console.Out.WriteLine(tests);
-            Console.Out.WriteLine();
+            report.Add(new Diagnostic(
+                TaskFileStale,
+                Severity.Error,
+                prompt.Refusal ?? $"No packet printed: the prompt for {settings.Task} could not be built.",
+                "docs packet",
+                plan,
+                Hint: $"Run 'kyber-weave docs tasks {plan} --write', then run this command again. If it still fails, report this output unchanged."));
+            return Fail(report);
         }
 
-        List<string> notes = [];
-        Console.Out.WriteLine(hostFacts.Render(root, config, agent, entry.Id, notes));
-        foreach (string note in notes)
-            Console.Error.WriteLine("docs packet: " + note);
+        Console.Out.WriteLine(prompt.Prompt);
+        if (prompt.Substitution is not null)
+        {
+            // A warning to the conductor, not part of the prompt: the hook inserts stdout unchanged.
+            Console.Error.WriteLine(prompt.Substitution);
+        }
+
+        // The test command is a packet extra, not part of the prompt the hook inserts, so it is printed here.
+        if (PacketTestCommand.Render(
+                root,
+                config,
+                prompt.Agent,
+                entry,
+                PlanTaskTarget.ContractRow(root, plan, entry.Id),
+                OperatingSystem.IsWindows()) is { } tests)
+        {
+            Console.Out.WriteLine();
+            Console.Out.WriteLine(tests);
+        }
+
         return 0;
     }
 

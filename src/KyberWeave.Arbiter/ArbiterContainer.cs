@@ -2,6 +2,7 @@ using KyberWeave.Application;
 using KyberWeave.Application.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -23,6 +24,27 @@ internal static class ArbiterContainer
     {
         _ = services.AddWeaveApplication();
         services.TryAddSingleton<IHostConfigLoader, CoreHostConfigLoader>();
+        return services;
+    }
+
+    /// <summary>Registers the hook host's services, plus the serve context built from this process's own argv.</summary>
+    /// <remarks>
+    /// The serve surface's tools resolve their collaborators from this collection, so the composition-root test
+    /// builds it too: a tool that asks for a service this root does not register fails the test rather than the
+    /// first tool call a client makes.
+    /// </remarks>
+    /// <param name="services">The collection to populate.</param>
+    /// <param name="args">The process arguments that name the root the serve surface answers for.</param>
+    /// <param name="log">Where the context factory reports a root it refuses.</param>
+    /// <returns>The same collection, for chaining.</returns>
+    internal static IServiceCollection AddArbiterServe(this IServiceCollection services, string[] args, TextWriter log)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(log);
+
+        _ = services.AddArbiterHost();
+        services.AddSingleton(sp => sp.GetRequiredService<IArbiterServeContextFactory>().Create(args, log));
         return services;
     }
 

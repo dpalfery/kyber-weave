@@ -32,6 +32,7 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
     private const string ClaudeUserHookCommand = "kyber-weave-arbiter hook --harness claude --scope global";
     private const string AgentToolName = "Agent";
     private const string InstallCommandPrefix = "kyber-weave arbiter install";
+    private const string DispatchHookCommand = "kyber-weave-arbiter hook";
 
     // These harnesses keep their global hook in a shim file rather than inside a JSON file they share.
     private static readonly IReadOnlySet<SquadTarget> ShimTargets = new HashSet<SquadTarget>
@@ -112,6 +113,74 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
         return new HarnessGatingReport(rows, unlisted);
     }
 
+    private HarnessGatingRow PromptHookRow(Installed installed, string root, string arbiterState)
+    {
+        // Prompt insertion is not an Arbiter action: a host with the Arbiter off still installs the dispatch hook
+        // so a worker starts with its task prompt. A deployment that predates the hook, or one rendered without it,
+        // is the one case the operator has to fix.
+        bool installedHook = HasProjectDispatchHook(root, installed.Token);
+        string trust = ArbiterHookWiring.TrustSteps.TryGetValue(installed.Target, out string? step)
+            ? $" Trust: {step}"
+            : string.Empty;
+        if (installed.Deployed && !installedHook)
+        {
+            return new HarnessGatingRow(
+                installed.Token,
+                $"{arbiterState}; the dispatch hook that expands a task id into the worker's prompt is not installed," +
+                $" so a worker would start with only its task id.{trust}",
+                "kyber-weave squad update",
+                Ungated: true);
+        }
+
+        string state = installedHook
+            ? $"{arbiterState}; the dispatch hook is installed"
+            : arbiterState;
+        return new HarnessGatingRow(installed.Token, state + trust, null, Ungated: false);
+    }
+
+    /// <summary>
+    /// Whether the project deployment carries the dispatch hook that expands a task id into the worker's prompt.
+    /// </summary>
+    /// <remarks>
+    /// The hook is a command line inside whichever file the harness reads: an agent body on Claude and Copilot, a
+    /// shared hook file on Cursor, Codex, Factory and Devin, a plugin shim on Pi, Kilo and OpenCode. The receipt names
+    /// every file or block Squad owns for the target, so the check reads those and asks whether the command is in
+    /// one. A receipt that cannot be read is reported as a missing hook, as every other unreadable install fact is.
+    /// </remarks>
+    private bool HasProjectDispatchHook(string root, string token)
+    {
+        try
+        {
+            SquadReceipt? receipt = _store.ReadReceipt(root, SquadDeploymentScope.Project);
+            if (receipt is null)
+            {
+                return false;
+            }
+
+            IEnumerable<string> paths = receipt.Files
+                .Where(file => string.Equals(file.Target, token, StringComparison.Ordinal))
+                .Select(file => file.RelativePath)
+                .Concat(receipt.Blocks
+                    .Where(block => string.Equals(block.Target, token, StringComparison.Ordinal))
+                    .Select(block => block.RelativePath));
+            foreach (string relative in paths.Distinct(StringComparer.Ordinal))
+            {
+                string path = Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+                if (_files.FileExists(path)
+                    && _files.ReadAllText(path).Contains(DispatchHookCommand, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is ArgumentException or IOException or UnauthorizedAccessException or JsonException or InvalidDataException or InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
     private HarnessGatingRow RowFor(Installed installed, string root, string home, KyberWeaveConfig config)
     {
         string token = installed.Token;
@@ -122,15 +191,16 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
 
         if (config.Arbiter.ExplicitlyEnabled == false)
         {
-            return new HarnessGatingRow(token, OptedOutState, null, Ungated: false);
+            return PromptHookRow(installed, root, OptedOutState);
         }
 
         bool live = IsLive(installed);
         if (!config.Arbiter.Enabled)
         {
-            return live
-                ? new HarnessGatingRow(token, GlobalUserConfigState, null, Ungated: false)
-                : new HarnessGatingRow(token, NoProjectConfigState, null, Ungated: false);
+            return PromptHookRow(
+                installed,
+                root,
+                live ? GlobalUserConfigState : NoProjectConfigState);
         }
 
         if (installed.Target == SquadTarget.Claude)

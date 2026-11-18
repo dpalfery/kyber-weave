@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Mcp;
 using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Data.Arbiter;
@@ -61,6 +62,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ISeverityOverrideSource>(),
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<IPacketHostFacts>(sp => new PacketHostFacts(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
+            sp.GetRequiredService<IPlanTaskService>(),
+            sp.GetRequiredService<IPacketHostFacts>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<ICodeGraphPortsFactory>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
@@ -181,7 +187,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ITaskGateSelectionService>(),
             sp.GetRequiredService<IPlanTaskTargetService>()));
         services.TryAddSingleton<IPlanTaskTargetService>(sp => new PlanTaskTargetService(
-            sp.GetRequiredService<IPlanTaskService>(), sp.GetRequiredService<ITaskGateSelectionService>()));
+            sp.GetRequiredService<IPlanTaskService>(),
+            sp.GetRequiredService<ITaskGateSelectionService>(),
+            sp.GetRequiredService<IGitRepositoryFacts>()));
         services.TryAddSingleton<IReviewDecisionModelFactory, ReviewDecisionModelFactory>();
         services.TryAddSingleton<IReviewVerdictService, ReviewVerdictService>();
         _ = services.AddWeaveArbiterApplication();

@@ -19,7 +19,8 @@ public sealed class ArbiterEvaluatorFactory(
         string arbiterDirectory,
         IArbiterGitFacts gitFacts,
         IArbiterPlanReader planReader,
-        TimeProvider? clock = null) =>
+        TimeProvider? clock = null,
+        string? modelTargetsDirectory = null) =>
         new ArbiterEvaluator(
             provider,
             keyResolver,
@@ -30,7 +31,8 @@ public sealed class ArbiterEvaluatorFactory(
             modelTargets,
             gateReports,
             state,
-            clock ?? defaultClock);
+            clock ?? defaultClock,
+            modelTargetsDirectory: modelTargetsDirectory);
 }
 
 /// <summary>Creates comment triage services over the Arbiter's registered ports.</summary>

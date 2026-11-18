@@ -43,12 +43,12 @@ public sealed class ArbiterFactBuilderTests
             {
                 Harness = "claude",
                 Phase = "pre",
-                Target = "csharp-dev",
+                Target = "dev-medium",
                 Prompt = Prompt,
                 HarnessCaller = "conductor",
                 IsDispatch = true,
             },
-            "csharp-dev",
+            "dev-medium",
             Prompt);
 
         Assert.Equal("delegate", classification.Trigger);
@@ -62,7 +62,7 @@ public sealed class ArbiterFactBuilderTests
 
         Assert.Equal("conductor", facts.Facts["caller"].Value);
         Assert.Equal(ArbiterFactLabel.Derived, facts.Facts["caller"].Label);
-        Assert.Equal("csharp-dev", facts.Facts["delegation.target"].Value);
+        Assert.Equal("dev-medium", facts.Facts["delegation.target"].Value);
         Assert.Equal(ArbiterFactLabel.Asserted, facts.Facts["delegation.target"].Label);
         Assert.Equal("implementation", facts.Facts["delegation.target-class"].Value);
         Assert.Equal(ArbiterFactLabel.Derived, facts.Facts["delegation.target-class"].Label);
@@ -93,7 +93,7 @@ public sealed class ArbiterFactBuilderTests
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nTouch `src/a.cs` and `docs/plans/plan.md`.";
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             "delegate",
-            "csharp-dev",
+            "dev-medium",
             Prompt,
             "conductor",
             "harness",
@@ -185,7 +185,7 @@ public sealed class ArbiterFactBuilderTests
 
         ArbiterFactSet facts = TriggerFactBuilder.Build(
             "delegate",
-            "csharp-dev",
+            "dev-medium",
             Prompt,
             "conductor",
             "harness",
@@ -224,7 +224,7 @@ public sealed class ArbiterFactBuilderTests
     public void FactBuilder_UnknownTriggerThrowsWithHint()
     {
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            TriggerFactBuilder.Build("not-a-trigger", "csharp-dev", "body", null, null, DocsConfig()));
+            TriggerFactBuilder.Build("not-a-trigger", "dev-medium", "body", null, null, DocsConfig()));
 
         Assert.Contains("delegate", ex.Message, StringComparison.Ordinal);
     }

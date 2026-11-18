@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using KyberWeave.Core.Review;
+using KyberWeave.Core.Review.Catalogue;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -58,6 +59,9 @@ public static class ReviewConfigParser
             TaskGates = section.TaskGates is null
                 ? defaults.TaskGates
                 : ParseTaskGates(section.TaskGates, repositoryRoot, facts),
+            TechnologyGates = section.TechnologyGates is null
+                ? defaults.TechnologyGates
+                : ParseTechnologyGates(section.TechnologyGates, repositoryRoot, facts),
             TestMap = section.TestMap is null ? defaults.TestMap : ParseTestMap(section.TestMap),
             Coverage = ParseCoverage(section.Coverage, defaults.Coverage),
             Duplicates = ParseDuplicates(section.Duplicates, defaults.Duplicates),
@@ -172,7 +176,7 @@ public static class ReviewConfigParser
             {
                 throw new YamlException(
                     $"review.task-gates agent '{entry.Key}' is not a valid lookup name. Use the agent's slug: " +
-                    "lowercase alphanumerics separated by single hyphens, e.g. 'csharp-dev'.");
+                    "lowercase alphanumerics separated by single hyphens, e.g. 'dev-medium'.");
             }
 
             if (entry.Value is null || entry.Value.Count == 0)
@@ -182,7 +186,42 @@ public static class ReviewConfigParser
                     "or remove the agent.");
             }
 
-            parsed[entry.Key] = ParseAgentTaskGates(entry.Key, entry.Value, repositoryRoot, facts);
+            parsed[entry.Key] = ParseGateList($"review.task-gates '{entry.Key}'", entry.Value, repositoryRoot, facts);
+        }
+
+        return new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(parsed);
+    }
+
+    /// <summary>
+    /// Validates <c>review.technology-gates</c>, keyed by the one technology a task names. A gate is refused
+    /// where the operator wrote it, for the same reason a task gate is.
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> ParseTechnologyGates(
+        Dictionary<string, List<ReviewTaskGateYaml>?> technologyGates,
+        string? repositoryRoot,
+        ReviewWorkingDirectoryFacts? facts)
+    {
+        Dictionary<string, IReadOnlyList<ReviewTaskGate>> parsed = new(technologyGates.Count, StringComparer.Ordinal);
+
+        foreach (KeyValuePair<string, List<ReviewTaskGateYaml>?> entry in technologyGates)
+        {
+            if (!ConfigSlug.IsValid(entry.Key))
+            {
+                throw new YamlException(
+                    $"review.technology-gates technology '{entry.Key}' is not a valid lookup name. Use the " +
+                    "technology's name: lowercase alphanumerics separated by single hyphens, e.g. 'csharp' " +
+                    "or 'sql-server'.");
+            }
+
+            if (entry.Value is null || entry.Value.Count == 0)
+            {
+                throw new YamlException(
+                    $"review.technology-gates '{entry.Key}' declares no gates. Give it at least one gate, " +
+                    "or remove the technology.");
+            }
+
+            parsed[entry.Key] = ParseGateList(
+                $"review.technology-gates '{entry.Key}'", entry.Value, repositoryRoot, facts);
         }
 
         return new ReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>(parsed);
@@ -270,8 +309,8 @@ public static class ReviewConfigParser
         return true;
     }
 
-    private static IReadOnlyList<ReviewTaskGate> ParseAgentTaskGates(
-        string agent,
+    private static IReadOnlyList<ReviewTaskGate> ParseGateList(
+        string gatesWhere,
         List<ReviewTaskGateYaml> gates,
         string? repositoryRoot,
         ReviewWorkingDirectoryFacts? facts)
@@ -284,30 +323,30 @@ public static class ReviewConfigParser
             if (gate is null)
             {
                 throw new YamlException(
-                    $"review.task-gates '{agent}' has an empty gate entry. Each entry is a mapping with " +
+                    $"{gatesWhere} has an empty gate entry. Each entry is a mapping with " +
                     "an id and a run command.");
             }
 
             if (gate.Id is not { } id)
             {
                 throw new YamlException(
-                    $"review.task-gates '{agent}' has a gate with no id. Give every gate a lookup-name id " +
+                    $"{gatesWhere} has a gate with no id. Give every gate a lookup-name id " +
                     "such as 'format-whitespace'.");
             }
 
             if (!ConfigSlug.IsValid(id))
             {
                 throw new YamlException(
-                    $"review.task-gates '{agent}' gate id '{id}' is not a valid lookup name. Use lowercase " +
+                    $"{gatesWhere} gate id '{id}' is not a valid lookup name. Use lowercase " +
                     "alphanumerics separated by single hyphens.");
             }
 
-            // Gate ids are unique within an agent only: each agent's gates are reported as that agent's
-            // list, so the same id under two agents is the natural shared shape and is allowed.
+            // Gate ids are unique within one key only: each key's gates are reported as that key's
+            // list, so the same id under two keys is the natural shared shape and is allowed.
             if (!seen.Add(id))
-                throw new YamlException($"review.task-gates '{agent}' declares gate '{id}' more than once.");
+                throw new YamlException($"{gatesWhere} declares gate '{id}' more than once.");
 
-            string gateWhere = $"review.task-gates '{agent}' gate '{id}'";
+            string gateWhere = $"{gatesWhere} gate '{id}'";
 
             IReadOnlyList<string> run = ParseArgv(gate.Run, "run", gateWhere, true);
             IReadOnlyList<string> fix = ParseArgv(gate.Fix, "fix", gateWhere, false);
@@ -533,7 +572,10 @@ public static class ReviewConfigParser
         return normalized;
     }
 
-    /// <summary>Keys a gate mapping carries that the typed reader does not map. Each is reported, not dropped.</summary>
+    /// <summary>
+    /// Reports the non-fatal findings in a host's <c>review:</c> section: a key the typed reader does not map, and an
+    /// agent-keyed task gate that belongs to an agent the removal phase deletes. Each is reported, not dropped.
+    /// </summary>
     /// <remarks>
     /// A second pass over the raw YAML, because the typed reader ignores unknown keys by design, so that no host
     /// breaks on them. The load still succeeds; the operator is told the key does nothing.
@@ -572,27 +614,62 @@ public static class ReviewConfigParser
 
         if (ChildOf(review, "task-gates") is YamlMappingNode taskGates)
         {
-            foreach (KeyValuePair<YamlNode, YamlNode> agentEntry in taskGates.Children)
-            {
-                if (agentEntry.Value is not YamlSequenceNode agentGates)
-                    continue;
-
-                string agent = ScalarOf(agentEntry.Key);
-                foreach (YamlNode entry in agentGates.Children)
-                {
-                    if (entry is not YamlMappingNode gate)
-                        continue;
-
-                    string id = ScalarOf(ChildOf(gate, "id"));
-                    string where = id.Length == 0
-                        ? $"review.task-gates '{agent}' gate"
-                        : $"review.task-gates '{agent}' gate '{id}'";
-                    AddUnknownKeys(gate, TaskGateKeys, where, warnings);
-                }
-            }
+            AddGateKeyWarnings(taskGates, "review.task-gates", warnings);
+            AddRemovalWarnings(root, taskGates, warnings);
         }
 
+        if (ChildOf(review, "technology-gates") is YamlMappingNode technologyGates)
+            AddGateKeyWarnings(technologyGates, "review.technology-gates", warnings);
+
         return warnings;
+    }
+
+    /// <summary>
+    /// Reports each agent-keyed task gate whose agent the removal phase deletes.
+    /// </summary>
+    /// <remarks>
+    /// The warning fires only for a host that wrote <c>worker-roster: tiered</c>: that is a host holding a migration
+    /// it has not run yet, and the warning names the command that runs it. A host that never wrote the key is not
+    /// mid-migration, so its agent keys are read without a warning.
+    /// </remarks>
+    private static void AddRemovalWarnings(YamlMappingNode root, YamlMappingNode taskGates, List<string> warnings)
+    {
+        if (!string.Equals(ScalarOf(ChildOf(root, "worker-roster")), WorkerRosters.Tiered, StringComparison.Ordinal))
+            return;
+
+        foreach (KeyValuePair<YamlNode, YamlNode> entry in taskGates.Children)
+        {
+            string agent = ScalarOf(entry.Key);
+            if (!RemovedAgentMap.IsRemoved(agent))
+                continue;
+
+            warnings.Add(
+                $"review.task-gates '{agent}' is keyed by an agent the removal phase deletes. Run " +
+                $"'{RemovedAgentMap.MigrationCommand}' to rewrite it as review.technology-gates.");
+        }
+    }
+
+    /// <summary>Reports a key each <c>{section}.&lt;key&gt;</c> gate carries that the typed reader does not map.</summary>
+    private static void AddGateKeyWarnings(YamlMappingNode gatesByKey, string section, List<string> warnings)
+    {
+        foreach (KeyValuePair<YamlNode, YamlNode> entry in gatesByKey.Children)
+        {
+            if (entry.Value is not YamlSequenceNode gates)
+                continue;
+
+            string key = ScalarOf(entry.Key);
+            foreach (YamlNode node in gates.Children)
+            {
+                if (node is not YamlMappingNode gate)
+                    continue;
+
+                string id = ScalarOf(ChildOf(gate, "id"));
+                string where = id.Length == 0
+                    ? $"{section} '{key}' gate"
+                    : $"{section} '{key}' gate '{id}'";
+                AddUnknownKeys(gate, TaskGateKeys, where, warnings);
+            }
+        }
     }
 
     private static void AddUnknownKeys(

@@ -6,7 +6,7 @@ invocation: subagent
 model-profile: reviewer
 capability-profile: reviewer
 copilot-tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, "codegraph/*", "kw-docs/*", "context7/resolve-library-id", "context7/query-docs", search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]
-delegates-to: [azure-reader, review-lens, review-triage]
+delegates-to: [platform-researcher, review-lens, review-triage]
 fallback: role-skill
 aliases: []
 ---
@@ -74,7 +74,7 @@ Add `--hand-back` in hand-back mode. In seconds it syncs the tree's CodeGraph in
 
 **Hand-back mode.** When your dispatch's first body line is `COUNCIL-SEATS: hand-back`, the `review-council` skill starts your seats, because sub-agents here cannot dispatch, and you neither start nor apply a lens. Run `review seats` with `--hand-back` and return `STATUS: COUNCIL_SEATS_NEEDED` with its whole output, and stop. Dispatched again with `GATES` as the second body line, run the `run:` command and return its `not-seated:` and `after-gates:` lines. Re-invoked with each seat's outcome, the seat files are in the cycle folder: go to step 3. An Arbiter note relayed as a seat's outcome is acted on as the Arbiter review notes below direct.
 
-**Routing headers.** Every block opens with `KYBER-ARBITER: true`, `LENS: <lens>` and `REVIEW_RUN: <id>`, one id for the whole review, then a blank line. When you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), send each block without those header lines. A dispatch to `azure-reader` carries the marker and no `LENS:` header. Each block names its agent: `review-lens` for lenses that read code and judge it, `review-triage` for those whose input is a machine artifact; do not swap them.
+**Routing headers.** Every block opens with `KYBER-ARBITER: true`, `LENS: <lens>` and `REVIEW_RUN: <id>`, one id for the whole review, then a blank line. When you hold `arbiter_evaluate_agent_dispatch_or_return` (see Arbiter fallback), send each block without those header lines. A dispatch to `platform-researcher` carries the marker and no `LENS:` header. Each block names its agent: `review-lens` for lenses that read code and judge it, `review-triage` for those whose input is a machine artifact; do not swap them.
 
 The verdict command warns (`KW-REVIEW-047`) when the correctness seat wrote no readable `Input sites:` line, and a findings or `NO FINDINGS` seat without its `REVIEW.md sections checked: [<ids>]` attestation is a coverage gap; a seat's `Index fallback: <mode>` line is copied into Council coverage as a coverage gap. None of these is a verdict input or a finding against the code. A `SKIPPED` lens is recorded with its reason: an explicit skip is the opposite of silence.
 

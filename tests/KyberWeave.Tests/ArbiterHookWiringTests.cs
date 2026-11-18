@@ -375,14 +375,24 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
-    public void BuildHooks_WhenDisabled_ProducesNoHooks()
+    public void BuildHooks_WhenDisabled_WiresTheDispatchersAndNoGuardedAgent()
     {
+        // Prompt insertion runs with the Arbiter off, so the agents that call the dispatch tool keep their hook. The
+        // guarded agents' hooks gate their own reads and shell calls, which have nothing to do with the prompt.
         SquadArbiterWiring wiring = new(Enabled: false, HookTimeoutSeconds: 45);
 
         IReadOnlyList<SquadArbiterHook> hooks = ArbiterHookWiring.BuildHooks(
             LoadedSource, wiring, SquadDeploymentScope.Project);
 
-        Assert.Empty(hooks);
+        Assert.Equal(HookedTargetTokens.Length * DispatcherAgents.Length, hooks.Count);
+        Assert.All(hooks, hook =>
+        {
+            Assert.Contains(hook.Target, HookedTargetTokens);
+            Assert.Contains(hook.Caller, DispatcherAgents);
+            Assert.Equal(
+                $"{ExpectedCommandPrefix} {hook.Target} --caller {hook.Caller}",
+                hook.CommandLine);
+        });
     }
 
     [Fact]
@@ -432,7 +442,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_DisabledArbiter_RendersByteForByteIdenticallyToOmittingIt()
+    public async Task RenderAsync_DisabledArbiter_RendersOnlyTheDispatchHookSurface()
     {
         SquadRendererRegistry registry = SquadTestRegistry.Create([new ClaudeRenderer(), new OpenCodeRenderer()]);
         SquadRenderRequest withoutWiring = new SquadRenderRequest(
@@ -453,20 +463,40 @@ public sealed class ArbiterHookWiringTests : IDisposable
         Assert.Equal(withoutResult.Errors, disabledResult.Errors);
         Assert.Equal(withoutResult.Warnings, disabledResult.Warnings);
         Assert.Equal(withoutResult.Degradations, disabledResult.Degradations);
+        // A disabled wiring changes exactly two things: a dispatcher's Claude agent file carries the dispatch
+        // hook, and OpenCode gets the plugin shim that calls it. Every other file is byte for byte as before.
+        Assert.True(
+            disabledResult.Files.Any(file => file.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal)),
+            string.Join(", ", disabledResult.Files.Select(file => file.RelativePath)));
         Assert.Equal(
             withoutResult.Files.Select(file => (file.Target, file.RelativePath)).Order().ToList(),
-            disabledResult.Files.Select(file => (file.Target, file.RelativePath)).Order().ToList());
-        foreach ((SquadDeploymentFile expected, SquadDeploymentFile actual) in withoutResult.Files
-            .OrderBy(file => file.Target, StringComparer.Ordinal)
-            .ThenBy(file => file.RelativePath, StringComparer.Ordinal)
-            .Zip(disabledResult.Files
-                .OrderBy(file => file.Target, StringComparer.Ordinal)
-                .ThenBy(file => file.RelativePath, StringComparer.Ordinal)))
+            disabledResult.Files
+                .Where(file => !file.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal))
+                .Select(file => (file.Target, file.RelativePath))
+                .Order()
+                .ToList());
+        foreach (SquadDeploymentFile file in disabledResult.Files)
         {
+            if (file.RelativePath.EndsWith("kyber-arbiter.ts", StringComparison.Ordinal))
+            {
+                Assert.Contains("kyber-weave-arbiter", System.Text.Encoding.UTF8.GetString(file.Content.Span), StringComparison.Ordinal);
+                continue;
+            }
+
+            SquadDeploymentFile expected = Assert.Single(withoutResult.Files,
+                candidate => candidate.Target == file.Target && candidate.RelativePath == file.RelativePath);
+            bool dispatcherAgent = file.Target == "claude"
+                && file.RelativePath.StartsWith(".claude/agents/", StringComparison.Ordinal)
+                && DispatcherAgents.Any(agent => file.RelativePath.EndsWith($"/{agent}.md", StringComparison.Ordinal));
+            if (dispatcherAgent)
+            {
+                Assert.Contains("kyber-weave-arbiter hook", System.Text.Encoding.UTF8.GetString(file.Content.Span), StringComparison.Ordinal);
+                continue;
+            }
+
             Assert.True(
-                expected.Content.Span.SequenceEqual(actual.Content.Span),
-                $"Rendered bytes differ for {actual.Target}/{actual.RelativePath} when the " +
-                "Arbiter wiring is disabled; a disabled wiring must not change today's render.");
+                expected.Content.Span.SequenceEqual(file.Content.Span),
+                $"Rendered bytes differ for {file.Target}/{file.RelativePath} when the Arbiter wiring is disabled.");
         }
     }
 

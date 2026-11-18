@@ -26,5 +26,13 @@ public enum DocType
     /// standard is scoped by the <c>technology</c> key and is what a portable agent looks up
     /// when it needs the local answer rather than the one it shipped with.
     /// </summary>
-    CodingStandard
+    CodingStandard,
+
+    /// <summary>
+    /// How to carry out work in one technology or role: commands, tool servers, query
+    /// patterns and output shape. Scoped by <c>technology</c> or <c>role</c>, and required to
+    /// sit in that scope's folder, because a skill that drifts away from its standard stops
+    /// matching the work it describes.
+    /// </summary>
+    Skill
 }

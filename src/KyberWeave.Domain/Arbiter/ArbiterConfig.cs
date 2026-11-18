@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Core.Diagnostics;
 
 namespace KyberWeave.Core.Arbiter;
 
@@ -124,8 +125,22 @@ public sealed record ArbiterConfig
     /// <summary>The glob patterns that mark a path as a test file.</summary>
     public IReadOnlyList<string> TestFilePatterns { get; init; } = [];
 
+    /// <summary>
+    /// Each technology folder's <c>builds-on</c> parent, keyed by the technology whose standard names it. An event
+    /// in the child technology is judged by that parent's rules too; see <c>ArbiterRuleScopes</c>.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> RuleFolderParents { get; init; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>The <c>LENS-001</c> step-0 per-lens path table.</summary>
     public IReadOnlyList<ArbiterLensPathEntry> LensPaths { get; init; } = [];
+
+    /// <summary>
+    /// The findings the host's rule folders raised when the configuration was read. A folder file that could not be
+    /// parsed, or held a rule the Arbiter cannot use, is named here; the shipped rules are in force for that folder.
+    /// <c>arbiter validate</c> and <c>arbiter doctor</c> report these.
+    /// </summary>
+    public IReadOnlyList<Diagnostic> RuleFolderFindings { get; init; } = [];
 
     /// <summary>The <c>arbiter.model-targeting</c> block.</summary>
     public ArbiterModelTargetingConfig ModelTargeting { get; init; } = ArbiterModelTargetingConfig.Defaults;
@@ -147,8 +162,8 @@ public sealed record ArbiterConfig
     /// shipped rule enabled.
     /// </summary>
     /// <remarks>
-    /// Loaded from the embedded <c>default-rules.yml</c> rather than hardcoded so the
-    /// shipped catalogue has exactly one source of truth: the file the validator and
+    /// Loaded from the embedded role arbiter-rules files rather than hardcoded so the
+    /// shipped catalogue has exactly one source of truth: the files the validator and
     /// the documentation both read.
     /// </remarks>
     public static ArbiterConfig ProductDefaults { get; } = ArbiterConfigLoader.LoadEmbeddedDefaults();

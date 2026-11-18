@@ -106,10 +106,16 @@ public static class PacketTestCommandRenderer
         IPlanTaskTargetService targets,
         ITaskGateSelectionService taskGates)
     {
-        if (agent is null || !config.Review.TaskGates.TryGetValue(agent, out IReadOnlyList<ReviewTaskGate>? gates))
+        if (agent is null)
             return [];
 
-        ReviewTaskGate[] testGates = [.. gates.Where(gate => gate.Run.Any(element => element.Contains(TestsToken, StringComparison.Ordinal)))];
+        TaskGateResolution resolved = TaskGateResolver.Resolve(
+            config.Review,
+            agent,
+            entry.Technology,
+            TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, entry.Technology));
+
+        ReviewTaskGate[] testGates = [.. resolved.Gates.Where(gate => gate.Run.Any(element => element.Contains(TestsToken, StringComparison.Ordinal)))];
         string slug = TaskSlug.Normalise(entry.Id);
         IReadOnlyList<string> files = targets.Files(repoRoot, entry, row);
         if (testGates.Length == 0 || files.Count == 0 || slug.Length == 0)

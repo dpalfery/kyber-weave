@@ -166,18 +166,16 @@ public sealed class ArbiterModelTargetsFileTests : IDisposable
     }
 
     [Fact]
-    public async Task ArbiterDisabled_NoTableAndByteIdenticalRender()
+    public async Task ArbiterDisabled_NoTableAndTheDispatchHookIsInstalled()
     {
         SquadRenderResult disabled = await RenderAsync(SquadDeploymentScope.Project, arbiterEnabled: false);
-        SquadRenderResult withoutWiring = await Registry().RenderAsync(new SquadRenderRequest(
-            SourceDirectory: CorpusRoot,
-            Targets: [SquadTarget.Claude, SquadTarget.OpenCode],
-            Scope: SquadDeploymentScope.Project,
-            PreloadedSource: Canonical).Prepared());
 
         Assert.True(disabled.Success, string.Join("; ", disabled.Errors));
         Assert.DoesNotContain(disabled.Files, file => file.RelativePath.Contains("model-targets", StringComparison.Ordinal));
-        Assert.Equal(Snapshot(withoutWiring), Snapshot(disabled));
+        Assert.Contains(
+            disabled.Files,
+            file => System.Text.Encoding.UTF8.GetString(file.Content.Span)
+                .Contains("kyber-weave-arbiter hook", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -190,6 +190,62 @@ public sealed partial class DocumentIndex
     }
 
     /// <summary>
+    /// The whole bundle for one technology, or null when no standard answers the key.
+    /// </summary>
+    /// <remarks>
+    /// The bundle is stitched when asked for and never stored: it must reflect the files on
+    /// disk and the standard's current <c>builds-on</c> value, and a second stored copy is a
+    /// second answer that can drift. The docs tool and the task prompt both call this, so
+    /// they cannot disagree about what a technology's rules are.
+    /// </remarks>
+    public StandardsBundle? StandardsFor(string technology)
+    {
+        string key = NormalizeTechnologyKey(technology);
+        if (key.Length == 0) return null;
+
+        DocumentModel? standard = ScopedDocuments(DocType.CodingStandard, key)
+            .OrderBy(doc => doc.RelativePath, StringComparer.Ordinal)
+            .FirstOrDefault();
+        if (standard is null) return null;
+
+        string? parent = standard.Frontmatter.BuildsOn?.Trim();
+        bool hasParent = !string.IsNullOrWhiteSpace(parent);
+
+        return new StandardsBundle(
+            SharedRulesDocument(),
+            hasParent ? ScopedDocuments(DocType.Rule, parent!).FirstOrDefault() : null,
+            hasParent ? ScopedDocuments(DocType.Skill, parent!).FirstOrDefault() : null,
+            ScopedDocuments(DocType.Rule, key).FirstOrDefault(),
+            ScopedDocuments(DocType.Skill, key).FirstOrDefault(),
+            standard);
+    }
+
+    private IEnumerable<DocumentModel> ScopedDocuments(DocType docType, string scope) =>
+        _corpus.Documents
+            .Where(doc => doc.DocType == docType
+                          && string.Equals(
+                              doc.Frontmatter.Technology?.Trim(),
+                              scope,
+                              StringComparison.OrdinalIgnoreCase))
+            .OrderBy(doc => doc.RelativePath, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The shared rules file: a rule that names no technology or role and is the file the
+    /// standards root keeps beside its folders.
+    /// </summary>
+    private DocumentModel? SharedRulesDocument() =>
+        _corpus.Documents
+            .Where(doc => doc.DocType == DocType.Rule
+                          && string.IsNullOrWhiteSpace(doc.Frontmatter.Technology)
+                          && string.IsNullOrWhiteSpace(doc.Frontmatter.Role)
+                          && string.Equals(
+                              Path.GetFileName(doc.RelativePath),
+                              "shared-rules.md",
+                              StringComparison.OrdinalIgnoreCase))
+            .OrderBy(doc => doc.RelativePath, StringComparer.Ordinal)
+            .FirstOrDefault();
+
+    /// <summary>
     /// The documents whose <c>code-refs</c> formally claim a symbol. This is the reverse
     /// lookup the ontology exists to make possible; it is a claim of ownership, not a
     /// textual occurrence.
@@ -578,10 +634,21 @@ public sealed partial class DocumentIndex
     /// </remarks>
     internal static double Authority(DocumentModel doc)
     {
+        bool scoped = !string.IsNullOrWhiteSpace(doc.Frontmatter.Technology)
+                      || !string.IsNullOrWhiteSpace(doc.Frontmatter.Role);
+
         double byType = doc.DocType switch
         {
             DocType.Plan or DocType.Spec => 0.55,
             DocType.Adr => 0.9,
+
+            // A worker already receives these in its task prompt. Ranking them at full
+            // weight would let a standard or skills file outrank the architecture document
+            // that explains the same subject. The shared rules file is deliberately not
+            // here: it is small, applies everywhere, and is what remains when a budget cut
+            // drops a section.
+            DocType.CodingStandard or DocType.Skill => 0.55,
+            DocType.Rule when scoped => 0.55,
             _ => 1.0
         };
 
@@ -824,3 +891,22 @@ public sealed partial class DocumentIndex
             budgetExhausted);
     }
 }
+
+/// <summary>
+/// One technology's whole standards bundle: the shared rules that apply everywhere, the
+/// parent's rules and skills when the standard names one, then this technology's rules,
+/// skills and standard.
+/// </summary>
+/// <param name="SharedRules">The rules file that names no technology, when the corpus has one.</param>
+/// <param name="ParentRules">The parent technology's rules, when the standard names a parent.</param>
+/// <param name="ParentSkills">The parent technology's skills, when the standard names a parent.</param>
+/// <param name="Rules">This technology's prose rules.</param>
+/// <param name="Skills">This technology's skills document.</param>
+/// <param name="Standard">This technology's coding standard.</param>
+public sealed record StandardsBundle(
+    DocumentModel? SharedRules,
+    DocumentModel? ParentRules,
+    DocumentModel? ParentSkills,
+    DocumentModel? Rules,
+    DocumentModel? Skills,
+    DocumentModel? Standard);

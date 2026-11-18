@@ -196,6 +196,16 @@ public sealed class FileKyberWeaveConfigRepository(IRepositoryTreeProbe tree) : 
             : directory;
 
         return KyberWeaveConfigAssembler.FromRepositoryYaml(
-            yaml, root, new ReviewWorkingDirectoryFacts(tree.DirectoryExists, tree.LeadsOutsideThroughSymlink));
+            yaml,
+            root,
+            new ReviewWorkingDirectoryFacts(tree.DirectoryExists, tree.LeadsOutsideThroughSymlink),
+            ReadRepositoryText);
     }
+
+    /// <summary>
+    /// Reads a repository file for the assembler, or returns null when it does not exist. The domain layer parses the
+    /// text; this data layer owns the disk access, so <c>DomainPurityTests</c> keeps holding.
+    /// </summary>
+    private static string? ReadRepositoryText(string path) =>
+        File.Exists(path) ? File.ReadAllText(path) : null;
 }

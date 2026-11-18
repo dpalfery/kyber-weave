@@ -41,7 +41,7 @@ Normal phase work returns one of these exact status markers:
 - `STATUS: SPEC_READY`
 - `STATUS: SPEC_FINALIZED`
 - `STATUS: SPEC_WRITE_ERROR`
-- `STATUS: BLOCKED`, used only when `tasks.json` is missing at finalization
+- `STATUS: BLOCKED`, used only when `tasks.yml` is missing at finalization
 
 Every review or gap digest includes:
 

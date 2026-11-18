@@ -190,8 +190,20 @@ public sealed class FactoryRendererContractTests : IDisposable
                     declaredMcpServers,
                     StringComparer.Ordinal));
 
-            SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
-            if (modelProfile.HarnessModels.TryGetValue("factory", out string? factoryHarnessModel))
+            SquadModelProfile? modelProfile = string.IsNullOrWhiteSpace(agent.ModelProfile)
+                ? null
+                : source.ModelProfiles.Profiles[agent.ModelProfile];
+            if (modelProfile is null)
+            {
+                // An agent with no profile runs on the session's model.
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' names no model profile and must omit 'model'.");
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("reasoningEffort")),
+                    $"Agent '{agent.Name}' names no model profile and must omit 'reasoningEffort'.");
+            }
+            else if (modelProfile.HarnessModels.TryGetValue("factory", out string? factoryHarnessModel))
             {
                 if (string.Equals(factoryHarnessModel, "inherit", StringComparison.Ordinal) ||
                     string.IsNullOrWhiteSpace(factoryHarnessModel))

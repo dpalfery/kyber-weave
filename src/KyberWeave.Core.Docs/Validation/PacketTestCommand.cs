@@ -1,5 +1,6 @@
 using KyberWeave.Application.Review;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
@@ -20,7 +21,8 @@ public static class PacketTestCommand
 
     private static readonly IPlanTaskTargetService Targets = new PlanTaskTargetService(
         new PlanTaskService(LegacyPorts.Files),
-        new TaskGateSelectionService(new FileRepositoryTreeProbe(), new FileTestClassSources()));
+        new TaskGateSelectionService(new FileRepositoryTreeProbe(), new FileTestClassSources()),
+        new GitFacts());
 
     private static readonly ITaskGateSelectionService TaskGates =
         new TaskGateSelectionService(new FileRepositoryTreeProbe(), new FileTestClassSources());

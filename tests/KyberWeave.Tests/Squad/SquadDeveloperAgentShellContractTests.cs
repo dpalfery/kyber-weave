@@ -31,20 +31,11 @@ public sealed class SquadDeveloperAgentShellContractTests
 
     private static readonly string[] DeveloperAgents =
     [
-        "csharp-dev",
-        "dal-dev",
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops",
         "docs-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev",
     ];
 
     private static readonly HashSet<string> DeveloperProfiles =

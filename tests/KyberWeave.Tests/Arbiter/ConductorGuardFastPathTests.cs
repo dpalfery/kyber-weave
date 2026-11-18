@@ -47,7 +47,7 @@ public sealed class ConductorGuardFastPathTests
     [Fact]
     public void AWorkersCall_IsAnsweredWithNothing()
     {
-        string json = JsonSerializer.Serialize(new { cwd = Cwd, agentId = "a1", parentAgentId = "p1", agentType = "csharp-dev", toolName = "edit", toolArgs = new { } });
+        string json = JsonSerializer.Serialize(new { cwd = Cwd, agentId = "a1", parentAgentId = "p1", agentType = "dev-medium", toolName = "edit", toolArgs = new { } });
 
         AssertSameAnswer(json);
     }
@@ -63,7 +63,7 @@ public sealed class ConductorGuardFastPathTests
     [Fact]
     public void ADispatchOfAFileWritingSpecialist_NeedsTheGuardBecauseItReadsTheRunRecords()
     {
-        string json = JsonSerializer.Serialize(new { cwd = Cwd, toolName = "task", toolArgs = new { agent_type = "csharp-dev", prompt = "Implement it" } });
+        string json = JsonSerializer.Serialize(new { cwd = Cwd, toolName = "task", toolArgs = new { agent_type = "dev-medium", prompt = "Implement it" } });
 
         Assert.False(ConductorGuard.TryAnswer(json, TextWriter.Null, TextWriter.Null, null, out _));
     }

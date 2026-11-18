@@ -285,21 +285,22 @@ public sealed class PiRenderer : SquadHarnessRenderer
         context.EmitCanonicalSkills(skill =>
             context.RenderSkillDocument(skill.Name, skill.Description, skill.InstructionBody, Yaml));
 
-    /// <summary>The owned extension shim, only for an enabled wiring.</summary>
+    /// <summary>The owned extension shim: for an enabled wiring, and for prompt insertion with it off.</summary>
     private protected override void RenderArbiter(SquadHarnessRenderContext context)
     {
-        if (context.EnabledArbiter is not { } arbiter)
+        if (context.EnabledArbiter is null && !context.DispatchHooks)
         {
             return;
         }
 
+        int timeoutSeconds = context.EnabledArbiter?.HookTimeoutSeconds ?? context.DispatchHookTimeoutSeconds;
         string relativePath = context.Scope == SquadDeploymentScope.Global
             ? "extensions/kyber-arbiter.ts"
             : ArbiterExtensionFileRelativePath;
 
         context.Files.Add(context.CreateFile(
             relativePath,
-            RenderArbiterExtension(arbiter.HookTimeoutSeconds, context.Scope)));
+            RenderArbiterExtension(timeoutSeconds, context.Scope)));
     }
 
     private static SquadDeploymentFile RenderSubagentAgent(

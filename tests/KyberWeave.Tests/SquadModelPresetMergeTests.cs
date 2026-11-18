@@ -45,8 +45,8 @@ public sealed class SquadModelPresetMergeTests
         Assert.True(merged.Profiles.ContainsKey("fast"), "Category 'fast' should be preserved.");
         Assert.Equal(bundled.Profiles["fast"], merged.Profiles["fast"]);
 
-        Assert.True(merged.Profiles.ContainsKey("orchestration"), "Category 'orchestration' should be preserved.");
-        Assert.Equal(bundled.Profiles["orchestration"], merged.Profiles["orchestration"]);
+        Assert.True(merged.Profiles.ContainsKey("dev-hard"), "Category 'orchestration' should be preserved.");
+        Assert.Equal(bundled.Profiles["dev-hard"], merged.Profiles["dev-hard"]);
 
         Assert.True(merged.Profiles.ContainsKey("reviewer"), "Category 'reviewer' should be preserved.");
         Assert.Equal(bundled.Profiles["reviewer"], merged.Profiles["reviewer"]);
@@ -368,11 +368,11 @@ public sealed class SquadModelPresetMergeTests
             "kyber-squad.model-profiles/v1",
             new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
-                ["orchestration"] = profile
+                ["dev-hard"] = profile
             },
             "models.yml");
 
-        string? resolved = SquadModelResolution.ResolveToken(profiles, "orchestration", "devin");
+        string? resolved = SquadModelResolution.ResolveToken(profiles, "dev-hard", "devin");
 
         Assert.Null(resolved);
     }
@@ -388,11 +388,11 @@ public sealed class SquadModelPresetMergeTests
             "kyber-squad.model-profiles/v1",
             new Dictionary<string, SquadModelProfile>(StringComparer.Ordinal)
             {
-                ["orchestration"] = profile
+                ["dev-hard"] = profile
             },
             "models.yml");
 
-        string? resolved = SquadModelResolution.ResolveToken(profiles, "orchestration", "cursor");
+        string? resolved = SquadModelResolution.ResolveToken(profiles, "dev-hard", "cursor");
 
         Assert.Null(resolved);
     }

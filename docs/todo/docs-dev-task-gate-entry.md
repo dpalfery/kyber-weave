@@ -18,8 +18,8 @@ last-reviewed: 2026-11-08
 > `NONE_APPLICABLE`. The documentation check this todo asks for is unchanged and unbuilt.
 
 When this todo was filed, `review.task-gates` in `.kyber-weave/kyber-weave.yml` declared entries for
-the development agents — `csharp-dev`, `github-devops`, `react-dev`, `typescript-dev`, `rust-dev`,
-`test-dev` — and for none of the documentation, review or planning roles. `docs-dev` is the one that
+the development agents — the three developer tiers and `devops` — and for none of the documentation,
+review or planning roles. `docs-dev` is the one that
 matters most, because it is the role every completed change passes through: it edits governed
 Markdown in this repository and the two `AGENTS.md` files, and it is the only role that archives a
 plan or a specification. `kyber-weave review gates --agent docs-dev` then reported `KW-REVIEW-027`

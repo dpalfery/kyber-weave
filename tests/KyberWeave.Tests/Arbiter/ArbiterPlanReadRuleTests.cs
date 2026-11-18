@@ -33,8 +33,9 @@ public sealed class ArbiterPlanReadRuleTests
 {
     private const string PlanReadRule = "KW-ARB-PLANREAD-001";
 
-    private static readonly string ShippedRulesPath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
+    private static readonly string ConductorRulesPath = Path.Combine(
+        KyberWeaveTestPaths.ToolRoot,
+        "products", "kyber-squad", "standards", "conductor", "conductor.arbiter-rules.yml");
 
     /// <summary>A dispatch prompt with the routing header block, a task, and a body.</summary>
     private static string Prompt(string body) =>
@@ -54,7 +55,7 @@ public sealed class ArbiterPlanReadRuleTests
     /// <see cref="KyberWeaveConfig.ProductDefaults" /> places it at <c>6-Docs</c>, so a prompt naming
     /// <c>docs/plans/…</c> would name no configured planning directory and the rule could not fire.
     /// </remarks>
-    private static ArbiterFactSet Facts(string prompt, string target = "csharp-dev")
+    private static ArbiterFactSet Facts(string prompt, string target = "dev-medium")
     {
         return TriggerFactBuilder.Build(
             "delegate",
@@ -75,10 +76,10 @@ public sealed class ArbiterPlanReadRuleTests
     }
 
     /// <summary>The shipped rule's step-0 answer for those facts.</summary>
-    private static string Answer(string prompt, string target = "csharp-dev") => RuleEngine.Decide(Rule(), Facts(prompt, target));
+    private static string Answer(string prompt, string target = "dev-medium") => RuleEngine.Decide(Rule(), Facts(prompt, target));
 
     /// <summary>The effect the shipped rule produces for those facts.</summary>
-    private static string Effect(string prompt, string target = "csharp-dev")
+    private static string Effect(string prompt, string target = "dev-medium")
     {
         ArbiterOutcome outcome = RuleEngine.EvaluateStep0([Rule()], Facts(prompt, target), "delegate");
         return outcome.CombinedEffect;
@@ -108,7 +109,7 @@ public sealed class ArbiterPlanReadRuleTests
     /// product's own packet commands name the plan so the machine can identify the dispatch, and never reach the question.
     /// </summary>
     [Theory]
-    [InlineData("Fetch your packet with `kyber-weave docs packet T1 --agent dal-dev`.")]
+    [InlineData("Fetch your packet with `kyber-weave docs packet T1 --agent dev-medium`.")]
     [InlineData("Fetch your packet with `kyber-weave docs tasks docs/plans/2026-11-07-ready-tasks.md --task T1` (from the worktree).")]
     [InlineData("Your first action is `kyber-weave docs packet T1 --plan docs/plans/2026-11-07-ready-tasks.md`.")]
     public void RoutingMetadataAndPacketCommandsNameNoPlanToTheQuestion(string body)
@@ -121,6 +122,25 @@ public sealed class ArbiterPlanReadRuleTests
         Assert.DoesNotContain("PLAN_FILE", head, StringComparison.Ordinal);
         Assert.DoesNotContain("development-mode", head, StringComparison.Ordinal);
         Assert.DoesNotContain("docs/plans", head, StringComparison.Ordinal);
+        Assert.Equal("no-plan", Answer(prompt));
+    }
+
+    /// <summary>
+    /// Every dispatch header is routing metadata, including the retry headers: a <c>PRIOR_RESULTS</c> line naming a
+    /// planning path is how the hook finds the retry file, not an instruction telling the worker to open a plan.
+    /// </summary>
+    [Fact]
+    public void RetryHeadersAreRoutingMetadataNotAWorkerInstruction()
+    {
+        const string prompt =
+            "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/2026-11-07-ready-tasks.md\nTASK: T26\n" +
+            "PRIOR_RESULTS: docs/plans/2026-11-07-ready-tasks.md\nFAILED_ATTEMPTS: 2\n\nImplement T26.";
+        ArbiterFactSet facts = Facts(prompt);
+
+        Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<string>>(Fact(facts, "delegation.planning-paths")));
+        string head = Assert.IsType<string>(Fact(facts, "delegation.body-head"));
+        Assert.DoesNotContain("PRIOR_RESULTS", head, StringComparison.Ordinal);
+        Assert.DoesNotContain("FAILED_ATTEMPTS", head, StringComparison.Ordinal);
         Assert.Equal("no-plan", Answer(prompt));
     }
 
@@ -194,23 +214,18 @@ public sealed class ArbiterPlanReadRuleTests
     public void TheShippedFileDeclaresTheRuleAsTheTwentySixth()
     {
         Assert.True(
-            File.Exists(ShippedRulesPath),
-            $"the shipped rules file must live at '{ShippedRulesPath}'.");
-        string[] lines = File.ReadAllLines(ShippedRulesPath);
-
-        Assert.Contains("36 shipped Arbiter rules", lines[0], StringComparison.Ordinal);
-
+            File.Exists(ConductorRulesPath),
+            $"the conductor rules file must live at '{ConductorRulesPath}'.");
         string[] ids =
         [
-            .. lines
+            .. File.ReadAllLines(ConductorRulesPath)
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        Assert.Equal(36, ids.Length);
+        Assert.Equal(21, ids.Length);
         Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("KW-ARB-MODE-002", ids[^3]);
         Assert.Equal("delegate", Rule().Trigger);
     }
 }

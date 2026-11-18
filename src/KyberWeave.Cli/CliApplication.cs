@@ -130,9 +130,27 @@ internal static class CliApplication
                     .WithExample("docs", "validate", ".")
                     .WithExample("docs", "validate", ".", "--merge-ready");
 
+                docs.AddBranch("standards", standards =>
+                {
+                    standards.SetDescription("Inspect and migrate a host's technology, role and platform folders.");
+
+                    standards.AddCommand<DocsStandardsMigrateCommand>("migrate")
+                        .WithDescription(
+                            "Rename each legacy standards README.md to the folder-prefixed standard and add the " +
+                            "four files a folder holds.")
+                        .WithExample("docs", "standards", "migrate", ".")
+                        .WithExample("docs", "standards", "migrate", ".", "--dry-run");
+
+                    standards.AddCommand<DocsStandardsDiffCommand>("diff")
+                        .WithDescription(
+                            "Show how a host's standards folder differs from the current template, and write nothing.")
+                        .WithExample("docs", "standards", "diff", ".")
+                        .WithExample("docs", "standards", "diff", ".", "csharp");
+                });
+
                 docs.AddCommand<DocsTasksCommand>("tasks")
                     .WithDescription(
-                        "Derive a plan's task file (<plan>.tasks.json) and its execution digest from the plan; write or check it (KW-DOC-TASKS-*).")
+                        "Derive a plan's task file (<plan>.tasks.yml) and its execution digest from the plan; write or check it (KW-DOC-TASKS-*).")
                     .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--write")
                     .WithExample("docs", "tasks", "docs/plans/2026-11-12-my-plan.md", "--check");
 
@@ -140,7 +158,7 @@ internal static class CliApplication
                     .WithDescription(
                         "Print one task's packet for the worker dispatched on it: the plan is found from the repository, " +
                         "the task file is checked against it, and {worktree} is filled in (KW-DOC-TASKS-CLI-*).")
-                    .WithExample("docs", "packet", "T1", "--agent", "csharp-dev")
+                    .WithExample("docs", "packet", "T1", "--agent", "dev-medium")
                     .WithExample("docs", "packet", "T2", "--prior-results", "results.txt");
 
                 docs.AddCommand<DocsCloseoutCommand>("closeout")
@@ -359,6 +377,12 @@ internal static class CliApplication
                                      "added lines only.")
                     .WithExample("review", "suppressions", ".")
                     .WithExample("review", "suppressions", ".", "--base", "origin/main");
+
+                review.AddCommand<ReviewMigrateTaskGatesCommand>("migrate-task-gates")
+                    .WithDescription("Rewrite the host's agent-keyed task gates as technology-keyed gates, showing the " +
+                                     "change before writing it.")
+                    .WithExample("review", "migrate-task-gates", ".")
+                    .WithExample("review", "migrate-task-gates", ".", "--write");
 
                 review.AddCommand<ReviewDuplicatesCommand>("duplicates")
                     .WithDescription("Find symbols whose bodies are duplicated across the tree, from the CodeGraph index.")

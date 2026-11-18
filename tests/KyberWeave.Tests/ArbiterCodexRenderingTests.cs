@@ -69,7 +69,6 @@ public sealed class ArbiterCodexRenderingTests : IDisposable
 
     [Theory]
     [InlineData("null")]
-    [InlineData("disabled")]
     public async Task RenderAsync_WhenNotRendered_EmitsNoBlock(string mode)
     {
         SquadArbiterWiring? wiring = mode switch

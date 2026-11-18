@@ -192,6 +192,29 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         return string.IsNullOrWhiteSpace(renderedCaller) ? null : renderedCaller;
     }
 
+    /// <inheritdoc/>
+    public string? RenderPromptInsertion(JsonElement payload, string? renderedCaller, HookContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        _ = renderedCaller;
+
+        if (!string.Equals(GetString(payload, "hook_event_name"), "PreToolUse", StringComparison.Ordinal)
+            || !IsDispatchTool(GetString(payload, "tool_name")))
+        {
+            return null;
+        }
+
+        JsonElement toolInput = RequireToolInput(payload);
+        string prompt = GetString(toolInput, "prompt") ?? string.Empty;
+        DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+        return insertion.Kind switch
+        {
+            DispatchInsertionKind.Inserted => RenderPreAllowPrompt(toolInput, insertion.Text),
+            DispatchInsertionKind.Stopped => RenderPreDeny(insertion.Reason!),
+            _ => null,
+        };
+    }
+
     private string HandlePre(JsonElement payload, string? tool, string caller, KyberWeaveConfig config, HookContext context)
     {
         if (IsDispatchTool(tool))
@@ -221,24 +244,49 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 },
             };
             HookOutcome outcome = DecidePre(payload, caller, target, prompt, config, decisionContext, dispatchModel);
+
+            // The rules judge the short dispatch first; the prompt is inserted only for a dispatch they allowed.
+            DispatchInsertion insertion = DispatchPromptInsertion.Expand(prompt, context);
+            if (outcome.Kind == HookOutcomeKind.Deny)
+            {
+                return RenderPreDeny(
+                    outcome.Reason ?? throw new InvalidOperationException(
+                        "Hook engine denied without a reason."));
+            }
+
+            // A prompt that cannot be built stops the dispatch: no worker starts with only a task id.
+            if (insertion.Kind == DispatchInsertionKind.Stopped)
+            {
+                return RenderPreDeny(insertion.Reason!);
+            }
+
+            bool inserted = insertion.Kind == DispatchInsertionKind.Inserted;
+            string sentPrompt = inserted ? insertion.Text : prompt;
             return outcome.Kind switch
             {
-                HookOutcomeKind.PassThrough => string.Empty,
-                HookOutcomeKind.Allow when outcome.ModelToken is not null => RenderPreAllowModel(
-                    pending.Input ?? ModelInputOf(toolInput, prompt), outcome.ModelToken, pending.Written, context),
-                // A write the engine asked for that did not hold falls back to today's model allow: the header is
-                // stripped for every target, as the model path always did for a token it was asked to write.
-                HookOutcomeKind.Allow when pending.Written is false => RenderPreAllow(
-                    pending.Input ?? ModelInputOf(toolInput, prompt), _ => { }),
-                HookOutcomeKind.Allow => ReadGuard.IsImplementationSpecialist(target)
-                    ? RenderPreAllowStrip(toolInput, prompt)
+                HookOutcomeKind.PassThrough => inserted
+                    ? RenderPreAllowPrompt(toolInput, sentPrompt)
                     : string.Empty,
+                HookOutcomeKind.Allow when outcome.ModelToken is not null => RenderPreAllowModel(
+                    ModelInputOf(pending.Input, toolInput, sentPrompt, inserted), outcome.ModelToken, pending.Written, context),
+                // A write the engine asked for that did not hold falls back to today's model allow: the header is
+                // stripped for every target, as the model path always did for a token it was asked to write. The
+                // prompt inserted for the allowed dispatch still replaces it.
+                HookOutcomeKind.Allow when pending.Written is false => RenderPreAllow(
+                    ModelInputOf(pending.Input, toolInput, sentPrompt, inserted), _ => { }),
+                HookOutcomeKind.Allow => inserted
+                    ? RenderPreAllowPrompt(toolInput, sentPrompt)
+                    : ReadGuard.IsImplementationSpecialist(target)
+                        ? RenderPreAllowStrip(toolInput, sentPrompt)
+                        : string.Empty,
                 HookOutcomeKind.AllowWithRewrite => RenderPreAllowRaw(
                     outcome.RewrittenInputJson ?? throw new InvalidOperationException(
-                        "Hook engine returned allow-with-rewrite without rewritten input.")),
+                        "Hook engine returned allow-with-rewrite without rewritten input."),
+                    inserted ? sentPrompt : null),
                 HookOutcomeKind.AllowWithNote => RenderPreAllowNote(
                     toolInput,
-                    prompt,
+                    sentPrompt,
+                    inserted,
                     outcome.Reason ?? throw new InvalidOperationException(
                         "Hook engine allowed with a note but wrote none.")),
                 HookOutcomeKind.Deny => RenderPreDeny(
@@ -552,12 +600,12 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
         string.Equals(tool, "Bash", StringComparison.Ordinal)
         || string.Equals(tool, "PowerShell", StringComparison.Ordinal);
 
-    private static string RenderPreAllowNote(JsonElement toolInput, string prompt, string note)
+    private static string RenderPreAllowNote(JsonElement toolInput, string prompt, bool inserted, string note)
     {
         JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
             ?? throw new InvalidOperationException(
                 "Malformed Claude hook event: tool_input is not a JSON object.");
-        updated["prompt"] = HeaderBlock.Strip(prompt);
+        updated["prompt"] = inserted ? prompt : HeaderBlock.Strip(prompt);
         return new JsonObject
         {
             ["hookSpecificOutput"] = new JsonObject
@@ -588,6 +636,13 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 "Malformed Claude hook event: tool_input is not a JSON object."),
             node => node["prompt"] = HeaderBlock.Strip(prompt));
 
+    /// <summary>The allow that writes the prompt in place of the dispatch's identity line, every other field kept.</summary>
+    private static string RenderPreAllowPrompt(JsonElement toolInput, string prompt) =>
+        RenderPreAllow(JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+            ?? throw new InvalidOperationException(
+                "Malformed Claude hook event: tool_input is not a JSON object."),
+            node => node["prompt"] = prompt);
+
     /// <summary>
     /// Renders the allow that writes the delivered model. The write is one <c>updatedInput</c> that keeps
     /// every field of the tool input, with the header stripped from the prompt. A token the harness does
@@ -614,12 +669,20 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
     }
 
     /// <summary>The tool input as a JSON object, with the header stripped from the prompt.</summary>
-    private static JsonObject ModelInputOf(JsonElement toolInput, string prompt)
+    private static JsonObject ModelInputOf(JsonElement toolInput, string prompt) =>
+        ModelInputOf(null, toolInput, prompt, inserted: false);
+
+    /// <summary>
+    /// The tool input the model is written into: the input built while the decision asked for the model, or a
+    /// copy of the dispatch. The prompt is the inserted one when the hook built it, else the header-stripped dispatch.
+    /// </summary>
+    private static JsonObject ModelInputOf(JsonObject? input, JsonElement toolInput, string prompt, bool inserted)
     {
-        JsonObject updated = JsonNode.Parse(toolInput.GetRawText()) as JsonObject
+        JsonObject updated = input
+            ?? JsonNode.Parse(toolInput.GetRawText()) as JsonObject
             ?? throw new InvalidOperationException(
                 "Malformed Claude hook event: tool_input is not a JSON object.");
-        updated["prompt"] = HeaderBlock.Strip(prompt);
+        updated["prompt"] = inserted ? prompt : HeaderBlock.Strip(prompt);
         return updated;
     }
 
@@ -694,7 +757,7 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
 
     private static string OneLine(string text) => text.ReplaceLineEndings(" ");
 
-    private static string RenderPreAllowRaw(string rewrittenInputJson)
+    private static string RenderPreAllowRaw(string rewrittenInputJson, string? insertedPrompt)
     {
         JsonNode rewritten;
         try
@@ -708,7 +771,13 @@ public sealed class ClaudeHookAdapter : IHarnessHookAdapter
                 $"Hook engine returned invalid rewritten input JSON: {ex.Message}", ex);
         }
 
-        return RenderPreAllow(rewritten, _ => { });
+        return RenderPreAllow(rewritten, node =>
+        {
+            if (insertedPrompt is not null)
+            {
+                node["prompt"] = insertedPrompt;
+            }
+        });
     }
 
     private static string RenderPreAllow(JsonNode updatedInput, Action<JsonObject> mutate)

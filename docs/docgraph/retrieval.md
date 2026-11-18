@@ -100,10 +100,19 @@ So relevance is scaled by how far a document counts as current guidance:
 |---|---|
 | `plan`, `spec` | 0.55 |
 | `adr` | 0.9 |
+| `coding-standard`, `skill` | 0.55 |
+| `rule` that names a technology or role | 0.55 |
+| `rule` that names no scope (the shared rules file) | 1.0 |
 | every other doc type | 1.0 |
 | `superseded` | 0.4 |
 | `draft`, `needs-review` | 0.85 |
 | `current` | 1.0 |
+
+A standard, skills document and scoped rules document rank at 0.55 because a worker
+already holds them in its task prompt; letting them outrank the architecture or runbook
+that explains the same subject answers from the copy instead of the source. The shared
+rules file keeps full weight: it is small, applies everywhere, and is what remains when a
+prompt budget cut drops a section.
 
 The two multiply. A superseded plan lands at 0.22 of its raw relevance — present, but
 never the first thing an agent reads. A demoted document still wins when it is named

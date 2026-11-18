@@ -26,7 +26,7 @@ the contract, and is named by both entry points. None of them can prove that a l
 **loads** it: a deployment that half-updated would leave a dangling link and the run would lose
 its contract with no error. That is the observation this todo exists to capture now.
 
-Slice 4's `bug-crusher` roster also widened to `architect`, `test-dev`, `code-reviewer` and the
+Slice 4's `bug-crusher` roster also widened to `architect`, the developer tiers, `code-reviewer` and the
 twelve developer agents, so an escalation starts a specialist instead of stopping for a human.
 Whether that dispatch actually works on a real run is likewise unobservable from the corpus.
 

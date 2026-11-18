@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Text;
 using System.Text.Json.Nodes;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Validation;
@@ -109,11 +110,13 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
                 : request with { GlobalRoots = new MemoizedSquadGlobalRoots(request.GlobalRoots) };
 
             SquadSource renderSource = SquadWorkerBaselineInjector.Apply(
-                SubstituteHarnessToken(
-                    source,
-                    Spec.Token,
-                    SubagentDispatchAnswer(Spec.Target),
-                    SquadTargetCatalog.GetSubagentDispatchTool(Spec.Target)),
+                RestrictDelegatesToRoster(
+                    SubstituteHarnessToken(
+                        source,
+                        Spec.Token,
+                        SubagentDispatchAnswer(Spec.Target),
+                        SquadTargetCatalog.GetSubagentDispatchTool(Spec.Target)),
+                    request.WorkerRoster),
                 SquadWorkerBaselineInjector.BindSkillsRoot(
                     request.RequireWorkerBaselineBlock(),
                     ResolveSkillsRoot(Spec, request)));
@@ -211,6 +214,45 @@ public abstract class SquadHarnessRenderer : ISquadRenderer
             throw new SquadRenderValidationException(
                 $"Resource '{resource.RelativePath}' owned by '{owner}' is not a canonical portable relative path.");
         }
+    }
+
+    /// <summary>
+    /// Leaves out of every rendered <c>delegates-to</c> the agents whose own source declares the
+    /// <c>technology</c> roster, when the host runs the <c>tiered</c> roster.
+    /// </summary>
+    /// <remarks>
+    /// The shipped source lists no technology developer any more, so this filter is usually a no-op. It still runs
+    /// because a host can render from a Squad source an older release deployed, which lists them: a tiered run cannot
+    /// dispatch one — the task-prompt tool refuses it and names the tier instead — and listing it would offer a choice
+    /// that always fails, while on a harness whose delegation permission is built from <c>delegates-to</c> it would
+    /// grant the call the rule refuses. The filter is one-way by construction: with no roster, or with the retired
+    /// <c>technology</c> value, the source passes through untouched.
+    /// </remarks>
+    private static SquadSource RestrictDelegatesToRoster(SquadSource source, string? workerRoster)
+    {
+        if (!string.Equals(workerRoster, WorkerRosters.Tiered, StringComparison.Ordinal))
+        {
+            return source;
+        }
+
+        HashSet<string> technologyAgents = source.Agents
+            .Where(agent => string.Equals(agent.WorkerRoster, WorkerRosters.Technology, StringComparison.Ordinal))
+            .Select(agent => agent.Name)
+            .ToHashSet(StringComparer.Ordinal);
+        if (technologyAgents.Count == 0)
+        {
+            return source;
+        }
+
+        return source with
+        {
+            Agents =
+            [
+                .. source.Agents.Select(agent => agent.DelegatesTo.Any(technologyAgents.Contains)
+                    ? agent with { DelegatesTo = [.. agent.DelegatesTo.Where(name => !technologyAgents.Contains(name))] }
+                    : agent)
+            ]
+        };
     }
 
     /// <summary>
@@ -374,6 +416,19 @@ public sealed class SquadHarnessRenderContext
     /// </summary>
     public SquadArbiterWiring? EnabledArbiter =>
         Request.Arbiter is { Enabled: true } ? Request.Arbiter : null;
+
+    /// <summary>
+    /// Whether this render installs the dispatch hook, which replaces a dispatch's task-id line with the full prompt.
+    /// </summary>
+    /// <remarks>
+    /// Prompt insertion is not an Arbiter action: the hook is installed whenever a wiring is configured, enabled or
+    /// not, because a host with the Arbiter off still dispatches workers and still needs their prompts. The hook
+    /// process reads the host configuration and either judges the short dispatch first or only inserts.
+    /// </remarks>
+    public bool DispatchHooks => Scope == SquadDeploymentScope.Project && Request.Arbiter is not null;
+
+    /// <summary>The timeout a dispatch hook carries, from the wiring this render was given.</summary>
+    public int DispatchHookTimeoutSeconds => Request.Arbiter?.HookTimeoutSeconds ?? 0;
 
     /// <summary>
     /// The harness's own per-render state, created once on first use: a renderer is shared across
@@ -615,9 +670,12 @@ public sealed class SquadHarnessRenderContext
         SquadYamlEmitter emitter,
         string discoveryGlob)
     {
+        string principalPath = $"{AgentsDirectory}/{agent.Name}.md";
+        int separator = principalPath.LastIndexOf('/');
+        string principalDirectory = separator < 0 ? string.Empty : principalPath[..separator];
         SquadDeploymentFile principal = CreateFile(
-            $"{AgentsDirectory}/{agent.Name}.md",
-            emitter.Compose(frontmatter, SquadAgentResourceDiscoveryGuard.RewriteBody(agent)));
+            principalPath,
+            emitter.Compose(frontmatter, SquadAgentResourceDiscoveryGuard.RewriteBody(agent, principalDirectory)));
         Files.Add(principal);
         SquadAgentResourceDiscoveryGuard.Append(
             Files,
@@ -629,10 +687,10 @@ public sealed class SquadHarnessRenderContext
             discoveryGlob);
     }
 
-    /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter.</summary>
+    /// <summary>Adds the owned Arbiter plugin shim when the request enables Arbiter or installs the dispatch hook.</summary>
     public void AddArbiterPluginShim(string projectRelativePath, string? globalRelativePath = null)
     {
-        if (EnabledArbiter is null)
+        if (EnabledArbiter is null && !DispatchHooks)
         {
             return;
         }
@@ -658,26 +716,36 @@ public sealed class SquadHarnessRenderContext
     /// Only Factory asks for it, because only Factory fires a hook when a background subagent
     /// stops.
     /// </param>
-    public void AddArbiterMatcherGroupBlock(SquadHookBlockFormat format, string matcher, bool includeSubagentStop = false)
+    /// <param name="installWhenDisabled">
+    /// Installs the block even with the Arbiter off, for the harness whose adapter also inserts a dispatch prompt.
+    /// A harness whose adapter cannot rewrite the dispatch keeps its disabled render unchanged and takes the prompt
+    /// file instead.
+    /// </param>
+    public void AddArbiterMatcherGroupBlock(
+        SquadHookBlockFormat format,
+        string matcher,
+        bool includeSubagentStop = false,
+        bool installWhenDisabled = false)
     {
-        if (EnabledArbiter is not { } arbiter)
+        if (EnabledArbiter is null && !(installWhenDisabled && DispatchHooks))
         {
             return;
         }
 
+        int timeoutSeconds = EnabledArbiter?.HookTimeoutSeconds ?? DispatchHookTimeoutSeconds;
         string commandLine = ArbiterHookWiring.HookCommandLine(Token, Scope);
         string projectPath = SquadHookJsonBlock.RelativePath(format);
         string relativePath = Scope == SquadDeploymentScope.Global ? Path.GetFileName(projectPath) : projectPath;
         List<SquadRenderedBlockEntry> entries =
         [
-            new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds)),
-            new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, arbiter.HookTimeoutSeconds))
+            new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(matcher, commandLine, timeoutSeconds)),
+            new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(matcher, commandLine, timeoutSeconds))
         ];
         if (includeSubagentStop)
         {
             entries.Add(new SquadRenderedBlockEntry(
                 "SubagentStop",
-                MatcherGroup(matcher: null, commandLine, arbiter.HookTimeoutSeconds)));
+                MatcherGroup(matcher: null, commandLine, timeoutSeconds)));
         }
 
         Blocks.Add(new SquadRenderedBlock(Token, relativePath, format, entries));

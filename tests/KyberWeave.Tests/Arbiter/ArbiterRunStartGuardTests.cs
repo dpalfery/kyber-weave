@@ -119,20 +119,20 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     [Fact]
     public void Rule_EscalatesAWriterDispatchFromTheConductorWithNoRun()
     {
-        Assert.Equal("not-started", Answer("delegate", "conductor", "csharp-dev", "Add the widget.", started: false));
+        Assert.Equal("not-started", Answer("delegate", "conductor", "dev-medium", "Add the widget.", started: false));
         Assert.Equal("escalate", Rule().Effects["not-started"]);
     }
 
     [Fact]
     public void Rule_AllowsOnceTheRunIsStarted()
     {
-        Assert.Equal("started", Answer("delegate", "conductor", "csharp-dev", "Add the widget.", started: true));
+        Assert.Equal("started", Answer("delegate", "conductor", "dev-medium", "Add the widget.", started: true));
     }
 
     [Fact]
     public void Rule_IsUndecidedWhenTheEvidenceCouldNotBeRead()
     {
-        Assert.Equal(RuleEngine.Undecidable, Answer("delegate", "conductor", "csharp-dev", "Add the widget.", started: null));
+        Assert.Equal(RuleEngine.Undecidable, Answer("delegate", "conductor", "dev-medium", "Add the widget.", started: null));
     }
 
     [Theory]
@@ -149,12 +149,12 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     }
 
     [Theory]
-    [InlineData("investigate", "conductor", "github-devops", "RUN-START: true\nkyber-weave run start --harness claude --type feat --slug a")]
-    [InlineData("investigate", "conductor", "github-devops", "kyber-weave run start --harness claude --type feat --slug a")]
+    [InlineData("investigate", "conductor", "devops", "RUN-START: true\nkyber-weave run start --harness claude --type feat --slug a")]
+    [InlineData("investigate", "conductor", "devops", "kyber-weave run start --harness claude --type feat --slug a")]
     [InlineData("investigate", "conductor", "research-agent", "Find the widget.")]
     [InlineData("investigate", "architect", "research-agent", "Find the widget.")]
-    [InlineData("investigate", "unidentified", "csharp-dev", "Add the widget.")]
-    [InlineData("investigate", "general-purpose", "csharp-dev", "Add the widget.")]
+    [InlineData("investigate", "unidentified", "dev-medium", "Add the widget.")]
+    [InlineData("investigate", "general-purpose", "dev-medium", "Add the widget.")]
     public void Rule_DoesNotApplyOutsideAnOrchestratorHandingWorkToAWriter(string trigger, string caller, string target, string prompt)
     {
         Assert.Equal("not-applicable", Answer(trigger, caller, target, prompt, started: false));
@@ -163,17 +163,17 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     [Fact]
     public void Rule_CoversTheBugCrusher()
     {
-        Assert.Equal("not-started", Answer("investigate", "bug-crusher", "typescript-dev", "Fix the parser.", started: false));
+        Assert.Equal("not-started", Answer("investigate", "bug-crusher", "dev-medium", "Fix the parser.", started: false));
     }
 
     [Fact]
     public void HookFacts_FillRunStartedFromTheRecord()
     {
-        Assert.Equal(false, HookFact("csharp-dev"));
+        Assert.Equal(false, HookFact("dev-medium"));
 
         StartInPlace();
 
-        Assert.Equal(true, HookFact("csharp-dev"));
+        Assert.Equal(true, HookFact("dev-medium"));
     }
 
     [Fact]
@@ -195,7 +195,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     [Fact]
     public void Guard_DeniesTheConductorsWriterDispatchWithNoRun()
     {
-        string answer = Guard(Task("csharp-dev", "Add the widget."));
+        string answer = Guard(Task("dev-medium", "Add the widget."));
 
         Assert.Contains("deny", answer, StringComparison.Ordinal);
         Assert.Contains(RuleId, answer, StringComparison.Ordinal);
@@ -208,7 +208,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     {
         StartInPlace();
 
-        Assert.Empty(Guard(Task("csharp-dev", "Add the widget.")));
+        Assert.Empty(Guard(Task("dev-medium", "Add the widget.")));
     }
 
     [Theory]
@@ -227,7 +227,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     }
 
     [Theory]
-    [InlineData("github-devops", "kyber-weave run start --harness copilot --type feat --slug add-widget")]
+    [InlineData("devops", "kyber-weave run start --harness copilot --type feat --slug add-widget")]
     [InlineData("research-agent", "Find the widget.")]
     public void Guard_AllowsDispatchesThatWriteNoProjectFiles(string target, string prompt)
     {
@@ -243,7 +243,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         {
             cwd = _home.Path,
             toolName = "task",
-            toolArgs = new { agent_type = "csharp-dev", prompt = "Add the widget." },
+            toolArgs = new { agent_type = "dev-medium", prompt = "Add the widget." },
         });
 
         ArbiterTestServices.Get<IConductorGuard>().Run(json, stdout, log, copilotHome: "/nowhere/.copilot", homeDirectory: _home.Path);

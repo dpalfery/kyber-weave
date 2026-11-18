@@ -170,7 +170,6 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
                 skills:
                   - response-format
                   - task-gate
-                  - testing
                 """,
                 new UTF8Encoding(false));
 

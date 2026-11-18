@@ -147,10 +147,14 @@ public sealed class ConfigRegConfig
     /// <summary>Suffix that turns a declared technology into its registry property name.</summary>
     public const string CodingStandardSuffix = "-coding-standard";
 
+    /// <summary>The registry property naming the worker roster a run dispatches from.</summary>
+    public const string WorkerRosterProperty = "worker-roster";
+
     /// <summary>
     /// Registry property per scaffolded folder. Each resolves to that folder's canonical
-    /// README rather than to the directory: a property an agent can read in one step is
-    /// worth more than one it has to list, and the README is the folder's own index.
+    /// README rather than to the directory, except a technology's standard, which resolves
+    /// to its own prefixed file: a property an agent can read in one step is worth more than
+    /// one it has to list, and the README is the folder's own index.
     /// <c>standards</c> is the exception, published as a root because the deferred standards
     /// skill enumerates it.
     /// </summary>
@@ -207,6 +211,9 @@ public sealed class ConfigRegConfig
     /// did not set one. Read <see cref="BaseBranch"/> for the branch a run actually uses.
     /// </summary>
     public string? RunBaseBranch { get; init; }
+
+    /// <summary>The worker roster setting to publish, or null when the host wrote none.</summary>
+    public string? WorkerRoster { get; init; }
 
     /// <summary>
     /// The branch a run is compared against: the configured one, or
@@ -280,6 +287,14 @@ public sealed class ConfigRegConfig
         // was actually chosen is worth a line, and only a chosen value can differ from it.
         // stop-on-tool-failure is deliberately not published: the CLI and the MCP server are
         // the readers, not an agent instruction file (ADR 0061).
+        if (!string.IsNullOrWhiteSpace(WorkerRoster))
+        {
+            entries.Add(new ConfigRegEntry(
+                WorkerRosterProperty,
+                WorkerRoster,
+                ConfigRegEntryKind.Mode));
+        }
+
         if (!string.IsNullOrWhiteSpace(RunBaseBranch))
         {
             entries.Add(new ConfigRegEntry(
