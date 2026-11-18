@@ -9,15 +9,19 @@ using Xunit;
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// Contract for task 12.1: the Pi plugin-envelope adapter. Pi dispatches through the
-/// <c>Agent</c> tool (from <c>@tintinweb/pi-subagents</c>), with the target at
-/// <c>args.subagent_type</c> and the prompt at <c>args.prompt</c>. Both phases answer
-/// as task 4.3 defines, and a malformed envelope blocks carrying
-/// <c>KW-ARB-HOOK-001</c> with the harness token recorded.
-/// RED: no <c>pi</c> adapter is registered in <c>PluginHookAdapters</c>.
+/// Contract for task 16.1: the Kilo plugin-envelope adapter. Kilo's plugin API is
+/// identical to OpenCode's — the same <c>tool.execute.before</c> and
+/// <c>tool.execute.after</c> hooks, blocking by throwing — so its shim dispatches
+/// on the <c>task</c> tool, with the target at <c>args.subagent_type</c> and the
+/// prompt at <c>args.prompt</c>. Both phases answer as task 4.3 defines, and a
+/// malformed envelope blocks carrying <c>KW-ARB-HOOK-001</c> with the harness
+/// token recorded.
+/// RED: no <c>kilo</c> adapter is registered in <c>PluginHookAdapters</c>.
 /// </summary>
-public sealed class PiHookAdapterTests
+public sealed class KiloHookAdapterTests
 {
+    private static readonly string Cwd = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "repo"));
+
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public string? SeenPreTarget;
@@ -47,7 +51,7 @@ public sealed class PiHookAdapterTests
         JsonObject args,
         JsonNode? result = null,
         string schema = PluginEnvelope.SchemaV1,
-        string harness = "pi")
+        string harness = "kilo")
     {
         JsonObject envelope = new()
         {
@@ -57,7 +61,7 @@ public sealed class PiHookAdapterTests
             ["tool"] = tool,
             ["call-id"] = "call-1",
             ["session"] = "sess-1",
-            ["cwd"] = Directory.GetCurrentDirectory(),
+            ["cwd"] = Cwd,
             ["args"] = args,
         };
         if (result is not null)
@@ -68,9 +72,9 @@ public sealed class PiHookAdapterTests
         return envelope.ToJsonString();
     }
 
-    private static JsonObject AgentArgs(string target, string prompt) => new()
+    private static JsonObject TaskArgs(string target, string prompt) => new()
     {
-        ["description"] = "Implement T12",
+        ["description"] = "Implement T16",
         ["prompt"] = prompt,
         ["subagent_type"] = target,
     };
@@ -78,31 +82,31 @@ public sealed class PiHookAdapterTests
     private static (int Exit, string Stdout) Run(
         string stdin, string? caller, ScriptedEngine engine)
     {
-        PluginHookAdapter adapter = new("pi", "Agent", "subagent_type", "prompt", engine);
+        PluginHookAdapter adapter = new("kilo", "task", "subagent_type", "prompt", engine);
         HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             _ => EnabledConfig(),
             () => "decision-test-1");
         using StringWriter stdout = new();
         using StringWriter log = new();
-        int exit = command.Run("pi", caller, stdin, stdout, log);
+        int exit = command.Run("kilo", caller, stdin, stdout, log);
         return (exit, stdout.ToString());
     }
 
     [Fact]
-    public void Before_AgentEnvelope_ClassifiedBySubagentTypeAndPrompt()
+    public void Before_TaskEnvelope_ClassifiedBySubagentTypeAndPrompt()
     {
         const string body = "Implement the plan parser.";
-        string prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 12.1\n\n" + body;
+        string prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: 16.1\n\n" + body;
         (int exit, string stdout) = Run(
-            Envelope("before", "Agent", AgentArgs("dev-medium", prompt)), "conductor", new ScriptedEngine());
+            Envelope("before", "task", TaskArgs("dev-medium", prompt)), "conductor", new ScriptedEngine());
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout);
         Assert.Equal("allow", doc.RootElement.GetProperty("decision").GetString());
         Assert.False(doc.RootElement.TryGetProperty("reason", out _), "Allow must carry no reason.");
         JsonElement args = doc.RootElement.GetProperty("args");
-        Assert.Equal("Implement T12", args.GetProperty("description").GetString());
+        Assert.Equal("Implement T16", args.GetProperty("description").GetString());
         Assert.Equal("dev-medium", args.GetProperty("subagent_type").GetString());
         string stripped = args.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal(body, stripped);
@@ -117,7 +121,7 @@ public sealed class PiHookAdapterTests
         ScriptedEngine engine = new() { PreResult = new HookOutcome(HookOutcomeKind.Deny, envelope) };
 
         (int exit, string stdout) = Run(
-            Envelope("before", "Agent", AgentArgs("dev-medium", "Implement the parser.")),
+            Envelope("before", "task", TaskArgs("dev-medium", "Implement the parser.")),
             "conductor",
             engine);
 
@@ -131,9 +135,9 @@ public sealed class PiHookAdapterTests
     [Fact]
     public void After_Allow_WritesAllow()
     {
-        JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
         (int exit, string stdout) = Run(
-            Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
+            Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "conductor",
             new ScriptedEngine());
 
@@ -149,10 +153,10 @@ public sealed class PiHookAdapterTests
         const string envelope =
             "STATUS: ARBITER_ESCALATION\nTRIGGER: delegate.returned\nANSWER: adds-work (step 0)";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostBlock, envelope) };
-        JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
-            Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
+            Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "conductor",
             engine);
 
@@ -167,10 +171,10 @@ public sealed class PiHookAdapterTests
     {
         const string note = "STATUS: ARBITER_ANNOTATION\nFINDING: correctness/null-plan-task";
         ScriptedEngine engine = new() { PostResult = new HookOutcome(HookOutcomeKind.PostAnnotation, note) };
-        JsonObject args = AgentArgs("dev-medium", "Implement the parser.");
+        JsonObject args = TaskArgs("dev-medium", "Implement the parser.");
 
         (int exit, string stdout) = Run(
-            Envelope("after", "Agent", args, new JsonObject { ["output"] = "done" }),
+            Envelope("after", "task", args, new JsonObject { ["output"] = "done" }),
             "code-reviewer",
             engine);
 
@@ -184,12 +188,12 @@ public sealed class PiHookAdapterTests
     [InlineData("{oops")]
     [InlineData("[1, 2]")]
     [InlineData("")]
-    [InlineData("{\"schema\":\"nope\",\"harness\":\"pi\",\"phase\":\"before\",\"tool\":\"Agent\"}")]
-    [InlineData("{\"schema\":\"kyber-arbiter.plugin-event/v1\",\"harness\":\"pi\",\"phase\":\"middle\",\"tool\":\"Agent\"}")]
+    [InlineData("{\"schema\":\"nope\",\"harness\":\"kilo\",\"phase\":\"before\",\"tool\":\"task\"}")]
+    [InlineData("{\"schema\":\"kyber-arbiter.plugin-event/v1\",\"harness\":\"kilo\",\"phase\":\"middle\",\"tool\":\"task\"}")]
     public void MalformedEnvelope_AllowsAndLogsWithHarnessToken(string stdin)
     {
         ScriptedEngine engine = new();
-        PluginHookAdapter adapter = new("pi", "Agent", "subagent_type", "prompt", engine);
+        PluginHookAdapter adapter = new("kilo", "task", "subagent_type", "prompt", engine);
         HookCommand command = ArbiterTestServices.Command(
             new HarnessAdapterRegistry([adapter]),
             _ => EnabledConfig(),
@@ -197,7 +201,7 @@ public sealed class PiHookAdapterTests
         using StringWriter stdout = new();
         using StringWriter log = new();
 
-        int exit = command.Run("pi", "conductor", stdin, stdout, log);
+        int exit = command.Run("kilo", "conductor", stdin, stdout, log);
 
         // ADR 0072: an envelope the host cannot read allows, with the code and the harness in the log.
         Assert.Equal(0, exit);
@@ -206,17 +210,17 @@ public sealed class PiHookAdapterTests
     }
 
     [Fact]
-    public void PiAdapter_IsRegisteredWithDispatchShape()
+    public void KiloAdapter_IsRegisteredWithDispatchShape()
     {
         ScriptedEngine engine = new();
         IReadOnlyList<IHarnessHookAdapter> adapters = PluginHookAdapters.All(engine);
 
         IHarnessHookAdapter adapter = Assert.Single(adapters, a =>
-            string.Equals(a.HarnessToken, "pi", StringComparison.Ordinal));
+            string.Equals(a.HarnessToken, "kilo", StringComparison.Ordinal));
         Assert.IsType<PluginHookAdapter>(adapter);
 
         Assert.True(
-            ArbiterTestServices.Registry(engine).TryGet("pi", out _),
-            "The default registry must serve the pi harness.");
+            ArbiterTestServices.Registry(engine).TryGet("kilo", out _),
+            "The default registry must serve the kilo harness.");
     }
 }
