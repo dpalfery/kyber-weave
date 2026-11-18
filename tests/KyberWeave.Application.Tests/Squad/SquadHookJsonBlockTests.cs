@@ -15,7 +15,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadHookJsonBlockTests
 {
-    private static readonly string Base = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "hook-json");
+    private static readonly string Base = Path.GetFullPath("/hook-json");
 
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
 
