@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.FileSystem;
@@ -14,7 +15,15 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// dispatch text is read only to pick among several worktrees that all hold the plan, and to place a return whose
 /// headers were stripped. When nothing resolves, the hook's directory stands and the rules decide on the absence.
 /// </remarks>
-public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver planPaths) : IPlanRootResolver
+/// <param name="git">The repository's own worktree list.</param>
+/// <param name="planPaths">Resolves the dispatch's plan inside a root.</param>
+/// <param name="files">The file system a candidate root is checked against.</param>
+/// <param name="paths">Decides whether two spellings name the same root.</param>
+public sealed class PlanRootResolver(
+    IGitRepositoryFacts git,
+    IPlanFileResolver planPaths,
+    IFileSystem files,
+    IPathResolver paths) : IPlanRootResolver
 {
     /// <summary>
     /// The root to evaluate <paramref name="prompt"/> against: <paramref name="hookRoot"/> when the plan exists
@@ -45,7 +54,7 @@ public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver 
         }
 
         IReadOnlyList<string> others = [.. listWorktrees(hookRoot)
-            .Where(worktree => !SamePath(worktree, hookRoot) && Directory.Exists(worktree))];
+            .Where(worktree => !paths.AreSame(worktree, hookRoot) && files.DirectoryExists(worktree))];
         if (others.Count == 0)
         {
             return hookRoot;
@@ -76,7 +85,7 @@ public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver 
         }
 
         return holding
-            .OrderByDescending(worktree => File.GetLastWriteTimeUtc(planPaths.Resolve(planFile, worktree)!))
+            .OrderByDescending(worktree => files.GetLastWriteTimeUtc(planPaths.Resolve(planFile, worktree)!))
             .First();
     }
 
@@ -84,7 +93,7 @@ public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver 
     {
         try
         {
-            return planPaths.Resolve(planFile, root) is { } path && File.Exists(path);
+            return planPaths.Resolve(planFile, root) is { } path && files.FileExists(path);
         }
         catch (ArgumentException)
         {
@@ -96,7 +105,7 @@ public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver 
     /// Whether the text names the worktree: its path as git lists it, or a directory token that is the same working
     /// tree reached through another spelling (on macOS git lists <c>/private/var/…</c> for <c>/var/…</c>).
     /// </summary>
-    private static bool Names(string text, string worktree)
+    private bool Names(string text, string worktree)
     {
         if (NamesPath(text, worktree))
         {
@@ -112,12 +121,12 @@ public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver 
     }
 
     /// <summary>A linked worktree's <c>.git</c> file names its private git directory, which identifies it.</summary>
-    private static string? GitFileOf(string directory)
+    private string? GitFileOf(string directory)
     {
         try
         {
             string gitFile = Path.Combine(directory, ".git");
-            return File.Exists(gitFile) ? File.ReadAllText(gitFile).Trim() : null;
+            return files.FileExists(gitFile) ? files.ReadAllText(gitFile).Trim() : null;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
         {
@@ -142,10 +151,4 @@ public sealed class PlanRootResolver(IGitRepositoryFacts git, IPlanFileResolver 
 
         return false;
     }
-
-    private static bool SamePath(string left, string right) =>
-        string.Equals(
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(left)),
-            Path.TrimEndingDirectorySeparator(Path.GetFullPath(right)),
-            OperatingSystem.IsWindows() || OperatingSystem.IsMacOS() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 }

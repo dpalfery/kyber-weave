@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Docs.FileSystem;
@@ -11,6 +12,7 @@ using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 using KyberWeave.Data.Skills;
 using KyberWeave.Data.RunStart;
@@ -89,6 +91,7 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddSingleton<IWritableFileSystem>(_ => new PhysicalFileSystem());
         services.TryAddSingleton<IFileSystem>(sp => sp.GetRequiredService<IWritableFileSystem>());
+        services.TryAddSingleton<IPathResolver>(sp => new PhysicalPathResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());

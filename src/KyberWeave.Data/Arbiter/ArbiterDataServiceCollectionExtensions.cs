@@ -1,4 +1,5 @@
 using KyberWeave.Arbiter.Hooks.Adapters;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -27,7 +28,11 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IGateReportFacts, GateReportFacts>();
         services.TryAddSingleton<IFileTextFacts, FileTextFacts>();
         services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();
-        services.TryAddSingleton<IPlanRootResolver>(sp => new PlanRootResolver(sp.GetRequiredService<IGitRepositoryFacts>(), sp.GetRequiredService<IPlanFileResolver>()));
+        services.TryAddSingleton<IPlanRootResolver>(sp => new PlanRootResolver(
+            sp.GetRequiredService<IGitRepositoryFacts>(),
+            sp.GetRequiredService<IPlanFileResolver>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<IPlanFacts>(sp => new PlanFacts(sp.GetRequiredService<IPlanFileResolver>()));
         services.TryAddSingleton<IClaudeHookCoverage, ClaudeHookCoverage>();
         services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
