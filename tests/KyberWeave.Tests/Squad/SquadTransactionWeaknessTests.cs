@@ -368,6 +368,69 @@ public sealed class SquadTransactionWeaknessTests
         Assert.Equal("user content", fixture.Files.ReadAllText(userFile));
     }
 
+    [Fact]
+    public void AJournalWithAnUnknownPhaseIsRefusedAndTheTreeLeftUntouched()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Update);
+        SquadDeploymentPlan plan = fixture.Plan(SquadCrashFlow.Update);
+        fixture.Files.KillWhen(operation =>
+            InMemorySquadCrashSafetyFixture.IsMutating(operation)
+            && !operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal));
+        Exception? stopped = Record.Exception(() => fixture.Transaction().Execute(plan));
+        Assert.True(stopped is not null && InMemorySquadCrashSafetyFixture.IsKill(stopped), "The flow was not killed.");
+        fixture.Files.ClearFaults();
+        string journal = fixture.Files.EnumerateFiles(fixture.Root, "intent.json", true).Single();
+        string text = fixture.Files.ReadAllText(journal);
+        Assert.Contains("\"phase\": \"prepared\"", text, StringComparison.Ordinal);
+
+        // A journal a newer build wrote with a phase this build does not know must not be guessed at.
+        fixture.Files.WriteAllText(journal, text.Replace("\"phase\": \"prepared\"", "\"phase\": \"sealed\"", StringComparison.Ordinal));
+        IReadOnlyDictionary<string, SquadTreeEntry> before = fixture.Capture();
+
+        _ = Assert.Throws<InvalidDataException>(() => fixture.Recover());
+
+        Assert.Null(SquadTreeComparison.Difference(before, fixture.Capture()));
+    }
+
+    [Fact]
+    public void AnOriginalThatIsARelativeDirectoryLinkIsRestoredWithItsRelativeTarget()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Update);
+        SquadDeploymentPlan plan = fixture.Plan(SquadCrashFlow.Update);
+        string conductor = Path.Combine(fixture.Root, SquadCrashSafetyFixture.ConductorPath);
+        string destination = Path.Combine(fixture.Root, "linked-directory");
+
+        // After the preconditions passed and the journal was written, something swaps the owned file for a link to a
+        // directory, so the claim meets a node it did not expect and the transaction must put it back as it was.
+        LinkSwap swap = new(() =>
+        {
+            fixture.Files.DeleteFile(conductor);
+            fixture.Files.CreateDirectory(destination);
+            fixture.Files.CreateDirectoryLink(conductor, Path.Combine("..", "..", "linked-directory"));
+        });
+
+        _ = Assert.ThrowsAny<Exception>(() => fixture.Transaction(swap).Execute(plan));
+
+        Assert.Equal(Path.Combine("..", "..", "linked-directory"), fixture.Files.GetLinkTarget(conductor));
+        Assert.True(fixture.Files.DirectoryExists(destination));
+    }
+
+    private sealed class LinkSwap(Action swap) : ISquadTransactionObserver
+    {
+        private bool _done;
+
+        public void AfterStep(SquadTransactionStep transactionStep)
+        {
+            if (!_done && transactionStep.Kind == SquadTransactionStepKind.IntentWritten)
+            {
+                _done = true;
+                swap();
+            }
+        }
+    }
+
     private static bool IsTransactionDelete(FileSystemOperation operation) =>
         operation.Name.StartsWith("Delete", StringComparison.Ordinal)
         && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);

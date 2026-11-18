@@ -195,6 +195,28 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     }
 
     [Fact]
+    public void RecoverToleratesAnEmptyUndescribedFolderInTheTransactionTree()
+    {
+        using TransactionFixture fixture = TransactionFixture.Create();
+        string fixturePath = fixture.Path;
+        SortedDictionary<string, TreeEntry> interrupted = InterruptTransactionAfterCheckpoint(
+            fixture,
+            SquadTransactionCheckpointKind.Prepared);
+        RestoreTree(fixturePath, interrupted);
+        string transactionDirectory = Path.Combine(fixturePath, ".kyber-weave", ".squad-transaction");
+
+        // What a kill between a stage move and the removal of its now-empty folders leaves.
+        Directory.CreateDirectory(Path.Combine(transactionDirectory, "staging", "emptied-by-a-kill"));
+
+        Exception? exception = Record.Exception(() => Transaction(fixturePath).Recover(
+            fixturePath,
+            SquadDeploymentScope.Project));
+
+        Assert.Null(exception);
+        Assert.False(Directory.Exists(transactionDirectory));
+    }
+
+    [Fact]
     public void RecoverValidCreatedDirectoryAuthorityRemovesOnlyDeclaredEmptyDirectoriesDeepestFirst()
     {
         using TempDirectory fixture = new();

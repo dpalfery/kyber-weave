@@ -91,8 +91,10 @@ public sealed partial class PhysicalFileSystem : IWritableFileSystem
 
     /// <inheritdoc />
     /// <remarks>
-    ///     Unix opens the directory read-only and calls fsync on it. Windows does nothing: NTFS journals its metadata,
-    ///     and a directory handle there cannot be flushed.
+    ///     Unix opens the directory read-only and calls fsync on it. Windows does nothing: a directory handle cannot be
+    ///     flushed there. NTFS journals its metadata, which keeps the volume consistent after a crash; it does not
+    ///     promise that a just-renamed name has reached the device, so durability of the rename there rests on the
+    ///     file flush alone.
     /// </remarks>
     public void FlushDirectory(string directoryPath)
     {
@@ -102,7 +104,9 @@ public sealed partial class PhysicalFileSystem : IWritableFileSystem
         if (OperatingSystem.IsWindows())
             return;
 
-        int descriptor = OpenDirectory(directoryPath, 0);
+        // O_RDONLY, plus close-on-exec so a child process started meanwhile does not inherit the descriptor. O_DIRECTORY
+        // is left out: its value differs by Linux architecture, and the directory was checked just above.
+        int descriptor = OpenDirectory(directoryPath, OperatingSystem.IsMacOS() ? ReadOnlyCloseOnExecMac : ReadOnlyCloseOnExecLinux);
         if (descriptor < 0)
             throw new IOException(
                 $"The directory '{directoryPath}' could not be opened to flush it.",
@@ -124,6 +128,8 @@ public sealed partial class PhysicalFileSystem : IWritableFileSystem
     }
 
     private const int EInval = 22;
+    private const int ReadOnlyCloseOnExecLinux = 0x80000;
+    private const int ReadOnlyCloseOnExecMac = 0x1000000;
 
     [LibraryImport("libc", EntryPoint = "open", StringMarshalling = StringMarshalling.Utf8, SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.SafeDirectories)]

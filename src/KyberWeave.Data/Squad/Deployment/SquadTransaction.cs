@@ -30,8 +30,6 @@ public sealed class SquadTransaction : ISquadTransaction
     private const string IntentSchema = "kyber-squad.transaction/v1";
     private static readonly JsonSerializerOptions IntentJsonOptions = CreateIntentJsonOptions();
 
-    private static readonly TimeSpan RegistryLeaseTimeout = TimeSpan.FromSeconds(10);
-
     private const string LeaseBusyMessage =
         "A Squad transaction is active for this deployment root. Wait for it to finish before retrying.";
 
@@ -346,23 +344,17 @@ public sealed class SquadTransaction : ISquadTransaction
                 // The rollback is complete, so a kill while the artifacts are deleted must be finished forward, as
                 // recovery's own rollback does. The marker is best effort: without it only that kill window is
                 // left open, and the failure being reported matters more.
-                try
+                if (_files.FileExists(intentPath))
                 {
-                    if (_files.FileExists(intentPath))
-                    {
-                        lease.ReleaseJournal();
-                        MarkCleanupOnly(intentPath, intent);
-                    }
-                }
-                catch (Exception marking) when (marking is IOException or UnauthorizedAccessException)
-                {
+                    lease.ReleaseJournal();
+                    TryMarkCleanupOnly(intentPath, intent);
                 }
 
                 throw;
             }
 
             lease.ReleaseJournal();
-            MarkCleanupOnly(intentPath, intent);
+            TryMarkCleanupOnly(intentPath, intent);
             CleanupOwnedArtifacts(journalDirectory, workDirectory, keepIntent: true);
             RecordProjectRegistration(plan, stateDirectory);
         }
@@ -391,6 +383,11 @@ public sealed class SquadTransaction : ISquadTransaction
     }
 
     /// <summary>Rolls back an interrupted transaction. Repeated recovery is a no-op.</summary>
+    /// <remarks>
+    ///     A journal in its final committed phase is only cleaned up, not rolled back, and that cleanup deletes
+    ///     everything in the journal folder, including a file another tool put there: the folder belongs to the
+    ///     transaction while a journal exists in it.
+    /// </remarks>
     public void Recover(string targetRoot, SquadDeploymentScope scope)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
@@ -2303,6 +2300,23 @@ public sealed class SquadTransaction : ISquadTransaction
     ///     Records that the transaction is decided and only cleanup is left, so a kill while the backups and the
     ///     staging area are being deleted is finished forward instead of refused for the pieces already gone.
     /// </summary>
+    /// <summary>
+    ///     <see cref="MarkCleanupOnly" /> for a deployment that has already been decided: the marker only closes the
+    ///     window in which a kill during cleanup would be refused, so an I/O error writing it must not turn a
+    ///     committed deployment (or replace the failure of a rolled-back one) into a different error. Recovery's own
+    ///     rollback writes it strictly, because there a failing disk means recovery has not finished.
+    /// </summary>
+    private void TryMarkCleanupOnly(string intentPath, IntentDocument intent)
+    {
+        try
+        {
+            MarkCleanupOnly(intentPath, intent);
+        }
+        catch (Exception marking) when (marking is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     private void MarkCleanupOnly(string intentPath, IntentDocument intent) =>
         WriteIntent(
             intentPath,
@@ -3325,25 +3339,18 @@ public sealed class SquadTransaction : ISquadTransaction
 
         try
         {
-            // The registry is shared by every project of this user, so the project lease the transaction holds does
-            // not protect it: two projects committing at once would each read the old registry and the later write
-            // would drop the earlier entry. A lease of its own makes the read-modify-write one step.
-            using (_lease.Acquire(
-                       SquadLeaseNames.ForRegistry(_stateStore.ResolveHomeStateDirectory()),
-                       RegistryLeaseTimeout))
+            // The state store takes the registry lease itself, so every writer is covered, not only this one.
+            if (plan.ReceiptMutation == SquadStateMutation.Delete)
             {
-                if (plan.ReceiptMutation == SquadStateMutation.Delete)
-                {
-                    _stateStore.UnregisterProject(plan.PhysicalRootPath);
-                }
-                else
-                {
-                    _stateStore.RegisterProject(
-                        plan.PhysicalRootPath,
-                        plan.Receipt.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal)
-                            .Order(StringComparer.Ordinal).ToArray(),
-                        plan.Receipt.InstalledAtUtc);
-                }
+                _stateStore.UnregisterProject(plan.PhysicalRootPath);
+            }
+            else
+            {
+                _stateStore.RegisterProject(
+                    plan.PhysicalRootPath,
+                    plan.Receipt.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal)
+                        .Order(StringComparer.Ordinal).ToArray(),
+                    plan.Receipt.InstalledAtUtc);
             }
 
             if (plan.ReceiptMutation == SquadStateMutation.Delete)
