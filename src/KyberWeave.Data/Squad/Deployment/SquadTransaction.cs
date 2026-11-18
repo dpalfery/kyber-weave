@@ -401,11 +401,12 @@ public sealed class SquadTransaction : ISquadTransaction
         string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, scope));
         if (!_files.DirectoryExists(journalDirectory))
         {
-            // A kill between removing the journal folder and the folders above it leaves them empty and unexplained.
-            // They hold nothing, so they go; a folder with anything in it stops the walk.
-            RemoveEmptyDirectoriesUpTo(
-                Path.GetDirectoryName(journalDirectory)!,
-                Physical(_stateStore.ResolveStateAuthorityRoot(root, scope)));
+            // A kill between removing the journal folder and the tool folder above it leaves that folder empty and
+            // unexplained. It is the tool's own folder, so an empty one goes. Nothing above it is touched: those
+            // folders may predate the transaction and the journal that recorded which ones it made is gone.
+            string toolFolder = Path.GetDirectoryName(journalDirectory)!;
+            if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
+                DeleteEmptyDirectory(toolFolder);
             return;
         }
 
