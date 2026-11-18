@@ -105,7 +105,7 @@ task's list.
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Mcp` | `DrainingStreamServerTransport.cs` | Opens the standard streams for the MCP server |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
-| `ConsoleArbiterKeyInput` | Console | `KyberWeave.Cli` | `Commands/Arbiter/ConsoleArbiterKeyInput.cs` | The `IArbiterKeyInput` adapter: it is the only code that reads a key from standard input or from a masked Spectre prompt. Every Arbiter command around it takes `IAnsiConsole` by constructor, so its own two calls are the whole seam translation |
+| `ConsoleArbiterKeyInput` | Console | `KyberWeave.Cli` | `Commands/Arbiter/ConsoleArbiterKeyInput.cs` | The `IArbiterKeyInput` adapter: the only code that reads a key from standard input or from a masked Spectre prompt, and it reaches both through the `IConsole` and `IAnsiConsole` seams it is given |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |

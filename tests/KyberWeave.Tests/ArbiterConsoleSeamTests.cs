@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Testing;
@@ -60,6 +61,27 @@ public sealed class ArbiterConsoleSeamTests
 
         Assert.Equal(1, exitCode);
         Assert.Contains(FailingArbiterConfigs.Code, console.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The key input reads both of its answers through the seams it was given: the standard-input line from
+    /// <see cref="IConsole"/> and the masked prompt from the injected <see cref="IAnsiConsole"/>, so a test scripts a key
+    /// instead of typing one, and neither answer comes from the process's own streams.
+    /// </summary>
+    [Fact]
+    public void KeyInput_ReadsBothAnswersThroughTheSeamsItWasGiven()
+    {
+        TestConsole console = new();
+        console.Input.PushTextWithEnter("TS-PROMPTED-KEY");
+        FakeConsole standard = new(isInputRedirected: true);
+        standard.ScriptInput("TS-STDIN-KEY\n");
+        ConsoleArbiterKeyInput input = new(console, standard);
+
+        string? fromStdin = input.ReadFromStandardInput();
+        string? fromPrompt = input.PromptHidden();
+
+        Assert.Equal("TS-STDIN-KEY", fromStdin);
+        Assert.Equal("TS-PROMPTED-KEY", fromPrompt);
     }
 
     /// <summary>The empty notice is the exact text <c>arbiter status</c> and <c>arbiter doctor</c> printed before.</summary>
