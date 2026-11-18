@@ -7,8 +7,8 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Arbiter;
-using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
 

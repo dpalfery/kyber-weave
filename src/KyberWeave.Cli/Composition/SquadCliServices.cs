@@ -27,7 +27,11 @@ internal static class SquadCliServices
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
             sp.GetRequiredService<ISquadRenderInputReader>()));
-        services.TryAddSingleton<Func<SelfUpdateHost>>(_ => SelfUpdateHostFactory.FromCurrentProcess);
+        services.TryAddSingleton<Func<SelfUpdateHost>>(sp =>
+        {
+            IProcessEnvironment environment = sp.GetRequiredService<IProcessEnvironment>();
+            return () => SelfUpdateHostFactory.FromCurrentProcess(environment);
+        });
         services.TryAddSingleton(new SquadConsoleOptions());
         services.TryAddSingleton(new SquadRunOptions());
         services.TryAddSingleton(new SquadDoctorOptions());

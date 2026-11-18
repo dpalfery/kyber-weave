@@ -1,5 +1,6 @@
 using System.Reflection;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Cli.Composition;
 
@@ -7,16 +8,18 @@ namespace KyberWeave.Cli.Composition;
 internal static class SelfUpdateHostFactory
 {
     /// <summary>Snapshots where the running binary lives, what it reports and which RID to fetch.</summary>
+    /// <param name="environment">Reports the operating system the binary runs on.</param>
     /// <returns>The snapshot.</returns>
     /// <exception cref="SelfUpdateException">The operating system has no published RID.</exception>
-    internal static SelfUpdateHost FromCurrentProcess()
+    internal static SelfUpdateHost FromCurrentProcess(IProcessEnvironment environment)
     {
+        ArgumentNullException.ThrowIfNull(environment);
         return new SelfUpdateHost(
             Environment.ProcessPath ?? string.Empty,
             ReadCurrentVersion(),
-            PlatformRid.Detect(),
-            OperatingSystem.IsWindows(),
-            OperatingSystem.IsMacOS());
+            PlatformRid.Detect(environment),
+            environment.OperatingSystem == OperatingSystemKind.Windows,
+            environment.OperatingSystem == OperatingSystemKind.MacOS);
     }
 
     private static string ReadCurrentVersion()
