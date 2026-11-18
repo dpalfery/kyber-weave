@@ -9,18 +9,19 @@ using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Mcp;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
-namespace KyberWeave.Tests;
+namespace KyberWeave.Mcp.Tests;
 
 /// <summary>
 /// T14 RED — MCP analysis tools are capped, stable, conversational reads over the
 /// repository's current configured corpus and never expose a write capability.
 /// </summary>
-public sealed class McpAnalysisToolsTests : IDisposable
+public sealed class McpAnalysisToolsTests
 {
-    private readonly TempDirectory _temp = new();
+    private readonly MemoryDocsHost _host = new();
 
     [Fact]
     public void AnalysisCandidatesKindFilterAndCursorPageStableOrderedCandidates()
@@ -229,7 +230,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Write("knowledge/second.md", Document("reference/second", "current"));
         Write("knowledge/draft.md", Document("reference/draft", "draft"));
         Write("knowledge/terms.md", GlossaryMarkdown());
-        RepositoryDocsAnalysisReader reader = McpTestServices.AnalysisReader(_temp.Path);
+        RepositoryDocsAnalysisReader reader = DocsToolsComposition.AnalysisReader(_host.Services(), _host.Repo);
 
         DocumentationAnalysisResult analysis = reader.Analyze();
         GlossaryLookupResult glossary = reader.LookupGlossary("loop");
@@ -238,7 +239,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.Single(analysis.Candidates, candidate => candidate.IsExact);
         Assert.Equal("loop", glossary.Term);
         Assert.Single(glossary.Senses);
-        Assert.False(Directory.Exists(Path.Combine(_temp.Path, ".kyber-weave", "cache")));
+        Assert.False(_host.Files.DirectoryExists(Path.Combine(_host.Repo, ".kyber-weave", "cache")));
     }
 
     [Fact]
@@ -251,7 +252,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
               statuses: [current]
             """);
         Write("knowledge/first.md", Document("reference/first", "current"));
-        RepositoryDocsAnalysisReader reader = McpTestServices.AnalysisReader(_temp.Path);
+        RepositoryDocsAnalysisReader reader = DocsToolsComposition.AnalysisReader(_host.Services(), _host.Repo);
 
         DocumentationAnalysisResult analysis = reader.Analyze();
 
@@ -261,17 +262,15 @@ public sealed class McpAnalysisToolsTests : IDisposable
         Assert.Contains("bounded lexical search", warning.Hint, StringComparison.Ordinal);
     }
 
-    public void Dispose() => _temp.Dispose();
-
     private DocsTools Tools(IDocsAnalysisReader reader)
     {
         DocumentIndexHost host = new DocumentIndexHost(
-            _temp.Path,
+            _host.Repo,
             () => FakeCodeGraphResolver.WithSymbols(),
             () => new DocumentSet { Documents = [] },
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+            _host.Store,
+            _host.Paths,
+            _host.Environment,
             "docs");
         return DocsToolsComposition.Create(host, reader);
     }
@@ -341,9 +340,7 @@ public sealed class McpAnalysisToolsTests : IDisposable
 
     private void Write(string relativePath, string content)
     {
-        string path = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
+        _host.WriteInRepo(relativePath, content);
     }
 
     private static string Document(string id, string status) => $$"""

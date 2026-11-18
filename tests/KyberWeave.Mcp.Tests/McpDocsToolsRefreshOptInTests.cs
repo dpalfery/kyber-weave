@@ -1,16 +1,16 @@
-using KyberWeave.Tests.Configuration;
-
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
+using KyberWeave.Tests;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using KyberWeave.Tests.Fakes;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Mcp.Tests;
 
 /// <summary>
 /// Pins that the docs server's CodeGraph refresh is opt-in: a <see cref="DocsTools"/> a caller builds
@@ -29,13 +29,13 @@ namespace KyberWeave.Tests;
 /// </para>
 /// <para>
 /// The repository arranged here is one the refresh WOULD stop: it declares <c>codegraph</c> among its
-/// required MCP servers (<see cref="McpDeclarationFixture.RequireCodeGraph"/>) and its resolver reports
+/// required MCP servers (<see cref="MemoryMcpDeclaration.RequireCodeGraph"/>) and its resolver reports
 /// the index unreadable, which is the condition a runner without an index presents. A tools instance
 /// built without a schedule still has to answer, because answering from the documents on disk is what
 /// a docs tool is for; the gate belongs to the caller that asked to keep the index fresh.
 /// </para>
 /// </remarks>
-public sealed class McpDocsToolsRefreshOptInTests : IDisposable
+public sealed class McpDocsToolsRefreshOptInTests
 {
     /// <summary>The whole line a tool the gate stopped returns in place of its answer.</summary>
     private const string ToolFailure = "STATUS: TOOL_FAILURE";
@@ -43,9 +43,7 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
     /// <summary>A document id the scaffolded corpus carries, so the query has an answer on disk.</summary>
     private const string ScaffoldedDocumentId = "documentation-ontology";
 
-    private readonly TempDirectory _root = new();
-
-    public void Dispose() => _root.Dispose();
+    private readonly MemoryDocsHost _host = new();
 
     /// <summary>
     /// With no explicit refresh schedule the tools answer from the documents on disk, even though the
@@ -59,10 +57,10 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
     [Fact]
     public void DocsToolsBuiltWithoutARefreshScheduleAnswerFromTheDocumentsOnDisk()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_root.Path);
-        McpDeclarationFixture.RequireCodeGraph(_root.Path);
+        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(_host.Repo);
+        MemoryMcpDeclaration.RequireCodeGraph(_host.Files, _host.Repo);
 
-        string response = ToolsWithoutARefreshSchedule(_root.Path).Explore(ScaffoldedDocumentId);
+        string response = ToolsWithoutARefreshSchedule(_host.Repo).Explore(ScaffoldedDocumentId);
 
         Assert.DoesNotContain(ToolFailure, response, StringComparison.Ordinal);
         Assert.StartsWith("provenance:", response, StringComparison.Ordinal);
@@ -76,16 +74,16 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
     /// wants only document retrieval builds them: no analysis port, no refresh schedule.
     /// </summary>
     /// <param name="root">A repository root that already carries the scaffolded corpus.</param>
-    private static DocsTools ToolsWithoutARefreshSchedule(string root)
+    private DocsTools ToolsWithoutARefreshSchedule(string root)
     {
-        KyberWeaveConfig config = ConfigFileReader.Load(root);
+        KyberWeaveConfig config = _host.Services().GetRequiredService<IKyberWeaveConfigRepository>().Load(root);
         DocumentIndexHost host = new(
             root,
             () => new UnreadableCodeGraph(),
-            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+            () => new DocumentLoader(_host.Store, root, _host.Paths, _host.Environment, config.Ontology).Load(),
+            _host.Store,
+            _host.Paths,
+            _host.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

@@ -159,3 +159,43 @@ internal sealed class UnreachedEmbeddingGeneratorFactory : KyberWeave.Contracts.
     public KyberWeave.Core.Docs.Analysis.IEmbeddingGenerator Create() =>
         throw new InvalidOperationException("The case replaced the embedding factory, so it must not be reached.");
 }
+
+/// <summary>
+/// Edits the <c>mcp:</c> declaration <c>docs init</c> scaffolds in an in-memory file system so the repository
+/// requires CodeGraph: the entry the scaffold leaves commented out is uncommented, as an operator does.
+/// </summary>
+internal static class MemoryMcpDeclaration
+{
+    private const string ConfigRelativePath = ".kyber-weave/kyber-weave.yml";
+    private const string EntryIndent = "    ";
+    private const string EntryCommentPrefix = EntryIndent + "# ";
+    private const string CommentedCodeGraphEntry = EntryIndent + "# codegraph:";
+
+    /// <summary>Declares <c>codegraph</c> among the MCP servers the repository requires.</summary>
+    /// <param name="files">The file system holding the scaffolded host configuration.</param>
+    /// <param name="root">The repository root.</param>
+    public static void RequireCodeGraph(InMemoryFileSystem files, string root)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        string path = Path.Combine(root, ConfigRelativePath.Replace('/', Path.DirectorySeparatorChar));
+        string config = files.ReadAllText(path);
+        string newline = config.Contains("\r\n", StringComparison.Ordinal) ? "\r\n" : "\n";
+        List<string> lines = [.. config.Split(newline)];
+
+        int entryStart = lines.IndexOf(CommentedCodeGraphEntry);
+        if (entryStart < 0)
+        {
+            throw new InvalidOperationException(
+                $"'{ConfigRelativePath}' in '{root}' carries no commented 'codegraph' entry, so this fixture cannot declare it as required.");
+        }
+
+        for (int index = entryStart;
+             index < lines.Count && lines[index].StartsWith(EntryCommentPrefix, StringComparison.Ordinal);
+             index++)
+        {
+            lines[index] = EntryIndent + lines[index][EntryCommentPrefix.Length..];
+        }
+
+        files.WriteAllText(path, string.Join(newline, lines));
+    }
+}
