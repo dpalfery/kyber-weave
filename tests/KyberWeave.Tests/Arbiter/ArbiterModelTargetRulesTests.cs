@@ -151,7 +151,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         new NoGitFacts(),
         new PlanFacts(_recordedDifficulty),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)

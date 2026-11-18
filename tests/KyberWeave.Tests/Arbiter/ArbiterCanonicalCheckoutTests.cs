@@ -261,7 +261,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             ArbiterTestServices.HookGitFacts(_repo, _home.Path, arbiterDirectory),
             new ArbiterEvaluatorFixtures.PlanFacts(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
             TimeProvider.System);
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules);

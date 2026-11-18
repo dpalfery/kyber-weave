@@ -15,7 +15,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// RED: <c>KyberWeave.Core.Arbiter.Facts.FileTextFacts</c> and <c>FileExcerpt</c> do not exist yet.
 /// </summary>
 /// <remarks>
-/// Names (GREEN must match): <c>new FileTextFacts().ReadExcerpt(string repoRoot, string path, int line)</c> returns
+/// Names (GREEN must match): <c>RealFileTextFacts.Create().ReadExcerpt(string repoRoot, string path, int line)</c> returns
 /// <c>FileExcerpt(string Path, int StartLine, int EndLine, string Text, bool Truncated)</c> or <c>null</c> when the
 /// file is absent or outside the root; <c>FileTextFacts.MaxExcerptCharacters</c> bounds <c>Text</c>.
 /// </remarks>
@@ -42,7 +42,7 @@ public sealed class FileTextFactsTests : IDisposable
         string content = string.Join("\n", Enumerable.Range(1, 100).Select(i => $"line {i}"));
         string path = WriteRepoFile("src/Widget.cs", content);
 
-        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(new FileTextFacts().ReadExcerpt(Root, path, 50));
+        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(RealFileTextFacts.Create().ReadExcerpt(Root, path, 50));
 
         Assert.True(excerpt.StartLine <= 50 && excerpt.EndLine >= 50, $"{excerpt.StartLine}-{excerpt.EndLine}");
         Assert.True(excerpt.EndLine - excerpt.StartLine < 40, $"{excerpt.StartLine}-{excerpt.EndLine}");
@@ -59,7 +59,7 @@ public sealed class FileTextFactsTests : IDisposable
     {
         string path = WriteRepoFile("src/Generated.cs", "// header\n" + new string('x', 200_000) + "\n");
 
-        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(new FileTextFacts().ReadExcerpt(Root, path, 2));
+        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(RealFileTextFacts.Create().ReadExcerpt(Root, path, 2));
 
         Assert.True(
             excerpt.Text.Length <= FileTextFacts.MaxExcerptCharacters,
@@ -77,8 +77,8 @@ public sealed class FileTextFactsTests : IDisposable
         File.WriteAllText(Path.Combine(_sandbox.Path, "outside.txt"), "secret\n");
         Directory.CreateDirectory(Root);
 
-        Assert.Null(new FileTextFacts().ReadExcerpt(Root, "../outside.txt", 1));
-        Assert.Null(new FileTextFacts().ReadExcerpt(Root, Path.Combine(_sandbox.Path, "outside.txt"), 1));
+        Assert.Null(RealFileTextFacts.Create().ReadExcerpt(Root, "../outside.txt", 1));
+        Assert.Null(RealFileTextFacts.Create().ReadExcerpt(Root, Path.Combine(_sandbox.Path, "outside.txt"), 1));
     }
 
     /// <summary>A file the branch has since deleted has no current text to judge a comment against.</summary>
@@ -87,6 +87,6 @@ public sealed class FileTextFactsTests : IDisposable
     {
         Directory.CreateDirectory(Root);
 
-        Assert.Null(new FileTextFacts().ReadExcerpt(Root, "src/Deleted.cs", 3));
+        Assert.Null(RealFileTextFacts.Create().ReadExcerpt(Root, "src/Deleted.cs", 3));
     }
 }

@@ -309,7 +309,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(reportPath, ReviewJson.Write(report));
 
             string returned = $"TASK_GATE: PASS report={reportPath}";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.True(agrees);
 
             ArbiterFactSet facts = new ArbiterFactSet()
@@ -337,7 +337,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(reportPath, ReviewJson.Write(report));
 
             string returned = $"TASK_GATE: PASS report={reportPath}";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.False(agrees);
 
             ArbiterFactSet facts = new ArbiterFactSet()
@@ -363,7 +363,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(passReport, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: report={passReport} PASS";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.True(agrees);
         }
         finally
@@ -388,7 +388,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(passReport, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: FAIL report={failReport}\nTASK_GATE: PASS report={passReport}";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.True(agrees);
         }
         finally
@@ -409,7 +409,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(report, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: FAIL report={report}\nTASK_GATE: PASS report={report}";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.False(agrees);
         }
         finally
@@ -431,7 +431,7 @@ public sealed class ArbiterGateReportRuleTests
 
             string unnormalized = Path.Combine(tempDir, ".", "gates.json");
             string returned = $"TASK_GATE: FAIL report={unnormalized}\nTASK_GATE: PASS report={report}";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.False(agrees);
         }
         finally
@@ -454,7 +454,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(outsideReport, ReviewJson.Write(pass));
 
             string returned = $"TASK_GATE: PASS report={outsideReport}";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.Null(agrees);
         }
         finally
@@ -478,7 +478,7 @@ public sealed class ArbiterGateReportRuleTests
             File.WriteAllText(reportPath, ReviewJson.Write(report));
 
             string returned = $"Example: TASK_GATE:\nQuoted: TASK_GATE: PASS\nTASK_GATE: PASS report={reportPath}";
-            bool? agrees = new GateReportFacts().Agrees(returned, tempDir);
+            bool? agrees = RealGateReportFacts.Create().Agrees(returned, tempDir);
             Assert.True(agrees);
         }
         finally

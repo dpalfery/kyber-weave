@@ -117,7 +117,7 @@ public sealed class FileFailureGuardTests : IDisposable
     [InlineData("agent.md")]
     public void AHookSourceWhoseReadIsRefusedDoesNotFire(string name)
     {
-        bool fires = new ClaudeHookCoverage().Fires(
+        bool fires = RealClaudeHookCoverage.Create().Fires(
             Path.Combine(_temp.Path, name), "PreToolUse", "Bash", _ => throw new SecurityException("denied"));
 
         Assert.False(fires);

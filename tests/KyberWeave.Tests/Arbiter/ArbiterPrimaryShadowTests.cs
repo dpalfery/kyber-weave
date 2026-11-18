@@ -75,7 +75,7 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
             gitFacts,
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
             new FixedClock(fixedNow));
     }

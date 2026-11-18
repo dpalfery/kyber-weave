@@ -182,6 +182,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepositoryLocator` (`Arbiter/ArbiterRepositoryLocator.cs`) | file system, paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
+| `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
+| `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths, identifiers | 4.3 |
 | `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
@@ -311,10 +313,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `ClaudeHookCoverage` (`Arbiter/ClaudeHookCoverage.cs`) | file system | 4.4 |
 | `ConfiguredArbiterProviderFactory` (`Arbiter/ConfiguredArbiterProviderFactory.cs`) | environment, network | 4.4 |
-| `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | file system, paths | 4.4 |
-| `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | file system, paths | 4.4 |
 | `InFlightLedger` (`Arbiter/Ledger/InFlightLedger.cs`) | file system, clock | 4.4 |
 | `PlanPathResolver` (`Arbiter/Plans/PlanPathResolver.cs`) | file system, paths | 4.4 |
 | `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
@@ -440,7 +439,6 @@ the behaviour: where a test observes the value, the seam still wraps it.
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 18 non-adapter classes open a `FileStream` directly. They are
 `Application/Docs/Scaffolding/StandardsFolderMigration.cs`, `Application/Update/SelfUpdater.cs`,
-`Data/Arbiter/Facts/FileTextFacts.cs` and `GateReportFacts.cs`,
 `Data/Arbiter/Ledger/InFlightLedger.cs`, `Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and
 `FileWorkerBudgetStore.cs`, `Data/Squad/Deployment/SquadStateMigration.cs`, `SquadStateStore.cs`,
 `SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,

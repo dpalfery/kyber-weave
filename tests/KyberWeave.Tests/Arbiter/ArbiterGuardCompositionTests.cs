@@ -2,6 +2,9 @@ using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Review;
 using KyberWeave.Tests.Fakes;
@@ -96,5 +99,18 @@ public sealed class ArbiterGuardCompositionTests
         {
             Directory.Delete(home, recursive: true);
         }
+    }
+
+    [Fact]
+    public void TheHookHostContainerResolvesTheServicesThatReadThroughTheFactsTheGuardsDoNotNeed()
+    {
+        using ServiceProvider services = (ServiceProvider)ArbiterContainer.Create();
+
+        _ = Assert.IsAssignableFrom<IArbiterHookHost>(services.GetRequiredService<IArbiterHookHost>());
+        _ = Assert.IsType<FileTextFacts>(services.GetRequiredService<IFileTextFacts>());
+        _ = Assert.IsType<ClaudeHookCoverage>(services.GetRequiredService<IClaudeHookCoverage>());
+        _ = Assert.IsType<GateReportFacts>(services.GetRequiredService<IGateReportFacts>());
+        _ = Assert.IsType<FileArbiterUserSettings>(services.GetRequiredService<IArbiterUserSettings>());
+        _ = Assert.IsType<FileArbiterModelTargetsReader>(services.GetRequiredService<IArbiterModelTargetsReader>());
     }
 }
