@@ -4,7 +4,7 @@ title: Inventory of Domain's data and logic, and the callers of its logic
 doc-type: reference
 status: draft
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 component: CI Pipelines
 ---
 
@@ -24,6 +24,12 @@ bags, value objects, enums, options, constants) and all logic moves to `KyberWea
 counting slip in the design, not a change since. This inventory counts 445 and classifies
 every one of them.
 
+Revised 2026-11-18: part 2 now routes every `Data` and `Core` caller row by the class of the Domain
+type it names, instead of sending it to a `Contracts` interface by default. That default contradicted
+requirement 4.3, which moves a pure function over its arguments to `Application` as a static helper —
+a static cannot sit behind an interface — and requirement 3.1, which leaves an adapter no decisions
+to hold.
+
 ## Bottom line
 
 - **445 `.cs` files**: **155** stay (data), **285** hold logic and move,
@@ -36,17 +42,28 @@ every one of them.
   and `Application` already carries files in those namespaces (25 in `KyberWeave.Application.Review`,
   14 in `KyberWeave.Core.Docs.Validation`, 9 in `KyberWeave.Mcp`), so a moved class keeps its namespace.
   A project that already references `Application` needs no source change at its call sites.
-- **Only three projects cannot reach the moved code**: `Data` (because `Application` references it),
+- **Three projects cannot reach the moved code**: `Data` (because `Application` references it),
   `Contracts` (a reference back would be a cycle), and `Core` (task 2.2 removes its `Application`
-  reference). 65 files in `Data`, 14 in `Core` and
-  36 in `Contracts` name a Domain logic type and take a route below.
+  reference). 65 files in `Data` and 13 in `Core` name a Domain logic type and take a route below.
+  The first version of this part said 14 in `Core`; its extra row, `Core/Review/ReviewCycles.cs`, was
+  deleted in `b9454059` before the tree this file was written from, so it is not a caller.
   `Core.Docs` has no caller of Domain logic; it has four files of its own to delete, listed in part 2.
-  `Cli` (76 files), `Mcp` (4),
-  `Arbiter` (2) and `Hooks` (1) reference
+  `Cli` (76 files), `Mcp` (4), `Arbiter` (2) and `Hooks` (1) reference
   `Application` and are unaffected.
+- **The 81 Domain logic types those 78 rows name fall into three classes**: 20 data with a method (a),
+  53 pure static helpers (b), and 8 stateful services (c). The class decides the route: 23 `Data` rows
+  move to `Application`, 35 split (the raw-I/O adapter stays in `Data` and the logic moves), and 7 need
+  no file move at all — 5 name data only, and 2 register or take the one `Contracts` interface that
+  replaces a moved member. In `Core`, 7 rows move, 1 splits, 1 takes a `Contracts` interface, and 4 are
+  deleted by tasks 2.2 and 2.3.
+- **The order is not free.** The moves compile in any order only for callers that reference
+  `Application`; `Data` and `Contracts` do not. Part 3 therefore resolves the 36 `Contracts` findings
+  (step 0a) and splits the data-with-method types and reroutes the callers (step 0b) before any folder
+  moves, which are then mechanical.
 - **22 Domain logic types are named by 36 files in `Contracts`**: the finding the
-  task asks for, with a decision per type in part 2.
+  task asks for, with a decision per type in part 2, taken first in part 3's order.
 - **24 move tasks**, one per Domain folder or group of subfolders, none over 30 logic classes.
+  `Security` (2.5.10) is the pilot, and `Configuration` (2.5.1) waits for task 2.3.
 
 ## How a file was classified
 
@@ -250,9 +267,9 @@ below. Counts are files.
 
 | Project | Files | Route |
 |---|---|---|
-| `Data` | 65 | take a `Contracts` interface, or the caller itself moves to `Application` (the deployment services do) |
+| `Data` | 65 | per row in the table below: move, split, or none (part 3, step 0b) |
 | `Contracts` | 36 | one of the three decisions below, per type |
-| `Core` | 14 | take a `Contracts` interface, or delete the static locator (task 2.2) |
+| `Core` | 13 | per row below: move, split, none, or delete the static locator (tasks 2.2 and 2.3) |
 | `Core.Docs` | 0 | no caller; its own four files are deleted under task 2.2 (below) |
 | `Cli` | 76 | none: `Cli` references `Application` |
 | `Mcp` | 4 | none: `Mcp` references `Application` |
@@ -265,6 +282,63 @@ below. Counts are files.
 | `tests/KyberWeave.Application.Tests` | 3 | already an `Application` test |
 | `tests/KyberWeave.RepoPolicy.Tests` | 2 | none |
 
+### How a caller row was routed
+
+The class belongs to the Domain type; the route belongs to the caller, so one row that names types of
+two classes carries two routes.
+
+- **(a) data with a method.** The type is a record, class or exception that holds values and adds
+  methods over them. `Domain` keeps the values as data and the methods move to an `Application` service
+  or factory. A caller that only reads the values needs no route; one that calls a moved method takes a
+  `Contracts` interface for it, or splits so that the call happens in `Application`.
+- **(b) pure static helper.** The type computes only from values passed in, so requirement 4.3 moves it
+  to `Application` as a static helper. `Data` and `Core` cannot call a static helper in `Application`,
+  so the caller is itself logic and takes one of two routes. **move**: the whole file moves to
+  `Application`, which is allowed because `Application` references `Data`. **split**: the file keeps a
+  raw-I/O adapter in place and the part that computes moves to `Application`. A split is the right
+  route when the file already talks to a resource: requirement 3.1 leaves the adapter no decisions, so
+  the adapter returns the raw value and the logic lives one layer up.
+- **(c) stateful service.** The type holds state or reads a resource, so it becomes an instance service
+  behind a `Contracts` interface and the caller takes that interface.
+
+`Core` has one extra constraint: requirement 4.1 stops it referencing `Application`, so no `Core` row
+can go on calling an `Application` helper. Each `Core` row therefore moves (nothing else in `Core`
+calls it, and `Cli` and `Mcp` reach it through `Application`), takes a `Contracts` interface, or is
+deleted by task 2.2 or 2.3.
+
+Only 28 types are not (b); the other 53 move as static helpers and need no per-type decision.
+
+| type | class | what the split or the seam does |
+|---|---|---|
+| `ArbiterFactSet` | a | dictionary stays; `Contains`, `IsPresent`, `TryGet` and the lookups move |
+| `ArbiterModelTargets` | a | record stays; `IsCompleteFor` moves |
+| `ArbiterRule` | a | record stays; `ShouldAsk` moves |
+| `ArbiterRunScope` | a | record stays; `Includes` and `Normalize` move |
+| `PlanDocument` | a | record stays; `RedEvidenceRequirement` moves |
+| `ConfigRegConfig` | a | the declared map stays; `Resolve` and `ModeWord` move |
+| `DocumentModel` | a | property bag stays; the two `Append*` helpers move |
+| `DocumentSet` | a | the model list stays; `ByComponent` moves |
+| `EmbeddingUsage` | a | record stays; `Add` is internal, so no caller outside `Domain` sees the split |
+| `HarnessProfileConfig` | a | record stays; `CloneWithProfiles` and `CreateProductDefaultProfiles` move |
+| `KyberWeaveConfigLoadResult` | a | record stays (the `Contracts` decision is *narrow*); `Ok` and `Fail` move to an `Application` factory |
+| `OntologyConfig` | a | record stays; `IsRequired*` and `With*` (except the copy helper) move |
+| `OntologyConfigLoadResult` | a | record stays; `Ok` and `Fail` move |
+| `ReleaseOrigin` | a | record stays; `Resolve`, `EnsureAllowed` and `IsLoopbackAuthority` move |
+| `SeverityOverrides` | a | rows stay; `Parse`, `Find`, `Apply` and `RowsFor` move |
+| `SquadModelPreset` | a | record stays; `ApplyTo` moves |
+| `SquadPhysicalRootIdentity` | a | record stays; `Resolve`, `KeyOf` and `CanonicalizeAllowingMissing` move |
+| `SquadRenderRequest` | a | record stays; the `Require*` guards and `Unprepared` move |
+| `SquadSourceValidationException` | a | the exception stays with its constructors; nothing moves |
+| `SquadDeploymentPlan` | a | its values and mutators are one object, so the whole type and its two `Contracts` interfaces move (the *move the interface* decision) |
+| `ArbiterConfigLoader` | c | the embedded-rule read makes it a service behind a `Contracts` interface; its merge moves as a static helper |
+| `DocGraphProjection` | c | a computed object built by a pure `Build`; `CandidateContracts.cs` moves with it |
+| `GateCatalogueRenderer` | c | the embedded catalogue and the repository probe make it a service behind `IReviewGateCatalogue` |
+| `MemoizedSquadGlobalRoots` | c | a cache over `ISquadGlobalRootResolver`, and it moves with that interface |
+| `ProjectRootDetection` | c | it walks directories, so it becomes a service on the file-system seam |
+| `SectionSelector` | c | already a service; it moves behind `IArbiterSectionSelectionService` |
+| `SquadGlobalRoots` | c | reads the environment and files, so it becomes the `ISquadGlobalRootResolver` implementation |
+| `SquadResponseGuidanceSource` | c | an embedded-resource accessor with a lazy cache, so it becomes a service |
+
 ### The one same-name definition the scan found
 
 
@@ -274,93 +348,90 @@ below. Counts are files.
 
 ### src/KyberWeave.Data (65 files)
 
-| file | Domain logic it names | route |
-|---|---|---|
-| `Arbiter/ConfiguredArbiterProviderFactory.cs` | `ArbiterKeyResolver` | Contracts interface |
-| `Arbiter/Facts/FileTextFacts.cs` | `DocsRootPath`, `SectionSelector` | Contracts interface |
-| `Arbiter/Facts/GateReportFacts.cs` | `ArbiterFactSet`, `ReturnMarkerParser`, `ReviewJson`, `TextExcerpts` | Contracts interface |
-| `Arbiter/Facts/GitFacts.cs` | `GitDiffParser` | Contracts interface |
-| `Arbiter/FileArbiterModelTargetsReader.cs` | `ArbiterModelTargets` | Contracts interface |
-| `Arbiter/FileArbiterUserOverrideWriter.cs` | `ArbiterUserSettings` | Contracts interface |
-| `Arbiter/FileArbiterUserSettings.cs` | `ArbiterConfigLoader`, `ArbiterUserSettings`, `RuleValidator` | Contracts interface |
-| `Arbiter/Ledger/DecisionLog.cs` | `ArbiterDecisionQueries`, `ArbiterJson` | Contracts interface |
-| `Arbiter/Ledger/InFlightLedger.cs` | `ArbiterJson`, `ArbiterLedgerQueries`, `ArbiterRunScope` | Contracts interface |
-| `Arbiter/Plans/PlanFacts.cs` | `ArbiterFactSet`, `ArbiterTriggerCatalog`, `ModelTargetingRules`, `PlanDocument` … | Contracts interface |
-| `Arbiter/Plans/PlanRootResolver.cs` | `HeaderBlock` | Contracts interface |
-| `Arbiter/Providers/SystemOneClient.cs` | `ArbiterFactSet`, `ArbiterRule`, `LensInstructions`, `RuleEngine` … | Contracts interface |
-| `Arbiter/Stores/ArbiterRunStore.cs` | `ArbiterJson`, `RefutationOutcome` | Contracts interface |
-| `Configuration/FileKyberWeaveConfigRepository.cs` | `KyberWeaveConfigAssembler`, `KyberWeaveConfigLoadResult`, `KyberWeaveYamlParser`, `OntologyConfig` … | Contracts interface |
-| `Configuration/FileUserHostConfigStore.cs` | `HostConfigYaml`, `KyberWeaveYamlParser`, `UserHostConfigPath` | Contracts interface |
-| `Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs` | `EmbeddingUsage` | Contracts interface |
-| `Docs/Export/DocGraphExporter.cs` | `DocGraphProjection`, `DocumentSet` | Contracts interface |
-| `Docs/FileSystem/PhysicalRepositoryFileStore.cs` | `DocsRootPath` | Contracts interface |
-| `Docs/GraphClaimCandidateSource.cs` | `LexicalSimilarity` | Contracts interface |
-| `Docs/Mcp/GitCheckoutProbe.cs` | `CorpusProvenance` | Contracts interface |
-| `Docs/Mcp/GitWorktreeIdentity.cs` | `CorpusProvenance` | Contracts interface |
-| `Docs/Parsing/DocumentLoader.cs` | `DocsRootPath`, `DocumentMarkdown`, `DocumentModel`, `DocumentSet` … | Contracts interface |
-| `Docs/Parsing/DocumentLoaderFactory.cs` | `OntologyConfig` | Contracts interface |
-| `Docs/SparseLexicalCandidateSource.cs` | `LexicalSimilarity` | Contracts interface |
-| `Doctor/ConfigFileToolSettings.cs` | `KyberWeaveConfigLoadResult` | Contracts interface |
-| `Doctor/FileCodeGraphIndexWorkspace.cs` | `CodeGraphIndexRules` | Contracts interface |
-| `Hooks/ConventionTestClassResolver.cs` | `PathContainment` | Contracts interface |
-| `Hooks/YamlHooksConfigSource.cs` | `HooksConfigMerger`, `HooksConfigPath` | Contracts interface |
-| `Review/FileCitedSourceFiles.cs` | `DocsRootPath` | Contracts interface |
-| `Review/FileContainedFileReader.cs` | `DocsRootPath` | Contracts interface |
-| `Review/FileCoverageReportSource.cs` | `CoberturaReport` | Contracts interface |
-| `Review/FileNotSeatedStore.cs` | `NotSeatedRecord` | Contracts interface |
-| `Review/FileRepositoryFileLister.cs` | `ProjectRootDetection` | Contracts interface |
-| `Review/FileRepositoryTreeProbe.cs` | `TaskGatePlanning` | Contracts interface |
-| `Review/FileReviewCycleStore.cs` | `ReviewCyclePlanning` | Contracts interface |
-| `Review/FileSeverityOverrideSource.cs` | `ConfigRegConfig`, `SeverityOverrides` | Contracts interface |
-| `Review/FileTestClassSources.cs` | `TestClassPlanning` | Contracts interface |
-| `Review/GitChangeReader.cs` | `GitChangeParsing` | Contracts interface |
-| `RunStart/FileRunStateStore.cs` | `RunBaseStateFormat` | Contracts interface |
-| `RunStart/RunCheckoutGuard.cs` | `RunBaseStateFormat` | Contracts interface |
-| `Squad/Deployment/SquadDeploymentAdapters.cs` | `SquadDeploymentPlan`, `SquadModelPreset`, `SquadSourceValidationException` | move to Application |
-| `Squad/Deployment/SquadDeploymentPlanner.cs` | `SquadDeploymentPlan`, `SquadHookJsonBlock`, `SquadPathPolicy`, `SquadPhysicalRootIdentity` … | move to Application |
-| `Squad/Deployment/SquadHookJsonFile.cs` | `SquadHookJsonBlock` | move to Application |
-| `Squad/Deployment/SquadResponseGuidanceDeployer.cs` | `SquadPathPolicy`, `SquadResponseGuidanceSource` | move to Application |
-| `Squad/Deployment/SquadResponseGuidanceReader.cs` | `SquadResponseGuidanceSource` | move to Application |
-| `Squad/Deployment/SquadSkillShadowing.cs` | `SquadSkillOutputPaths` | move to Application |
-| `Squad/Deployment/SquadStateMigration.cs` | `SquadPhysicalRootIdentity` | move to Application |
-| `Squad/Deployment/SquadStateStore.cs` | `SquadDeploymentPlan`, `SquadPathPolicy`, `SquadPhysicalRootIdentity`, `SquadTargetCatalog` | move to Application |
-| `Squad/Deployment/SquadTargetResolver.cs` | `SquadTargetCatalog` | move to Application |
-| `Squad/Deployment/SquadTransaction.cs` | `SquadDeploymentPlan`, `SquadPathPolicy`, `SquadPhysicalRootIdentity` | move to Application |
-| `Squad/Deployment/SquadWorkerBaselineFile.cs` | `SquadWorkerBaselineInjector` | move to Application |
-| `Squad/Instances/SquadInstanceLinkSync.cs` | `SquadPhysicalRootIdentity` | Contracts interface |
-| `Squad/Packaging/SquadCompanionSkills.cs` | `SquadSourceValidationException` | Contracts interface |
-| `Squad/Packaging/SquadPacker.cs` | `SquadResponseGuidanceSource`, `SquadResponsePreferencesInjector` | Contracts interface |
-| `Squad/Parsing/SquadSourceLoader.cs` | `CopilotToolCatalog`, `SquadModelPreset`, `SquadPathPolicy`, `SquadSourceValidator` | Contracts interface |
-| `Squad/Presets/SquadModelPresetSelectionStore.cs` | `SquadPhysicalRootIdentity`, `SquadTargetCatalog` | Contracts interface |
-| `Squad/Presets/SquadModelPresetStore.cs` | `SquadModelPreset` | Contracts interface |
-| `Squad/Presets/SquadModelPresetValidator.cs` | `SquadModelPreset`, `SquadSourceValidator` | Contracts interface |
-| `Squad/Release/GitHubSquadReleaseSource.cs` | `ReleaseOrigin`, `ReleaseVersion` | Contracts interface |
-| `Squad/Rendering/CopilotMcpServerProbe.cs` | `SquadOperatorChannel` | Contracts interface |
-| `Squad/Rendering/FileSquadRenderInputReader.cs` | `MemoizedSquadGlobalRoots`, `SquadOperatorChannel`, `SquadRenderRequest` | Contracts interface |
-| `Squad/Rendering/SquadOperatorChannelOverlayFile.cs` | `SquadOperatorChannel` | Contracts interface |
-| `Squad/SquadServiceCollectionExtensions.cs` | `SquadGlobalRoots` | Contracts interface |
-| `Update/CopilotPromptRefresher.cs` | `CopilotPromptFile` | Contracts interface |
-| `Update/GitHubReleaseClient.cs` | `ReleaseOrigin`, `ReleaseVersion` | Contracts interface |
+| file | Domain logic it names | class | route |
+|---|---|---|---|
+| `Arbiter/ConfiguredArbiterProviderFactory.cs` | `ArbiterKeyResolver` | b | move: a factory, so it moves with the provider it builds |
+| `Arbiter/Facts/FileTextFacts.cs` | `DocsRootPath`, `SectionSelector` | b, c | split: the file read stays, excerpting moves; takes `ISectionSelector` |
+| `Arbiter/Facts/GateReportFacts.cs` | `ArbiterFactSet`, `ReturnMarkerParser`, `ReviewJson`, `TextExcerpts` | a, b | move: `ArbiterFactSet` stays in `Domain` as data |
+| `Arbiter/Facts/GitFacts.cs` | `GitDiffParser` | b | split: the git call stays, diff parsing moves |
+| `Arbiter/FileArbiterModelTargetsReader.cs` | `ArbiterModelTargets` | a | none + a `Contracts` interface for `IsCompleteFor` |
+| `Arbiter/FileArbiterUserOverrideWriter.cs` | `ArbiterUserSettings` | b | split: the write stays, the path and parse move |
+| `Arbiter/FileArbiterUserSettings.cs` | `ArbiterConfigLoader`, `ArbiterUserSettings`, `RuleValidator` | b, c | split: the file read stays, merge and validation move; takes `IArbiterConfigResolver` |
+| `Arbiter/Ledger/DecisionLog.cs` | `ArbiterDecisionQueries`, `ArbiterJson` | b | split: log append and read stay, the queries move |
+| `Arbiter/Ledger/InFlightLedger.cs` | `ArbiterJson`, `ArbiterLedgerQueries`, `ArbiterRunScope` | a, b | split: the log read stays, the queries move; `ArbiterRunScope` stays data |
+| `Arbiter/Plans/PlanFacts.cs` | `ArbiterFactSet`, `ArbiterTriggerCatalog`, `ModelTargetingRules`, `PlanDocument` … | a, b | move: both records stay in `Domain` |
+| `Arbiter/Plans/PlanRootResolver.cs` | `HeaderBlock` | b | move: already logic over `IGitRepositoryFacts` and `IPlanFileResolver` |
+| `Arbiter/Providers/SystemOneClient.cs` | `ArbiterFactSet`, `ArbiterRule`, `LensInstructions`, `RuleEngine` … | a, b | split: the HTTP call stays, rule evaluation moves |
+| `Arbiter/Stores/ArbiterRunStore.cs` | `ArbiterJson`, `RefutationOutcome` | b | split: the ledger file stays, serialization and verdicts move |
+| `Configuration/FileKyberWeaveConfigRepository.cs` | `KyberWeaveConfigAssembler`, `KyberWeaveConfigLoadResult`, `KyberWeaveYamlParser`, `OntologyConfig` … | a, b | split: the file read stays, assembly and the `Ok`/`Fail` factories move; lands with task 2.3 |
+| `Configuration/FileUserHostConfigStore.cs` | `HostConfigYaml`, `KyberWeaveYamlParser`, `UserHostConfigPath` | b | split: the file read stays, yaml assembly moves |
+| `Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs` | `EmbeddingUsage` | a | none: it builds the record, and `Add` is internal to `Domain` |
+| `Docs/Export/DocGraphExporter.cs` | `DocGraphProjection`, `DocumentSet` | a, c | split: the write stays, the projection moves with `CandidateContracts.cs` |
+| `Docs/FileSystem/PhysicalRepositoryFileStore.cs` | `DocsRootPath` | b | split: the store keeps the raw I/O, path normalisation moves; 2.5.6 reconciles the two `DocsRootPath` definitions |
+| `Docs/GraphClaimCandidateSource.cs` | `LexicalSimilarity` | b | move |
+| `Docs/Mcp/GitCheckoutProbe.cs` | `CorpusProvenance` | b | split: the git call stays, provenance formatting moves |
+| `Docs/Mcp/GitWorktreeIdentity.cs` | `CorpusProvenance` | b | split: the git call stays, provenance formatting moves |
+| `Docs/Parsing/DocumentLoader.cs` | `DocsRootPath`, `DocumentMarkdown`, `DocumentModel`, `DocumentSet` … | a, b | split: the file read stays, markdown parsing moves; `DocumentModel` and `DocumentSet` stay data |
+| `Docs/Parsing/DocumentLoaderFactory.cs` | `OntologyConfig` | a | none |
+| `Docs/SparseLexicalCandidateSource.cs` | `LexicalSimilarity` | b | move |
+| `Doctor/ConfigFileToolSettings.cs` | `KyberWeaveConfigLoadResult` | a | none |
+| `Doctor/FileCodeGraphIndexWorkspace.cs` | `CodeGraphIndexRules` | b | split: the process and file calls stay, the index rules move |
+| `Hooks/ConventionTestClassResolver.cs` | `PathContainment` | b | move: already logic over an `IFileSystem` |
+| `Hooks/YamlHooksConfigSource.cs` | `HooksConfigMerger`, `HooksConfigPath` | b | split: the file and environment reads stay, merging moves |
+| `Review/FileCitedSourceFiles.cs` | `DocsRootPath` | b | split: the file read stays, path normalisation moves |
+| `Review/FileContainedFileReader.cs` | `DocsRootPath` | b | split: the file read stays, containment moves |
+| `Review/FileCoverageReportSource.cs` | `CoberturaReport` | b | split: the file read stays, the coverage parse moves |
+| `Review/FileNotSeatedStore.cs` | `NotSeatedRecord` | b | split: the read and write stay, the record parse moves |
+| `Review/FileRepositoryFileLister.cs` | `ProjectRootDetection` | c | split: the listing stays, root detection moves behind a `Contracts` interface |
+| `Review/FileRepositoryTreeProbe.cs` | `TaskGatePlanning` | b | split: the file probe stays, the gate plan moves |
+| `Review/FileReviewCycleStore.cs` | `ReviewCyclePlanning` | b | split: the folder read stays, cycle planning moves |
+| `Review/FileSeverityOverrideSource.cs` | `ConfigRegConfig`, `SeverityOverrides` | a | split: it returns the text, and `Parse`, `Find` and `Apply` move with the type's methods |
+| `Review/FileTestClassSources.cs` | `TestClassPlanning` | b | split: the file and process reads stay, class resolution moves |
+| `Review/GitChangeReader.cs` | `GitChangeParsing` | b | split: the git call stays, name-status parsing moves |
+| `RunStart/FileRunStateStore.cs` | `RunBaseStateFormat` | b | split: the file read stays, the record format moves |
+| `RunStart/RunCheckoutGuard.cs` | `RunBaseStateFormat` | b | move: already logic over `IRunStateStore` and `IWritableFileSystem` |
+| `Squad/Deployment/SquadDeploymentAdapters.cs` | `SquadDeploymentPlan`, `SquadModelPreset`, `SquadSourceValidationException` | a, b | move: already routed |
+| `Squad/Deployment/SquadDeploymentPlanner.cs` | `SquadDeploymentPlan`, `SquadHookJsonBlock`, `SquadPathPolicy`, `SquadPhysicalRootIdentity` … | a, b | move: already routed |
+| `Squad/Deployment/SquadHookJsonFile.cs` | `SquadHookJsonBlock` | b | move: already routed |
+| `Squad/Deployment/SquadResponseGuidanceDeployer.cs` | `SquadPathPolicy`, `SquadResponseGuidanceSource` | b, c | move: already routed |
+| `Squad/Deployment/SquadResponseGuidanceReader.cs` | `SquadResponseGuidanceSource` | c | move: already routed |
+| `Squad/Deployment/SquadSkillShadowing.cs` | `SquadSkillOutputPaths` | b | move: already routed |
+| `Squad/Deployment/SquadStateMigration.cs` | `SquadPhysicalRootIdentity` | a | move: already routed |
+| `Squad/Deployment/SquadStateStore.cs` | `SquadDeploymentPlan`, `SquadPathPolicy`, `SquadPhysicalRootIdentity`, `SquadTargetCatalog` | a, b | move: already routed |
+| `Squad/Deployment/SquadTargetResolver.cs` | `SquadTargetCatalog` | b | move: already routed |
+| `Squad/Deployment/SquadTransaction.cs` | `SquadDeploymentPlan`, `SquadPathPolicy`, `SquadPhysicalRootIdentity` | a | move: already routed |
+| `Squad/Deployment/SquadWorkerBaselineFile.cs` | `SquadWorkerBaselineInjector` | b | move: already routed |
+| `Squad/Instances/SquadInstanceLinkSync.cs` | `SquadPhysicalRootIdentity` | a | move: the identity record stays, the sync is logic |
+| `Squad/Packaging/SquadCompanionSkills.cs` | `SquadSourceValidationException` | a | none: it throws an exception that stays in `Domain` |
+| `Squad/Packaging/SquadPacker.cs` | `SquadResponseGuidanceSource`, `SquadResponsePreferencesInjector` | b, c | move: a static class that becomes `ISquadPackager` |
+| `Squad/Parsing/SquadSourceLoader.cs` | `CopilotToolCatalog`, `SquadModelPreset`, `SquadPathPolicy`, `SquadSourceValidator` | a, b | move: becomes `ISquadSourceLoader`, and `SquadModelPreset` stays data |
+| `Squad/Presets/SquadModelPresetSelectionStore.cs` | `SquadPhysicalRootIdentity`, `SquadTargetCatalog` | a, b | split: the file stays, root identity and target lookups move |
+| `Squad/Presets/SquadModelPresetStore.cs` | `SquadModelPreset` | a | none: it reads and writes the preset's own file |
+| `Squad/Presets/SquadModelPresetValidator.cs` | `SquadModelPreset`, `SquadSourceValidator` | a, b | move |
+| `Squad/Release/GitHubSquadReleaseSource.cs` | `ReleaseOrigin`, `ReleaseVersion` | a, b | split: HTTP stays, origin resolution and version parsing move |
+| `Squad/Rendering/CopilotMcpServerProbe.cs` | `SquadOperatorChannel` | b | split: the config read stays, the channel rules move |
+| `Squad/Rendering/FileSquadRenderInputReader.cs` | `MemoizedSquadGlobalRoots`, `SquadOperatorChannel`, `SquadRenderRequest` | a, b, c | split: the file reads stay, the request guards move, global roots move behind `ISquadGlobalRootResolver` |
+| `Squad/Rendering/SquadOperatorChannelOverlayFile.cs` | `SquadOperatorChannel` | b | split: the file read stays, the overlay rules move |
+| `Squad/SquadServiceCollectionExtensions.cs` | `SquadGlobalRoots` | c | none: it registers `ISquadGlobalRootResolver`, and the implementation moves |
+| `Update/CopilotPromptRefresher.cs` | `CopilotPromptFile` | b | split: the write stays, the embedded text and validation move |
+| `Update/GitHubReleaseClient.cs` | `ReleaseOrigin`, `ReleaseVersion` | a, b | split: HTTP stays, the origin resolve and guard move |
+### src/KyberWeave.Core (13 files)
 
-### src/KyberWeave.Core (14 files)
-
-| file | Domain logic it names | route |
-|---|---|---|
-| `Configuration/KyberWeaveConfigLoader.cs` | `KyberWeaveConfigAssembler`, `KyberWeaveConfigLoadResult` | Contracts interface |
-| `Configuration/KyberWeaveYamlFile.cs` | `HarnessProfileConfig`, `HarnessProfileConfigLoader`, `OntologyConfig`, `OntologyConfigLoadResult` … | Contracts interface |
-| `Configuration/ReviewConfigLoader.cs` | `ReviewConfigParser` | Contracts interface |
-| `Doctor/CodeGraphProvisioner.cs` | `CodeGraphIndexRules` | Contracts interface |
-| `Doctor/DoctorFileSystem.cs` | `CopilotOverrideSettings` | Contracts interface |
-| `Review/Catalogue/GateCatalogue.cs` | `GateCatalogueRenderer` | Contracts interface |
-| `Review/ChangedFiles.cs` | `GitChangeParsing` | Contracts interface |
-| `Review/ReviewCycles.cs` | `ReviewCyclePlanning` | Contracts interface |
-| `Review/ReviewDecisionModel.cs` | `ArbiterRule`, `ReviewDecisionText` | Contracts interface |
-| `Review/ReviewLensApplicability.cs` | `ReviewLensRules` | Contracts interface |
-| `Review/ReviewVerdictDecisions.cs` | `ReviewVerdictRules`, `SeverityOverrides` | Contracts interface |
-| `Review/TaskGateSelection.cs` | `TaskGatePlanning` | Contracts interface |
-| `RunStart/RunBaseState.cs` | `RunBaseStateFormat` | Contracts interface |
-| `RunStart/RunStartEvidence.cs` | `RunStartEvidenceRules` | Contracts interface |
-
+| file | Domain logic it names | class | route |
+|---|---|---|---|
+| `Configuration/KyberWeaveConfigLoader.cs` | `KyberWeaveConfigAssembler`, `KyberWeaveConfigLoadResult` | a, b | deleted by task 2.3; callers take `IKyberWeaveConfigRepository` |
+| `Configuration/KyberWeaveYamlFile.cs` | `HarnessProfileConfig`, `HarnessProfileConfigLoader`, `OntologyConfig`, `OntologyConfigLoadResult` … | a, b | deleted by task 2.3 |
+| `Configuration/ReviewConfigLoader.cs` | `ReviewConfigParser` | b | deleted by task 2.3 |
+| `Doctor/CodeGraphProvisioner.cs` | `CodeGraphIndexRules` | b | move: becomes the `ICodeGraphProvisioner` implementation |
+| `Doctor/DoctorFileSystem.cs` | `CopilotOverrideSettings` | b | split: the settings read stays, the parse moves |
+| `Review/Catalogue/GateCatalogue.cs` | `GateCatalogueRenderer` | c | move: behind `IReviewGateCatalogue` |
+| `Review/ChangedFiles.cs` | `GitChangeParsing` | b | move |
+| `Review/ReviewDecisionModel.cs` | `ArbiterRule`, `ReviewDecisionText` | a, b | move: behind `IReviewDecisionModel` and `IReviewDecisionModelFactory` |
+| `Review/ReviewLensApplicability.cs` | `ReviewLensRules` | b | move |
+| `Review/ReviewVerdictDecisions.cs` | `ReviewVerdictRules`, `SeverityOverrides` | a, b | move: behind `IReviewDecisionSteps` |
+| `Review/TaskGateSelection.cs` | `TaskGatePlanning` | b | move: behind `ITaskGateSelectionService` |
+| `RunStart/RunBaseState.cs` | `RunBaseStateFormat` | b | deleted by task 2.2; callers take `IRunStateStore` |
+| `RunStart/RunStartEvidence.cs` | `RunStartEvidenceRules` | b | none + `IRunStartEvidence`: the static becomes the interface |
 ### src/KyberWeave.Cli (76 files)
 
 | file | Domain logic it names | route |
@@ -534,18 +605,62 @@ the first two fits cleanly: their factory methods are the logic and they belong 
 `SquadDeploymentPlan` is the only type whose whole interface moves, because `ISquadDeploymentPlanner`
 and `ISquadTransaction` exist for the deployment logic that phase 3 moves anyway.
 
-## Part 3: the move, in dependency order
+## Part 3: the move, in order
 
-One task per group, each a Domain folder or a slice of one, none over 30 logic classes, ordered by how
-many other groups name a group's types, most-named first: the shared records and helpers move before
-the code that uses them. `depends on` names the groups whose logic this group's code names; a cycle is
-harmless here because the whole move lands in one project and keeps every namespace, so the groups in a
-cycle can run in either order without a compile break.
+Three stages. The first two are what make the third mechanical.
 
+**Step 0a — resolve the 36 `Contracts` findings.** Apply the decision in part 2's finding table for
+each of the 22 types (`split`, `move the interface`, `narrow`): the record, the `Contracts` interface
+and the `Application` factory, helper or service are put in place, and `Contracts` stops naming
+anything that will move. This goes first because `Contracts` references `Domain` and may never
+reference `Application`; once a logic type has moved, a `Contracts` file that still names it can be
+made to compile only by giving that project a reference to `Application`, which is the cycle the
+layers forbid.
+
+**Step 0b — split the (a) types and reroute the callers.** Apply the 20 (a) splits and the 8 (c)
+seams, then the 65 `Data` and 13 `Core` routes in part 2: each `move` row moves, each `split` row
+leaves its raw-I/O adapter behind and hands its logic to `Application`, and each `none` row is
+rechecked against the new shape. This is what makes a folder move compile: `Data` and `Contracts` do
+not reference `Application`, so an unrouted caller of a moved type breaks the moment the type lands.
+
+**Step 1 — the folder moves.** Then each task below is a `git mv` of a folder's logic files and their
+tests, plus the path-keyed artefacts in the rules below, and the namespace does not change. The order
+inside step 1 barely matters: after steps 0a and 0b, every remaining reference is either inside
+`Application` or through a `Contracts` interface, so a `depends on` cycle between groups is harmless.
+The groups are still listed most-named first, because that is the order that keeps each move's
+call-site diff smallest.
+
+The first version of this part claimed the moves need no particular order. That holds only for the
+callers that reference `Application` — `Cli`, `Mcp`, `Arbiter`, `Hooks` and every test project — which
+compile against a moved class wherever it sits. It does not hold for `Data` and `Contracts`, which is
+why they are steps 0a and 0b.
+
+### Rules every move task follows
+
+1. **A move commit is `git mv` only.** No file it moves changes content in that commit, and the build
+   and the tests that covered the class are green before and after it. Anything else — a namespace, a
+   `using`, a call site that has to change — is either the build fix the move forces, in its own
+   commit, or a step 0b change that should already be in place.
+2. **A seam conversion is a separate commit.** Turning a static class into an instance service,
+   replacing a resource call with a seam, or taking a `Contracts` interface in a caller lands on its
+   own, before or after the move, never inside it, so a review reads one commit as movement and the
+   next as behaviour.
+3. **Every move updates the path-keyed artefacts**, because a file's path is a key in four places:
+   - document code references: any `docs/` document that names the file, then `kyber-weave docs drift .`
+     to prove the corpus still matches the code;
+   - `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`, when the moved class
+     starts a process;
+   - the `Domain` rows of `docs/reference/seams.md`, when the moved class is an adapter or gains a
+     seam;
+   - the `tests/KyberWeave.Domain.Tests` files of the moved classes: the test moves to
+     `tests/KyberWeave.Application.Tests` beside its class, and task 5.2 groups it by seam afterwards.
+4. **The order is steps 0a, 0b, then the folders**, with `Security` (2.5.10) first as the pilot.
+
+### The 24 folder tasks
 
 | task | Domain group | logic classes | files | depends on | callers outside Application |
 |---|---|---|---|---|---|
-| 2.5.1 | `Configuration` | 23 | 23 | Arbiter: root, FileSystem, Review: catalogue and commands, Review: gates and cycles, Squad: deployment, briefs and the rest | KyberWeave.Application.Tests, KyberWeave.Arbiter, KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Mcp, KyberWeave.Testing, KyberWeave.Tests |
+| 2.5.1 | `Configuration` | 23 | 23 | task 2.3, then Arbiter: root, FileSystem, Review: catalogue and commands, Review: gates and cycles, Squad: deployment, briefs and the rest | KyberWeave.Application.Tests, KyberWeave.Arbiter, KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Mcp, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.2 | `Arbiter: Rules and providers` | 18 | 16 | Arbiter: Facts, Arbiter: root, FileSystem | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.3 | `Squad: deployment, briefs and the rest` | 24 | 23 | Configuration | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.RepoPolicy.Tests, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.4 | `Arbiter: root` | 16 | 12 | Arbiter: Facts, Arbiter: Rules and providers, Configuration, Squad: deployment, briefs and the rest | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Testing, KyberWeave.Tests |
@@ -554,7 +669,7 @@ cycle can run in either order without a compile break.
 | 2.5.7 | `Review: gates and cycles` | 15 | 14 | Arbiter: Rules and providers, Configuration, Review: duplicates and suppression, Review: seats and verdicts | KyberWeave.Cli, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Tests |
 | 2.5.8 | `Review: seats and verdicts` | 15 | 12 | Configuration, Review: duplicates and suppression, Review: gates and cycles | KyberWeave.Cli, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Tests |
 | 2.5.9 | `Review: duplicates and suppression` | 5 | 4 | Arbiter: Rules and providers | KyberWeave.Contracts, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Tests |
-| 2.5.10 | `Security` | 2 | 2 | none | none |
+| 2.5.10 | `Security` — **the pilot** | 2 | 2 | none | none |
 | 2.5.11 | `Docs: validation and models` | 22 | 22 | Arbiter: Rules and providers, Arbiter: root, Configuration, FileSystem, Review: seats and verdicts | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.12 | `Squad: rendering support` | 18 | 16 | Arbiter: Facts, Arbiter: Rules and providers, Squad: deployment, briefs and the rest | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.13 | `Skills` | 11 | 11 | Agents, Security | KyberWeave.Cli, KyberWeave.Tests |
@@ -574,6 +689,12 @@ cycle can run in either order without a compile break.
 each moved class gains or keeps a unit test through fakes, and behaviour does not change
 (requirement 10.1). Task 2.6 then confirms the end state.
 
+`Security` (2.5.10) is the pilot: 2 logic classes in 2 files, no caller outside `Application` and no
+dependency on another group, so it proves the move mechanics and the artefact list above at the
+smallest possible size before a 26-class group runs. `Configuration` (2.5.1) waits for task 2.3: the
+static loader retirement is what puts `KyberWeaveConfigAssembler`, `KyberWeaveYamlParser` and
+`ReviewConfigParser` behind `IKyberWeaveConfigRepository`, so that folder cannot move before it.
+
 ## Limits
 
 - The scan matches type names, not resolved symbols. Comments and string literals are stripped, and a
@@ -588,4 +709,11 @@ each moved class gains or keeps a unit test through fakes, and behaviour does no
 - A dependency edge is a type name used in the group's code with comments and string literals stripped,
   so it can still come from a name in a generic constraint or an attribute; the edges were not read
   line by line.
+- The class is one per type, and a few types span two: `ArbiterConfigLoader` is (c) by its
+  embedded-resource read and (b) by its merge, `SquadResponseGuidanceSource` is (c) by its embedded
+  resource and (b) by the text it builds. The caller table names both where that happens. The route,
+  not the class, is what a move task acts on.
+- The route for each row was decided from the type's declaration and the caller's shape, not from a
+  call-by-call reading of all 78 files. Where a row's route says "none", the check that remains is
+  mechanical: the caller names only data members.
 
