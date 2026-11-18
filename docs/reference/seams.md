@@ -105,6 +105,7 @@ task's list.
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Mcp` | `DrainingStreamServerTransport.cs` | Opens the standard streams for the MCP server |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
+| `ConsoleArbiterKeyInput` | Console | `KyberWeave.Cli` | `Commands/Arbiter/ConsoleArbiterKeyInput.cs` | The `IArbiterKeyInput` adapter: it is the only code that reads a key from standard input or from a masked Spectre prompt. Every Arbiter command around it takes `IAnsiConsole` by constructor, so its own two calls are the whole seam translation |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
@@ -260,7 +261,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepoRoot` (`Commands/Arbiter/ArbiterRepoRoot.cs`) | file system, paths | 4.5 |
 | `ArbiterSectionsCommand` (`Commands/Arbiter/ArbiterSectionsCommand.cs`) | file system, paths | 4.5 |
 | `ArbiterUninstallCommand` (`Commands/Arbiter/ArbiterUninstallCommand.cs`) | paths | 4.5 |
-| `ConsoleArbiterKeyInput` (`Commands/Arbiter/ConsoleArbiterKeyInput.cs`) | console | 4.5 |
 | `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
 | `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
 | `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
