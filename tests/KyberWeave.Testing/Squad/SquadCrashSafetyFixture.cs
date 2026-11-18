@@ -378,6 +378,7 @@ public sealed class SquadCrashInjectedException : Exception
 public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 {
     private readonly TempDirectory _temp = new();
+    private string? _committedPoint;
 
     /// <inheritdoc />
     public override string Root => _temp.Path;
@@ -410,6 +411,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     {
         RecordingObserver observer = new(Capture);
         RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
+        _committedPoint = observer.CommittedPoint;
         return observer.FaultPoints;
     }
 
@@ -442,6 +444,11 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     /// <inheritdoc />
     public override string? ExecuteToRollback(SquadCrashFlow flow, string faultPoint)
     {
+        // A failure at or after the commit marker is a committed deployment whose cleanup failed, not one to roll
+        // back: the receipt is already published, and the kill sweep proves the tree it leaves recovers forward.
+        if (string.Equals(faultPoint, _committedPoint, StringComparison.Ordinal))
+            return null;
+
         RecordingObserver observer = new(failAt: faultPoint);
         try
         {
@@ -478,7 +485,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     public override IReadOnlyDictionary<string, SquadTreeEntry> Capture()
     {
         SortedDictionary<string, SquadTreeEntry> tree = new(StringComparer.Ordinal);
-        CaptureDirectory(new DirectoryInfo(Root), Root, tree);
+        CaptureDirectory(new DirectoryInfo(Root), Root, tree, StateStore.ResolveHomeStateDirectory());
         return tree;
     }
 
@@ -583,12 +590,18 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         }
     }
 
-    private void CaptureDirectory(DirectoryInfo directory, string root, IDictionary<string, SquadTreeEntry> tree)
+    private void CaptureDirectory(
+        DirectoryInfo directory,
+        string root,
+        IDictionary<string, SquadTreeEntry> tree,
+        string registryDirectory)
     {
         foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos()
                      .OrderBy(value => value.Name, StringComparer.Ordinal))
         {
             string relativePath = RelativeKey(Path.GetRelativePath(root, entry.FullName));
+            if (IsRegistryFile(entry, registryDirectory))
+                continue;
             if (entry.LinkTarget is not null)
             {
                 bool namesDirectory = entry is DirectoryInfo;
@@ -605,7 +618,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
             if (entry is DirectoryInfo childDirectory)
             {
                 tree.Add(relativePath, new SquadTreeEntry(SquadTreeEntryKind.Directory));
-                CaptureDirectory(childDirectory, root, tree);
+                CaptureDirectory(childDirectory, root, tree, registryDirectory);
                 continue;
             }
 
@@ -613,6 +626,26 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
                 relativePath,
                 new SquadTreeEntry(SquadTreeEntryKind.File, File.ReadAllBytes(entry.FullName)));
         }
+    }
+
+    /// <summary>
+    /// The home-level project registry, which a snapshot leaves out: it is a cache written after the commit and
+    /// rebuilt by a later status run, so a kill after the commit marker leaves a whole tree without it. It is not
+    /// content the deployment installs.
+    /// </summary>
+    /// <param name="entry">The entry under the root.</param>
+    /// <param name="registryDirectory">The home state directory the registry sits in.</param>
+    /// <returns>True for the registry file itself.</returns>
+    private static bool IsRegistryFile(FileSystemInfo entry, string registryDirectory)
+    {
+        if (!string.Equals(entry.Name, "registry.json", StringComparison.Ordinal))
+            return false;
+
+        SquadFileSystemPathSemantics semantics = SquadFileSystemPathSemantics.Instance;
+        return string.Equals(
+            semantics.Canonicalize(Path.GetDirectoryName(entry.FullName)!),
+            semantics.Canonicalize(registryDirectory),
+            StringComparison.Ordinal);
     }
 
     private static void DeleteContents(DirectoryInfo directory)
@@ -662,6 +695,8 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 
         public IReadOnlyList<string> FaultPoints => _faultPoints;
 
+        public string? CommittedPoint { get; private set; }
+
         public void AfterStep(SquadTransactionStep transactionStep)
         {
             _steps++;
@@ -671,7 +706,10 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint)
         {
             _checkpoints++;
-            Record($"checkpoint:{Invariant(checkpoint.Sequence)}");
+            string point = $"checkpoint:{Invariant(checkpoint.Sequence)}";
+            if (checkpoint.Kind == SquadTransactionCheckpointKind.Committed)
+                CommittedPoint = point;
+            Record(point);
         }
 
         private void Record(string point)

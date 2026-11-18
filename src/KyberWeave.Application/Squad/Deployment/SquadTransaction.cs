@@ -356,6 +356,13 @@ public sealed class SquadTransaction : ISquadTransaction
 
             lease.ReleaseJournal();
             TryMarkCleanupOnly(intentPath, intent);
+
+            // The commit marker is durable here and the artifacts are still on disk: the only window a kill can
+            // leave a committed journal behind, and the one the crash sweep stops at to recover it.
+            NotifyCheckpoint(
+                ref checkpointSequence,
+                _observer,
+                SquadTransactionCheckpointKind.Committed);
             CleanupOwnedArtifacts(journalDirectory, workDirectory, keepIntent: true);
             RecordProjectRegistration(plan, stateDirectory);
         }

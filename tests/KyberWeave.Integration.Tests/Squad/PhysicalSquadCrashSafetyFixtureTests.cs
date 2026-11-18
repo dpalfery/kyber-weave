@@ -11,6 +11,31 @@ namespace KyberWeave.Integration.Tests;
 public sealed class PhysicalSquadCrashSafetyFixtureTests
 {
     [Fact]
+    public void TheSweepStopsAfterTheCommitMarker()
+    {
+        using PhysicalSquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Update);
+        IReadOnlyDictionary<string, SquadTreeEntry> baseline = fixture.Capture();
+        string intent = Path.Combine(fixture.Root, ".kyber-weave", ".squad-transaction", "intent.json");
+
+        List<string> committedPoints = [];
+        foreach (string faultPoint in fixture.ExecuteClean(SquadCrashFlow.Update))
+        {
+            fixture.Restore(baseline);
+            Assert.Null(fixture.ExecuteUnderFault(SquadCrashFlow.Update, faultPoint));
+            if (File.Exists(intent) &&
+                File.ReadAllText(intent).Contains("\"phase\": \"committed\"", StringComparison.Ordinal))
+            {
+                committedPoints.Add(faultPoint);
+            }
+        }
+
+        Assert.True(
+            committedPoints.Count > 0,
+            "The sweep never stopped after the commit marker, so the committed phase is never recovered.");
+    }
+
+    [Fact]
     public void EveryReportedFaultPointLeavesADistinctCrashState()
     {
         using PhysicalSquadCrashSafetyFixture fixture = new();
@@ -62,7 +87,10 @@ public sealed class PhysicalSquadCrashSafetyFixtureTests
         IReadOnlyDictionary<string, SquadTreeEntry> oldTree = fixture.Capture();
         IReadOnlyList<string> faultPoints = fixture.ExecuteClean(SquadCrashFlow.Update);
         fixture.Restore(oldTree);
-        Assert.Null(fixture.ExecuteUnderFault(SquadCrashFlow.Update, faultPoints[^1]));
+
+        // The point before the commit marker leaves a prepared journal, so recovery rewrites the deployed files;
+        // the committed point after it only cleans the journal, which a read-only folder cannot stop.
+        Assert.Null(fixture.ExecuteUnderFault(SquadCrashFlow.Update, faultPoints[^2]));
 
         string blocked = Path.Combine(fixture.Root, ".codex", "agents");
         UnixFileMode original = File.GetUnixFileMode(blocked);

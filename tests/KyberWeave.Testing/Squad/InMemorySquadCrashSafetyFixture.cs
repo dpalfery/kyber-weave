@@ -40,13 +40,13 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
 
     // The project registry is a cache written after the commit and rebuilt by a later status run, so a kill between
     // the commit and that write leaves a whole new tree without it. A kill before the journal exists can leave the
-    // empty state folders its run had made, which hold nothing for a later run to recover. Neither is a difference
-    // in what the deployment installed, so both are left out of every snapshot; the lock and receipt files are not.
+    // empty state folders its run had made, which hold nothing for a later run to recover. Both are left out of every
+    // snapshot; the lock and receipt files are not.
     private const string RegistryKey = "home/.kyber-weave/squad/registry.json";
-    private const string StateFolderPrefix = "home";
 
     private readonly InMemorySquadState _state;
     private readonly string _root;
+    private readonly HashSet<string> _leftOutOfSnapshots;
     private int _commitOrdinal;
 
     /// <summary>
@@ -57,6 +57,7 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
     {
         _state = new InMemorySquadState(stateRoot: "/kw/projects/crash");
         _root = _state.CreateRoot("crash");
+        _leftOutOfSnapshots = ResolveLeftOutOfSnapshots();
     }
 
     /// <inheritdoc />
@@ -181,11 +182,29 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
         _state.Transaction().Recover(Root, SquadDeploymentScope.Project);
     }
 
-    private static bool IsLeftOutOfSnapshots(KeyValuePair<string, SquadTreeEntry> entry) =>
-        string.Equals(entry.Key, RegistryKey, StringComparison.Ordinal) ||
-        (entry.Value.Kind == SquadTreeEntryKind.Directory &&
-         (string.Equals(entry.Key, StateFolderPrefix, StringComparison.Ordinal) ||
-          entry.Key.StartsWith(StateFolderPrefix + "/", StringComparison.Ordinal)));
+    /// <summary>
+    /// The snapshot keys this workspace leaves out: the registry, and the state-folder chain a kill can leave empty.
+    /// The chain is resolved from the store rather than matched by name, so a folder beside it under the home is
+    /// compared like any other.
+    /// </summary>
+    /// <returns>The keys, relative to the root in ordinal order.</returns>
+    private HashSet<string> ResolveLeftOutOfSnapshots()
+    {
+        HashSet<string> leftOut = new(StringComparer.Ordinal) { RegistryKey };
+        string? directory = _state.Store.ResolveStateDirectory(_root, SquadDeploymentScope.Project);
+        while (directory is not null &&
+               _state.Semantics.IsWithin(_root, directory) &&
+               !_state.Semantics.AreSame(_root, directory))
+        {
+            leftOut.Add(Path.GetRelativePath(_root, directory).Replace(Path.DirectorySeparatorChar, '/'));
+            directory = Path.GetDirectoryName(directory);
+        }
+
+        return leftOut;
+    }
+
+    private bool IsLeftOutOfSnapshots(KeyValuePair<string, SquadTreeEntry> entry) =>
+        _leftOutOfSnapshots.Contains(entry.Key);
 
     /// <inheritdoc />
     public override void ExecuteNext(SquadCrashFlow flow)
