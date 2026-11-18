@@ -112,6 +112,18 @@ public sealed class SquadDoctorSeamTests
     }
 
 
+    /// <summary>
+    /// With no path named, the diagnosed root is the environment seam's current directory, not the process's.
+    /// </summary>
+    [Fact]
+    public void Execute_NoNamedPath_DiagnosesTheEnvironmentSeamsCurrentDirectory()
+    {
+        _ = Execute(new SquadDoctorSettings { Global = false }, out _);
+
+        Assert.Equal("/launched-from", _locator.WorkingDirectory);
+    }
+
+
     /// <summary>The state migration runs from the environment seam's current directory, not from the process's.</summary>
     [Fact]
     public void Execute_MigrationRunsFromTheEnvironmentSeamsCurrentDirectory()

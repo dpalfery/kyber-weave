@@ -143,10 +143,12 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         // The named root is the diagnosed root. The unresolved default — "." positional,
-        // no --path — keeps the injected working directory, the process's current
-        // directory in production, exactly as before the option existed.
-        string workingDirectory = SquadCommandComposition.ResolveTargetRoot(
-            effectivePath is null or "." ? _options.WorkingDirectory : effectivePath);
+        // no --path — is the environment seam's current directory, the process's in
+        // production, exactly as before the option existed.
+        string targetRoot = effectivePath is null or "."
+            ? _options.WorkingDirectory ?? _environment.CurrentDirectory
+            : effectivePath;
+        string workingDirectory = SquadCommandComposition.ResolveTargetRoot(targetRoot);
 
         // Doctor reads home-level state, so it resolves the store once. A --global doctor is anchored at the
         // home directory whatever the working directory is, and a path given with it is named and ignored.
