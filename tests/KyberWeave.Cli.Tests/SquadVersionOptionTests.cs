@@ -1,4 +1,3 @@
-using KyberWeave.Testing.Squad;
 using System.Net;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -7,10 +6,11 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the <c>-v|--version</c> contract on <c>squad install</c> and <c>squad update</c>
@@ -23,27 +23,20 @@ namespace KyberWeave.Integration.Tests;
 /// matching GitHub release fails closed (exit 1) with a targeted diagnostic instead of the
 /// raw 404.
 /// </summary>
-public sealed class SquadVersionOptionTests : IDisposable
+public sealed class SquadVersionOptionTests
 {
     private static readonly Uri ApiRoot = new("https://api.github.test/");
-    private readonly TempDirectory _temp = new();
+    private readonly InMemorySquadState _state = new();
 
     [Theory]
     [InlineData("v1.2.3+dev")]
     [InlineData("1.2.3+a.b.9")]
     public void Install_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero(string version)
     {
-        string targetDir = Path.Combine(_temp.Path, "install-pinned");
-        Directory.CreateDirectory(targetDir);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetDir = _state.CreateRoot("install-pinned");
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -65,18 +58,11 @@ public sealed class SquadVersionOptionTests : IDisposable
     [Fact]
     public void Update_WithPinnedVersion_PinsTheNormalizedVersionAtTheReleaseSourceAndExitsZero()
     {
-        string targetDir = Path.Combine(_temp.Path, "update-pinned");
-        Directory.CreateDirectory(targetDir);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetDir = _state.CreateRoot("update-pinned");
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SeedDeployment(targetDir, stateStore);
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
+        SeedDeployment(targetDir);
+        SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -98,17 +84,10 @@ public sealed class SquadVersionOptionTests : IDisposable
     [Fact]
     public void Install_WithoutPinnedVersion_RequestsTheRunningAssemblyVersionWithoutMetadata()
     {
-        string targetDir = Path.Combine(_temp.Path, "install-default-version");
-        Directory.CreateDirectory(targetDir);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetDir = _state.CreateRoot("install-default-version");
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -129,18 +108,11 @@ public sealed class SquadVersionOptionTests : IDisposable
     [Fact]
     public void Update_WithoutPinnedVersion_RequestsTheRunningAssemblyVersionWithoutMetadata()
     {
-        string targetDir = Path.Combine(_temp.Path, "update-default-version");
-        Directory.CreateDirectory(targetDir);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetDir = _state.CreateRoot("update-default-version");
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SeedDeployment(targetDir, stateStore);
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
+        SeedDeployment(targetDir);
+        SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -176,18 +148,11 @@ public sealed class SquadVersionOptionTests : IDisposable
         string version,
         string expectedMessageFragment)
     {
-        string targetDir = Path.Combine(_temp.Path, "install-invalid-version");
-        Directory.CreateDirectory(targetDir);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetDir = _state.CreateRoot("install-invalid-version");
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = _state.Capture();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -205,7 +170,7 @@ public sealed class SquadVersionOptionTests : IDisposable
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedMessageFragment, execution.Output, StringComparison.Ordinal);
         Assert.Empty(releaseSource.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        Assert.Null(SquadTreeComparison.Difference(before, _state.Capture()));
     }
 
     [Theory]
@@ -226,19 +191,12 @@ public sealed class SquadVersionOptionTests : IDisposable
         string version,
         string expectedMessageFragment)
     {
-        string targetDir = Path.Combine(_temp.Path, "update-invalid-version");
-        Directory.CreateDirectory(targetDir);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetDir = _state.CreateRoot("update-invalid-version");
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SeedDeployment(targetDir, stateStore);
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
-        IReadOnlyDictionary<string, byte[]> before = DirectoryTreeSnapshot.SnapshotTree(_temp.Path);
+        SeedDeployment(targetDir);
+        SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer);
+        IReadOnlyDictionary<string, SquadTreeEntry> before = _state.Capture();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -256,24 +214,17 @@ public sealed class SquadVersionOptionTests : IDisposable
         Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
         Assert.Contains(expectedMessageFragment, execution.Output, StringComparison.Ordinal);
         Assert.Empty(releaseSource.Requests);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_temp.Path, before);
+        Assert.Null(SquadTreeComparison.Difference(before, _state.Capture()));
     }
 
     [Fact]
     public void Install_WithPinnedVersionThatHasNoGitHubRelease_FailsWithTheTargetedDiagnosticAndExitOne()
     {
-        string targetDir = Path.Combine(_temp.Path, "install-missing-release");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = _state.CreateRoot("install-missing-release");
         using StatusCodeHandler handler = new StatusCodeHandler(HttpStatusCode.NotFound);
-        using GitHubSquadReleaseSource releaseSource = RealSquadReleaseSource.Create(handler, ApiRoot);
+        using GitHubSquadReleaseSource releaseSource = RealSquadReleaseSource.CreateInMemory(handler, ApiRoot, _state);
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer);
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -295,10 +246,8 @@ public sealed class SquadVersionOptionTests : IDisposable
         Assert.Equal(
             new Uri(ApiRoot, "repos/dpalfery/kyber-weave/releases/tags/v9.9.9"),
             Assert.Single(handler.Requests));
-        Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        Assert.False(_state.Files.DirectoryExists(Path.Combine(targetDir, ".kyber-weave")));
     }
-
-    public void Dispose() => _temp.Dispose();
 
     /// <summary>
     /// Computes, from the assembly attribute, the version the lifecycle resolves when no
@@ -325,23 +274,24 @@ public sealed class SquadVersionOptionTests : IDisposable
     /// has a deployment to operate on, mirroring the fixture the existing update command
     /// tests seed through <see cref="SquadStateStore"/>.
     /// </summary>
-    private static void SeedDeployment(string targetRoot, SquadStateStore stateStore)
+    private void SeedDeployment(string targetRoot)
     {
+        SquadStateStore stateStore = _state.Store;
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Project);
         string lockPath = stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
 
         string deployedRelativePath = ".codex/agents/architect.toml";
         string deployedPath = Path.Combine(targetRoot, deployedRelativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(deployedPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(deployedPath)!);
         byte[] deployedBytes = Encoding.UTF8.GetBytes("name = \"architect\"\n");
-        File.WriteAllBytes(deployedPath, deployedBytes);
+        _state.Files.WriteAllBytes(deployedPath, deployedBytes);
 
         SquadReceipt receipt = new SquadReceipt(
             Schema: "kyber-squad.receipt/v1",
             Scope: SquadDeploymentScope.Project,
             TargetRoot: ".",
-            InstalledAtUtc: DateTimeOffset.UtcNow,
+            InstalledAtUtc: _state.Time.GetUtcNow(),
             Degradations: [],
             Files:
             [
@@ -365,8 +315,8 @@ public sealed class SquadVersionOptionTests : IDisposable
             AssetDigest: "b".PadRight(64, '0'),
             Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
-        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+        _state.Files.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt));
+        _state.Files.WriteAllText(lockPath, stateStore.SerializeLock(squadLock));
     }
 
     private static CommandExecution Capture(Func<int> execute)

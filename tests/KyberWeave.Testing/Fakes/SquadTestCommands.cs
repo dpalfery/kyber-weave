@@ -197,6 +197,89 @@ internal static class SquadTestCommands
             state.Paths);
     }
 
+    /// <summary>
+    /// The real lifecycle service over an in-memory Squad state: its file system, state store, planner, transactions and
+    /// clock, with the release source and renderer a test supplies. Nothing touches the disk.
+    /// </summary>
+    public static SquadLifecycleService InMemoryLifecycle(
+        InMemorySquadState state,
+        ISquadReleaseSource releaseSource,
+        ISquadRenderer renderer)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        InMemorySquadServices services = new(state.Files);
+        return new SquadLifecycleService(
+            releaseSource,
+            renderer,
+            state.Store,
+            new SquadModelPresetStore(state.UserPaths, state.Files),
+            new SquadModelPresetSelectionStore(state.UserPaths, state.Files, state.Semantics),
+            services.SourceLoader(),
+            services.PresetValidator(),
+            state.Planner,
+            new InMemoryTransactions(state),
+            new SquadResponseGuidanceReader(state.Files),
+            new FactoryHooksShadowing(state.Files),
+            new SquadCanonicalProfileStore(state.UserPaths, state.Files),
+            new InMemorySquadFileAccess(state.Files),
+            state.Semantics,
+            state.Time);
+    }
+
+    /// <summary><c>squad install</c> over the in-memory lifecycle of <paramref name="state"/>.</summary>
+    public static SquadInstallCommand InMemoryInstall(
+        InMemorySquadState state,
+        ISquadReleaseSource releaseSource,
+        ISquadRenderer renderer,
+        SquadConsole? output = null)
+    {
+        SquadConsole console = output ?? CapturedSquadConsole();
+        return new SquadInstallCommand(
+            InMemoryLifecycle(state, releaseSource, renderer),
+            state.Store,
+            state.Migration,
+            new SquadTargetResolver(state.Files, state.Semantics, state.Environment),
+            new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
+            new SquadConsoleOptions(false, null),
+            console,
+            new SquadTargetRootConfirmation(console),
+            state.Environment,
+            new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
+            new FakeKyberWeaveConfigRepository(),
+            null);
+    }
+
+    /// <summary><c>squad update</c> over the in-memory lifecycle of <paramref name="state"/>.</summary>
+    public static SquadUpdateCommand InMemoryUpdate(
+        InMemorySquadState state,
+        ISquadReleaseSource releaseSource,
+        ISquadRenderer renderer,
+        SquadConsole? output = null)
+    {
+        SquadConsole console = output ?? CapturedSquadConsole();
+        return new SquadUpdateCommand(
+            InMemoryLifecycle(state, releaseSource, renderer),
+            new FuncInstanceService((_, _) => throw new NotSupportedException("The test reached the instance ensure.")),
+            state.Store,
+            state.Migration,
+            new SquadTargetResolver(state.Files, state.Semantics, state.Environment),
+            new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
+            new InMemorySquadFileAccess(state.Files),
+            new SquadConsoleOptions(false, null),
+            console,
+            new SquadTargetRootConfirmation(console),
+            state.Environment,
+            new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
+            new FakeKyberWeaveConfigRepository(),
+            null,
+            null);
+    }
+
+    private sealed class InMemoryTransactions(InMemorySquadState state) : ISquadTransactionFactory
+    {
+        public ISquadTransaction Create(ISquadTransactionObserver? observer) => state.Transaction(observer);
+    }
+
     public static SquadStatusCommand Status(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,
