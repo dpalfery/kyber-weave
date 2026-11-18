@@ -69,9 +69,72 @@ public sealed class DocsInitProvisionTests : IDisposable
         Assert.True(
             execution.Result == 0,
             $"docs init --provision exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
-        (string root, DoctorMode mode) = Assert.Single(doctor.Runs);
-        Assert.Equal(Path.GetFullPath(_repo.Path), root);
-        Assert.Equal(DoctorMode.Provision, mode);
+        DoctorRun run = Assert.Single(doctor.Runs);
+        Assert.Equal(Path.GetFullPath(_repo.Path), run.Root);
+        Assert.Equal(DoctorMode.Provision, run.Mode);
+    }
+
+    /// <summary>
+    /// The command passes the provision run's options, executor and environment to the doctor, so a change to one of
+    /// them is visible here rather than only in a real run.
+    /// </summary>
+    [Fact]
+    public void DocsInit_WithProvision_PassesTheProvisionArgumentsToTheDoctor()
+    {
+        ScriptedProcessExecutor executor = new(_ => DoctorHarness.Ok());
+        FakeRepositoryDoctor doctor = new();
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor)
+        {
+            Executor = executor,
+            McpExecutable = "kyber-weave-mcp-stub",
+        };
+        DocsInitSettings settings = new()
+        {
+            Path = _repo.Path,
+            NoSkill = true,
+            NoReviewGates = true,
+            Provision = true,
+        };
+
+        _ = ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
+
+        DoctorRun run = Assert.Single(doctor.Runs);
+        Assert.Equal(TimeSpan.FromMinutes(10), run.Options.IndexTimeout);
+        Assert.Equal(TimeSpan.FromSeconds(20), run.Options.McpTimeout);
+        Assert.Equal("codegraph", run.Options.CodeGraphExecutable);
+        Assert.Equal("kyber-weave-mcp-stub", run.Options.McpExecutable);
+        Assert.Same(executor, run.Executor);
+        Func<string, string?> expectedEnvironment = Environment.GetEnvironmentVariable;
+        Assert.Equal(expectedEnvironment, run.Environment);
+        Assert.Null(run.LockDirectory);
+    }
+
+    /// <summary>The command returns the doctor's exit code, so a failed provision is not reported as success.</summary>
+    [Fact]
+    public void DocsInit_WithProvision_ReturnsTheDoctorsExitCode()
+    {
+        FakeRepositoryDoctor doctor = new()
+        {
+            Report = new DoctorReport(
+                ".",
+                DoctorMode.Provision,
+                3,
+                [new DoctorCheck("codegraph.binary", false, "codegraph is missing", "install codegraph")]),
+        };
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor);
+        DocsInitSettings settings = new()
+        {
+            Path = _repo.Path,
+            NoSkill = true,
+            NoReviewGates = true,
+            Provision = true,
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, settings, CancellationToken.None));
+
+        Assert.Equal(3, execution.Result);
+        Assert.Contains("codegraph.binary", execution.Output, StringComparison.Ordinal);
     }
 
     /// <summary>

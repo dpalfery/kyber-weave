@@ -4,15 +4,24 @@ using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Tests;
 
+/// <summary>Answers a fixed doctor report and records every argument the caller passed.</summary>
+internal sealed record DoctorRun(
+    string Root,
+    DoctorMode Mode,
+    DoctorOptions Options,
+    IProcessExecutor Executor,
+    Func<string, string?> Environment,
+    string? LockDirectory);
+
 /// <summary>Answers a fixed doctor report and records what it was asked to inspect.</summary>
 internal sealed class FakeRepositoryDoctor : IRepositoryDoctor
 {
-    private readonly List<(string Root, DoctorMode Mode)> _runs = [];
+    private readonly List<DoctorRun> _runs = [];
 
-    /// <summary>The runs the caller asked for, in order.</summary>
-    public IReadOnlyList<(string Root, DoctorMode Mode)> Runs => _runs;
+    /// <summary>The runs the caller asked for, in order, with the arguments it passed.</summary>
+    public IReadOnlyList<DoctorRun> Runs => _runs;
 
-    /// <summary>The report every run answers.</summary>
+    /// <summary>The report every run answers. Its exit code is what the caller must return.</summary>
     public DoctorReport Report { get; init; } = new(".", DoctorMode.Check, 0, []);
 
     /// <inheritdoc />
@@ -24,7 +33,7 @@ internal sealed class FakeRepositoryDoctor : IRepositoryDoctor
         Func<string, string?> environment,
         string? lockDirectory = null)
     {
-        _runs.Add((root, mode));
+        _runs.Add(new DoctorRun(root, mode, options, executor, environment, lockDirectory));
         return Report with { Root = root, Mode = mode };
     }
 
@@ -35,7 +44,7 @@ internal sealed class FakeRepositoryDoctor : IRepositoryDoctor
         IProcessExecutor executor,
         string? lockDirectory = null)
     {
-        _runs.Add((root, DoctorMode.Provision));
-        return Report with { Root = root, Mode = DoctorMode.Provision };
+        _runs.Add(new DoctorRun(root, DoctorMode.Ensure, options, executor, _ => null, lockDirectory));
+        return Report with { Root = root, Mode = DoctorMode.Ensure };
     }
 }
