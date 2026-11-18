@@ -30,7 +30,7 @@ public sealed class NewSettings : CommandSettings
     public bool NoMetadata { get; set; }
 }
 
-public sealed class NewCommand(ISkillGovernanceService skills) : Command<NewSettings>
+public sealed class NewCommand(ISkillGovernanceService skills, IAnsiConsole ansi) : Command<NewSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, NewSettings settings, CancellationToken cancellationToken)
@@ -41,14 +41,14 @@ public sealed class NewCommand(ISkillGovernanceService skills) : Command<NewSett
         switch (result.Status)
         {
             case SkillScaffoldStatus.InvalidName:
-                AnsiConsole.MarkupLine($"[red]Invalid name '{Markup.Escape(name)}'. Use lowercase letters, digits and single hyphens.[/]");
+                ansi.MarkupLine($"[red]Invalid name '{Markup.Escape(name)}'. Use lowercase letters, digits and single hyphens.[/]");
                 return 2;
             case SkillScaffoldStatus.AlreadyExists:
-                AnsiConsole.MarkupLine($"[red]Directory already exists: {Markup.Escape(result.Directory)}[/]");
+                ansi.MarkupLine($"[red]Directory already exists: {Markup.Escape(result.Directory)}[/]");
                 return 2;
             default:
-                AnsiConsole.MarkupLine($"[green]Created skill[/] [bold]{Markup.Escape(name)}[/] at {Markup.Escape(result.Directory)}");
-                AnsiConsole.MarkupLine($"Next: [grey]kyber-weave skill validate {Markup.Escape(result.Directory)} && kyber-weave skill lint {Markup.Escape(result.Directory)} --explain[/]");
+                ansi.MarkupLine($"[green]Created skill[/] [bold]{Markup.Escape(name)}[/] at {Markup.Escape(result.Directory)}");
+                ansi.MarkupLine($"Next: [grey]kyber-weave skill validate {Markup.Escape(result.Directory)} && kyber-weave skill lint {Markup.Escape(result.Directory)} --explain[/]");
                 return 0;
         }
     }
