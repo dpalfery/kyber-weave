@@ -16,15 +16,19 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class DevinImportOverlapTests
 {
-    private static readonly string Base = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "devin-overlap");
-
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly string _base;
 
-    private DevinImportOverlap Overlap => new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Base));
+    public DevinImportOverlapTests()
+    {
+        _base = Path.Combine(_files.Root, "devin-overlap");
+    }
+
+    private DevinImportOverlap Overlap => new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: _base));
 
     private string Workspace()
     {
-        string root = Path.Combine(Base, "ws");
+        string root = Path.Combine(_base, "ws");
         _files.CreateDirectory(root);
         return root;
     }
@@ -135,7 +139,7 @@ public sealed class DevinImportOverlapTests
     public void Inspect_LocalConfigOutranksProjectAndProjectOutranksUser()
     {
         string ws = Workspace();
-        string userRoot = Path.Combine(Base, "user-devin");
+        string userRoot = Path.Combine(_base, "user-devin");
         Skill(ws, ".devin/skills", "code-review");
         Skill(ws, ".claude/skills", "code-review");
         Skill(ws, ".github/skills", "code-review");
@@ -153,7 +157,7 @@ public sealed class DevinImportOverlapTests
     public void Inspect_UserConfigTurningAnImportOff_AppliesWhenTheProjectIsSilent()
     {
         string ws = Workspace();
-        string userRoot = Path.Combine(Base, "user-devin");
+        string userRoot = Path.Combine(_base, "user-devin");
         Skill(ws, ".devin/skills", "code-review");
         Skill(ws, ".windsurf/skills", "code-review");
 
