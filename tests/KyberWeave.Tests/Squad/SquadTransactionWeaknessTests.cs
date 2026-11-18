@@ -284,6 +284,61 @@ public sealed class SquadTransactionWeaknessTests
         Assert.False(files.FileExists("/a"));
     }
 
+    [Fact]
+    public void AKillDuringCleanupAfterAnInlineRollbackIsFinishedByRecoveryAtEveryStep()
+    {
+        foreach (SquadCrashFlow flow in new[] { SquadCrashFlow.Install, SquadCrashFlow.Update, SquadCrashFlow.Uninstall })
+        {
+            IReadOnlyDictionary<string, SquadTreeEntry> oldTree;
+            using (InMemorySquadCrashSafetyFixture baseline = new())
+            {
+                baseline.CreateBaseline(flow);
+                oldTree = baseline.Capture();
+            }
+
+            for (int step = 1; step < 200; step++)
+            {
+                using InMemorySquadCrashSafetyFixture fixture = new();
+                fixture.CreateBaseline(flow);
+                SquadDeploymentPlan plan = fixture.Plan(flow);
+                bool failed = false;
+                int deletes = 0;
+                int target = step;
+
+                // One failure while the files are applied sends the transaction down its inline rollback; the kill
+                // then lands on the nth delete of the cleanup that follows it.
+                fixture.Files.FailWhen(
+                    operation =>
+                    {
+                        bool fails = !failed && operation.Name == "MoveFile"
+                            && (operation.DestinationPath!.Contains("claimed-", StringComparison.Ordinal)
+                                || (operation.Path!.Contains("staging", StringComparison.Ordinal)
+                                    && !operation.DestinationPath.Contains(".kyber-weave", StringComparison.Ordinal)));
+                        failed |= fails;
+                        return fails;
+                    },
+                    new IOException("The disk failed once while the files were applied."));
+                fixture.Files.KillWhen(operation =>
+                {
+                    return failed && IsTransactionDelete(operation) && ++deletes == target;
+                });
+
+                Exception? stopped = Record.Exception(() => fixture.Transaction().Execute(plan));
+                Assert.NotNull(stopped);
+                if (!InMemorySquadCrashSafetyFixture.IsKill(stopped))
+                {
+                    Assert.True(step > 1 || !failed, "The rollback never reached its cleanup.");
+                    break;
+                }
+
+                fixture.Files.ClearFaults();
+                fixture.Recover();
+
+                Assert.Null(SquadTreeComparison.Difference(oldTree, fixture.Capture()));
+            }
+        }
+    }
+
     private static bool IsTransactionDelete(FileSystemOperation operation) =>
         operation.Name.StartsWith("Delete", StringComparison.Ordinal)
         && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);

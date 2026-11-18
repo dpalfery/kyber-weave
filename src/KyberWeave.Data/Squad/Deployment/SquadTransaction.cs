@@ -343,6 +343,21 @@ public sealed class SquadTransaction : ISquadTransaction
                         failure);
                 }
 
+                // The rollback is complete, so a kill while the artifacts are deleted must be finished forward, as
+                // recovery's own rollback does. The marker is best effort: without it only that kill window is
+                // left open, and the failure being reported matters more.
+                try
+                {
+                    if (_files.FileExists(intentPath))
+                    {
+                        lease.ReleaseJournal();
+                        MarkCleanupOnly(intentPath, intent);
+                    }
+                }
+                catch (Exception marking) when (marking is IOException or UnauthorizedAccessException)
+                {
+                }
+
                 throw;
             }
 
