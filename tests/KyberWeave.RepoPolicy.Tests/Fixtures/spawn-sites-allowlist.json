@@ -686,10 +686,16 @@
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; the product assembly run as `dotnet <dll> --version`, which prints and exits."
     },
     {
+      "file": "tests/KyberWeave.Tests/DocsInitCommandSeamTests.cs",
+      "text": "_ = run.Executor.Run(new ProcessStartInfo(\"probe\"), string.Empty);",
+      "count": 1,
+      "bound": "Fake: the executor under test runs over ScriptedProcessRunner, which starts nothing."
+    },
+    {
       "file": "src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"apm\")",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at DocsInitCommand.cs:200 with ApmInstallTimeout = 5 min; the process tree is killed on expiry."
+      "bound": "Builds only; nothing starts on this line. Started through the injected bounded process executor with ApmInstallTimeout = 5 min; the process tree is killed on expiry."
     },
     {
       "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs",
@@ -810,12 +816,6 @@
       "text": "return BuildStartInfo(",
       "count": 1,
       "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."
-    },
-    {
-      "file": "src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, ApmInstallTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with ApmInstallTimeout = 5 min (DocsInitCommand.cs:28); the process tree is killed on expiry."
     },
     {
       "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/IProcessExecutor.cs",
