@@ -17,7 +17,7 @@ internal sealed class ArbiterHookRefresherFactory(
     IKyberWeaveConfigRepository configs,
     ISquadLifecycleService lifecycle,
     ISquadStateStore state,
-    IFileSystem files,
+    IWritableFileSystem files,
     IMcpWiringService wiring) : IArbiterHookRefresherFactory
 {
     /// <inheritdoc />
