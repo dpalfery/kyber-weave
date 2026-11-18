@@ -68,7 +68,12 @@ public sealed class SquadSharedIdentityProjectionTests
     public async Task RegistryAcceptsExactlyOneSharedIdentityProjection()
     {
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new SingleProjectionRenderer()]);
+        SquadDeploymentFile projection = new(
+            $".github/agents/{SharedIdentitySquadFixture.Identity}.agent.md",
+            Encoding.UTF8.GetBytes("shared projection"),
+            "copilot");
+        SquadRendererRegistry registry = SquadTestRegistry.Create(
+            [FakeSquadRenderer.Emitting([projection], SquadTarget.Copilot)]);
         SquadRenderRequest request = new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Copilot],
@@ -78,23 +83,5 @@ public sealed class SquadSharedIdentityProjectionTests
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.Single(result.Files);
-    }
-
-    private sealed class SingleProjectionRenderer : ISquadRenderer
-    {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Copilot];
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            SquadDeploymentFile file = new(
-                $".github/agents/{SharedIdentitySquadFixture.Identity}.agent.md",
-                Encoding.UTF8.GetBytes("shared projection"),
-                "copilot");
-            return Task.FromResult(new SquadRenderResult(true, [file], [], [], []));
-        }
     }
 }

@@ -182,7 +182,7 @@ public sealed class RemovedAgentResolutionTests
         const string edited = "csharp-dev";
         const string editedContent = "operator edit\n";
 
-        SquadLifecycleResult install = await harness.Lifecycle(new ScriptedAgentRenderer(["conductor", .. removed]))
+        SquadLifecycleResult install = await harness.Lifecycle(FakeSquadRenderer.ScriptedAgents(["conductor", .. removed]))
             .InstallAsync(new SquadInstallRequest(
                 anchor,
                 SquadDeploymentScope.Global,
@@ -194,7 +194,7 @@ public sealed class RemovedAgentResolutionTests
         Assert.True(File.Exists(editedPath), "The first release must render the agent file this test edits.");
         await File.WriteAllTextAsync(editedPath, editedContent, new UTF8Encoding(false));
 
-        SquadLifecycleResult update = await harness.Lifecycle(new ScriptedAgentRenderer("conductor"))
+        SquadLifecycleResult update = await harness.Lifecycle(FakeSquadRenderer.ScriptedAgents("conductor"))
             .UpdateAsync(new SquadUpdateRequest(
                 anchor,
                 SquadDeploymentScope.Global,
@@ -355,31 +355,5 @@ public sealed class RemovedAgentResolutionTests
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content, new UTF8Encoding(false));
-    }
-
-    /// <summary>A renderer that renders one file per named agent and nothing else, so a release can drop an agent.</summary>
-    private sealed class ScriptedAgentRenderer(params string[] agentNames) : ISquadRenderer
-    {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            List<SquadDeploymentFile> files = [];
-            foreach (SquadTarget target in request.Targets)
-            {
-                foreach (string agent in agentNames)
-                {
-                    files.Add(new SquadDeploymentFile(
-                        $"agents/{agent}.md",
-                        Encoding.UTF8.GetBytes($"canonical {agent}\n"),
-                        SquadTargetCatalog.GetToken(target)));
-                }
-            }
-
-            return Task.FromResult(new SquadRenderResult(true, files, [], [], []));
-        }
     }
 }
