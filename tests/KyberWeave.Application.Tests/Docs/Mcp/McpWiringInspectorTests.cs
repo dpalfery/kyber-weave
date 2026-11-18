@@ -241,10 +241,11 @@ public sealed class McpWiringInspectorTests
     /// root and never searched for on <c>PATH</c>.
     /// </para>
     /// <para>
-    /// The rootless contrast is asserted for the same command so the case has teeth: reverting the
-    /// overload to <see cref="ResolverFromAnotherDirectory"/> restores
-    /// <c>KW-MCP-WIRE-003</c> here, and the resolver-level assertion names what the revert broke
-    /// even if the inspector's wording moves.
+    /// The rootless contrast is asserted for the same command, and against the resolver the
+    /// regressed overload would build, so the case has teeth: reverting
+    /// <see cref="McpWiringService.ResolverFor"/> to its working-directory form restores
+    /// <c>KW-MCP-WIRE-003</c> below. The in-memory process stands outside the repository, so the
+    /// two resolvers differ exactly as they do in a real run started from another directory.
     /// </para>
     /// </remarks>
     [Fact]
@@ -254,9 +255,12 @@ public sealed class McpWiringInspectorTests
         McpWiringFixture.WriteExecutable(_wiring.Files, Path.Combine(Repo, "tools"), BinaryName);
         McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", McpServersDocument(".", relativeCommand));
 
-        // The contrast resolver stands outside the repository, so the relative command cannot
-        // resolve; without it the check below would prove nothing about the root it was given.
+        // Both contrasts stand outside the repository: one built here, and the one the regressed
+        // overload would build from the process's own directory. Neither may resolve the command,
+        // or the positive assertion below would pass whatever root the product handed down.
         Assert.Null(ResolverFromAnotherDirectory().Resolve(relativeCommand));
+        Assert.NotEqual(Repo, _wiring.Environment.CurrentDirectory);
+        Assert.Null(_wiring.LaunchFactory.FromEnvironment().Resolve(relativeCommand));
 
         McpConfig declared = McpWiringFixture.Declare(RepositoryRelativeServer(relativeCommand));
 

@@ -55,8 +55,13 @@ internal sealed class InMemoryMcpWiring
         Files.CreateDirectory(Root);
 
         Paths = new FakePathResolver(Files);
+
+        // A process standing somewhere other than the repository it is asked about, which is the
+        // situation the wiring check runs in: `docs init` is started from wherever the operator is,
+        // and a launch command that only resolves against the working directory is a bug the
+        // inspector suite has to be able to see.
         Environment = new FakeProcessEnvironment(
-            currentDirectory: Root,
+            currentDirectory: Files.Root,
             homeDirectory: Path.Combine(Files.Root, "home"),
             tempDirectory: Path.Combine(Files.Root, "tmp"),
             isFileSystemCaseInsensitive: !Files.CaseSensitive);
@@ -112,7 +117,10 @@ internal sealed class InMemoryMcpWiring
     public IMcpWiringService Wiring { get; }
 
     /// <summary>Gets the launch-command factory, which reads the in-memory <c>PATH</c> the environment holds.</summary>
-    public ILaunchCommandResolverFactory Launch => new EnvironmentLaunchCommandResolverFactory(Files, Paths, Environment);
+    public EnvironmentLaunchCommandResolverFactory LaunchFactory => new(Files, Paths, Environment);
+
+    /// <summary>Gets the launch-command factory the wiring service is composed with.</summary>
+    public ILaunchCommandResolverFactory Launch => LaunchFactory;
 
     /// <summary>The full path of a repository-relative path written with forward slashes.</summary>
     /// <param name="relativePath">The path, relative to <see cref="Root"/>.</param>
