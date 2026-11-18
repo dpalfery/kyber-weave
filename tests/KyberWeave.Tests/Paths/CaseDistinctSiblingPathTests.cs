@@ -56,6 +56,34 @@ public sealed class CaseDistinctSiblingPathTests
     }
 
     /// <summary>
+    /// Pins what a project transaction's lease is keyed by: two roots whose names differ only in case hold
+    /// distinct keys and so never contend, while a link to a root holds that root's own key and so does contend.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SquadStateStore.ResolveLeaseIdentity" /> asks the deployment view for exactly this expression, so a
+    /// key that folds the two siblings together would either let two deployments write one root at once or refuse a
+    /// second one that names the same root through a link. The Windows job's two case-sensitive and link cases run
+    /// only there; this one runs everywhere.
+    /// </remarks>
+    [Fact]
+    public void ProjectLeaseKeysSeparateCaseDistinctRootsAndFollowALink()
+    {
+        InMemoryFileSystem files = new(caseSensitive: false);
+        files.CreateDirectory(CaseParent, caseSensitiveNames: true);
+        files.CreateDirectory(UpperRoot);
+        files.CreateDirectory(LowerSibling);
+        files.CreateDirectoryLink(CaseParent + "/Root-alias", UpperRoot);
+        SquadFileSystemPathSemantics semantics = new(new FileSystemPathResolver(files, caseSensitiveFileSystem: false));
+
+        string upperKey = SquadPhysicalRootIdentity.Resolve(UpperRoot, semantics).Key;
+        string lowerKey = SquadPhysicalRootIdentity.Resolve(LowerSibling, semantics).Key;
+        string aliasKey = SquadPhysicalRootIdentity.Resolve(CaseParent + "/Root-alias", semantics).Key;
+
+        Assert.NotEqual(upperKey, lowerKey);
+        Assert.Equal(upperKey, aliasKey);
+    }
+
+    /// <summary>
     /// Builds the configuration the Windows job runs in: the volume folds names, the parent directory matches them
     /// exactly, and one of the two siblings that differ only in case is the target of a link inside the root.
     /// </summary>
