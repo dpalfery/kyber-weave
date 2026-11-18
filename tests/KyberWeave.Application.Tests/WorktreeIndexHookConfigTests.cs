@@ -1,5 +1,4 @@
-using KyberWeave.Tests.Configuration;
-
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using Xunit;
 
@@ -16,9 +15,9 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class WorktreeIndexHookConfigTests : IDisposable
 {
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryReviewServices _services = new();
 
-    public void Dispose() => _root.Dispose();
+    public void Dispose() => _services.Dispose();
 
     /// <summary>A repository that has never mentioned the key gets the index hook, so a new worktree is indexed by default.</summary>
     [Fact]
@@ -26,7 +25,7 @@ public sealed class WorktreeIndexHookConfigTests : IDisposable
     {
         WriteConfig("stop-on-tool-failure: true\n");
 
-        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = _services.Get<IKyberWeaveConfigRepository>().TryLoad(_services.Root);
 
         Assert.True(result.Success, result.Error);
         Assert.NotNull(result.Config);
@@ -38,7 +37,7 @@ public sealed class WorktreeIndexHookConfigTests : IDisposable
     {
         WriteConfig("stop-on-tool-failure: true\nworktree-index-hook: false\n");
 
-        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = _services.Get<IKyberWeaveConfigRepository>().TryLoad(_services.Root);
 
         Assert.True(result.Success, result.Error);
         Assert.NotNull(result.Config);
@@ -54,7 +53,7 @@ public sealed class WorktreeIndexHookConfigTests : IDisposable
     {
         WriteConfig("worktree-index-hook: maybe\n");
 
-        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = _services.Get<IKyberWeaveConfigRepository>().TryLoad(_services.Root);
 
         Assert.False(result.Success);
         string error = result.Error ?? string.Empty;
@@ -65,7 +64,7 @@ public sealed class WorktreeIndexHookConfigTests : IDisposable
 
     private void WriteConfig(string text)
     {
-        Directory.CreateDirectory(Path.Combine(_root.Path, ".kyber-weave"));
-        File.WriteAllText(Path.Combine(_root.Path, ".kyber-weave", "kyber-weave.yml"), text);
+        _services.Files.CreateDirectory(Path.Combine(_services.Root, ".kyber-weave"));
+        _services.Files.WriteAllText(Path.Combine(_services.Root, ".kyber-weave", "kyber-weave.yml"), text);
     }
 }
