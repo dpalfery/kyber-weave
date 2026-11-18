@@ -133,6 +133,14 @@ public sealed class FileTextFactsOverSeamsTests
     }
 
     [Fact]
+    public void AMalformedCitedPathIsRefusedRatherThanThrown()
+    {
+        Assert.Null(Facts().ResolveWithinRoot(Root, "a\0b"));
+        Assert.Null(Facts().ResolveContainedFile(Root, "a\0b"));
+        Assert.Null(Facts().ReadExcerpt(Root, "a\0b", 1));
+    }
+
+    [Fact]
     public void AMissingFileAndALinePastTheEndReadAsAbsent()
     {
         Write("short.txt", "one\ntwo");

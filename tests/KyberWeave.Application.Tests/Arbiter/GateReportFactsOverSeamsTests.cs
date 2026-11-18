@@ -77,6 +77,13 @@ public sealed class GateReportFactsOverSeamsTests
     }
 
     [Fact]
+    public void AMalformedReportPathIsUndecidableRatherThanAThrow()
+    {
+        Assert.Null(Facts().Agrees("TASK_GATE: PASS report=a\0b", Root));
+        Assert.Null(Facts().TryReadFile("a\0b"));
+    }
+
+    [Fact]
     public void AReportInTheRepositoryRootIsReadFromItsDefaultPath()
     {
         _ = Write("/repo/artifacts/gates.json", Failing());
