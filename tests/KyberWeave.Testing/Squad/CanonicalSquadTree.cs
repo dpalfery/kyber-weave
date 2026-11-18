@@ -79,3 +79,14 @@ public sealed class CanonicalSquadTree
             .ToList();
     }
 }
+
+/// <summary>Reads a render request's inputs from a <see cref="CanonicalSquadTree"/>.</summary>
+public static class CanonicalSquadTreeExtensions
+{
+    /// <summary>Reads the render's inputs onto the request from the tree's file system.</summary>
+    /// <param name="request">The request to prepare.</param>
+    /// <param name="tree">The tree whose file system holds the Squad source.</param>
+    /// <returns>The prepared request.</returns>
+    public static SquadRenderRequest Prepared(this SquadRenderRequest request, CanonicalSquadTree tree) =>
+        tree.Prepare(request);
+}

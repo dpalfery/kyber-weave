@@ -21,6 +21,9 @@ public sealed class InMemorySquadServices(InMemoryFileSystem files)
     /// <param name="root">The Squad source root.</param>
     public SquadSource Load(string root) => SourceLoader().Load(root);
 
+    /// <summary>Creates the model preset validator over the in-memory tree.</summary>
+    public SquadModelPresetValidator PresetValidator() => new(files);
+
     /// <summary>Creates the render input reader over the in-memory tree; no environment variable is set.</summary>
     public FileSquadRenderInputReader RenderInputReader() => new(
         SourceLoader(),

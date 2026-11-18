@@ -18,10 +18,16 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadModelPresetMergeTests
 {
+    private static readonly Lazy<CanonicalSquadTree> Tree = new(CanonicalSquadTree.Create);
+
+    private static readonly Lazy<SquadSource> CanonicalSource = new(() => Tree.Value.Load());
+
+    private static readonly Lazy<SquadModelPresetValidator> Validator = new(() => Tree.Value.Services.PresetValidator());
+
     [Fact]
     public void ApplyToPreservesBundledCategoriesWhenPresetDoesNotMentionThem()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
@@ -204,7 +210,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ValidateAcceptsPresetWhenAllCategoriesAreDeclaredInBundledProfiles()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
@@ -217,13 +223,13 @@ public sealed class SquadModelPresetMergeTests
                                   """;
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("valid.yml", Encoding.UTF8.GetBytes(presetYaml));
 
-        RealSquadServices.PresetValidator().Validate(preset, bundled);
+        Validator.Value.Validate(preset, bundled);
     }
 
     [Fact]
     public void ValidateThrowsSquadSourceValidationExceptionNamingUnknownCategoryKeyAndFile()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string relativePath = "presets/unknown-category.yml";
@@ -236,7 +242,7 @@ public sealed class SquadModelPresetMergeTests
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset(relativePath, Encoding.UTF8.GetBytes(presetYaml));
 
         SquadSourceValidationException exception =
-            Assert.Throws<SquadSourceValidationException>(() => RealSquadServices.PresetValidator().Validate(preset, bundled));
+            Assert.Throws<SquadSourceValidationException>(() => Validator.Value.Validate(preset, bundled));
 
         Diagnostic diagnostic = Assert.Single(exception.Diagnostics.Items);
         Assert.Equal(Severity.Error, diagnostic.Severity);
@@ -270,7 +276,7 @@ public sealed class SquadModelPresetMergeTests
 
         SquadSourceValidationException exception =
             Assert.Throws<SquadSourceValidationException>(() =>
-                RealSquadServices.PresetValidator().Validate(preset, bundledWithoutFast));
+                Validator.Value.Validate(preset, bundledWithoutFast));
 
         Diagnostic diagnostic = Assert.Single(exception.Diagnostics.Items);
         Assert.Equal(Severity.Error, diagnostic.Severity);
@@ -283,7 +289,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ValidateOverloadAcceptingSquadSourceValidatesAgainstModelProfiles()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
 
         const string validYaml = """
                                  schema: kyber-squad.model-preset/v1
@@ -295,7 +301,7 @@ public sealed class SquadModelPresetMergeTests
                                  """;
         SquadModelPreset validPreset =
             SquadSourceLoader.ParseModelPreset("valid-source.yml", Encoding.UTF8.GetBytes(validYaml));
-        RealSquadServices.PresetValidator().Validate(validPreset, source);
+        Validator.Value.Validate(validPreset, source);
 
         const string invalidYaml = """
                                    schema: kyber-squad.model-preset/v1
@@ -305,7 +311,7 @@ public sealed class SquadModelPresetMergeTests
                                    """;
         SquadModelPreset invalidPreset =
             SquadSourceLoader.ParseModelPreset("invalid-source.yml", Encoding.UTF8.GetBytes(invalidYaml));
-        Assert.Throws<SquadSourceValidationException>(() => RealSquadServices.PresetValidator().Validate(invalidPreset, source));
+        Assert.Throws<SquadSourceValidationException>(() => Validator.Value.Validate(invalidPreset, source));
     }
 
     [Fact]
@@ -424,7 +430,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ComputeReturnsEmptyDiffWhenProfilesAreIdentical()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadModelProfiles profiles = source.ModelProfiles;
 
         IReadOnlyList<SquadModelDiffItem> diffs = SquadModelDiff.Compute(source, "claude", profiles, profiles);
@@ -548,7 +554,7 @@ public sealed class SquadModelPresetMergeTests
     [Fact]
     public void ComputeDetectsExpectedDiffsAcrossAgentsAgainstCanonicalSquadSource()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadModelProfiles bundled = source.ModelProfiles;
 
         const string presetYaml = """
