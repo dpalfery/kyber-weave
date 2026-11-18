@@ -77,6 +77,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
+        services.TryAddSingleton<IArbiterLogStore>(_ => new KyberWeave.Core.Arbiter.Facts.ArbiterLogFiles());
         return services;
     }
 }

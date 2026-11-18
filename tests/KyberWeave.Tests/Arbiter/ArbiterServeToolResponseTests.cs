@@ -57,7 +57,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
 
         ArbiterLedgerEvent? record = Assert.Single(
-            new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+            RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
         Assert.Equal("code-reviewer", record.Caller);
     }
 
@@ -82,7 +82,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.Contains("larger than", response, StringComparison.Ordinal);
-        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+        Assert.Empty(RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             });
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
-        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+        Assert.Empty(RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
     }
 
     [Fact]
@@ -114,7 +114,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.Contains("at most 64", response, StringComparison.Ordinal);
-        Assert.Empty(new InFlightLedger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+        Assert.Empty(RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         // The fixture must reach a retarget, or the advisory assertions below prove nothing.
         ArbiterDecisionRecord difficulty = Assert.Single(
-            new DecisionLog(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
+            RealArbiterState.Decisions(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
             record => record.Trigger == "delegate.model");
         Assert.NotNull(difficulty.Model);
         Assert.Equal("dev-hard", difficulty.Model.Profile);
@@ -245,7 +245,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         // No model field on the pre event names a retarget: it is rendered, caller or unknown.
         Assert.All(
-            new InFlightLedger(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
+            RealArbiterState.Ledger(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
             record => Assert.NotEqual("retarget", record.ModelSource));
     }
 
@@ -281,7 +281,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
     /// <summary>The ledger's decision-relevant fields, without ids and timestamps, in write order.</summary>
     private static List<(string Phase, string? Trigger, string? Target, string? Caller, string? CallerSource, string? ModelProfile, string? ModelToken, string? ModelSource)> LedgerProjection(string repoRoot) =>
-        new InFlightLedger(ArbiterDirectoryOf(repoRoot)).ReadAll()
+        RealArbiterState.Ledger(ArbiterDirectoryOf(repoRoot)).ReadAll()
             .Select(record => (record.Phase, record.Trigger, record.Target, record.Caller, record.CallerSource, record.ModelProfile, record.ModelToken, record.ModelSource))
             .ToList();
 

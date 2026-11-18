@@ -140,13 +140,13 @@ public sealed class ModelTargetingTieredTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        new InFlightLedger(ArbiterDirectory),
-        new DecisionLog(ArbiterDirectory),
+        RealArbiterState.Ledger(ArbiterDirectory),
+        RealArbiterState.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new RealPlanReader(RealPlanFacts.Create(), _repo.Path),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         RealGateReportFacts.Create(),
-        new FileArbiterStateFactory(),
+        RealArbiterState.Factory(),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? [Trigger]
@@ -174,7 +174,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
         await Evaluator(provider).EvaluateAsync(
             Dispatch(target), Config(roster, mode), null, TestContext.Current.CancellationToken);
 
-        IReadOnlyList<ArbiterDecisionRecord> records = new DecisionLog(ArbiterDirectory).ReadAll();
+        IReadOnlyList<ArbiterDecisionRecord> records = RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
         ArbiterDecisionRecord primary = Assert.Single(records, record => record.Trigger == "delegate");
         string blockers = string.Join(", ", primary.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
         Assert.True(primary.Outcome == "allow", $"fixture precondition: primary outcome {primary.Outcome}: {blockers}");
@@ -186,7 +186,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
 
     private async Task SeedAttemptAsync(string profile, string result, string target)
     {
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", "claude", null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",

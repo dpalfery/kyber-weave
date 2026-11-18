@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
 namespace KyberWeave.Tests;
 
@@ -60,7 +61,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     private async Task WriteStandardFixtureAsync()
     {
         Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(Decision("d-1", "ledger-1", LensRule, 1, 0.45, shadow: true));
         await decisions.AppendAsync(Decision("d-2", "ledger-2", LensRule, 1, 0.65, shadow: true));
         await decisions.AppendAsync(Decision("d-3", "ledger-3", LensRule, 1, 0.66, shadow: true));
@@ -69,7 +70,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
         await decisions.AppendAsync(Decision("d-6", "ledger-6", QuoteRule, 1, 0.9, shadow: false));
         await decisions.AppendAsync(Decision("d-7", "ledger-7", ScopeRule, 0, null, shadow: false));
 
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent(
             "post-1", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
         {
@@ -231,13 +232,13 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     private async Task WriteDelegateModelFixtureAsync()
     {
         Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(DelegateModelDecision(
             "d-shadow", "ledger-shadow", shadow: true, delivered: false, reason: "shadow"));
         await decisions.AppendAsync(DelegateModelDecision(
             "d-enforced", "ledger-enforced", shadow: false, delivered: true, reason: null));
 
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent(
             "post-shadow", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
         {
@@ -371,7 +372,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     public async Task Tune_WithOnlyStepZeroAnswersSaysNoScoredAnswersOnOneLine()
     {
         Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(Decision("d-7", "ledger-7", ScopeRule, 0, null, shadow: false));
 
         CommandExecution execution = RunTune(_repo.Path);

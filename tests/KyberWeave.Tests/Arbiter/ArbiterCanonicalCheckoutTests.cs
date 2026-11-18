@@ -256,13 +256,13 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         ArbiterEvaluator evaluator = new(
             new NoneProvider(),
             _ => null,
-            new InFlightLedger(arbiterDirectory),
-            new DecisionLog(arbiterDirectory),
+            RealArbiterState.Ledger(arbiterDirectory),
+            RealArbiterState.Decisions(arbiterDirectory),
             ArbiterTestServices.HookGitFacts(_repo, _home.Path, arbiterDirectory),
             new ArbiterEvaluatorFixtures.PlanFacts(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             TimeProvider.System);
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules);
 
@@ -273,7 +273,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             Event("post", "claude", "conductor") with { ToolOutput = "Done." }, config, null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Escalate, result.Outcome);
-        ArbiterDecisionRule rule = new DecisionLog(arbiterDirectory).ReadAll()
+        ArbiterDecisionRule rule = RealArbiterState.Decisions(arbiterDirectory).ReadAll()
             .SelectMany(record => record.Rules)
             .Single(candidate => candidate.Id == RuleId);
         Assert.Equal("stray", rule.Answer);

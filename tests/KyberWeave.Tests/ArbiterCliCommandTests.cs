@@ -817,7 +817,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     private string SeedLedger(string name, Action<InFlightLedger> seed)
     {
         string host = NewDir(name);
-        InFlightLedger ledger = new(Path.Combine(host, "artifacts", "arbiter"));
+        InFlightLedger ledger = RealArbiterState.Ledger(Path.Combine(host, "artifacts", "arbiter"));
         seed(ledger);
         return host;
     }

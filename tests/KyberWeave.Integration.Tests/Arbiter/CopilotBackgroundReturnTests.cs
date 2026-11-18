@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -351,9 +352,9 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
 
     private string ArbiterDirectory => Path.Combine(_probe.Root, "artifacts", "arbiter");
 
-    private IReadOnlyList<ArbiterLedgerEvent> Ledger() => new InFlightLedger(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterLedgerEvent> Ledger() => RealArbiterState.Ledger(ArbiterDirectory).ReadAll();
 
-    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => new DecisionLog(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
 
     /// <summary>Stands in for the plan: T1 and T2 are free and own different files, T3 depends on both.</summary>
     private sealed class ThreeTaskPlan : IArbiterPlanReader

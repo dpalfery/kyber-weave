@@ -133,7 +133,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
             dispatchModel: dispatchModel);
 
     private ArbiterDecisionRecord DelegateModelRecord() =>
-        Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Trigger == ModelTrigger);
+        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == ModelTrigger);
 
     [Fact]
     public void EnforceWithADeliveringResolver_CarriesTheResolvedTokenOnAllow()

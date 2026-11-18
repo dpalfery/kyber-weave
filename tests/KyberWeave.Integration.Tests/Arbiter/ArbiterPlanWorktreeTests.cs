@@ -140,7 +140,7 @@ public sealed class ArbiterPlanWorktreeTests
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
-        ArbiterDecisionRecord record = new DecisionLog(Path.Combine(probe.Root, "artifacts", "arbiter"))
+        ArbiterDecisionRecord record = RealArbiterState.Decisions(Path.Combine(probe.Root, "artifacts", "arbiter"))
             .ReadAll()
             .First(decision => decision.Trigger == "delegate");
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "has-tasks");
@@ -182,8 +182,8 @@ public sealed class ArbiterPlanWorktreeTests
         Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: home.Path));
 
         Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
-        ArbiterDecisionRecord record = new DecisionLog(Path.Combine(worktree, "artifacts", "arbiter")).ReadAll()
-            .Concat(new DecisionLog(Path.Combine(probe.Root, "artifacts", "arbiter")).ReadAll())
+        ArbiterDecisionRecord record = RealArbiterState.Decisions(Path.Combine(worktree, "artifacts", "arbiter")).ReadAll()
+            .Concat(RealArbiterState.Decisions(Path.Combine(probe.Root, "artifacts", "arbiter")).ReadAll())
             .First(decision => decision.Trigger == "delegate");
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "has-tasks");
         // The task resolved, so the task rules read it rather than their unknown-task answers.

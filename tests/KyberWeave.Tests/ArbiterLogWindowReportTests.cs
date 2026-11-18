@@ -42,7 +42,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     {
         await AppendLedgerPastTheWindowAsync();
 
-        ArbiterLogRead<ArbiterLedgerEvent> read = new InFlightLedger(ArbiterDirectory).ReadAllWithDiagnostics();
+        ArbiterLogRead<ArbiterLedgerEvent> read = RealArbiterState.Ledger(ArbiterDirectory).ReadAllWithDiagnostics();
 
         Assert.True(read.Truncated);
         Assert.Null(read.Unreadable);
@@ -57,7 +57,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     {
         await AppendDecisionsPastTheWindowAsync();
 
-        ArbiterLogRead<ArbiterDecisionRecord> read = new DecisionLog(ArbiterDirectory).ReadAllWithDiagnostics();
+        ArbiterLogRead<ArbiterDecisionRecord> read = RealArbiterState.Decisions(ArbiterDirectory).ReadAllWithDiagnostics();
 
         Assert.True(read.Truncated);
         Assert.DoesNotContain(read.Records, record => record.Id == "decision-000");
@@ -68,9 +68,9 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     public async Task ALogThatFitsTheWindowIsNotTruncated()
     {
         Directory.CreateDirectory(ArbiterDirectory);
-        await new InFlightLedger(ArbiterDirectory).AppendAsync(Event("event-small", 10));
+        await RealArbiterState.Ledger(ArbiterDirectory).AppendAsync(Event("event-small", 10));
 
-        ArbiterLogRead<ArbiterLedgerEvent> read = new InFlightLedger(ArbiterDirectory).ReadAllWithDiagnostics();
+        ArbiterLogRead<ArbiterLedgerEvent> read = RealArbiterState.Ledger(ArbiterDirectory).ReadAllWithDiagnostics();
 
         Assert.False(read.Truncated);
         Assert.Null(read.Unreadable);
@@ -80,7 +80,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     [Fact]
     public void AnAbsentLogIsEmptyWithNoProblem()
     {
-        ArbiterLogRead<ArbiterLedgerEvent> read = new InFlightLedger(ArbiterDirectory).ReadAllWithDiagnostics();
+        ArbiterLogRead<ArbiterLedgerEvent> read = RealArbiterState.Ledger(ArbiterDirectory).ReadAllWithDiagnostics();
 
         Assert.Empty(read.Records);
         Assert.False(read.Truncated);
@@ -94,8 +94,8 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
         Directory.CreateDirectory(Path.Combine(ArbiterDirectory, InFlightLedger.FileName));
         Directory.CreateDirectory(Path.Combine(ArbiterDirectory, DecisionLog.FileName));
 
-        ArbiterLogRead<ArbiterLedgerEvent> ledger = new InFlightLedger(ArbiterDirectory).ReadAllWithDiagnostics();
-        ArbiterLogRead<ArbiterDecisionRecord> decisions = new DecisionLog(ArbiterDirectory).ReadAllWithDiagnostics();
+        ArbiterLogRead<ArbiterLedgerEvent> ledger = RealArbiterState.Ledger(ArbiterDirectory).ReadAllWithDiagnostics();
+        ArbiterLogRead<ArbiterDecisionRecord> decisions = RealArbiterState.Decisions(ArbiterDirectory).ReadAllWithDiagnostics();
 
         Assert.Empty(ledger.Records);
         Assert.NotNull(ledger.Unreadable);
@@ -131,7 +131,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     {
         WriteHostConfig();
         Directory.CreateDirectory(ArbiterDirectory);
-        await new InFlightLedger(ArbiterDirectory).AppendAsync(Event("event-small", 10));
+        await RealArbiterState.Ledger(ArbiterDirectory).AppendAsync(Event("event-small", 10));
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
             null!, new ArbiterSettings { Path = Root }));
@@ -206,7 +206,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     private async Task AppendLedgerPastTheWindowAsync()
     {
         Directory.CreateDirectory(ArbiterDirectory);
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         for (int i = 0; i < 100; i++)
         {
             await ledger.AppendAsync(Event($"event-{i:D3}", PaddingChars));
@@ -216,7 +216,7 @@ public sealed class ArbiterLogWindowReportTests : IDisposable
     private async Task AppendDecisionsPastTheWindowAsync()
     {
         Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         for (int i = 0; i < 100; i++)
         {
             await decisions.AppendAsync(Decision($"decision-{i:D3}", PaddingChars));

@@ -96,13 +96,13 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
         new(
             provider,
             _ => null,
-            new InFlightLedger(arbiterDirectory),
-            new DecisionLog(arbiterDirectory),
+            RealArbiterState.Ledger(arbiterDirectory),
+            RealArbiterState.Decisions(arbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(Now),
             SecondaryTriggers.For);
 
@@ -212,7 +212,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
 
         Assert.Equal(0, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        string stored = Assert.Single(new ArbiterRunStore(ArbiterDirectory, null, () => Now).ReadFailures(null, null, Session));
+        string stored = Assert.Single(RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFailures(null, null, Session));
         Assert.Contains(FirstFailure, stored, StringComparison.Ordinal);
     }
 
@@ -307,7 +307,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
         ArbiterDecisionRecord record = Assert.Single(
-            new DecisionLog(ArbiterDirectory).ReadAll(),
+            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(),
             decision => decision.Trigger == FailureTrigger && decision.LedgerId == result.LedgerId);
         ArbiterDecisionRule rule = Assert.Single(record.Rules, r => r.Id == FailureRule);
         Assert.Equal(RuleEffects.SameFailure, rule.WouldEffect);

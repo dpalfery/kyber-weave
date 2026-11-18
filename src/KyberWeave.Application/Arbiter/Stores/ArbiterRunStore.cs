@@ -65,30 +65,54 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     private readonly string _storesDirectory;
     private readonly ArbiterStoreOptions _options;
     private readonly Func<DateTimeOffset> _clock;
-    private readonly Func<DirectoryInfo, DateTime> _newestItemTime;
+    private readonly Func<string, DateTime> _newestItemTime;
+    private readonly IArbiterLogStore _log;
+    private readonly IFileSystem _files;
+    private readonly IWritableFileSystem _writes;
 
     /// <summary>Creates a store rooted at <c>&lt;arbiter-dir&gt;/stores</c>.</summary>
     /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
+    /// <param name="log">The append and windowed-read mechanics every store file shares.</param>
+    /// <param name="files">The file system the retention sweep lists and ages siblings through.</param>
+    /// <param name="writes">The file system the retention sweep deletes expired siblings through.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
-    public ArbiterRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, Func<DateTimeOffset>? clock = null)
-        : this(arbiterDirectory, options, clock, null)
+    public ArbiterRunStore(
+        string arbiterDirectory,
+        IArbiterLogStore log,
+        IFileSystem files,
+        IWritableFileSystem writes,
+        ArbiterStoreOptions? options = null,
+        Func<DateTimeOffset>? clock = null)
+        : this(arbiterDirectory, log, files, writes, options, clock, null)
     {
     }
 
     /// <summary>Creates a store whose sweep reads a sibling directory's age through <paramref name="newestItemTime"/>.</summary>
     /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
+    /// <param name="log">The append and windowed-read mechanics every store file shares.</param>
+    /// <param name="files">The file system the retention sweep lists and ages siblings through.</param>
+    /// <param name="writes">The file system the retention sweep deletes expired siblings through.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
     /// <param name="newestItemTime">Reads when a sibling directory was last written; the file system when null. Lets a test make that read fail.</param>
     internal ArbiterRunStore(
         string arbiterDirectory,
+        IArbiterLogStore log,
+        IFileSystem files,
+        IWritableFileSystem writes,
         ArbiterStoreOptions? options,
         Func<DateTimeOffset>? clock,
-        Func<DirectoryInfo, DateTime>? newestItemTime)
+        Func<string, DateTime>? newestItemTime)
     {
-        _newestItemTime = newestItemTime ?? NewestItemTimeUtc;
         ArgumentNullException.ThrowIfNull(arbiterDirectory);
+        ArgumentNullException.ThrowIfNull(log);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(writes);
+        _log = log;
+        _files = files;
+        _writes = writes;
+        _newestItemTime = newestItemTime ?? NewestItemTimeUtc;
         _storesDirectory = Path.Combine(arbiterDirectory, StoresDirectoryName);
         _options = options ?? new ArbiterStoreOptions();
         _clock = clock ?? (() => DateTimeOffset.UtcNow);
@@ -162,7 +186,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     public IReadOnlyList<string> ReadFailures(string? planFile, string? planDigest, string? session)
     {
         string path = Path.Combine(FailureDirectory(planFile, planDigest, session), FailuresFileName);
-        return ReadItems(path, MaxFailuresReadBytes);
+        return ReadItems(path, MaxFailuresReadBytes, _log);
     }
 
     /// <summary>
@@ -186,7 +210,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     public IReadOnlyList<string> ReadReturns(string planFile)
     {
         ArgumentNullException.ThrowIfNull(planFile);
-        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName), MaxReturnsReadBytes);
+        return ReadItems(Path.Combine(ReturnsDirectory(planFile), ReturnsFileName), MaxReturnsReadBytes, _log);
     }
 
     /// <summary>Keyed by the plan file alone, so an amended plan still sees the returns made before the amendment.</summary>
@@ -222,7 +246,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     {
         ArgumentNullException.ThrowIfNull(reviewRun);
         string path = Path.Combine(ReviewDirectory(reviewRun), FindingsFileName);
-        return ReadItems(path, MaxFindingsReadBytes);
+        return ReadItems(path, MaxFindingsReadBytes, _log);
     }
 
     private async Task<ArbiterStoreStatus> AppendAsync(string directory, string fileName, string text, CancellationToken ct)
@@ -237,7 +261,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         {
             SweepExpired(directory, now);
             string line = ArbiterJson.Serialize(new StoredItem(now, text));
-            await ArbiterLogFiles.AppendLineAsync(directory, fileName, line, ct);
+            await _log.AppendLineAsync(directory, fileName, line, ct);
             return ArbiterStoreStatus.Stored;
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -252,7 +276,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     /// </summary>
     private void SweepExpired(string keepDirectory, DateTimeOffset now)
     {
-        if (!Directory.Exists(_storesDirectory))
+        if (!_files.DirectoryExists(_storesDirectory))
         {
             return;
         }
@@ -260,13 +284,11 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         // Clamped before the conversion: a value past the representable span would throw, and the append must still store.
         TimeSpan retain = TimeSpan.FromDays(Math.Clamp(_options.RetainDays, 1, MaxRetainDays));
         string keep = Path.GetFullPath(keepDirectory);
-        DirectoryInfo root = new(_storesDirectory);
-        // IgnoreInaccessible is off so an unlistable stores directory is reported to the catch below instead of being
-        // silently read as empty: the outcome is the same, but the failure is handled in one place.
-        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0, IgnoreInaccessible = false };
+        // A listing failure is reported to the catch below rather than read as an empty directory: the outcome is the
+        // same, but the failure is handled in one place.
         try
         {
-            foreach (FileSystemInfo entry in root.EnumerateFileSystemInfos("*", options))
+            foreach (FileSystemEntry entry in _files.EnumerateEntries(_storesDirectory))
             {
                 SweepEntry(entry, keep, now, retain);
             }
@@ -278,20 +300,20 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         }
     }
 
-    private void SweepEntry(FileSystemInfo entry, string keep, DateTimeOffset now, TimeSpan retain)
+    private void SweepEntry(FileSystemEntry entry, string keep, DateTimeOffset now, TimeSpan retain)
     {
-        if (entry.LinkTarget is not null
-            || entry is not DirectoryInfo directory
-            || string.Equals(Path.GetFullPath(directory.FullName), keep, StringComparison.Ordinal))
+        if (entry.IsLink
+            || !entry.IsDirectory
+            || string.Equals(Path.GetFullPath(entry.Path), keep, StringComparison.Ordinal))
         {
             return;
         }
 
         try
         {
-            if (now - _newestItemTime(directory) > retain)
+            if (now - _newestItemTime(entry.Path) > retain)
             {
-                directory.Delete(recursive: true);
+                _writes.DeleteTreeNoFollow(entry.Path);
             }
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -305,24 +327,24 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     /// when an entry is created or removed, so an active run appended to in place would look old and be swept
     /// mid-review. The directory's time is the fallback for a directory that holds no file.
     /// </summary>
-    private static DateTime NewestItemTimeUtc(DirectoryInfo directory)
+    private DateTime NewestItemTimeUtc(string directory)
     {
-        EnumerationOptions options = new() { RecurseSubdirectories = false, AttributesToSkip = 0 };
         DateTime? newest = null;
-        foreach (FileInfo file in directory.EnumerateFiles("*", options))
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(directory))
         {
-            if (file.LinkTarget is not null)
+            if (entry.IsDirectory || entry.IsLink)
             {
                 continue;
             }
 
-            if (newest is not { } current || file.LastWriteTimeUtc > current)
+            DateTime written = _files.GetLastWriteTimeUtc(entry.Path);
+            if (newest is not { } current || written > current)
             {
-                newest = file.LastWriteTimeUtc;
+                newest = written;
             }
         }
 
-        return newest ?? directory.LastWriteTimeUtc;
+        return newest ?? _files.GetLastWriteTimeUtc(directory);
     }
 
     /// <summary>
@@ -336,10 +358,10 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     /// first line is the end of an item cut by the seek and is dropped, so a whole item is never lost.
     /// A missing file reads as empty.
     /// </remarks>
-    internal static IReadOnlyList<string> ReadItems(string path, long tailBytes)
+    internal static IReadOnlyList<string> ReadItems(string path, long tailBytes, IArbiterLogStore log)
     {
         List<string> items = [];
-        foreach (string line in ArbiterLogFiles.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine: true))
+        foreach (string line in log.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine: true))
         {
             StoredItem? item = TryDeserialize(line);
             if (item is not null)

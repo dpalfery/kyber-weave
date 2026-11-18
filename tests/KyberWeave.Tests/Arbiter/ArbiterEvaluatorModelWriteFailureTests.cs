@@ -82,13 +82,13 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
             Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
         },
         _ => null,
-        new InFlightLedger(ArbiterDirectory),
-        new DecisionLog(ArbiterDirectory),
+        RealArbiterState.Ledger(ArbiterDirectory),
+        RealArbiterState.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System);
 
     private ArbiterEvent Dispatch() => new()
@@ -143,7 +143,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
         Assert.False(result.IsError);
         Assert.NotEqual(RuleEffects.Escalate, result.Outcome);
         ArbiterDecisionRecord record = Assert.Single(
-            new DecisionLog(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
+            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
         ArbiterModelBlock block = BlockOf(record);
         Assert.False(block.Delivered);
         Assert.Equal("model-write-failed", block.Reason);

@@ -109,18 +109,18 @@ internal static class ArbiterEvaluatorFixtures
         new(
             provider,
             _ => null,
-            new InFlightLedger(DirectoryFor(root)),
-            new DecisionLog(DirectoryFor(root)),
+            RealArbiterState.Ledger(DirectoryFor(root)),
+            RealArbiterState.Decisions(DirectoryFor(root)),
             new PassThroughGitFacts(),
             planReader ?? new PlanFacts(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            new FileArbiterStateFactory(new ArbiterLogFiles(), new PhysicalFileSystem(), new PhysicalFileSystem()),
             new Clock(FixedNow),
             secondaryTriggers);
 
     public static IReadOnlyList<ArbiterDecisionRecord> Records(string root) =>
-        new DecisionLog(DirectoryFor(root)).ReadAll();
+        RealArbiterState.Decisions(DirectoryFor(root)).ReadAll();
 
     /// <summary>A step-1 rule with one answer that maps to <paramref name="effect"/> and a second answer that never matches.</summary>
     public static ArbiterRule AskRule(string id, string trigger, string answer, string effect, bool shadow = false) =>

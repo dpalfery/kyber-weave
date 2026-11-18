@@ -120,13 +120,13 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
         new(
             provider,
             _ => null,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(Now),
             SecondaryTriggers.For);
 
@@ -155,7 +155,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
         await evaluator.EvaluateAsync(Rework(FirstFailure), ReworkConfig());
         await evaluator.EvaluateAsync(Rework(SecondFailure), ReworkConfig());
 
-        ArbiterDecisionRule failure = new DecisionLog(ArbiterDirectory).ReadAll()
+        ArbiterDecisionRule failure = RealArbiterState.Decisions(ArbiterDirectory).ReadAll()
             .SelectMany(record => record.Rules)
             .Single(rule => rule.Id == FailureRule && rule.Step == 1);
         Assert.Equal(0.95, failure.Confidence);
@@ -193,7 +193,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
         ArbiterEvaluationResult result = await Evaluator(Confident((ModelRule, Hard))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
 
         ArbiterDecisionRecord primary = Assert.Single(
-            new DecisionLog(ArbiterDirectory).ReadAll(),
+            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(),
             record => record.Trigger == DelegateTrigger && record.LedgerId == result.LedgerId);
         ArbiterDecisionRule planRead = Assert.Single(primary.Rules, rule => rule.Id == PlanReadRule);
         Assert.Equal(NoPlan, planRead.Answer);

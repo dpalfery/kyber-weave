@@ -1,13 +1,17 @@
 using System.Text.Json;
+using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
@@ -430,6 +434,74 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         File.AppendAllText(
             Path.Combine(directory, "ledger.jsonl"),
             JsonSerializer.Serialize(dispatch) + Environment.NewLine);
+    }
+
+    /// <summary>
+    /// The guard decides the dispatch's technology from the ledger its injected state factory opens: it asks that
+    /// factory for the project ledger, and the ledger it reads is the one the factory hands back. A guard that read the
+    /// files itself would never call the factory, so this fails on the pre-refactor wiring.
+    /// </summary>
+    [Fact]
+    public void TheGuardOpensTheProjectLedgerThroughTheInjectedStateFactory()
+    {
+        TechnologyRepository(_repository.Path, "azure");
+        RecordingArbiterStateFactory state = new(
+            new FileArbiterStateFactory(new FakeArbiterLogStore(), new PhysicalFileSystem(), new PhysicalFileSystem()));
+
+        _ = Guard(GuardOver(state), "claude", Command("claude", "az vm list -o table"));
+
+        Assert.Contains(
+            Path.Combine(_repository.Path, "artifacts", "arbiter"),
+            state.OpenedLedgers,
+            StringComparer.Ordinal);
+    }
+
+    /// <summary>The worker guard over the application's registrations, with the ledger opened through <paramref name="state"/>.</summary>
+    private static IWorkerGuard GuardOver(IArbiterStateFactory state)
+    {
+        using ServiceProvider services = new ServiceCollection()
+            .AddSingleton(state)
+            .AddArbiterHost()
+            .BuildServiceProvider();
+        return services.GetRequiredService<IWorkerGuard>();
+    }
+
+    /// <summary>A state factory that records every directory the guard opens a ledger for.</summary>
+    private sealed class RecordingArbiterStateFactory(IArbiterStateFactory inner) : IArbiterStateFactory
+    {
+        /// <summary>The directories the guard asked for a ledger.</summary>
+        public List<string> OpenedLedgers { get; } = [];
+
+        /// <inheritdoc />
+        public IArbiterLedger OpenLedger(string arbiterDirectory)
+        {
+            OpenedLedgers.Add(arbiterDirectory);
+            return inner.OpenLedger(arbiterDirectory);
+        }
+
+        /// <inheritdoc />
+        public IArbiterDecisionLog OpenDecisionLog(string arbiterDirectory) => inner.OpenDecisionLog(arbiterDirectory);
+
+        /// <inheritdoc />
+        public IArbiterRunStore OpenRunStore(
+            string arbiterDirectory,
+            ArbiterStoreOptions? options = null,
+            Func<DateTimeOffset>? clock = null) =>
+            inner.OpenRunStore(arbiterDirectory, options, clock);
+    }
+
+    private string Guard(IWorkerGuard guard, string harness, string json)
+    {
+        using StringWriter stdout = new();
+        guard.Run(
+            harness,
+            json,
+            stdout,
+            TextWriter.Null,
+            _home.Path,
+            () => Start,
+            _ => ArbiterDispatchBudgetConfig.Defaults);
+        return stdout.ToString();
     }
 
     private string Guard(string harness, string json)

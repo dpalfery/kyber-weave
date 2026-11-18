@@ -224,13 +224,13 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
         ArbiterEvaluator evaluator = new(
             provider,
             _ => null,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             new FixedReviewFacts(review),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             TimeProvider.System);
         KyberWeaveConfig config = new()
         {

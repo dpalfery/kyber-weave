@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -180,13 +181,13 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         return new ArbiterEvaluator(
             provider,
             _ => null,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             gitFacts ?? new PassThroughGitFacts(),
             planReader ?? new PassThroughPlanReader(),
             modelTargets ?? new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(fixedNow),
             modelTargetsDirectory: modelTargetsDirectory);
     }
@@ -292,7 +293,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         await CreateEvaluator(provider).EvaluateAsync(DelegateEvent(Prompt), config);
 
-        ArbiterDecisionRecord record = new DecisionLog(ArbiterDirectory).ReadAll()[0];
+        ArbiterDecisionRecord record = RealArbiterState.Decisions(ArbiterDirectory).ReadAll()[0];
         ArbiterDecisionRule scored = record.Rules.Single(rule => rule.Id == "KW-ARB-ASK-001");
         Assert.Equal([0.9, 0.1], scored.Probabilities!);
         Assert.Equal(0.85, scored.Confidence);
@@ -333,8 +334,8 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
         Assert.False(result.IsError);
-        Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
-        Assert.Equal(ArbiterProviderStatuses.NotEvaluated, new DecisionLog(ArbiterDirectory).ReadAll()[0].Provider.Status);
+        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
+        Assert.Equal(ArbiterProviderStatuses.NotEvaluated, RealArbiterState.Decisions(ArbiterDirectory).ReadAll()[0].Provider.Status);
     }
 
     [Fact]
@@ -349,13 +350,13 @@ public sealed class ArbiterEvaluatorTests : IDisposable
                 resolverCalls++;
                 return null;
             },
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
@@ -447,7 +448,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         Assert.True(result.IsError);
         Assert.NotEqual(string.Empty, result.LedgerId);
         Assert.Contains(
-            new InFlightLedger(ArbiterDirectory).ReadAll(),
+            RealArbiterState.Ledger(ArbiterDirectory).ReadAll(),
             e => e.Id == result.LedgerId);
     }
 
@@ -474,7 +475,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         ArbiterEvaluator second = CreateEvaluator(new NoneProvider(), planReader: new DigestPlanReader("digest-1"));
         await second.EvaluateAsync(DelegateEvent(Prompt), config);
 
-        DecisionLog log = new(ArbiterDirectory);
+        DecisionLog log = RealArbiterState.Decisions(ArbiterDirectory);
         ArbiterDecisionRecord unchanged = log.ReadAll()[^1];
         Assert.Equal(2, unchanged.Repeat);
 
@@ -502,8 +503,8 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.False(result.IsError);
         Assert.True(provider.SawLedgerFile, "ledger event is appended before evaluation");
-        Assert.Single(new InFlightLedger(ArbiterDirectory).ReadAll());
-        Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll());
+        Assert.Single(RealArbiterState.Ledger(ArbiterDirectory).ReadAll());
+        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
         string ledgerText = await File.ReadAllTextAsync(Path.Combine(ArbiterDirectory, InFlightLedger.FileName));
         Assert.NotEmpty(ledgerText.Trim());
     }
@@ -512,7 +513,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     public async Task Evaluator_DryRunReadsLedgerAndWritesNothing()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         DateTimeOffset at = new(2025, 10, 1, 12, 0, 0, TimeSpan.Zero);
         await ledger.AppendAsync(new ArbiterLedgerEvent(
             ArbiterRecordId.New(at), at, ArbiterSources.Hook, "claude", "s1", ArbiterLedgerPhases.Pre));

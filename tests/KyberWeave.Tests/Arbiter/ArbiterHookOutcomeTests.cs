@@ -77,7 +77,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
     private HookContext Context() => new(_repo.Path, () => "decision-hook", TextWriter.Null);
 
-    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => new DecisionLog(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
 
     private static string Marked(string body) => "KYBER-ARBITER: true\n\n" + body;
 
@@ -189,7 +189,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public async Task AnEnforcedDuplicateDeniesTheRefuterWithItsDuplicateLine()
     {
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
         HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
@@ -209,7 +209,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public async Task AShadowDuplicateLetsTheRefuterRun()
     {
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
         HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(

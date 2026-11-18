@@ -48,7 +48,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
 
     private ArbiterRunStore Store(DateTimeOffset at, ArbiterStoreOptions? options = null) =>
-        new(ArbiterDirectory, options, () => at);
+        RealArbiterState.RunStore(ArbiterDirectory, options, () => at);
 
     private static ArbiterLedgerEvent PreEvent(DateTimeOffset at) =>
         new(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "test-harness", "session-1", ArbiterLedgerPhases.Pre)
@@ -209,7 +209,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
 
-        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1]);
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1], new ArbiterLogFiles());
 
         Assert.Equal(["second", "third"], read);
     }
@@ -219,7 +219,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
 
-        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] - 3);
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] - 3, new ArbiterLogFiles());
 
         Assert.Equal(["third"], read);
     }
@@ -230,7 +230,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
         (string path, long[] starts, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second", "third");
 
         // The window opens on the newline that ends "first": only that empty remainder is dropped.
-        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] + 1);
+        IReadOnlyList<string> read = ArbiterRunStore.ReadItems(path, length - starts[1] + 1, new ArbiterLogFiles());
 
         Assert.Equal(["second", "third"], read);
     }
@@ -240,16 +240,16 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         (string path, _, long length) = await WriteFindingLinesAsync("RUN-TAIL", "first", "second");
 
-        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length));
-        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length + 1));
-        Assert.Equal(["second"], ArbiterRunStore.ReadItems(path, length - 1));
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length, new ArbiterLogFiles()));
+        Assert.Equal(["first", "second"], ArbiterRunStore.ReadItems(path, length + 1, new ArbiterLogFiles()));
+        Assert.Equal(["second"], ArbiterRunStore.ReadItems(path, length - 1, new ArbiterLogFiles()));
     }
 
     [Fact]
     public void AMissingFileAndANonPositiveWindowAreHandledExplicitly()
     {
-        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_root, "no", "such.jsonl"), 10));
-        Assert.Throws<ArgumentOutOfRangeException>(() => ArbiterRunStore.ReadItems(Path.Combine(_root, "x.jsonl"), 0));
+        Assert.Empty(ArbiterRunStore.ReadItems(Path.Combine(_root, "no", "such.jsonl"), 10, new ArbiterLogFiles()));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ArbiterRunStore.ReadItems(Path.Combine(_root, "x.jsonl"), 0, new ArbiterLogFiles()));
     }
 
     [Fact]
@@ -426,11 +426,11 @@ public sealed class ArbiterRunStoreTests : IDisposable
     {
         string sibling = Path.Combine(ArbiterDirectory, "stores", "returns-vanishing");
         Directory.CreateDirectory(sibling);
-        ArbiterRunStore store = new(
+        ArbiterRunStore store = RealArbiterState.RunStore(
             ArbiterDirectory,
             null,
             () => Now,
-            directory => throw new DirectoryNotFoundException($"'{directory.Name}' was removed during the sweep."));
+            directory => throw new DirectoryNotFoundException($"'{directory}' was removed during the sweep."));
 
         ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-OK", "still stored");
 
@@ -452,8 +452,8 @@ public sealed class ArbiterRunStoreTests : IDisposable
         ArbiterStoreStatus status = await store.AppendFindingAsync("RUN-SECRET", $"finding text carrying {SentinelSecret}");
         Assert.Equal(ArbiterStoreStatus.Stored, status);
 
-        InFlightLedger ledger = new(ArbiterDirectory);
-        DecisionLog decisions = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
         ArbiterLedgerEvent pre = PreEvent(Now);
         await ledger.AppendAsync(pre);
         await decisions.AppendAsync(Decision(Now, pre.Id));
@@ -481,7 +481,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
     [Fact]
     public async Task ARunAppendedToRecentlyIsNotSweptWhenItsDirectoryIsOld()
     {
-        ArbiterRunStore store = new(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
         await store.AppendFindingAsync("RUN-OLD", "id: old-1\nclaim: first");
         string runDirectory = Assert.Single(Directory.GetDirectories(Path.Combine(ArbiterDirectory, "stores")));
         Directory.SetLastWriteTimeUtc(runDirectory, Now.UtcDateTime.AddDays(-30));

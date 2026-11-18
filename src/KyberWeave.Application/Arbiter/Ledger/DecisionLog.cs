@@ -22,12 +22,17 @@ public sealed class DecisionLog : IArbiterDecisionLog
     public const string FileName = "decisions.jsonl";
 
     private readonly string _directory;
+    private readonly IArbiterLogStore _log;
 
     /// <summary>Creates a decision log over <paramref name="arbiterDirectory"/>.</summary>
-    public DecisionLog(string arbiterDirectory)
+    /// <param name="arbiterDirectory">The arbiter state directory the log file sits in.</param>
+    /// <param name="log">The append and windowed-read mechanics the log shares with the ledger.</param>
+    public DecisionLog(string arbiterDirectory, IArbiterLogStore log)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(arbiterDirectory);
+        ArgumentNullException.ThrowIfNull(log);
         _directory = arbiterDirectory;
+        _log = log;
     }
 
     /// <summary>The directory holding the ledger, the decision log and the lock.</summary>
@@ -44,14 +49,14 @@ public sealed class DecisionLog : IArbiterDecisionLog
     public async Task AppendAsync(ArbiterDecisionRecord record, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(record);
-        await ArbiterLogFiles.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
+        await _log.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
     }
 
-    /// <summary>Reads every complete decision in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes, in append order. Takes no lock.</summary>
+    /// <summary>Reads every complete decision in the newest bytes, in append order. Takes no lock.</summary>
     public IReadOnlyList<ArbiterDecisionRecord> ReadAll() => ReadAllWithDiagnostics().Records;
 
     /// <summary>
-    /// Reads every complete decision in the newest <see cref="ArbiterLogFiles.MaxReadBytes"/> bytes and reports what
+    /// Reads every complete decision in the newest bytes and reports what
     /// the read could not show: how many lines were malformed, whether older decisions fell outside the window, and
     /// why a log that exists could not be read. The hook uses <see cref="ReadAll"/> and stays quiet about all three;
     /// <c>audit</c> and <c>tune</c> use this overload to report them instead of presenting a partial log as whole.
@@ -60,7 +65,7 @@ public sealed class DecisionLog : IArbiterDecisionLog
     {
         List<ArbiterDecisionRecord> records = [];
         int malformed = 0;
-        LogTail tail = ArbiterLogFiles.ReadComplete(FilePath);
+        LogTail tail = _log.ReadComplete(FilePath);
         foreach (string line in tail.Lines)
         {
             ArbiterDecisionRecord? record = TryDeserialize(line);

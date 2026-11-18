@@ -70,17 +70,17 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
         return new ArbiterEvaluator(
             provider,
             _ => null,
-            new InFlightLedger(ArbiterDirectory),
-            new DecisionLog(ArbiterDirectory),
+            RealArbiterState.Ledger(ArbiterDirectory),
+            RealArbiterState.Decisions(ArbiterDirectory),
             gitFacts,
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
             new FixedClock(fixedNow));
     }
 
-    private IReadOnlyList<ArbiterDecisionRecord> Records() => new DecisionLog(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Records() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
 
     private static KyberWeaveConfig ConfigWith(IReadOnlyList<ArbiterRule> rules) =>
         new()

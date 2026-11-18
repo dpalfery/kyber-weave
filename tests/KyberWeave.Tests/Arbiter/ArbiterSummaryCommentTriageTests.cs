@@ -280,6 +280,6 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
             .ClassifySummaryAsync(Summary(BotLogin));
 
         string decisionId = result.Items[0].DecisionId;
-        Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), record => record.Id == decisionId);
+        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Id == decisionId);
     }
 }

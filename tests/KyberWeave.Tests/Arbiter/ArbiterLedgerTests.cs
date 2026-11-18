@@ -112,7 +112,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task LedgerSchema_FieldsExactlyAsDesigned()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         DateTimeOffset at = At(0);
         var ev = new ArbiterLedgerEvent(
             ArbiterRecordId.New(at), at, ArbiterSources.Hook, "pi", "session-1", ArbiterLedgerPhases.Pre)
@@ -168,7 +168,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task DecisionSchema_FieldsExactlyAsDesigned()
     {
-        var decisions = new DecisionLog(ArbiterDirectory);
+        var decisions = RealArbiterState.Decisions(ArbiterDirectory);
         DateTimeOffset at = At(0);
         var rule = new ArbiterDecisionRule(
             "KW-ARB-SCOPE-002", 1, "beyond-files", [0.86], 0.91, 0.6, RuleEffects.Escalate,
@@ -212,7 +212,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task Append_WritesCompleteLines_WithSortableUniqueIds()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         var first = NewEvent(At(0), ArbiterLedgerPhases.Pre);
         var second = NewEvent(At(1), ArbiterLedgerPhases.Post);
 
@@ -235,7 +235,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task Append_WhenLockUnavailable_FailsClosedAndWritesNothing()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         Directory.CreateDirectory(ArbiterDirectory);
 
         // Another process (or handle) holding .lock with FileShare.None is the
@@ -275,7 +275,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             // One InFlightLedger instance per writer: the mutual exclusion under
             // test is the OS-level lock on .lock (FileShare.None), not any shared
             // in-process state, exactly as it would be between hook processes.
-            var ledger = new InFlightLedger(ArbiterDirectory);
+            var ledger = RealArbiterState.Ledger(ArbiterDirectory);
             string harness = $"harness-{writer}";
             writers.Add(Task.Run(async () =>
             {
@@ -292,7 +292,7 @@ public sealed class ArbiterLedgerTests : IDisposable
 
         await Task.WhenAll(writers);
 
-        var events = new InFlightLedger(ArbiterDirectory).ReadAll();
+        var events = RealArbiterState.Ledger(ArbiterDirectory).ReadAll();
         Assert.Equal(Writers * AppendsPerWriter, events.Count);
         Assert.Equal(Writers * AppendsPerWriter, events.Select(e => e.Id).Distinct().Count());
         Assert.All(events, e =>
@@ -307,7 +307,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task Read_IgnoresFinalLineWithoutNewline()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(NewEvent(At(0), ArbiterLedgerPhases.Pre));
         await ledger.AppendAsync(NewEvent(At(1), ArbiterLedgerPhases.Post));
 
@@ -323,7 +323,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         // MatchPre reads the file with no lock and the append takes it afterwards, so
         // posts racing each other all saw the same unpaired pre and every one of them
         // claimed it. Pairing has to happen under the same lock as the write.
-        InFlightLedger ledger = new(ArbiterDirectory);
+        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         const string digest = "shared-pair-digest";
         List<string> preIds = [];
         for (int index = 0; index < 3; index++)
@@ -354,7 +354,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task Pairing_ByCallId()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         var pre = NewEvent(At(0), ArbiterLedgerPhases.Pre, callId: "call-1", pairDigest: "digest-a");
         await ledger.AppendAsync(pre);
         var post = NewEvent(At(1), ArbiterLedgerPhases.Post, callId: "call-1", pairDigest: "digest-b");
@@ -368,7 +368,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task Pairing_ByDigest_OldestUnpairedFirst_CallIdWinsWhenPresent()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         var pre1 = NewEvent(At(0), ArbiterLedgerPhases.Pre, pairDigest: "digest-same");
         var pre2 = NewEvent(At(1), ArbiterLedgerPhases.Pre, pairDigest: "digest-same");
         var pre3 = NewEvent(At(2), ArbiterLedgerPhases.Pre, callId: "call-9", pairDigest: "digest-x");
@@ -396,7 +396,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task InFlightPaths_ReturnsTaskFilesOfOtherUnpairedDelegatePreEvents()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         var a = NewEvent(At(0), ArbiterLedgerPhases.Pre, trigger: "delegate", taskFiles: ["docs/plans/a.md"]);
         var b = NewEvent(At(1), ArbiterLedgerPhases.Pre, trigger: "delegate", taskFiles: ["docs/plans/b.md"]);
         var c = NewEvent(At(2), ArbiterLedgerPhases.Pre, callId: "call-c", trigger: "delegate", taskFiles: ["docs/plans/c.md"]);
@@ -423,7 +423,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task InFlightPaths_DoesNotCountAnEarlierServedAttemptAtTheSameTask()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
         ArbiterLedgerHeaders task12 = new(plan, "1.2");
         ArbiterLedgerHeaders task13 = new(plan, "1.3");
@@ -450,7 +450,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task InFlightPaths_AHookDispatchOfTheSameTaskStillHoldsItsFiles()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
         ArbiterLedgerHeaders task12 = new(plan, "1.2");
         var dispatch = NewEvent(At(0), ArbiterLedgerPhases.Pre,
@@ -471,7 +471,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task InFlightPaths_AServedRetryStillSeesAHookDispatchOfTheSameTask()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
         ArbiterLedgerHeaders task12 = new(plan, "1.2");
         var dispatch = NewEvent(At(0), ArbiterLedgerPhases.Pre,
@@ -492,7 +492,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task InFlightPaths_AServedEvaluationDoesNotHoldAFileAgainstAHookRetryOfTheSameTask()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
         ArbiterLedgerHeaders task12 = new(plan, "1.2");
         var ghost = NewEvent(At(0), ArbiterLedgerPhases.Pre,
@@ -508,7 +508,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task ConcurrentWriters_ReturnsTaskFilesOfOverlappingWriterDispatches()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         var pre1 = NewEvent(At(0), ArbiterLedgerPhases.Pre, callId: "c1", trigger: "delegate", taskFiles: ["src/f1.cs"]);
         var pre2 = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "c2", trigger: "delegate", taskFiles: ["src/f2.cs"]);
         var pre3 = NewEvent(At(5), ArbiterLedgerPhases.Pre, callId: "c3", trigger: "delegate", taskFiles: ["src/f3.cs"]);
@@ -537,7 +537,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task ConcurrentWriters_FlagsASiblingWithNoFiles_AndSkipsRefusedAndStaleDispatches()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         var stale = NewEvent(At(-5 * 3600), ArbiterLedgerPhases.Pre, callId: "old", trigger: "delegate");
         var refused = NewEvent(At(0), ArbiterLedgerPhases.Pre, callId: "r", trigger: "delegate");
         var mine = NewEvent(At(1), ArbiterLedgerPhases.Pre, callId: "m", trigger: "delegate", taskFiles: ["src/m.cs"]);
@@ -559,7 +559,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task CompletedTasks_CountsPassResultsAndCompleteAttestations()
     {
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(NewEvent(
             At(0), ArbiterLedgerPhases.Post,
             headers: new ArbiterLedgerHeaders(Task: "T3"),
@@ -593,7 +593,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Contains("red-evidence", old, StringComparison.Ordinal);
         File.WriteAllText(Path.Combine(ArbiterDirectory, InFlightLedger.FileName), old + "\n");
 
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
 
         Assert.Single(ledger.ReadAll());
         Assert.Equal(["T2"], ledger.CompletedTasks());
@@ -607,7 +607,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             Path.Combine(ArbiterDirectory, DecisionLog.FileName),
             "null\ninvalid-json{\n[]\n" + ArbiterJson.Serialize(Decision(At(0), RuleEffects.Escalate, ["KW-ARB-TEST-001"])) + "\n");
 
-        var log = new DecisionLog(ArbiterDirectory);
+        var log = RealArbiterState.Decisions(ArbiterDirectory);
 
         Assert.Single(log.ReadAll());
         Assert.Equal(2, log.Repeat("KW-ARB-TEST-001", "docs/plans/plan.md", "plan-digest-1", "T3"));
@@ -621,7 +621,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             Path.Combine(ArbiterDirectory, InFlightLedger.FileName),
             "null\ninvalid-json{\n[]\n" + ArbiterJson.Serialize(NewEvent(At(0), ArbiterLedgerPhases.Pre)) + "\n");
 
-        var ledger = new InFlightLedger(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
 
         Assert.Single(ledger.ReadAll());
         Assert.Empty(ledger.InFlightPaths());
@@ -631,7 +631,7 @@ public sealed class ArbiterLedgerTests : IDisposable
     [Fact]
     public async Task DecisionLog_Repeat_CountsPriorEscalationsMatchingRuleAndPlanKey()
     {
-        var decisions = new DecisionLog(ArbiterDirectory);
+        var decisions = RealArbiterState.Decisions(ArbiterDirectory);
         const string rule = "KW-ARB-SCOPE-002";
 
         Assert.Equal(1, decisions.Repeat(rule, "docs/plans/plan.md", "plan-digest-1", "T3"));
@@ -669,8 +669,8 @@ public sealed class ArbiterLedgerTests : IDisposable
         string promptBody = $"PLAN_FILE header\nTASK body mentioning {secret}\ncode: var x = \"{secret}\";";
         string digest = Sha256Hex(promptBody);
 
-        var ledger = new InFlightLedger(ArbiterDirectory);
-        var decisions = new DecisionLog(ArbiterDirectory);
+        var ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        var decisions = RealArbiterState.Decisions(ArbiterDirectory);
         var pre = NewEvent(At(0), ArbiterLedgerPhases.Pre, trigger: "delegate", target: "dev-medium", pairDigest: digest);
         await ledger.AppendAsync(pre);
 

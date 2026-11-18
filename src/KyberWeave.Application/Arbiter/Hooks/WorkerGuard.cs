@@ -27,12 +27,14 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="hostConfig">Loads the project's configuration, for the budget it sets and whether it turns the Arbiter off.</param>
 /// <param name="process">The operator's home.</param>
 /// <param name="clock">The clock the budget window is measured on.</param>
+/// <param name="state">Opens the ledgers whose dispatch headers the command allow-list reads.</param>
 public sealed class WorkerGuard(
     IWorkerBudgetStore budgets,
     IRunCheckout checkouts,
     IHostConfigLoader hostConfig,
     IProcessEnvironment process,
-    TimeProvider clock) : IWorkerGuard
+    TimeProvider clock,
+    IArbiterStateFactory state) : IWorkerGuard
 {
     /// <summary>The rule id a stray write is refused under.</summary>
     public const string CheckoutRuleId = WorkerGuardRules.CheckoutRuleId;
@@ -219,19 +221,14 @@ public sealed class WorkerGuard(
     /// The ledger events that can name this call's dispatch: the project's and the user-level project ledger's,
     /// when they are readable. Anything unreadable leaves the dispatch unknown, so every list applies.
     /// </summary>
-    private static IReadOnlyList<ArbiterLedgerEvent> LedgerEvents(string cwd, string home)
+    private IReadOnlyList<ArbiterLedgerEvent> LedgerEvents(string cwd, string home)
     {
         List<ArbiterLedgerEvent> events = [];
         foreach (string directory in LedgerDirectories(cwd, home))
         {
             try
             {
-                if (!File.Exists(Path.Combine(directory, InFlightLedger.FileName)))
-                {
-                    continue;
-                }
-
-                events.AddRange(new InFlightLedger(directory).ReadAll());
+                events.AddRange(state.OpenLedger(directory).ReadAll());
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

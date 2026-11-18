@@ -45,13 +45,13 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider, IArbiterGitFacts? git = null) => new(
         provider,
         _ => null,
-        new InFlightLedger(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
-        new DecisionLog(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
+        RealArbiterState.Ledger(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
+        RealArbiterState.Decisions(ArbiterEvaluatorFixtures.DirectoryFor(_root)),
         git ?? new ChangedPaths("src/a.cs"),
         new RealPlanReader(_root),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System);
 
     private static KyberWeaveConfig ShippedConfig() =>

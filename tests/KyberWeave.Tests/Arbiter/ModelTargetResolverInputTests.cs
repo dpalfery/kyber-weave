@@ -78,13 +78,13 @@ public sealed class ModelTargetResolverInputTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        new InFlightLedger(ArbiterDirectory),
-        new DecisionLog(ArbiterDirectory),
+        RealArbiterState.Ledger(ArbiterDirectory),
+        RealArbiterState.Decisions(ArbiterDirectory),
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(),
+            RealArbiterState.Factory(),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? ["delegate.model"]
@@ -113,7 +113,7 @@ public sealed class ModelTargetResolverInputTests : IDisposable
                 Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
                 Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
             }).EvaluateAsync(ev, config, null, TestContext.Current.CancellationToken);
-        return Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
+        return Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
     }
 
     private static ArbiterModelBlock BlockOf(ArbiterDecisionRecord record) =>
