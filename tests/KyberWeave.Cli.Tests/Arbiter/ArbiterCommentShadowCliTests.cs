@@ -1,18 +1,12 @@
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Tests.Arbiter;
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter;
-using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for the CLI <c>kyber-weave arbiter comment</c> while the comment rule is in shadow. The printed class is
@@ -21,7 +15,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// The provider is substituted through <c>ArbiterCommentCommand.ProviderFactory</c>, so the printed answer does not depend on
-/// a live provider. Host configuration is written to <c>.kyber-weave/kyber-weave.yml</c> under the temp root the command reads.
+/// a live provider. Host configuration is written to <c>.kyber-weave/kyber-weave.yml</c> under the working directory the command reads.
 /// </remarks>
 public sealed class ArbiterCommentShadowCliTests : IDisposable
 {
@@ -32,32 +26,26 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
         "|---|---|---|---|\n" +
         "| nit | `src/Widget.cs` | L12 | Rename this. |\n";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _host.Dispose();
 
     private void WriteCitedFile()
     {
-        string full = Path.Combine(_temp.Path, "src", "Widget.cs");
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+        _ = _host.Write(_host.InWork("src", "Widget.cs"), string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
     }
 
     /// <summary>Writes the host configuration the command reads for this root.</summary>
     private void WriteHostConfig(string yaml)
     {
-        string directory = Path.Combine(_temp.Path, ".kyber-weave");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml);
+        _ = _host.Write(_host.InWork(".kyber-weave", "kyber-weave.yml"), yaml);
     }
 
-    private ArbiterCommentCommand Command(IArbiterProvider provider) =>
-        ArbiterTestServices.CommentCommand((_, _) => provider);
-
-    private static CommandExecution Capture(Func<int> execute)
+    private ArbiterCommentCommand Command(IArbiterProvider provider)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
+        command.ProviderFactory = (_, _) => provider;
+        return command;
     }
 
     /// <summary>An inline answer in shadow prints the real class and the line saying what the model would have given.</summary>
@@ -67,9 +55,9 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
         WriteCitedFile();
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("class real", execution.Output, StringComparison.Ordinal);
@@ -84,9 +72,9 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
         WriteCitedFile();
         ArbiterCommentCommand command = Command(new NoneProvider());
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("class real", execution.Output, StringComparison.Ordinal);
@@ -101,9 +89,9 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: false\n");
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Path = "src/Widget.cs", Line = 12, Body = "Rename this." }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("class nitpick", execution.Output, StringComparison.Ordinal);
@@ -118,9 +106,9 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
         WriteHostConfig("arbiter:\n  enabled: true\n  comment-triage:\n    bot-logins:\n      - " + BotLogin + "\n");
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Summary = true, Author = BotLogin, Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = BotLogin, Body = Summary }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("src/Widget.cs:12 real", execution.Output, StringComparison.Ordinal);
@@ -138,14 +126,12 @@ public sealed class ArbiterCommentShadowCliTests : IDisposable
             "\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: false\n");
         ArbiterCommentCommand command = Command(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"));
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Summary = true, Author = BotLogin, Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = BotLogin, Body = Summary }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("src/Widget.cs:12 nitpick", execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("shadow:", execution.Output, StringComparison.Ordinal);
     }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 }

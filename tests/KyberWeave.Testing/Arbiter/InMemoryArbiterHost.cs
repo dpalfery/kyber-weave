@@ -57,6 +57,7 @@ internal sealed class InMemoryArbiterHost : IDisposable
             _ = services.AddSingleton<IProcessRunner>(Runner);
             _ = services.AddSingleton<ICredentialStore>(Credentials);
             _ = services.AddSingleton<IFileStatReader>(new InMemoryFileStatReader(Files));
+            _ = services.AddSingleton<IBoundedFileReader>(new InMemoryBoundedFileReader(Files));
             configure?.Invoke(services);
         });
     }

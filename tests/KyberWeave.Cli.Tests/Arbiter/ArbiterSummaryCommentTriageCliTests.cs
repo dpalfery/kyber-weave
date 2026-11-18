@@ -1,13 +1,7 @@
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Tests.Arbiter;
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Core.Arbiter.Plans;
-using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 3.20 (requirement 20 amendment), CLI: <c>kyber-weave arbiter comment --summary --author &lt;login&gt;
@@ -30,17 +24,15 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
         "| nit | `src/Gadget.cs` | 8-10 | Prefer a constant. |\n" +
         "| warning | `src/Widget.cs:20` | 20 | Null check missing. |\n";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _host.Dispose();
 
     private void WriteCitedFiles()
     {
         foreach (string relative in new[] { "src/Widget.cs", "src/Gadget.cs" })
         {
-            string full = Path.Combine(_temp.Path, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+            _ = _host.Write(_host.InWork(relative.Split('/')), string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
         }
     }
 
@@ -49,11 +41,11 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_PrintsOneLinePerTableRow()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Summary = true, Author = "kilo-code-bot", Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "kilo-code-bot", Body = Summary }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("src/Widget.cs", execution.Output, StringComparison.Ordinal);
@@ -66,11 +58,11 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_HumanAuthor_PrintsEveryItemReal()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Summary = true, Author = "dave", Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "dave", Body = Summary }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("nitpick", execution.Output, StringComparison.Ordinal);
@@ -82,11 +74,11 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_NoAuthor_ExitsZeroWithRealItems()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Summary = true, Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Body = Summary }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.DoesNotContain("nitpick", execution.Output, StringComparison.Ordinal);
@@ -97,21 +89,13 @@ public sealed class ArbiterSummaryCommentTriageCliTests : IDisposable
     public void Summary_IssueWithMarkupCharacters_RendersLiterally()
     {
         WriteCitedFiles();
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterCommentSettings { Root = _temp.Path, Summary = true, Author = "dave", Body = Summary }));
+            new ArbiterCommentSettings { Root = _host.WorkingDirectory, Summary = true, Author = "dave", Body = Summary }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("Use [red]this[/] name.", execution.Output, StringComparison.Ordinal);
     }
-
-    private static CommandExecution Capture(Func<int> execute)
-    {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 }

@@ -1,13 +1,7 @@
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Tests.Arbiter;
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Core.Arbiter.Plans;
-using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Usage errors on <c>arbiter comment</c>. A missing <c>--path</c> is refused with the sibling commands' usage error
@@ -15,25 +9,25 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterCommentUsageCliTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _host.Dispose();
 
     [Fact]
     public void ACommentWithoutAPathIsAUsageErrorNotAnException()
     {
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings
             {
-                Root = _temp.Path,
+                Root = _host.WorkingDirectory,
                 Line = 2,
                 Body = "Shorten this heading.",
             }));
 
-        Assert.Equal(2, execution.Result);
+        Assert.Equal(2, execution.ExitCode);
         Assert.Contains("kyber-weave arbiter: error: --path is required.", execution.Output, StringComparison.Ordinal);
     }
 
@@ -41,19 +35,19 @@ public sealed class ArbiterCommentUsageCliTests : IDisposable
     [Fact]
     public void ACommentWithoutABodyIsAUsageErrorNotAnException()
     {
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings
             {
-                Root = _temp.Path,
+                Root = _host.WorkingDirectory,
                 Path = "docs/guide.md",
                 Line = 2,
                 Body = null!,
             }));
 
-        Assert.Equal(2, execution.Result);
+        Assert.Equal(2, execution.ExitCode);
         Assert.Contains("kyber-weave arbiter: error: --body is required.", execution.Output, StringComparison.Ordinal);
     }
 }
