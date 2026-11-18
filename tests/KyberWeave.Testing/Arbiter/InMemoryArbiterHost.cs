@@ -1,4 +1,5 @@
 using KyberWeave.Application;
+using KyberWeave.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Composition;
 using KyberWeave.Core.Docs.Mcp;
@@ -69,6 +70,7 @@ internal sealed class InMemoryArbiterHost : IDisposable
         _ = services.AddSingleton<IFileStatReader>(new InMemoryFileStatReader(Files));
         _ = services.AddSingleton<IBoundedFileReader>(new InMemoryBoundedFileReader(Files));
         _configure?.Invoke(services);
+        _ = services.AddArbiterHost();
     }
 
     /// <summary>Gets the directory the process is said to have started in.</summary>
