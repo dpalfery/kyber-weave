@@ -83,35 +83,6 @@ public sealed record SquadRenderRequest(
     SquadRenderDiskInputs? DiskInputs = null,
     string? WorkerRoster = null)
 {
-    /// <summary>Gets the canonical source this render starts from, or throws why it is not available.</summary>
-    /// <returns>The preloaded source.</returns>
-    /// <exception cref="SquadRenderValidationException">The request was never prepared with the source.</exception>
-    public SquadSource RequireSource() =>
-        PreloadedSource ?? throw (DiskInputs?.SourceFailure ?? Unprepared("the canonical source"));
-
-    /// <summary>Gets the worker baseline block, or throws why it could not be read.</summary>
-    /// <returns>The block, or null when the tree carries no baseline.</returns>
-    /// <exception cref="SquadRenderValidationException">The request was never prepared, or the baseline is malformed.</exception>
-    public string? RequireWorkerBaselineBlock()
-    {
-        SquadRenderDiskInputs inputs = RequireDiskInputs();
-        return inputs.WorkerBaselineFailure is { } failure ? throw failure : inputs.WorkerBaselineBlock;
-    }
-
-    /// <summary>Gets the reader of environment variables this render consults, or throws that the request was never prepared.</summary>
-    /// <returns>The reader.</returns>
-    /// <exception cref="SquadRenderValidationException">The request carries no reader.</exception>
-    public Func<string, string?> RequireEnvironmentReader() =>
-        EnvironmentReader ?? throw Unprepared("an environment reader");
-
-    /// <summary>Gets what the host read from disk ahead of the render, or throws that the request was never prepared.</summary>
-    /// <returns>The disk inputs.</returns>
-    /// <exception cref="SquadRenderValidationException">The request was never prepared.</exception>
-    public SquadRenderDiskInputs RequireDiskInputs() => DiskInputs ?? throw Unprepared("what the render reads from disk");
-
-    private static SquadRenderValidationException Unprepared(string what) =>
-        new($"The render request does not carry {what}: prepare it with the render input reader before rendering.");
-
     /// <summary>
     /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
     /// </summary>
