@@ -69,10 +69,10 @@ one), write the unit test against it, and keep the real-disk or real-program tes
 project. A new test in the unit project that reaches the real disk or spawns a process will be moved
 at review.
 
-The integration project is the safety net: CI runs it on every pull request in its own job, and a
-developer agent does not run it. The review council's `integration-test` gate is marked
-`full-suite: true`, so a developer's `review gates` run refuses it (`KW-REVIEW-033`) the same way it
-refuses the unit `test` gate.
+The integration project is the safety net: CI runs it on every pull request in its own required job.
+Developer agents, task gates and the review council's gates run unit and content projects only, so
+there is no integration gate in `.kyber-weave/kyber-weave.yml` and `scripts/fast-loop.sh --touched`
+only reports that an integration class was touched.
 
 ### A test name is an assertion
 
@@ -341,9 +341,8 @@ format check, then report. Run these `dotnet` commands directly from the reposit
 **No dev agent runs the full test suite**: the review council's `test` gate and CI run it. Whoever
 runs it, person or agent, times it and reports the number: it must finish in 120 seconds or less
 ([the .NET test budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)).
-The integration project (`tests/KyberWeave.Integration.Tests`) is not part of that budget: CI and the
-council's `integration-test` gate run it, and a developer agent runs only the integration classes its
-change touches when it is asked to.
+The integration project (`tests/KyberWeave.Integration.Tests`) is not part of that budget: CI runs it
+as its own required job, and no developer agent, task gate or council gate runs it.
 
 ```bash
 dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
@@ -352,7 +351,7 @@ dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
 
-A class in the integration project builds and runs the same way, against its own project:
+A person reproducing a failing CI integration class runs it the same way, against its own project:
 
 ```bash
 dotnet build tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj -c Release
