@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Processes;
@@ -73,8 +74,10 @@ public static class ReviewGateReporting
     public static bool NeedsChangedSet(IReadOnlyList<ReviewGate> gates) =>
         gates.Any(gate => gate.Include.Count > 0 || gate.AppliesWhen is not null);
 
-    /// <summary><c>windows</c> or <c>unix</c>, for a gate's <c>os</c> filter.</summary>
-    public static string CurrentOs() => OperatingSystem.IsWindows() ? "windows" : "unix";
+    /// <summary><c>windows</c> or <c>unix</c>, for a gate's <c>os</c> filter, read from the environment seam.</summary>
+    /// <param name="environment">Reports the operating-system family the process runs on.</param>
+    public static string CurrentOs(IProcessEnvironment environment) =>
+        environment.OperatingSystem == OperatingSystemKind.Windows ? "windows" : "unix";
 
     /// <summary>
     ///     The declared gates the caller named with <c>--gate</c>, in declaration order, or an empty list with a

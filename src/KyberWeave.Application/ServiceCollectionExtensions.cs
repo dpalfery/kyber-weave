@@ -237,7 +237,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IReviewWorkTreeService>(),
             sp.GetRequiredService<IReviewCycleStore>(),
             sp.GetRequiredService<IReviewCycleSelector>(),
-            sp.GetRequiredService<IConfigLoadService>()));
+            sp.GetRequiredService<IConfigLoadService>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewSeatsService>(sp => new ReviewSeatsService(
             sp.GetRequiredService<IReviewWorkTreeService>(),
             sp.GetRequiredService<IReviewCycleStore>(),

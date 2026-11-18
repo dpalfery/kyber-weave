@@ -80,7 +80,7 @@ public sealed class ReviewSeatsService(
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
             config.Review.Gates,
-            ReviewGateReporting.CurrentOs(),
+            ReviewGateReporting.CurrentOs(environment),
             commit => selector.ChangedSince(tree, commit));
         IReadOnlyList<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle)

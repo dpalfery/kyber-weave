@@ -102,6 +102,20 @@ public sealed class ReviewPathSeamTests
         Assert.Equal("/work/repo", configs.Root);
     }
 
+    [Fact]
+    public void TheGateOsFilterReadsThePlatformFromTheEnvironmentSeam()
+    {
+        Assert.Equal(
+            "windows",
+            ReviewGateReporting.CurrentOs(new FakeProcessEnvironment(operatingSystem: OperatingSystemKind.Windows)));
+        Assert.Equal(
+            "unix",
+            ReviewGateReporting.CurrentOs(new FakeProcessEnvironment(operatingSystem: OperatingSystemKind.MacOS)));
+        Assert.Equal(
+            "unix",
+            ReviewGateReporting.CurrentOs(new FakeProcessEnvironment(operatingSystem: OperatingSystemKind.Linux)));
+    }
+
     /// <summary>Records the root it was asked to load and refuses, so the command stops before any other seam is used.</summary>
     private sealed class RecordingConfigs : IConfigLoadService
     {

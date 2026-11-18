@@ -187,7 +187,7 @@ public sealed class ReviewGatesService(
             }
         }
 
-        CouncilGatePlan plan = CouncilGateSelection.Plan(declared, changed, ReviewGateReporting.CurrentOs());
+        CouncilGatePlan plan = CouncilGateSelection.Plan(declared, changed, ReviewGateReporting.CurrentOs(environment));
         ReviewGateReporting.AddSkips(report, plan.Skipped);
 
         // Full-suite gates run only for the council or CI, or for a person at a terminal. A refusal is a blocking
@@ -366,7 +366,7 @@ public sealed class ReviewGatesService(
         IReadOnlyList<ReviewCycleRecord> finished = prior.Valid;
 
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
-            finished, config.Review.Gates, ReviewGateReporting.CurrentOs(), commit => selector.ChangedSince(tree, commit));
+            finished, config.Review.Gates, ReviewGateReporting.CurrentOs(environment), commit => selector.ChangedSince(tree, commit));
         folder ??= Path.Combine(reviewFolder, $"cycle-{plan.Number}");
         IReadOnlyList<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle)
@@ -672,7 +672,7 @@ public sealed class ReviewGatesService(
 
         string repoRoot = EnclosingRepositoryRoot(root);
         TaskGatePlan plan = taskGates.Plan(
-            agentGates, changed, taskSlug, ReviewGateReporting.CurrentOs(), repoRoot, config.Review.TestMap,
+            agentGates, changed, taskSlug, ReviewGateReporting.CurrentOs(environment), repoRoot, config.Review.TestMap,
             target is null ? null : targets.DeclaredClasses(target.Row));
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, plan.Refusals);

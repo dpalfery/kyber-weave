@@ -20,11 +20,13 @@ namespace KyberWeave.Application.Review;
 /// <param name="cycles">Reads the recorded review cycle folders.</param>
 /// <param name="selector">Finds the review folder and the prior cycle's findings.</param>
 /// <param name="configs">Loads the host's configuration.</param>
+/// <param name="environment">Reports the operating-system family a gate's <c>os</c> filter is matched against.</param>
 public sealed class ReviewCycleService(
     IReviewWorkTreeService trees,
     IReviewCycleStore cycles,
     IReviewCycleSelector selector,
-    IConfigLoadService configs) : IReviewCycleService
+    IConfigLoadService configs,
+    IProcessEnvironment environment) : IReviewCycleService
 {
     private const string UnreadableInput = "KW-REVIEW-023";
 
@@ -63,7 +65,7 @@ public sealed class ReviewCycleService(
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
             config.Review.Gates,
-            ReviewGateReporting.CurrentOs(),
+            ReviewGateReporting.CurrentOs(environment),
             commit => selector.ChangedSince(tree, commit));
 
         IReadOnlyList<ReviewFinding> recheck = [];
