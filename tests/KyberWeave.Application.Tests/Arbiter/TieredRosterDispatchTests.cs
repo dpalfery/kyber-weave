@@ -6,9 +6,10 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Arbiter;
 using Xunit;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// The tiered roster must be dispatchable through the Arbiter's own path, <c>KW-ARB-ROSTER-001</c>. The second
@@ -25,26 +26,19 @@ public sealed class TieredRosterDispatchTests : IDisposable
 {
     private const string RosterRule = "KW-ARB-ROSTER-001";
 
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     /// <summary>Writes the host configuration for one roster, with every rule but the roster rule disabled.</summary>
     private void WriteConfig(string roster)
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
         string disabled = string.Join(
             "\n",
             ArbiterConfigDefaults.Product.Rules.Select(rule => rule.Id).Distinct(StringComparer.Ordinal)
                 .Where(id => !string.Equals(id, RosterRule, StringComparison.Ordinal))
                 .Select(id => $"    - id: {id}\n      enabled: false"));
-        File.WriteAllText(
-            Path.Combine(_repo.Path, ".kyber-weave", "kyber-weave.yml"),
+        _ = _host.WriteRepoConfig(
             $"worker-roster: {roster}\n\n" +
             "arbiter:\n" +
             "  enabled: true\n" +
@@ -57,12 +51,12 @@ public sealed class TieredRosterDispatchTests : IDisposable
     /// <summary>Dispatches one implementation task to <paramref name="target"/> through the OpenCode hook path.</summary>
     private string Dispatch(string target)
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
+        ArbiterHookDecisionEngine engine = _host.Engine(
             providerFactory: _ => new ArbiterEvaluatorFixtures.ScriptedProvider(),
-            homeDirectory: () => _home.Path);
-        HookCommand command = ArbiterTestServices.Command(
+            homeDirectory: () => _host.HomeDirectory);
+        HookCommand command = _host.HookCommand(
             new HarnessAdapterRegistry(PluginHookAdapters.All(engine)),
-            ArbiterTestServices.LoadHostConfig,
+            _host.LoadHostConfig,
             () => "decision-tiered-roster-1");
 
         JsonObject envelope = new()
@@ -73,7 +67,7 @@ public sealed class TieredRosterDispatchTests : IDisposable
             ["tool"] = "subagent",
             ["call-id"] = "d-1.1",
             ["session"] = "ses-tiered-1",
-            ["cwd"] = _repo.Path,
+            ["cwd"] = _host.RepoRoot,
             ["args"] = new JsonObject
             {
                 ["description"] = "Implement task 1.1",
