@@ -3,8 +3,9 @@ using System.Text;
 using KyberWeave.Application.Utilities;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Data.Utilities;
 using KyberWeave.Domain.StatusLine;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -41,13 +42,11 @@ namespace KyberWeave.Tests;
 /// <para>
 /// Every test runs against an injected temp home and an injected environment lookup, so no test
 /// reads or mutates the process environment and none of them can touch the operator's real harness
-/// configuration. Filesystem writes stay inside the <see cref="TempDirectory"/> the test owns.
+/// configuration. Filesystem writes stay inside the in-memory file system the test owns.
 /// </para>
 /// </remarks>
-public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
+public sealed class UtilitiesStatusLineDeploymentTests
 {
-    private static readonly IStatusLineDeploymentService Plans = new StatusLineDeploymentService(new FileStatusLineFiles(), SquadFileSystemPathSemantics.Instance);
-
     private const string ClaudeConfigDirectoryVariable = "CLAUDE_CONFIG_DIR";
     private const string PiCodingAgentDirectoryVariable = "PI_CODING_AGENT_DIR";
     private const string AgyConfigDirectoryVariable = "AGY_CONFIG_DIR";
@@ -93,11 +92,17 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     /// </summary>
     private static readonly string[] PinnedTargetNames = ["Claude", "Agy", "Pi", "CommandCode"];
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly SquadFileSystemPathSemantics _semantics;
+    private readonly IStatusLineDeploymentService _plans;
+    private readonly string _home;
 
-    public void Dispose()
+    public UtilitiesStatusLineDeploymentTests()
     {
-        _temp.Dispose();
+        _home = Path.Combine(_files.Root, "home");
+        _files.CreateDirectory(_home);
+        _semantics = new SquadFileSystemPathSemantics(new FakePathResolver(_files));
+        _plans = new StatusLineDeploymentService(new InMemoryStatusLineFiles(_files), _semantics);
     }
 
     public static TheoryData<StatusLineTarget> AllTargets => new()
@@ -127,7 +132,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     [Fact]
     public void CommandCodeStagingRootIgnoresEveryOverrideVariable()
     {
-        StatusLineTargetRoots roots = Roots(name => Path.Combine(_temp.Path, "decoy-" + name));
+        StatusLineTargetRoots roots = Roots(name => Path.Combine(_home, "decoy-" + name));
 
         string stagingRoot = roots.ResolveStagingRoot(StatusLineTarget.CommandCode);
 
@@ -209,8 +214,8 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
             $"The {target} staging root '{stagingRoot}' is not fully qualified, so it would resolve " +
             "against the process working directory.");
         Assert.True(
-            IsWithin(_temp.Path, stagingRoot),
-            $"The {target} staging root '{stagingRoot}' is outside the injected home '{_temp.Path}'.");
+            IsWithin(_home, stagingRoot),
+            $"The {target} staging root '{stagingRoot}' is outside the injected home '{_home}'.");
     }
 
     [Theory]
@@ -219,7 +224,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         StatusLineTarget target,
         string variableName)
     {
-        string overrideRoot = Path.Combine(_temp.Path, "override-" + variableName);
+        string overrideRoot = Path.Combine(_home, "override-" + variableName);
         string expected = Path.Combine(overrideRoot, ToNative(StagingSegment));
         // The lookup answers for this harness's variable and no other, so a resolver that consulted a
         // different name, or no name at all, would fall back to the home default and fail here.
@@ -240,7 +245,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         StatusLineTarget target,
         string unrelatedVariableName)
     {
-        string decoyRoot = Path.Combine(_temp.Path, "decoy-" + unrelatedVariableName);
+        string decoyRoot = Path.Combine(_home, "decoy-" + unrelatedVariableName);
         StatusLineTargetRoots roots = Roots(name =>
             string.Equals(name, unrelatedVariableName, StringComparison.Ordinal) ? decoyRoot : null);
 
@@ -277,7 +282,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         string autoLoadRelativePath)
     {
         StatusLineTargetRoots roots = Roots();
-        string autoLoadDirectory = Path.Combine(_temp.Path, ToNative(autoLoadRelativePath));
+        string autoLoadDirectory = Path.Combine(_home, ToNative(autoLoadRelativePath));
 
         string[] autoLoadDirectories = [.. roots.ResolveAutoLoadDirectories(target)];
         string stagingRoot = roots.ResolveStagingRoot(target);
@@ -336,9 +341,9 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
                 Path.IsPathFullyQualified(settingsPath),
                 $"Settings path '{settingsPath}' for {target} is not fully qualified.");
             Assert.True(
-                IsWithin(_temp.Path, settingsPath),
+                IsWithin(_home, settingsPath),
                 $"Settings path '{settingsPath}' for {target} is outside the injected home " +
-                $"'{_temp.Path}'.");
+                $"'{_home}'.");
         });
     }
 
@@ -351,7 +356,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         Dictionary<string, byte[]> sentinels = SeedConfirmedSettingsSentinels();
         string pinnedDeployedPath = PinnedStagingPath(target, PrimaryArtifactRelativePath);
 
-        StatusLineDeploymentPlan plan = Plans.CreateDeploy(
+        StatusLineDeploymentPlan plan = _plans.CreateDeploy(
             target,
             roots,
             [Artifact(PrimaryArtifactRelativePath, PrimaryArtifactContent)]);
@@ -360,20 +365,20 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         AssertSettingsSentinelsUnchanged(sentinels);
         AssertNoSettingsPathIsNamed(plan, sentinels, target);
 
-        Plans.Apply(plan);
+        _plans.Apply(plan);
 
         // The settings guarantee is a negative one, so it is only observable once the deploy has
         // happened: a plan that wrote nothing would leave the sentinels alone for the wrong reason.
         Assert.True(
-            File.Exists(pinnedDeployedPath),
+            _files.FileExists(pinnedDeployedPath),
             $"Deploy wrote nothing to '{pinnedDeployedPath}', so it says nothing about the settings " +
             "files it must leave untouched.");
         AssertSettingsSentinelsUnchanged(sentinels);
 
-        StatusLineDeploymentPlan removal = Plans.CreateRemove(target, roots);
+        StatusLineDeploymentPlan removal = _plans.CreateRemove(target, roots);
         AssertNoSettingsPathIsNamed(removal, sentinels, target);
 
-        Plans.Apply(removal);
+        _plans.Apply(removal);
 
         AssertSettingsSentinelsUnchanged(sentinels);
     }
@@ -386,7 +391,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         StatusLineTargetRoots roots = Roots();
         string pinnedDeployedPath = PinnedStagingPath(target, PrimaryArtifactRelativePath);
 
-        Plans.Apply(Plans.CreateDeploy(
+        _plans.Apply(_plans.CreateDeploy(
             target,
             roots,
             [Artifact(PrimaryArtifactRelativePath, PrimaryArtifactContent)]));
@@ -396,12 +401,12 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         // reason. This has to be asserted before the removal below, which deletes the very file it
         // proves was written.
         Assert.True(
-            File.Exists(pinnedDeployedPath),
+            _files.FileExists(pinnedDeployedPath),
             $"Deploy wrote nothing to '{pinnedDeployedPath}', so it says nothing about the settings " +
             "files it must never create.");
         AssertNoSettingsFileWasCreated(target);
 
-        Plans.Apply(Plans.CreateRemove(target, roots));
+        _plans.Apply(_plans.CreateRemove(target, roots));
 
         AssertNoSettingsFileWasCreated(target);
     }
@@ -416,7 +421,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     {
         StatusLineTargetRoots roots = Roots();
 
-        StatusLineDeploymentPlan plan = Plans.CreateDeploy(target, roots, Artifacts());
+        StatusLineDeploymentPlan plan = _plans.CreateDeploy(target, roots, Artifacts());
 
         Assert.Equal(target, plan.Target);
         Assert.True(
@@ -463,9 +468,9 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     {
         StatusLineTargetRoots roots = Roots();
 
-        Plans.Apply(Plans.CreateDeploy(target, roots, Artifacts()));
+        _plans.Apply(_plans.CreateDeploy(target, roots, Artifacts()));
 
-        StatusLineReceipt? receipt = Plans.ReadReceipt(target, roots);
+        StatusLineReceipt? receipt = _plans.ReadReceipt(target, roots);
         foreach (StatusLineDeploymentFile file in Artifacts())
         {
             AssertReceiptRecordsSha256(receipt, target, file.RelativePath, file.Content);
@@ -480,17 +485,17 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     {
         StatusLineTargetRoots roots = Roots();
         string occupiedPath = PinnedStagingPath(StatusLineTarget.Claude, PrimaryArtifactRelativePath);
-        Directory.CreateDirectory(RequireParent(occupiedPath));
-        File.WriteAllText(occupiedPath, UnmanagedFileContent);
+        _files.CreateDirectory(RequireParent(occupiedPath));
+        _files.WriteAllText(occupiedPath, UnmanagedFileContent);
 
         StatusLineDeploymentConflictException exception = Assert.Throws<StatusLineDeploymentConflictException>(() =>
-            Plans.CreateDeploy(
+            _plans.CreateDeploy(
                 StatusLineTarget.Claude,
                 roots,
                 [Artifact(PrimaryArtifactRelativePath, PrimaryArtifactContent)]));
 
         Assert.Contains(PrimaryArtifactRelativePath, exception.Message, StringComparison.Ordinal);
-        Assert.Equal(UnmanagedFileContent, File.ReadAllText(occupiedPath));
+        Assert.Equal(UnmanagedFileContent, _files.ReadAllText(occupiedPath));
     }
 
     /// <summary>
@@ -513,24 +518,24 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         StatusLineTargetRoots roots = Roots();
         string deployedPath = PinnedStagingPath(target, PrimaryArtifactRelativePath);
 
-        Plans.Apply(Plans.CreateDeploy(target, roots, Artifacts()));
+        _plans.Apply(_plans.CreateDeploy(target, roots, Artifacts()));
 
         AssertFileBytes(deployedPath, PrimaryArtifact().Content);
         AssertReceiptRecordsSha256(
-            Plans.ReadReceipt(target, roots),
+            _plans.ReadReceipt(target, roots),
             target,
             PrimaryArtifactRelativePath,
             PrimaryArtifact().Content);
 
-        File.WriteAllText(deployedPath, LocallyEditedFileContent);
+        _files.WriteAllText(deployedPath, LocallyEditedFileContent);
 
         StatusLineDeploymentConflictException exception =
             Assert.Throws<StatusLineDeploymentConflictException>(() =>
-                Plans.CreateDeploy(target, roots, Artifacts()));
+                _plans.CreateDeploy(target, roots, Artifacts()));
 
         Assert.Contains(PrimaryArtifactRelativePath, exception.Message, StringComparison.Ordinal);
         Assert.True(
-            string.Equals(LocallyEditedFileContent, File.ReadAllText(deployedPath), StringComparison.Ordinal),
+            string.Equals(LocallyEditedFileContent, _files.ReadAllText(deployedPath), StringComparison.Ordinal),
             $"The {target} redeploy replaced the operator's bytes at '{deployedPath}' with the " +
             "artifact's, even though the receipt still owns the file.");
     }
@@ -543,26 +548,26 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     public void RemoveDeletesEveryReceiptOwnedUnmodifiedFileAtItsPinnedStagingPathAndLeavesNoOwnershipBehind()
     {
         StatusLineTargetRoots roots = Roots();
-        Plans.Apply(Plans.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()));
+        _plans.Apply(_plans.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()));
 
         foreach (StatusLineDeploymentFile file in Artifacts())
             AssertFileBytes(PinnedStagingPath(StatusLineTarget.Claude, file.RelativePath), file.Content);
 
-        StatusLineDeploymentPlan removal = Plans.CreateRemove(StatusLineTarget.Claude, roots);
+        StatusLineDeploymentPlan removal = _plans.CreateRemove(StatusLineTarget.Claude, roots);
 
         AssertPlansADeletionOfEvery(removal, Artifacts(), StatusLineTarget.Claude);
 
-        Plans.Apply(removal);
+        _plans.Apply(removal);
 
         foreach (StatusLineDeploymentFile file in Artifacts())
         {
             string pinnedPath = PinnedStagingPath(StatusLineTarget.Claude, file.RelativePath);
             Assert.False(
-                File.Exists(pinnedPath),
+                _files.FileExists(pinnedPath),
                 $"Remove left the receipt-owned file '{pinnedPath}' behind.");
         }
 
-        int remainingCount = Plans.ReadReceipt(StatusLineTarget.Claude, roots)?.Files.Count ?? 0;
+        int remainingCount = _plans.ReadReceipt(StatusLineTarget.Claude, roots)?.Files.Count ?? 0;
         Assert.True(
             remainingCount == 0,
             $"Remove left {remainingCount} owned file(s) recorded after deleting all of them.");
@@ -572,7 +577,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     public void RemoveKeepsALocallyModifiedOwnedFileAndNeverTouchesAFileItDoesNotOwn()
     {
         StatusLineTargetRoots roots = Roots();
-        Plans.Apply(Plans.CreateDeploy(StatusLineTarget.Pi, roots, Artifacts()));
+        _plans.Apply(_plans.CreateDeploy(StatusLineTarget.Pi, roots, Artifacts()));
 
         string modifiedPath = PinnedStagingPath(StatusLineTarget.Pi, PrimaryArtifactRelativePath);
         string unmodifiedPath = PinnedStagingPath(StatusLineTarget.Pi, SecondaryArtifactRelativePath);
@@ -580,26 +585,26 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         AssertFileBytes(modifiedPath, PrimaryArtifact().Content);
         AssertFileBytes(unmodifiedPath, SecondaryArtifact().Content);
 
-        File.WriteAllText(modifiedPath, "locally edited by the user\n");
-        Directory.CreateDirectory(PinnedStagingRoot(StatusLineTarget.Pi));
-        File.WriteAllText(unownedPath, "not kyber's file\n");
+        _files.WriteAllText(modifiedPath, "locally edited by the user\n");
+        _files.CreateDirectory(PinnedStagingRoot(StatusLineTarget.Pi));
+        _files.WriteAllText(unownedPath, "not kyber's file\n");
 
-        StatusLineDeploymentPlan removal = Plans.CreateRemove(StatusLineTarget.Pi, roots);
+        StatusLineDeploymentPlan removal = _plans.CreateRemove(StatusLineTarget.Pi, roots);
 
         Assert.DoesNotContain(
             removal.PlannedFileChanges,
             change => string.Equals(change.RelativePath, PrimaryArtifactRelativePath, StringComparison.Ordinal));
 
-        Plans.Apply(removal);
+        _plans.Apply(removal);
 
-        Assert.Equal("locally edited by the user\n", File.ReadAllText(modifiedPath));
-        Assert.Equal("not kyber's file\n", File.ReadAllText(unownedPath));
+        Assert.Equal("locally edited by the user\n", _files.ReadAllText(modifiedPath));
+        Assert.Equal("not kyber's file\n", _files.ReadAllText(unownedPath));
         Assert.False(
-            File.Exists(unmodifiedPath),
+            _files.FileExists(unmodifiedPath),
             $"Remove kept the unmodified owned file '{unmodifiedPath}'.");
 
         IReadOnlyList<StatusLineOwnedFile> remaining =
-            Plans.ReadReceipt(StatusLineTarget.Pi, roots)?.Files ?? [];
+            _plans.ReadReceipt(StatusLineTarget.Pi, roots)?.Files ?? [];
         foreach (StatusLineOwnedFile owned in remaining)
         {
             if (string.Equals(owned.RelativePath, PrimaryArtifactRelativePath, StringComparison.Ordinal))
@@ -615,41 +620,41 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     public void RemoveDropsMissingFilesFromReceipt()
     {
         StatusLineTargetRoots roots = Roots();
-        Plans.Apply(Plans.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()));
+        _plans.Apply(_plans.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()));
 
         string primaryPath = PinnedStagingPath(StatusLineTarget.Claude, PrimaryArtifactRelativePath);
-        File.Delete(primaryPath);
+        _files.DeleteFile(primaryPath);
 
-        StatusLineDeploymentPlan removal = Plans.CreateRemove(StatusLineTarget.Claude, roots);
+        StatusLineDeploymentPlan removal = _plans.CreateRemove(StatusLineTarget.Claude, roots);
 
         Assert.DoesNotContain(
             removal.Receipt.Files,
             file => string.Equals(file.RelativePath, PrimaryArtifactRelativePath, StringComparison.Ordinal));
 
-        Plans.Apply(removal);
+        _plans.Apply(removal);
 
-        StatusLineReceipt? remaining = Plans.ReadReceipt(StatusLineTarget.Claude, roots);
+        StatusLineReceipt? remaining = _plans.ReadReceipt(StatusLineTarget.Claude, roots);
         Assert.Null(remaining);
     }
 
     [Fact]
     public void ReceiptRecordsStagingRootAndThrowsConflictWhenOverrideChanges()
     {
-        string overrideDirA = Path.Combine(_temp.Path, "overrideA");
-        string overrideDirB = Path.Combine(_temp.Path, "overrideB");
-        Directory.CreateDirectory(overrideDirA);
-        Directory.CreateDirectory(overrideDirB);
+        string overrideDirA = Path.Combine(_home, "overrideA");
+        string overrideDirB = Path.Combine(_home, "overrideB");
+        _files.CreateDirectory(overrideDirA);
+        _files.CreateDirectory(overrideDirB);
 
         string currentOverride = overrideDirA;
         StatusLineTargetRoots roots = Roots(varName => varName == ClaudeConfigDirectoryVariable ? currentOverride : null);
 
-        Plans.Apply(Plans.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()));
+        _plans.Apply(_plans.CreateDeploy(StatusLineTarget.Claude, roots, Artifacts()));
 
         currentOverride = overrideDirB;
         StatusLineTargetRoots changedRoots = Roots(varName => varName == ClaudeConfigDirectoryVariable ? currentOverride : null);
 
         StatusLineDeploymentConflictException ex = Assert.Throws<StatusLineDeploymentConflictException>(() =>
-            Plans.ReadReceipt(StatusLineTarget.Claude, changedRoots));
+            _plans.ReadReceipt(StatusLineTarget.Claude, changedRoots));
 
         Assert.Contains(overrideDirA, ex.Message, StringComparison.Ordinal);
         Assert.Contains(overrideDirB, ex.Message, StringComparison.Ordinal);
@@ -658,20 +663,18 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     [Fact]
     public void DeployRefusesSymlinkInStagingPath()
     {
-        Assert.SkipWhen(OperatingSystem.IsWindows(), "Creating a symbolic link needs extra privileges on Windows.");
-
         StatusLineTargetRoots roots = Roots();
-        string harnessRoot = Path.Combine(_temp.Path, HarnessRootRelativePath(StatusLineTarget.Pi));
-        Directory.CreateDirectory(harnessRoot);
+        string harnessRoot = Path.Combine(_home, HarnessRootRelativePath(StatusLineTarget.Pi));
+        _files.CreateDirectory(harnessRoot);
 
-        string targetDir = Path.Combine(_temp.Path, "outside");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Path.Combine(_home, "outside");
+        _files.CreateDirectory(targetDir);
 
         string linkPath = Path.Combine(harnessRoot, "kyber");
-        File.CreateSymbolicLink(linkPath, targetDir);
+        _files.CreateDirectoryLink(linkPath, targetDir);
 
         Assert.Throws<StatusLineDeploymentConflictException>(() =>
-            Plans.CreateDeploy(StatusLineTarget.Pi, roots, Artifacts()));
+            _plans.CreateDeploy(StatusLineTarget.Pi, roots, Artifacts()));
     }
 
     // -----------------------------------------------------------------------------------------
@@ -680,7 +683,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
 
     private StatusLineTargetRoots Roots(Func<string, string?>? getEnvironmentVariable = null)
     {
-        return new StatusLineTargetRoots(getEnvironmentVariable ?? (_ => null), _temp.Path);
+        return new StatusLineTargetRoots(getEnvironmentVariable ?? (_ => null), _home);
     }
 
     private static StatusLineDeploymentFile Artifact(string relativePath, string content)
@@ -720,7 +723,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
 
     private string PinnedStagingRoot(StatusLineTarget target)
     {
-        return Path.Combine(_temp.Path, ToNative(HarnessRootRelativePath(target)), ToNative(StagingSegment));
+        return Path.Combine(_home, ToNative(HarnessRootRelativePath(target)), ToNative(StagingSegment));
     }
 
     private string PinnedStagingPath(StatusLineTarget target, string relativePath)
@@ -730,7 +733,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
 
     private string SettingsSentinelPath(string settingsRelativePath)
     {
-        return Path.Combine(_temp.Path, ToNative(settingsRelativePath));
+        return Path.Combine(_home, ToNative(settingsRelativePath));
     }
 
     private static string ToNative(string relativePath)
@@ -761,14 +764,14 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
 
     /// <summary>
     /// Asserts that the bytes at <paramref name="path"/> are exactly <paramref name="expected"/>,
-    /// reporting the path and both lengths rather than letting <see cref="File.ReadAllBytes(string)"/>
+    /// reporting the path and both lengths rather than letting <see cref="_files.ReadAllBytes(string)"/>
     /// throw when the deployment wrote nothing. A missing file is a failed deployment — the
     /// assertion this suite is making — and a thrown <see cref="FileNotFoundException"/> would be a
     /// fixture fault, which the plan's T2 row does not accept as RED evidence.
     /// </summary>
-    private static void AssertFileBytes(string path, ReadOnlyMemory<byte> expected)
+    private void AssertFileBytes(string path, ReadOnlyMemory<byte> expected)
     {
-        byte[] actual = File.Exists(path) ? File.ReadAllBytes(path) : [];
+        byte[] actual = _files.FileExists(path) ? _files.ReadAllBytes(path) : [];
         Assert.True(
             expected.Span.SequenceEqual(actual),
             $"'{path}' holds {actual.Length} byte(s), not the {expected.Length} byte(s) the " +
@@ -827,7 +830,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         }
     }
 
-    private static void AssertContainsSettingPath(
+    private void AssertContainsSettingPath(
         IReadOnlyList<string> settingsPaths,
         string confirmedPath,
         StatusLineTarget target)
@@ -853,7 +856,7 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         {
             string settingsPath = SettingsSentinelPath(settingsRelativePath);
             Assert.False(
-                File.Exists(settingsPath),
+                _files.FileExists(settingsPath),
                 $"'{settingsPath}' was created for {target}, but Kyber Utilities never owns a " +
                 "settings file, not even by create-if-missing.");
         });
@@ -865,28 +868,28 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
         foreach (string settingsRelativePath in ConfirmedSettingsRelativePaths)
         {
             string settingsPath = SettingsSentinelPath(settingsRelativePath);
-            Directory.CreateDirectory(RequireParent(settingsPath));
+            _files.CreateDirectory(RequireParent(settingsPath));
             byte[] sentinel = Encoding.UTF8.GetBytes("{\"sentinel\":\"never-touched-by-kyber\"}\n");
-            File.WriteAllBytes(settingsPath, sentinel);
+            _files.WriteAllBytes(settingsPath, sentinel);
             sentinels[settingsPath] = sentinel;
         }
 
         return sentinels;
     }
 
-    private static void AssertSettingsSentinelsUnchanged(IReadOnlyDictionary<string, byte[]> sentinels)
+    private void AssertSettingsSentinelsUnchanged(IReadOnlyDictionary<string, byte[]> sentinels)
     {
         foreach ((string settingsPath, byte[] expected) in sentinels)
         {
-            Assert.True(File.Exists(settingsPath), $"Settings sentinel '{settingsPath}' was deleted.");
-            byte[] actual = File.ReadAllBytes(settingsPath);
+            Assert.True(_files.FileExists(settingsPath), $"Settings sentinel '{settingsPath}' was deleted.");
+            byte[] actual = _files.ReadAllBytes(settingsPath);
             Assert.True(
                 expected.AsSpan().SequenceEqual(actual),
                 $"Settings file '{settingsPath}' was modified, which Kyber Utilities never does.");
         }
     }
 
-    private static void AssertNoSettingsPathIsNamed(
+    private void AssertNoSettingsPathIsNamed(
         StatusLineDeploymentPlan plan,
         IReadOnlyDictionary<string, byte[]> sentinels,
         StatusLineTarget target)
@@ -913,22 +916,22 @@ public sealed class UtilitiesStatusLineDeploymentTests : IDisposable
     /// a <see cref="Path.GetFullPath(string)"/> exception thrown from inside the helper, which the
     /// plan's T2 row would not accept as valid RED evidence.
     /// </remarks>
-    private static bool IsWithin(string root, string candidate)
+    private bool IsWithin(string root, string candidate)
     {
-        return IsContainable(candidate) && SquadFileSystemPathSemantics.Instance.IsWithin(root, candidate);
+        return IsContainable(candidate) && _semantics.IsWithin(root, candidate);
     }
 
-    private static bool IsSame(string first, string second)
+    private bool IsSame(string first, string second)
     {
-        return IsContainable(first) && IsContainable(second) && SquadFileSystemPathSemantics.Instance.AreSame(first, second);
+        return IsContainable(first) && IsContainable(second) && _semantics.AreSame(first, second);
     }
 
-    private static bool IsContainable(string path)
+    private bool IsContainable(string path)
     {
         return !string.IsNullOrWhiteSpace(path) && Path.IsPathFullyQualified(path);
     }
 
-    private static bool IsSameOrWithin(string root, string candidate)
+    private bool IsSameOrWithin(string root, string candidate)
     {
         return IsSame(root, candidate) || IsWithin(root, candidate);
     }
