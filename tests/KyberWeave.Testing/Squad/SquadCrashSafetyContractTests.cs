@@ -1,3 +1,4 @@
+using KyberWeave.Core.Squad.Deployment;
 using Xunit;
 
 namespace KyberWeave.Testing.Squad;
@@ -71,6 +72,7 @@ public abstract class SquadCrashSafetyContractTests
     private void RunRollback(SquadCrashFlow flow)
     {
         using SquadCrashSafetyFixture fixture = CreateFixture();
+        Assert.Equal(SquadDeploymentScope.Project, fixture.Scope);
         fixture.CreateBaseline(flow);
 
         IReadOnlyDictionary<string, SquadTreeEntry> oldTree = fixture.Capture();

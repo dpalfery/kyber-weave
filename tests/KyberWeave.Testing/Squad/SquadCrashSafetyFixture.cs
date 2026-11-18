@@ -87,6 +87,13 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     /// <summary>Gets the state store the transaction writes its lock, receipt and journal through.</summary>
     public abstract SquadStateStore StateStore { get; }
 
+    /// <summary>
+    /// Gets the deployment scope this workspace can prove crash safety for. The kill snapshot covers
+    /// only <see cref="Root"/>, so a scope whose journal or state lives outside it cannot use this
+    /// workspace: the implementation refuses rather than silently testing the wrong tree.
+    /// </summary>
+    public abstract SquadDeploymentScope Scope { get; }
+
     /// <summary>Writes the tree the flow starts from, including the state the flow reads.</summary>
     /// <param name="flow">The flow about to run.</param>
     public abstract void CreateBaseline(SquadCrashFlow flow);
@@ -181,8 +188,12 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     public override SquadStateStore StateStore => new(new FakeSquadUserPaths(Root));
 
     /// <inheritdoc />
+    public override SquadDeploymentScope Scope => SquadDeploymentScope.Project;
+
+    /// <inheritdoc />
     public override void CreateBaseline(SquadCrashFlow flow)
     {
+        RequireEveryStatePathUnderRoot();
         Directory.CreateDirectory(Root);
         Write(ForeignPath, "operator note");
 
@@ -409,6 +420,39 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
             BaselineReceipt()),
         _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
     };
+
+    /// <summary>
+    /// Proves the assumption the kill snapshot rests on: every path the transaction writes state or
+    /// a journal to is beneath <see cref="Root"/>, so restoring the snapshot also restores recovery
+    /// evidence. A scope whose journal sits elsewhere would make every case prove nothing.
+    /// </summary>
+    private void RequireEveryStatePathUnderRoot()
+    {
+        SquadStateStore store = StateStore;
+        string[] statePaths =
+        [
+            store.ResolveLockPath(Root, Scope),
+            store.ResolveReceiptPath(Root, Scope),
+            store.ResolveTransactionDirectory(Root, Scope),
+            store.ResolveFileWorkDirectory(Root, Scope)
+        ];
+        string rootSpelling = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Root));
+        string canonicalRoot = Path.TrimEndingDirectorySeparator(
+            SquadPhysicalRootIdentity.Resolve(Root, SquadFileSystemPathSemantics.Instance).PhysicalPath);
+        foreach (string statePath in statePaths)
+        {
+            string full = Path.GetFullPath(statePath);
+            string canonical = full.StartsWith(rootSpelling, StringComparison.Ordinal)
+                ? canonicalRoot + full[rootSpelling.Length..]
+                : full;
+            if (!canonical.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"The {Scope} workspace resolves '{statePath}' outside its root '{Root}', so a kill snapshot would not restore it. " +
+                    "Run that scope through a fixture that snapshots every root the transaction writes.");
+            }
+        }
+    }
 
     private void WriteState()
     {

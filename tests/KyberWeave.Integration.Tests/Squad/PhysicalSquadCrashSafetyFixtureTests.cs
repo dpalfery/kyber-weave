@@ -36,6 +36,19 @@ public sealed class PhysicalSquadCrashSafetyFixtureTests
     }
 
     [Fact]
+    public void TheWorkspaceRefusesAScopeWhoseStateWouldEscapeTheKillSnapshot()
+    {
+        using PhysicalSquadCrashSafetyFixture fixture = new();
+
+        // CreateBaseline runs the guard: it resolves the lock, receipt, journal and work directory
+        // and refuses a scope whose state sits outside Root, which a kill snapshot could not restore.
+        fixture.CreateBaseline(SquadCrashFlow.Update);
+
+        Assert.Equal(KyberWeave.Core.Squad.Deployment.SquadDeploymentScope.Project, fixture.Scope);
+        Assert.True(Directory.Exists(fixture.Root));
+    }
+
+    [Fact]
     public void RestoringASnapshotReproducesItExactly()
     {
         using PhysicalSquadCrashSafetyFixture fixture = new();
