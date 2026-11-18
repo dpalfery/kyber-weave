@@ -471,9 +471,9 @@ internal static class SquadCommandComposition
         ArgumentNullException.ThrowIfNull(configs);
 
         if (string.IsNullOrWhiteSpace(targetRoot))
-            return KyberWeaveConfigLoadResult.Fail("The target root must not be empty.", null);
+            return KyberWeaveConfigLoadResultFactory.Fail("The target root must not be empty.", null);
         if (string.IsNullOrWhiteSpace(homeDirectory))
-            return KyberWeaveConfigLoadResult.Fail("The home directory must not be empty.", null);
+            return KyberWeaveConfigLoadResultFactory.Fail("The home directory must not be empty.", null);
 
         try
         {
@@ -499,7 +499,7 @@ internal static class SquadCommandComposition
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, null);
+            return KyberWeaveConfigLoadResultFactory.Fail(ex.Message, null);
         }
     }
 

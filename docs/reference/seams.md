@@ -212,6 +212,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | 4.8 |
 | `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | 4.8 |
 | `EditHookService` (`Hooks/EditHookService.cs`) | file system, paths | 4.8 |
+| `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateRunService` (`Review/GateRunService.cs`) | paths, clock | 4.3 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
 | `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
@@ -381,7 +382,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `McpWiringReceipt` (`Docs/Mcp/McpWiringReceipt.cs`) | file system | 2.5 |
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 2.5 |
 | `DocSpecValidator` (`Docs/Validation/DocSpecValidator.cs`) | file system, paths | 2.5 |
-| `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `TaskGatePlanning` (`Review/TaskGatePlanning.cs`) | paths | 2.5 |

@@ -40,7 +40,7 @@ public sealed class ReviewCycleService(
         string root = Path.GetFullPath(request.Path);
         DiagnosticReport report = new();
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // The review folder belongs to the git work tree that contains the path the command was run against: a linked
         // worktree has its own .agent_scratchpad, and the canonical checkout's is never read on its behalf.
@@ -48,7 +48,7 @@ public sealed class ReviewCycleService(
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, request.Task);
         if (!choice.Chosen)
-            return ReviewCommandResult.Refused(choice.Error!);
+            return ReviewCommandResultFactory.Refused(choice.Error!);
 
         string task = choice.Task;
         if (choice.Note is { } chosen && !request.Json)
@@ -72,7 +72,7 @@ public sealed class ReviewCycleService(
             (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
                 priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review cycle");
             if (!ok)
-                return ReviewCommandResult.Reported(1, report);
+                return ReviewCommandResultFactory.Reported(1, report);
 
             recheck = found;
         }

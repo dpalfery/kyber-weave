@@ -277,12 +277,12 @@ public sealed class ArbiterInstallService(
         {
             try
             {
-                configLoad = KyberWeaveConfigLoadResult.Ok(
+                configLoad = KyberWeaveConfigLoadResultFactory.Ok(
                     configs.LoadFromYaml(plan.DesiredConfigText), plan.ConfigPath);
             }
             catch (YamlDotNet.Core.YamlException ex)
             {
-                configLoad = KyberWeaveConfigLoadResult.Fail(ex.Message, plan.ConfigPath);
+                configLoad = KyberWeaveConfigLoadResultFactory.Fail(ex.Message, plan.ConfigPath);
             }
         }
         else
