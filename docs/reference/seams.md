@@ -225,18 +225,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
-| `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
 | `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
-| `ReviewCycleView` (`Review/ReviewCycleView.cs`) | paths | 4.3 |
-| `ReviewDuplicatesService` (`Review/ReviewDuplicatesService.cs`) | paths | 4.3 |
 | `ReviewEvidenceService` (`Review/ReviewEvidenceService.cs`) | paths | 4.3 |
-| `ReviewGatesService` (`Review/ReviewGatesService.cs`) | file system, paths | 4.3 |
-| `ReviewReportWriter` (`Review/ReviewReportWriter.cs`) | paths | 4.3 |
 | `ReviewSeatsService` (`Review/ReviewSeatsService.cs`) | paths | 4.3 |
-| `ReviewSuppressionsService` (`Review/ReviewSuppressionsService.cs`) | paths | 4.3 |
-| `ReviewVerdictService` (`Review/ReviewVerdictService.cs`) | paths | 4.3 |
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
-| `SuppressionScanService` (`Review/SuppressionScanService.cs`) | paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
 | `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
