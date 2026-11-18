@@ -192,6 +192,31 @@ public abstract class CredentialStoreContractTests : IDisposable
     }
 
     [Fact]
+    public void RejectsAnOriginWithALineBreak()
+    {
+        ICredentialStore store = NewStore();
+        const string origin = "https://kyber-weave\ncontract.invalid";
+        const string carriageReturnOrigin = "https://kyber-weave\rcontract.invalid";
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read(origin));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, "sk-contract-0006"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete(origin));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read(carriageReturnOrigin));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(carriageReturnOrigin, "sk-contract-0006"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete(carriageReturnOrigin));
+    }
+
+    [Fact]
+    public void RejectsAKeyWithALineBreak()
+    {
+        ICredentialStore store = NewStore();
+        string origin = NewOrigin();
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, "line-one\nline-two"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write(origin, "line-one\rline-two"));
+    }
+
+    [Fact]
     public void RejectsAnOriginThatIsNotGiven()
     {
         ICredentialStore store = NewStore();

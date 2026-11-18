@@ -48,6 +48,8 @@ internal sealed class FakeCredentialStore : ICredentialStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
+        RejectLineBreak(origin, nameof(origin));
+        RejectLineBreak(key, nameof(key));
         _host.Set(origin, key);
     }
 
@@ -55,6 +57,7 @@ internal sealed class FakeCredentialStore : ICredentialStore
     public string? Read(string origin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        RejectLineBreak(origin, nameof(origin));
         Reads.Add(origin);
         if (ReadFailure is { } failure)
         {
@@ -69,6 +72,8 @@ internal sealed class FakeCredentialStore : ICredentialStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
+        RejectLineBreak(origin, nameof(origin));
+        RejectLineBreak(key, nameof(key));
         Writes.Add((origin, key));
         _host.Set(origin, key);
     }
@@ -77,8 +82,17 @@ internal sealed class FakeCredentialStore : ICredentialStore
     public void Delete(string origin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        RejectLineBreak(origin, nameof(origin));
         Deletes.Add(origin);
         _ = _host.Entries.Remove(origin);
+    }
+
+    private static void RejectLineBreak(string value, string parameterName)
+    {
+        if (value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("A credential origin or key cannot contain a line break.", parameterName);
+        }
     }
 }
 

@@ -38,6 +38,11 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
     public string? Read(string origin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        if (HasNewline(origin))
+        {
+            throw new ArgumentException(
+                "The macOS keychain origin cannot contain newline characters.", nameof(origin));
+        }
         ProcessStartInfo startInfo = new("security")
         {
             UseShellExecute = false,

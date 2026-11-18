@@ -225,6 +225,31 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
+    public void MacReadRejectsAnOriginWithALineBreakBeforeRunningSecurity()
+    {
+        FakeCredentialProcessRunner runner = new();
+        MacKeychainCredentialStore store = new(runner);
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read("https://kyber-weave\ncontract.invalid"));
+
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public void LinuxRejectsALineBreakInTheOriginOrKeyBeforeRunningSecretTool()
+    {
+        FakeCredentialProcessRunner runner = new();
+        SecretServiceCredentialStore store = new(runner);
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read("https://kyber-weave\ncontract.invalid"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write("https://kyber-weave\rcontract.invalid", "sk-contract"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete("https://kyber-weave\ncontract.invalid"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write("https://api.typesafe.ai", "line-one\nline-two"));
+
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public void MacReadUsesExactArgvAndReturnsTrimmedStdout()
     {
         FakeCredentialProcessRunner runner = new();
