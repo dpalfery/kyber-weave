@@ -4,9 +4,9 @@ using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fixtures;
 using Xunit;
 using KyberWeave.Data.Hooks.Arbiter;
-using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.FileSystem;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -28,15 +28,12 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class FactoryHookAdapterTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private static readonly string TranscriptDirectory =
         Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "factory"));
 
     private readonly InMemoryFileSystem _files = new();
 
-    private const string TranscriptFixturePath =
-        "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/factory/transcript-background-task.jsonl";
+    private const string TranscriptFixtureName = "transcript-background-task.jsonl";
 
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
@@ -152,7 +149,7 @@ public sealed class FactoryHookAdapterTests
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static string Fixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/factory/{name}");
+        ArbiterHookFixtures.Factory(name);
 
     private (int Exit, string Stdout, string Log) Run(
         string stdin,
@@ -451,7 +448,7 @@ public sealed class FactoryHookAdapterTests
 
     private string TwoLaunches(string firstTask, string secondTask)
     {
-        string fixture = Corpus.ReadText(TranscriptFixturePath);
+        string fixture = ArbiterHookFixtures.Factory(TranscriptFixtureName);
         string first = fixture.Replace("TASK: T9", "TASK: " + firstTask, StringComparison.Ordinal);
         string second = fixture
             .Replace("TASK: T9", "TASK: " + secondTask, StringComparison.Ordinal)
@@ -537,7 +534,7 @@ public sealed class FactoryHookAdapterTests
     [Fact]
     public void SubagentStop_OnAFileThatIsNotATranscript_RecordsNothing()
     {
-        string notTranscript = TemporaryTranscript(Corpus.ReadText(TranscriptFixturePath), ".txt");
+        string notTranscript = TemporaryTranscript(ArbiterHookFixtures.Factory(TranscriptFixtureName), ".txt");
         try
         {
             ContextualEngine engine = new();
@@ -597,7 +594,7 @@ public sealed class FactoryHookAdapterTests
         return root.ToJsonString();
     }
 
-    private string TranscriptFixture() => TemporaryTranscript(Corpus.ReadText(TranscriptFixturePath));
+    private string TranscriptFixture() => TemporaryTranscript(ArbiterHookFixtures.Factory(TranscriptFixtureName));
 
     [Fact]
     public void SubagentStop_RecordsTheReportAgainstItsDispatch()
@@ -619,7 +616,7 @@ public sealed class FactoryHookAdapterTests
     public void SubagentStop_StripsHeadersForASpecialist_AsItsDispatchRan()
     {
         string transcript = TemporaryTranscript(
-            Corpus.ReadText(TranscriptFixturePath).Replace("\"echoer\"", "\"dev-medium\"", StringComparison.Ordinal));
+            ArbiterHookFixtures.Factory(TranscriptFixtureName).Replace("\"echoer\"", "\"dev-medium\"", StringComparison.Ordinal));
         try
         {
             ContextualEngine engine = new();
