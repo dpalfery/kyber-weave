@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -18,7 +19,9 @@ public sealed class DocsCloseoutCommand(
     IRepositoryFileStore files,
     IKyberWeaveConfigRepository configs,
     TimeProvider time,
-    IAnsiConsole console) : Command<DocsCloseoutSettings>
+    IAnsiConsole console,
+    IPathResolver paths,
+    IProcessEnvironment environment) : Command<DocsCloseoutSettings>
 {
     /// <summary>The <c>--date</c> value is not a date.</summary>
     public const string InvalidDate = "KW-DOC-CLOSEOUT-005";
@@ -48,7 +51,7 @@ public sealed class DocsCloseoutCommand(
         }
 
         string typed = settings.Path;
-        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
+        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory, paths, environment);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
@@ -57,13 +60,13 @@ public sealed class DocsCloseoutCommand(
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
+        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs closeout", report, out string relative, paths, environment))
         {
             CommandHelpers.Finish(console, report, settings, "docs closeout", "Plan");
             return 1;
         }
 
-        PlanArguments.Announce(report, settings, relative);
+        PlanArguments.Announce(console, report, settings, relative);
         PlanCloseoutOutcome outcome = closeout.Run(root, effective, relative, date, settings.Archive && !settings.DryRun);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("archived", outcome.Archived);

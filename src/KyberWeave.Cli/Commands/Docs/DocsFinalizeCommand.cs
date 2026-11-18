@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -18,7 +19,9 @@ public sealed class DocsFinalizeCommand(
     IRepositoryFileStore files,
     IKyberWeaveConfigRepository configs,
     TimeProvider time,
-    IAnsiConsole console) : Command<DocsFinalizeSettings>
+    IAnsiConsole console,
+    IPathResolver paths,
+    IProcessEnvironment environment) : Command<DocsFinalizeSettings>
 {
     /// <summary>A <c>--date</c> or <c>--approval-mode</c> value is not usable.</summary>
     public const string InvalidOption = "KW-DOC-FINALIZE-007";
@@ -49,7 +52,7 @@ public sealed class DocsFinalizeCommand(
         }
 
         string typed = settings.Path;
-        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
+        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory, paths, environment);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
@@ -58,13 +61,13 @@ public sealed class DocsFinalizeCommand(
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs finalize", report, out string relative))
+        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs finalize", report, out string relative, paths, environment))
         {
             CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
             return 1;
         }
 
-        PlanArguments.Announce(report, settings, relative);
+        PlanArguments.Announce(console, report, settings, relative);
         PlanFinalizeOutcome outcome = finalize.Run(root, effective, relative, mode, settings.Approval, date);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("finalized", outcome.Finalized);

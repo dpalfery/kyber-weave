@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Model;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
@@ -74,7 +75,9 @@ public sealed class DocsCommandOutputSeamTests
             arbiterDryRun: null!,
             files: new InMemoryRepositoryFileStore(_files),
             configs: _configs,
-            console: _console).Execute(null!, settings, CancellationToken.None);
+            console: _console,
+            paths: new FakePathResolver(_files),
+            environment: new FakeProcessEnvironment(currentDirectory: WorkingDirectory)).Execute(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains(DocsTasksCommand.ConflictingModes, _console.Output, StringComparison.Ordinal);
@@ -90,5 +93,27 @@ public sealed class DocsCommandOutputSeamTests
 
         Assert.Equal(1, exit);
         Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, _console.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CatalogRendersItsSummaryOnTheInjectedConsole()
+    {
+        DocsSettings settings = new() { Path = Root };
+
+        int exit = new DocsCatalogCommand(_configs, new EmptyDocumentSourceFactory(), _console)
+            .Execute(null!, settings, CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("0 documents in scope", _console.Output, StringComparison.Ordinal);
+    }
+
+    private sealed class EmptyDocumentSourceFactory : IDocumentSourceFactory, IDocumentSource
+    {
+        public IDocumentSource Create(string repoRoot, OntologyConfig ontology) => this;
+
+        public DocumentSet Load() => new() { Documents = [] };
+
+        public DocumentModel LoadArchivedDocument(string relativePath) =>
+            throw new InvalidOperationException("The catalogue reads no archived entry.");
     }
 }

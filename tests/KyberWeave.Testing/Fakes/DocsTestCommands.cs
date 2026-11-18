@@ -77,7 +77,9 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IRepositoryFileStore>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>(),
             provider.GetRequiredService<TimeProvider>(),
-            console ?? AnsiConsole.Console);
+            console ?? AnsiConsole.Console,
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     public static DocsFinalizeCommand Finalize(IServiceProvider? services = null, IAnsiConsole? console = null)
@@ -88,7 +90,9 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IRepositoryFileStore>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>(),
             provider.GetRequiredService<TimeProvider>(),
-            console ?? AnsiConsole.Console);
+            console ?? AnsiConsole.Console,
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     public static DocsValidateCommand Validate(IServiceProvider? services = null, IAnsiConsole? console = null)
@@ -131,7 +135,9 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IArbiterDryRunService>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>(),
-            console ?? AnsiConsole.Console);
+            console ?? AnsiConsole.Console,
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     public static IDocsSchemaGate SchemaGate => Services().GetRequiredService<IDocsSchemaGate>();

@@ -24,6 +24,10 @@ public sealed class DocsCommandSeamTests
     private readonly TestConsole _console = new() { EmitAnsiSequences = false };
     private readonly InMemoryFileSystem _files = new();
     private readonly FakeKyberWeaveConfigRepository _configs = new();
+    private readonly FakePathResolver _paths;
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: WorkingDirectory);
+
+    public DocsCommandSeamTests() => _paths = new FakePathResolver(_files);
 
     [Fact]
     public void CloseoutTakesItsArchiveDateFromTheInjectedClock()
@@ -35,6 +39,34 @@ public sealed class DocsCommandSeamTests
 
         Assert.Equal(0, exit);
         Assert.Equal(new DateOnly(2026, 3, 4), closeout.ArchiveDate);
+        Assert.Contains("\"archived\"", _console.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACloseoutWithoutAWorkingDirectoryResolvesItsRootAgainstTheEnvironmentSeam()
+    {
+        RecordingCloseout closeout = new();
+        DocsCloseoutSettings settings = CloseoutSettings();
+        settings.Path = "plans/x.md";
+        settings.WorkingDirectory = null;
+
+        int exit = Closeout(closeout, new FakeTimeProvider()).Execute(null!, settings, CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Equal([WorkingDirectory], _configs.LoadedRoots);
+    }
+
+    [Fact]
+    public void AHumanFormatCloseoutAnnouncesThePlanOnTheInjectedConsole()
+    {
+        RecordingCloseout closeout = new();
+        DocsCloseoutSettings settings = CloseoutSettings();
+        settings.Format = "lines";
+
+        int exit = Closeout(closeout, new FakeTimeProvider()).Execute(null!, settings, CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Contains($"Plan: {Plan}", _console.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -83,14 +115,18 @@ public sealed class DocsCommandSeamTests
         new InMemoryRepositoryFileStore(_files),
         _configs,
         clock,
-        _console);
+        _console,
+        _paths,
+        _environment);
 
     private DocsCloseoutCommand Closeout(RecordingCloseout closeout, TimeProvider clock) => new(
         closeout,
         new InMemoryRepositoryFileStore(_files),
         _configs,
         clock,
-        _console);
+        _console,
+        _paths,
+        _environment);
 
     private sealed class RecordingCloseout : IPlanCloseoutService
     {
