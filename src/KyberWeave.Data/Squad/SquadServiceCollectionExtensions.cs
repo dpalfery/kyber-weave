@@ -90,7 +90,10 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadPackager>(sp => new FileSquadPackager(
             sp.GetRequiredService<ISquadArchiveWriter>(),
             sp.GetRequiredService<ISquadSourceLoader>(),
-            sp.GetRequiredService<ISquadCompanionSkills>()));
+            sp.GetRequiredService<ISquadCompanionSkills>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadSkillShadowing>(sp => new SquadSkillShadowing(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),

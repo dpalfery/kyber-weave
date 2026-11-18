@@ -12,6 +12,8 @@ using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Spectre.Console.Testing;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 using KyberWeave.Testing.Squad;
@@ -24,13 +26,21 @@ namespace KyberWeave.Tests;
 /// output writing with SHA256 checksums, and exclusion of raw Squad corpus from CLI/MCP binary builds.
 /// Covers Test Contract K9 from docs/plans/2026-08-14-kyber-squad-unified-agent-skill-deployment.md.
 /// </summary>
-public sealed class SquadPackAndReleaseTests : IDisposable
+public sealed class SquadPackAndReleaseTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly TestConsole _console = new() { EmitAnsiSequences = false };
+    private readonly string _work;
+    private readonly InMemorySquadServices _services;
 
-    public void Dispose() => _temp.Dispose();
+    public SquadPackAndReleaseTests()
+    {
+        _work = Path.Combine(_files.Root, "work");
+        _files.CreateDirectory(_work);
+        _services = new InMemorySquadServices(_files);
+    }
 
     private static readonly string[] CanonicalAgents =
     [
@@ -87,16 +97,16 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_Apm_GeneratesDeterministicArchiveWithNormalizedEntries()
     {
         // Arrange
-        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
-        string outDir1 = Path.Combine(_temp.Path, "apm-out1");
-        string outDir2 = Path.Combine(_temp.Path, "apm-out2");
-        Directory.CreateDirectory(outDir1);
-        Directory.CreateDirectory(outDir2);
+        QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid(_files);
+        string outDir1 = Path.Combine(_work, "apm-out1");
+        string outDir2 = Path.Combine(_work, "apm-out2");
+        _files.CreateDirectory(outDir1);
+        _files.CreateDirectory(outDir2);
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
 
-        SquadPackCommand command1 = SquadTestCommands.Pack(repo.Path);
-        SquadPackCommand command2 = SquadTestCommands.Pack(repo.Path);
+        SquadPackCommand command1 = _services.PackCommand(repo.Path, _console);
+        SquadPackCommand command2 = _services.PackCommand(repo.Path, _console);
 
         // Act
         CommandExecution exec1 = Capture(() => command1.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir1 }));
@@ -106,8 +116,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Equal(0, exec1.ExitCode);
         Assert.Equal(0, exec2.ExitCode);
 
-        string[] archives1 = Directory.GetFiles(outDir1, "kyber-squad-*.zip");
-        string[] archives2 = Directory.GetFiles(outDir2, "kyber-squad-*.zip");
+        string[] archives1 = GetFiles(outDir1, "kyber-squad-*.zip");
+        string[] archives2 = GetFiles(outDir2, "kyber-squad-*.zip");
 
         Assert.NotEmpty(archives1);
         Assert.NotEmpty(archives2);
@@ -116,12 +126,12 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         string archivePath2 = archives2[0];
 
         // 1. Assert deterministic SHA-256 hash across multiple runs
-        string hash1 = ComputeSha256(File.ReadAllBytes(archivePath1));
-        string hash2 = ComputeSha256(File.ReadAllBytes(archivePath2));
+        string hash1 = ComputeSha256(_files.ReadAllBytes(archivePath1));
+        string hash2 = ComputeSha256(_files.ReadAllBytes(archivePath2));
         Assert.Equal(hash1, hash2);
 
         // 2. Inspect archive entries
-        using ZipArchive archive = ZipFile.OpenRead(archivePath1);
+        using ZipArchive archive = OpenZip(archivePath1);
         List<string> entryNames = archive.Entries.Select(e => e.FullName).ToList();
 
         // Strict ordinal entry ordering
@@ -185,9 +195,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     [Fact]
     public void Pack_Apm_CanonicalSourceShipsTaskGateAndNoRetiredTaskReviewer()
     {
-        string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        string archivePath = RealSquadPacker.Create().PackApm(productRoot, _temp.Path, "task-gate-inventory");
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        string productRoot = QualifiedSquadRepoFixture.CopyShippedSource(_files, Path.Combine(_work, "shipped"));
+        string archivePath = _services.Packer(_work).PackApm(productRoot, _work, "task-gate-inventory");
+        using ZipArchive archive = OpenZip(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
 
         Assert.Contains("skills/task-gate/SKILL.md", entryNames);
@@ -202,9 +212,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     [Fact]
     public void Pack_Apm_CanonicalSourceShipsNoRetiredSecondBrain()
     {
-        string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        string archivePath = RealSquadPacker.Create().PackApm(productRoot, _temp.Path, "no-second-brain");
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        string productRoot = QualifiedSquadRepoFixture.CopyShippedSource(_files, Path.Combine(_work, "shipped"));
+        string archivePath = _services.Packer(_work).PackApm(productRoot, _work, "no-second-brain");
+        using ZipArchive archive = OpenZip(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
 
         Assert.DoesNotContain(entryNames, name => name.Contains("second-brain", StringComparison.Ordinal));
@@ -219,20 +229,20 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_Apm_ExcludesAPiTargetTreeInsideTheSource()
     {
         // Arrange
-        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
+        QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid(_files);
         repo.WriteSourceFile(
             ".pi/agents/x.md",
             "---\nname: x\ndescription: Rendered Pi agent.\ntools: read\n---\nYou are x.\n");
-        string outDir = Path.Combine(_temp.Path, "apm-pi-out");
-        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
+        string outDir = Path.Combine(_work, "apm-pi-out");
+        SquadPackCommand command = _services.PackCommand(repo.Path, _console);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir }));
 
         // Assert
         Assert.True(execution.ExitCode == 0, execution.Output);
-        string archivePath = Assert.Single(Directory.GetFiles(outDir, "kyber-squad-*.zip"));
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        string archivePath = Assert.Single(GetFiles(outDir, "kyber-squad-*.zip"));
+        using ZipArchive archive = OpenZip(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
         Assert.Contains("squad.yml", entryNames);
         Assert.DoesNotContain(entryNames, name => name.StartsWith(".pi/", StringComparison.OrdinalIgnoreCase));
@@ -247,20 +257,20 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_Apm_ExcludesADevinTargetTreeInsideTheSource()
     {
         // Arrange
-        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
+        QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid(_files);
         repo.WriteSourceFile(
             ".devin/agents/x/AGENT.md",
             "---\nname: x\ndescription: Rendered Devin agent.\nallowed-tools:\n- read\n---\nYou are x.\n");
-        string outDir = Path.Combine(_temp.Path, "apm-devin-out");
-        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
+        string outDir = Path.Combine(_work, "apm-devin-out");
+        SquadPackCommand command = _services.PackCommand(repo.Path, _console);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(null!, new SquadPackSettings { Format = "apm", Out = outDir }));
 
         // Assert
         Assert.True(execution.ExitCode == 0, execution.Output);
-        string archivePath = Assert.Single(Directory.GetFiles(outDir, "kyber-squad-*.zip"));
-        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        string archivePath = Assert.Single(GetFiles(outDir, "kyber-squad-*.zip"));
+        using ZipArchive archive = OpenZip(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
         Assert.Contains("squad.yml", entryNames);
         Assert.DoesNotContain(entryNames, name => name.StartsWith(".devin/", StringComparison.OrdinalIgnoreCase));
@@ -270,16 +280,16 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_Plugins_GeneratesAgentPluginsV1Archive()
     {
         // Arrange
-        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
-        string outDir1 = Path.Combine(_temp.Path, "plugins-out1");
-        string outDir2 = Path.Combine(_temp.Path, "plugins-out2");
-        Directory.CreateDirectory(outDir1);
-        Directory.CreateDirectory(outDir2);
+        QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid(_files);
+        string outDir1 = Path.Combine(_work, "plugins-out1");
+        string outDir2 = Path.Combine(_work, "plugins-out2");
+        _files.CreateDirectory(outDir1);
+        _files.CreateDirectory(outDir2);
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
 
-        SquadPackCommand command1 = SquadTestCommands.Pack(repo.Path);
-        SquadPackCommand command2 = SquadTestCommands.Pack(repo.Path);
+        SquadPackCommand command1 = _services.PackCommand(repo.Path, _console);
+        SquadPackCommand command2 = _services.PackCommand(repo.Path, _console);
 
         // Act
         CommandExecution exec1 = Capture(() => command1.Execute(null!, new SquadPackSettings { Format = "plugins", Out = outDir1 }));
@@ -289,8 +299,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Equal(0, exec1.ExitCode);
         Assert.Equal(0, exec2.ExitCode);
 
-        string[] archives1 = Directory.GetFiles(outDir1, "kyber-squad-plugin-*.zip");
-        string[] archives2 = Directory.GetFiles(outDir2, "kyber-squad-plugin-*.zip");
+        string[] archives1 = GetFiles(outDir1, "kyber-squad-plugin-*.zip");
+        string[] archives2 = GetFiles(outDir2, "kyber-squad-plugin-*.zip");
 
         Assert.NotEmpty(archives1);
         Assert.NotEmpty(archives2);
@@ -299,12 +309,12 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         string archivePath2 = archives2[0];
 
         // 1. Assert deterministic SHA-256 hash across multiple runs
-        string hash1 = ComputeSha256(File.ReadAllBytes(archivePath1));
-        string hash2 = ComputeSha256(File.ReadAllBytes(archivePath2));
+        string hash1 = ComputeSha256(_files.ReadAllBytes(archivePath1));
+        string hash2 = ComputeSha256(_files.ReadAllBytes(archivePath2));
         Assert.Equal(hash1, hash2);
 
         // 2. Inspect archive entries
-        using ZipArchive archive = ZipFile.OpenRead(archivePath1);
+        using ZipArchive archive = OpenZip(archivePath1);
         List<string> entryNames = archive.Entries.Select(e => e.FullName).ToList();
 
         // Strict ordinal entry ordering
@@ -369,14 +379,14 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     [Fact]
     public void ResourceClosuresStayInsideApmAndAgentPluginPackageBoundaries()
     {
-        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateStub();
+        QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateStub(_files);
         const string agentResource = "agents/conductor/references/plan-path.md";
         const string skillResource = "skills/code-review/references/configuration.md";
         const string agentContent = "# Plan path\n\nExecute a Ready plan.\n";
         const string skillContent = "# Review configuration\n\nThe host's review keys.\n";
         repo.AddResourceClosure(agentResource, agentContent, skillResource, skillContent);
-        string outDirectory = Path.Combine(_temp.Path, "resource-pack");
-        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
+        string outDirectory = Path.Combine(_work, "resource-pack");
+        SquadPackCommand command = _services.PackCommand(repo.Path, _console);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -387,15 +397,15 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        string apmPath = Directory.GetFiles(outDirectory, "kyber-squad-*.zip")
+        string apmPath = GetFiles(outDirectory, "kyber-squad-*.zip")
             .Single(path => !Path.GetFileName(path).StartsWith(
                 "kyber-squad-plugin-",
                 StringComparison.Ordinal));
-        string pluginPath = Assert.Single(Directory.GetFiles(
+        string pluginPath = Assert.Single(GetFiles(
             outDirectory,
             "kyber-squad-plugin-*.zip"));
-        using ZipArchive apm = ZipFile.OpenRead(apmPath);
-        using ZipArchive plugin = ZipFile.OpenRead(pluginPath);
+        using ZipArchive apm = OpenZip(apmPath);
+        using ZipArchive plugin = OpenZip(pluginPath);
 
         Assert.Equal(agentContent, ReadArchiveText(apm, agentResource));
         Assert.Equal(skillContent, ReadArchiveText(apm, skillResource));
@@ -418,31 +428,29 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_WhenNotRepositoryRootOrNoProductsDirectory_FailsWithCleanDiagnostic(string scenario)
     {
         // Arrange
-        string workingDir = Path.Combine(_temp.Path, scenario);
-        Directory.CreateDirectory(workingDir);
-        string outDir = Path.Combine(_temp.Path, $"pack-out-{scenario}");
+        string workingDir = Path.Combine(_work, scenario);
+        _files.CreateDirectory(workingDir);
+        string outDir = Path.Combine(_work, $"pack-out-{scenario}");
         QualifiedSquadRepoFixture? repo = null;
 
         if (scenario == "sln-only")
         {
-            File.WriteAllText(Path.Combine(workingDir, "KyberWeave.sln"), "solution");
+            _files.WriteAllText(Path.Combine(workingDir, "KyberWeave.sln"), "solution");
         }
         else if (scenario == "squad-yml-only")
         {
-            Directory.CreateDirectory(Path.Combine(workingDir, "products", "kyber-squad"));
-            File.WriteAllText(Path.Combine(workingDir, "products", "kyber-squad", "squad.yml"), "schema: kyber-squad.squad/v1");
+            _files.CreateDirectory(Path.Combine(workingDir, "products", "kyber-squad"));
+            _files.WriteAllText(Path.Combine(workingDir, "products", "kyber-squad", "squad.yml"), "schema: kyber-squad.squad/v1");
         }
         else if (scenario == "child-dir")
         {
-            repo = QualifiedSquadRepoFixture.CreateValid();
+            repo = QualifiedSquadRepoFixture.CreateValid(_files);
             workingDir = Path.Combine(repo.Path, "src", "KyberWeave.Cli");
-            Directory.CreateDirectory(workingDir);
+            _files.CreateDirectory(workingDir);
         }
 
-        using QualifiedSquadRepoFixture? ownedRepo = repo;
-
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = SquadTestCommands.Pack(workingDir);
+        SquadPackCommand command = _services.PackCommand(workingDir, _console);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(
@@ -461,7 +469,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         Assert.Contains("squad install", execution.Output, StringComparison.Ordinal);
 
         // Ensure out directory was not created and no process calls were made
-        Assert.False(Directory.Exists(outDir));
+        Assert.False(_files.DirectoryExists(outDir));
         Assert.Empty(executor.Calls);
     }
 
@@ -469,11 +477,11 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_WithExplicitOutDirectory_WritesArchivesAndChecksumFile()
     {
         // Arrange
-        using QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid();
-        string outDir = Path.Combine(_temp.Path, "release-dist");
+        QualifiedSquadRepoFixture repo = QualifiedSquadRepoFixture.CreateValid(_files);
+        string outDir = Path.Combine(_work, "release-dist");
 
         FakeProcessExecutor executor = new FakeProcessExecutor();
-        SquadPackCommand command = SquadTestCommands.Pack(repo.Path);
+        SquadPackCommand command = _services.PackCommand(repo.Path, _console);
 
         // Act
         CommandExecution execution = Capture(() => command.Execute(
@@ -486,12 +494,12 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         // Assert
         Assert.Equal(0, execution.ExitCode);
-        Assert.True(Directory.Exists(outDir));
+        Assert.True(_files.DirectoryExists(outDir));
 
-        string[] apmArchives = Directory.GetFiles(outDir, "kyber-squad-*.zip")
+        string[] apmArchives = GetFiles(outDir, "kyber-squad-*.zip")
             .Where(f => !Path.GetFileName(f).StartsWith("kyber-squad-plugin-", StringComparison.Ordinal))
             .ToArray();
-        string[] pluginArchives = Directory.GetFiles(outDir, "kyber-squad-plugin-*.zip");
+        string[] pluginArchives = GetFiles(outDir, "kyber-squad-plugin-*.zip");
 
         Assert.Single(apmArchives);
         Assert.Single(pluginArchives);
@@ -501,11 +509,11 @@ public sealed class SquadPackAndReleaseTests : IDisposable
 
         // Verify checksum file
         string checksumFile = Path.Combine(outDir, "SHA256SUMS.txt");
-        Assert.True(File.Exists(checksumFile), "Pack with format 'all' must generate SHA256SUMS.txt in the output directory.");
+        Assert.True(_files.FileExists(checksumFile), "Pack with format 'all' must generate SHA256SUMS.txt in the output directory.");
 
-        string checksumContent = File.ReadAllText(checksumFile);
-        string apmHash = ComputeSha256(File.ReadAllBytes(apmArchive));
-        string pluginHash = ComputeSha256(File.ReadAllBytes(pluginArchive));
+        string checksumContent = _files.ReadAllText(checksumFile);
+        string apmHash = ComputeSha256(_files.ReadAllBytes(apmArchive));
+        string pluginHash = ComputeSha256(_files.ReadAllBytes(pluginArchive));
 
         Assert.Contains($"{apmHash}  {Path.GetFileName(apmArchive)}", checksumContent, StringComparison.Ordinal);
         Assert.Contains($"{pluginHash}  {Path.GetFileName(pluginArchive)}", checksumContent, StringComparison.Ordinal);
@@ -790,32 +798,44 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         return reader.ReadToEnd();
     }
 
-    private static CommandExecution Capture(Func<int> execute)
+    private CommandExecution Capture(Func<int> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
+        int exitCode = execute();
+        return new CommandExecution(exitCode, _console.Output);
     }
+
+    private string[] GetFiles(string directory, string pattern) =>
+        [.. _files.EnumerateFiles(directory, pattern, recursive: false)];
+
+    private ZipArchive OpenZip(string archivePath) => new(new MemoryStream(_files.ReadAllBytes(archivePath)));
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
-    private sealed class QualifiedSquadRepoFixture : IDisposable
+    private sealed class QualifiedSquadRepoFixture
     {
-        private readonly TempDirectory _temp = new();
+        private static int _counter;
+        private readonly InMemoryFileSystem _files;
 
-        public string Path => _temp.Path;
-
-        public static QualifiedSquadRepoFixture CreateValid()
+        private QualifiedSquadRepoFixture(InMemoryFileSystem files)
         {
-            QualifiedSquadRepoFixture fixture = new QualifiedSquadRepoFixture();
+            _files = files;
+            Path = System.IO.Path.Combine(files.Root, $"repo-{Interlocked.Increment(ref _counter)}");
+            files.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public static QualifiedSquadRepoFixture CreateValid(InMemoryFileSystem files)
+        {
+            QualifiedSquadRepoFixture fixture = new(files);
 
             // Solution marker
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
-            // Copy product source from real repo if available, or write all 21 agents and 24 skills
-            string realSquadSource = System.IO.Path.Combine(Corpus.Root, "products", "kyber-squad");
-            if (Directory.Exists(realSquadSource))
+            // Copy product source from the shipped corpus if available, or write all 21 agents and 24 skills
+            if (Corpus.DirectoryExists("products/kyber-squad"))
             {
-                CopyDirectory(realSquadSource, System.IO.Path.Combine(fixture.Path, "products", "kyber-squad"));
+                CopyShippedSource(files, System.IO.Path.Combine(fixture.Path, "products", "kyber-squad"));
                 // Update toolchain.yml to have a qualifying validated-release
                 fixture.Write("products/kyber-squad/toolchain.yml", """
                     schema: kyber-squad.toolchain/v1
@@ -838,9 +858,9 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             return fixture;
         }
 
-        public static QualifiedSquadRepoFixture CreateStub()
+        public static QualifiedSquadRepoFixture CreateStub(InMemoryFileSystem files)
         {
-            QualifiedSquadRepoFixture fixture = new();
+            QualifiedSquadRepoFixture fixture = new(files);
             fixture.Write(
                 "KyberWeave.sln",
                 "Microsoft Visual Studio Solution File, Format Version 12.00");
@@ -848,24 +868,38 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             return fixture;
         }
 
-        private static void CopyDirectory(string sourceDir, string destinationDir)
+        /// <summary>Copies the shipped <c>products/kyber-squad</c> tree into the in-memory file system.</summary>
+        /// <param name="files">The file system to copy into.</param>
+        /// <param name="destinationDir">Where the tree lands.</param>
+        /// <returns>The destination directory.</returns>
+        public static string CopyShippedSource(InMemoryFileSystem files, string destinationDir)
         {
-            Directory.CreateDirectory(destinationDir);
-            foreach (string file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+            const string sourceDir = "products/kyber-squad";
+            files.CreateDirectory(destinationDir);
+            foreach (string file in Corpus.EnumerateFiles(sourceDir, "*", recursive: true))
             {
-                string relativePath = System.IO.Path.GetRelativePath(sourceDir, file);
-                string destFile = System.IO.Path.Combine(destinationDir, relativePath);
-                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(destFile)!);
-                File.Copy(file, destFile, true);
+                string relativePath = file[(sourceDir.Length + 1)..];
+                string destFile = System.IO.Path.Combine(
+                    destinationDir,
+                    relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+                files.CreateDirectory(System.IO.Path.GetDirectoryName(destFile)!);
+                files.WriteAllBytes(destFile, Corpus.ReadBytes(file));
             }
+
+            return destinationDir;
         }
 
         private void Write(string relativePath, string content)
         {
             string fullPath = System.IO.Path.Combine(Path, relativePath);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);
-            File.WriteAllText(fullPath, content, new UTF8Encoding(false));
+            _files.CreateDirectory(System.IO.Path.GetDirectoryName(fullPath)!);
+            _files.WriteAllBytes(fullPath, new UTF8Encoding(false).GetBytes(content));
         }
+
+        private void Append(string fullPath, string content) =>
+            _files.WriteAllBytes(
+                fullPath,
+                [.. _files.ReadAllBytes(fullPath), .. new UTF8Encoding(false).GetBytes(content)]);
 
         public void AddResourceClosure(
             string agentResource,
@@ -874,20 +908,14 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             string skillContent)
         {
             string agentPath = System.IO.Path.Combine(Path, "products", "kyber-squad", "agents", "conductor.md");
-            File.AppendAllText(
-                agentPath,
-                "\n[Plan path](conductor/references/plan-path.md)\n",
-                new UTF8Encoding(false));
+            Append(agentPath, "\n[Plan path](conductor/references/plan-path.md)\n");
             Write($"products/kyber-squad/{agentResource}", agentContent);
 
             string[] segments = skillResource.Split('/');
             string skillPath = System.IO.Path.Combine(
                 [Path, "products", "kyber-squad", "skills", segments[1], "SKILL.md"]);
             string resource = string.Join('/', segments[2..]);
-            File.AppendAllText(
-                skillPath,
-                $"\n[Resource]({resource})\n",
-                new UTF8Encoding(false));
+            Append(skillPath, $"\n[Resource]({resource})\n");
             Write($"products/kyber-squad/{skillResource}", skillContent);
         }
 
@@ -1023,7 +1051,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             }
         }
 
-        public void Dispose() => _temp.Dispose();
     }
 
     #endregion
