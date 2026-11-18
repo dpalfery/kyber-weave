@@ -81,16 +81,18 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem f
             return facts;
         }
 
-        string? resolved = planPaths.Resolve(planFile, repositoryRoot);
-        if (resolved is null || !files.FileExists(resolved))
-        {
-            return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
-        }
-
+        // The resolver and the read both answer "absent" for anything they cannot use, including a root the
+        // resolver refuses: a caller's blank root must not take the hook's whole evaluation down.
         PlanDocument document;
         string content;
         try
         {
+            string? resolved = planPaths.Resolve(planFile, repositoryRoot);
+            if (resolved is null || !files.FileExists(resolved))
+            {
+                return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
+            }
+
             content = files.ReadAllText(resolved);
             document = PlanDocumentParser.Parse(content);
         }

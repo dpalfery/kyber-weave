@@ -72,6 +72,17 @@ public sealed class PlanFactsTests
         Assert.Equal("T1", Value(facts, "plan.task"));
     }
 
+    [Fact]
+    public void AWhitespaceRepositoryRoot_IsAnAbsentPlanRatherThanAThrow()
+    {
+        ArbiterFactSet facts = new PlanFacts(new PlanFileResolver(), _files).Enrich(
+            new ArbiterFactSet(),
+            new TriggerClassification("delegate", "conductor", "harness", "dev-medium", "implementation", Headers(("PLAN_FILE", "docs/plans/cards.md")), null, true),
+            "   ");
+
+        Assert.Equal(false, Value(facts, "plan.exists"));
+    }
+
     private ArbiterFactSet Facts(IReadOnlyDictionary<string, string> headers, ArbiterFactSet? facts = null) =>
         Facts(
             new TriggerClassification("delegate", "conductor", "harness", "dev-medium", "implementation", headers, null, true),
@@ -95,9 +106,12 @@ public sealed class PlanFactsTests
     /// <summary>Resolves a repository-relative plan inside the root it is given, and refuses a path that escapes.</summary>
     private sealed class PlanFileResolver : Contracts.Repositories.IPlanFileResolver
     {
-        public string? Resolve(string? planFile, string repositoryRoot) =>
-            planFile is null || planFile.StartsWith("..", StringComparison.Ordinal)
+        public string? Resolve(string? planFile, string repositoryRoot)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+            return planFile is null || planFile.StartsWith("..", StringComparison.Ordinal)
                 ? null
                 : Path.Combine(repositoryRoot, planFile);
+        }
     }
 }
