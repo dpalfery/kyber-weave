@@ -1,6 +1,6 @@
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -9,25 +9,22 @@ namespace KyberWeave.Tests;
 /// Pins the advisory doctor check that recommends raising Copilot CLI's large-output limit: it applies only when
 /// Copilot is in use, warns below 32000 bytes, and never fails.
 /// </summary>
-public sealed class CopilotLargeOutputDoctorTests : IDisposable
+public sealed class CopilotLargeOutputDoctorTests
 {
-    private readonly TempDirectory _repository = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryFileSystem _files = new();
 
-    public void Dispose()
-    {
-        _home.Dispose();
-        _repository.Dispose();
-    }
+    private string Repository => Path.Combine(_files.Root, "repo");
+
+    private string Home => Path.Combine(_files.Root, "home");
 
     private static Func<string, string?> Env(string? value) =>
         name => name == CopilotLargeOutputProbe.VariableName ? value : null;
 
-    private void UseCopilot() => Directory.CreateDirectory(Path.Combine(_home.Path, ".copilot"));
+    private void UseCopilot() => _files.CreateDirectory(Path.Combine(Home, ".copilot"));
 
     private DoctorCheck Single(string? value)
     {
-        IReadOnlyList<DoctorCheck> checks = CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(value), Directory.Exists, File.Exists);
+        IReadOnlyList<DoctorCheck> checks = CopilotLargeOutputProbe.Run(Repository, Home, Env(value), _files.DirectoryExists, _files.FileExists);
         return Assert.Single(checks);
     }
 
@@ -95,15 +92,15 @@ public sealed class CopilotLargeOutputDoctorTests : IDisposable
     [Fact]
     public void CopilotNotInUse_ReportsNothing()
     {
-        Assert.Empty(CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(null), Directory.Exists, File.Exists));
-        Assert.Empty(CopilotLargeOutputProbe.Run(_repository.Path, null, Env(null), Directory.Exists, File.Exists));
+        Assert.Empty(CopilotLargeOutputProbe.Run(Repository, Home, Env(null), _files.DirectoryExists, _files.FileExists));
+        Assert.Empty(CopilotLargeOutputProbe.Run(Repository, null, Env(null), _files.DirectoryExists, _files.FileExists));
     }
 
     [Fact]
     public void InstalledSquadCopilotTarget_CountsAsInUse()
     {
-        Directory.CreateDirectory(Path.Combine(_repository.Path, ".github", "agents"));
+        _files.CreateDirectory(Path.Combine(Repository, ".github", "agents"));
 
-        Assert.Single(CopilotLargeOutputProbe.Run(_repository.Path, _home.Path, Env(null), Directory.Exists, File.Exists));
+        Assert.Single(CopilotLargeOutputProbe.Run(Repository, Home, Env(null), _files.DirectoryExists, _files.FileExists));
     }
 }

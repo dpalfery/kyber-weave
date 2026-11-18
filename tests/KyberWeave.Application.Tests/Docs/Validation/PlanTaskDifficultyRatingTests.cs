@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -32,28 +33,29 @@ public sealed class PlanTaskDifficultyRatingTests : IDisposable
         Acceptance criteria: counts per status are returned.
         """;
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryFileSystem _files = new();
     private readonly List<PlanTaskAgentPick> _pickers = [];
 
     public PlanTaskDifficultyRatingTests()
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, "docs", "plans"));
-        File.WriteAllText(Path.Combine(_repo.Path, Plan), Markdown);
+        _files.CreateDirectory(Path.Combine(Repo, "docs", "plans"));
+        _files.WriteAllText(Path.Combine(Repo, Plan), Markdown);
     }
 
     public void Dispose()
     {
         foreach (PlanTaskAgentPick picker in _pickers)
             picker.Dispose();
-        _repo.Dispose();
     }
+
+    private string Repo => Path.Combine(_files.Root, "repo");
 
     private PlanTaskFile Write(IArbiterProvider provider)
     {
         PlanTaskAgentPick picker = new(provider, PlanTaskAgentPick.ImplementationAgents());
         _pickers.Add(picker);
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(
-            _repo.Path, KyberWeaveConfigDefaults.Product, DocsPorts.Files, picker)
+            Repo, KyberWeaveConfigDefaults.Product, new InMemoryRepositoryFileStore(_files), picker)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
         return outcome.File!;
