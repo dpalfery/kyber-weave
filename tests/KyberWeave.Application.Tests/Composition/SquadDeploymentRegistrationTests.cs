@@ -4,7 +4,7 @@ using KyberWeave.Data;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// The deployment planner and the transaction are built by the data and application composition roots, not by a
