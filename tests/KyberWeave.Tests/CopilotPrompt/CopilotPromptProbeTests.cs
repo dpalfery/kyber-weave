@@ -1,5 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Paths;
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
@@ -25,6 +27,8 @@ public sealed class CopilotPromptProbeTests : IDisposable
 
     public void Dispose() => _home.Dispose();
 
+    private static PhysicalPathResolver RealPaths { get; } = new(new PhysicalFileSystem());
+
     private string Home => _home.Path;
 
     private string PromptPath => CopilotPromptFile.InstalledPath(Home);
@@ -34,7 +38,7 @@ public sealed class CopilotPromptProbeTests : IDisposable
     private string UserDataDirectory => VsCodeUserSettingsPaths.UserDataDirectory(VsCodeFlavour.Stable, Home, null, OSPlatform.OSX);
 
     private IReadOnlyList<DoctorCheck> Run(DoctorMode mode = DoctorMode.Check) =>
-        CopilotPromptProbe.Run(mode, Home, null, OSPlatform.OSX, DoctorTestServices.Files);
+        CopilotPromptProbe.Run(mode, Home, null, OSPlatform.OSX, DoctorTestServices.Files, RealPaths, Home);
 
     private void WritePrompt(string text)
     {
@@ -231,7 +235,7 @@ public sealed class CopilotPromptProbeTests : IDisposable
         string file = JsonSerializer.Serialize(PromptPath);
         File.WriteAllText(settings, "{ \"chat.agentHost.copilot.modelCapabilityOverrides\": { \"*\": { \"promptOverrideFile\": " + file + " } } }");
 
-        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, DoctorTestServices.Files, xdgConfigHome);
+        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, DoctorTestServices.Files, RealPaths, Home, xdgConfigHome);
 
         Assert.Contains(checks, check => check.Id == "copilot.prompt.stable.setting" && check.Passed);
     }

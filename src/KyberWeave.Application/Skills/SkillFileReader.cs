@@ -85,6 +85,8 @@ public sealed class SkillFileReader(IFileSystem files, IPathResolver paths, IPro
             .ToList();
 
         IReadOnlyList<SkillResource> resources = SkillParser.DiscoverResources(
+            paths,
+            environment.CurrentDirectory,
             directoryPath,
             skillFilePath,
             files.EnumerateFiles(directoryPath, "*", recursive: true));

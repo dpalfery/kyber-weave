@@ -26,7 +26,8 @@ internal static class RunStartServiceCollectionExtensions
         services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IRunStateStore>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IPathResolver>()));
         return services;
     }
 }
