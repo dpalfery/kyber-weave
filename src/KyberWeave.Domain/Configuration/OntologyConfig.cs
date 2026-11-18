@@ -136,21 +136,6 @@ public sealed class OntologyConfig
 
     public static OntologyConfig ProductDefaults { get; } = new();
 
-    public bool IsRequiredForAll(string key)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        return BaseRequiredKeys.Contains(key, StringComparer.Ordinal);
-    }
-
-    public bool IsRequired(DocType docType, string key)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        if (!RequiredKeysByType.TryGetValue(docType, out IReadOnlyList<string>? keys))
-            return false;
-
-        return keys.Contains(key, StringComparer.Ordinal);
-    }
-
     internal OntologyConfig Clone(
         IReadOnlyList<string>? docsRoots = null,
         string? catalogPath = null,

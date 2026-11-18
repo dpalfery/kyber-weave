@@ -127,7 +127,7 @@ public class LegacyHostMigrationTests : IDisposable
     }
 
     private DiagnosticReport ValidateDocuments(KyberWeaveConfig config) =>
-        new DocSpecValidator(_repo.Path, config.Ontology)
+        RealDocSpecValidator.Create(_repo.Path, config.Ontology)
             .Validate(RealDocumentLoader.Create(_repo.Path, config.Ontology).Load());
 
     private DiagnosticReport ValidateRegistry(KyberWeaveConfig config) =>

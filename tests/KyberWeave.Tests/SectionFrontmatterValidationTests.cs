@@ -49,9 +49,9 @@ public sealed class SectionFrontmatterValidationTests
 
         DocumentModel doc = Assert.Single(fixture.LoadSubjects());
 
-        Assert.Contains("rolled-preamble-alias", doc.Keywords);
-        Assert.Contains("rolled-section-alias", doc.Keywords);
-        Assert.Contains("RolledSectionSymbol", doc.CodeRefs);
+        Assert.Contains("rolled-preamble-alias", doc.Keywords());
+        Assert.Contains("rolled-section-alias", doc.Keywords());
+        Assert.Contains("RolledSectionSymbol", doc.CodeRefs());
     }
 
     [Fact]
@@ -307,7 +307,7 @@ public sealed class SectionFrontmatterValidationTests
                 """));
 
         DocumentModel doc = Assert.Single(fixture.LoadSubjects());
-        Assert.NotNull(doc.Keywords);
+        Assert.NotNull(doc.Keywords());
     }
 
     [Fact]

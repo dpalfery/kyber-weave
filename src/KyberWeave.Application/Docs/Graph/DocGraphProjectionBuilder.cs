@@ -116,7 +116,7 @@ public static class DocGraphProjectionBuilder
                 edges.Add(new DocGraphEdge(
                     "DESCRIBES", documentId, $"path:{document.Frontmatter.SourceRoot}"));
 
-            foreach (string symbol in document.CodeRefs)
+            foreach (string symbol in document.CodeRefs())
                 foreach (CodeGraphNode node in resolveSymbol(symbol))
                     edges.Add(new DocGraphEdge("REFERENCES", documentId, node.Id));
 

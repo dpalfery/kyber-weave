@@ -362,7 +362,7 @@ public class OntologyConfigTests
                 .ToList();
 
         public DiagnosticReport Validate() =>
-            new DocSpecValidator(Root, _config).Validate(RealDocumentLoader.Create(Root, _config).Load());
+            RealDocSpecValidator.Create(Root, _config).Validate(RealDocumentLoader.Create(Root, _config).Load());
 
         public void Dispose()
         {

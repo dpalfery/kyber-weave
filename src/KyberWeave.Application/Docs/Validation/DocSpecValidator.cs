@@ -1,9 +1,9 @@
 using System.Globalization;
 using System.Text;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Graph;
-using KyberWeave.Domain.FileSystem;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
@@ -75,18 +75,20 @@ public sealed class DocSpecValidator
 
     private readonly string _repoRoot;
     private readonly OntologyConfig _config;
+    private readonly IFileSystem _files;
 
-    public DocSpecValidator(string repoRoot)
-        : this(repoRoot, OntologyConfig.ProductDefaults)
-    {
-    }
-
-    public DocSpecValidator(string repoRoot, OntologyConfig config)
+    /// <summary>Creates a validator over one checkout.</summary>
+    /// <param name="repoRoot">The checkout root.</param>
+    /// <param name="config">The ontology the documents are checked against.</param>
+    /// <param name="files">Answers which files, folders and links the checkout holds.</param>
+    public DocSpecValidator(string repoRoot, OntologyConfig config, IFileSystem files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(files);
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
+        _files = files;
     }
 
     /// <summary>
@@ -310,7 +312,7 @@ public sealed class DocSpecValidator
         if (!string.IsNullOrWhiteSpace(fm.SourceRoot))
         {
             string full = Path.Combine(_repoRoot, fm.SourceRoot.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(full) && !File.Exists(full))
+            if (!_files.DirectoryExists(full) && !_files.FileExists(full))
             {
                 report.Add(new Diagnostic(
                     SourceRootMissing, Severity.Error,
@@ -376,10 +378,10 @@ public sealed class DocSpecValidator
             case DocType.Architecture:
                 if (!string.IsNullOrWhiteSpace(fm.SourceRoot))
                 {
-                    RequireList(doc.CodeRefs, "code-refs", doc, report,
+                    RequireList(doc.CodeRefs(), "code-refs", doc, report,
                         "An architecture document with a source-root must name the symbols it describes.");
                 }
-                else if (doc.CodeRefs.Count > 0)
+                else if (doc.CodeRefs().Count > 0)
                 {
                     RequireValue(fm.SourceRoot, "source-root", doc, report);
                 }
@@ -389,7 +391,7 @@ public sealed class DocSpecValidator
             case DocType.Runbook:
                 if (!string.IsNullOrWhiteSpace(fm.SourceRoot))
                 {
-                    RequireList(doc.CodeRefs, "code-refs", doc, report,
+                    RequireList(doc.CodeRefs(), "code-refs", doc, report,
                         "A runbook with a source-root must name the symbols it operates, or drop source-root if it is process-only.");
                 }
 
@@ -539,7 +541,7 @@ public sealed class DocSpecValidator
                     continue;
                 }
 
-                if (!Directory.Exists(absoluteFolder)) continue;
+                if (!_files.DirectoryExists(absoluteFolder)) continue;
 
                 string standard = RepositoryRelative(DocsLayout.StandardFile(docsRoot, scope));
                 string legacy = $"{relativeFolder}/README.md";
@@ -610,7 +612,7 @@ public sealed class DocSpecValidator
     /// finding for a file no worker can reach.
     /// </summary>
     private bool ExistsWithoutLink(string relativePath) =>
-        !LinksIt(relativePath) && File.Exists(Combine(relativePath));
+        !LinksIt(relativePath) && _files.FileExists(Combine(relativePath));
 
     /// <summary>True when any segment of <paramref name="relativePath"/> is a symbolic link or junction.</summary>
     private bool LinksIt(string relativePath)
@@ -619,10 +621,7 @@ public sealed class DocSpecValidator
         foreach (string segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
-            FileSystemInfo entry = Directory.Exists(current)
-                ? new DirectoryInfo(current)
-                : new FileInfo(current);
-            if (entry.LinkTarget is not null) return true;
+            if (_files.GetLinkTarget(current) is not null) return true;
         }
 
         return false;

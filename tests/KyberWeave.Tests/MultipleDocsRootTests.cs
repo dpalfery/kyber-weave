@@ -235,7 +235,7 @@ public class MultipleDocsRootTests : IDisposable
         IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
 
         Assert.Single(documents, d => d.RelativePath == "docs/nested/guide.md");
-        Assert.False(new DocSpecValidator(_temp.Path, config).Validate(
+        Assert.False(RealDocSpecValidator.Create(_temp.Path, config).Validate(
             RealDocumentLoader.Create(_temp.Path, config).Load()).HasErrors);
     }
 
@@ -580,6 +580,6 @@ public class MultipleDocsRootTests : IDisposable
         """;
 
     private DiagnosticReport Validate(OntologyConfig config) =>
-        new DocSpecValidator(_temp.Path, config).Validate(
+        RealDocSpecValidator.Create(_temp.Path, config).Validate(
             RealDocumentLoader.Create(_temp.Path, config).Load());
 }
