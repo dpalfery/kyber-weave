@@ -11,6 +11,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Tests.RunStart;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -356,7 +357,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     }
 
     private void Record(string worktree) =>
-        RunBaseState.Write(
+        RunStartTestServices.RunStateStore().Write(
             _home.Path,
             Branch,
             "origin/main",

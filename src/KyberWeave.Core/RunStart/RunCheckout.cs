@@ -12,7 +12,9 @@ public static class RunCheckout
 {
     private static readonly RunCheckoutGuard Guard = new(
         new PhysicalFileSystem(),
-        RunBaseState.Store);
+        new FileRunStateStore(
+            new PhysicalFileSystem(),
+            new GitCheckedOutBranchReader(new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout))));
 
     /// <summary>The canonical checkout of a common git directory: its parent when it is a <c>.git</c> directory, else null.</summary>
     public static string? CanonicalCheckoutOf(string commonDirectory) => Guard.CanonicalCheckoutOf(commonDirectory);

@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
 using Xunit;
+using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -71,7 +72,7 @@ public sealed class HookGitFactsBaseStateTests : IDisposable
     [Fact]
     public void AStoredBaseMeasuresTheReviewFromThatBase()
     {
-        RunBaseState.Write(_home.Path, FeatureBranch, ParentBranch);
+        RunStartTestServices.RunStateStore().Write(_home.Path, FeatureBranch, ParentBranch);
 
         IReadOnlyList<string> paths = ChangedPaths();
 
@@ -103,7 +104,7 @@ public sealed class HookGitFactsBaseStateTests : IDisposable
     {
         if (stored)
         {
-            RunBaseState.Write(_home.Path, FeatureBranch, ParentBranch);
+            RunStartTestServices.RunStateStore().Write(_home.Path, FeatureBranch, ParentBranch);
         }
 
         ArbiterFactSet facts = EnrichedFacts();
@@ -132,7 +133,7 @@ public sealed class HookGitFactsBaseStateTests : IDisposable
     [Fact]
     public void ABogusRecordedBaseFallsBackToTheDefault()
     {
-        RunBaseState.Write(_home.Path, FeatureBranch, "no-such-ref");
+        RunStartTestServices.RunStateStore().Write(_home.Path, FeatureBranch, "no-such-ref");
 
         ArbiterFactSet facts = EnrichedFacts();
 

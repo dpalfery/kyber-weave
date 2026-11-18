@@ -12,6 +12,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
 using Xunit;
+using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -63,7 +64,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
 
         // A run branched in place, so the writer dispatches are not refused for want of one (KW-ARB-RUN-001).
         Git("switch", "-q", "-c", "claude/feat/widget");
-        RunBaseState.Write(
+        RunStartTestServices.RunStateStore().Write(
             _home.Path,
             "claude/feat/widget",
             "main",
