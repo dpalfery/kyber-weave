@@ -929,6 +929,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ github.base_ref }}
           EVENT_BEFORE: ${{ github.event.before }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           set -euo pipefail
           if [ "${EVENT_NAME}" = "pull_request" ]; then
@@ -936,7 +937,9 @@ jobs:
           elif [ -n "${EVENT_BEFORE}" ] && [ "${EVENT_BEFORE}" != "0000000000000000000000000000000000000000" ]; then
             BASE="${EVENT_BEFORE}"
           else
-            BASE="origin/HEAD"
+            # actions/checkout does not create the origin/HEAD symbolic ref, so name the
+            # default branch itself (schedule and workflow_dispatch runs land here).
+            BASE="origin/${DEFAULT_BRANCH:-main}"
           fi
           dotnet run --project src/KyberWeave.Cli --no-build -c ${{ env.CONFIGURATION }} -- \
             docs validate . --merge-ready --base "$BASE" --format table
