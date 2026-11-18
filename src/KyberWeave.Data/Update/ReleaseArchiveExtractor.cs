@@ -37,7 +37,7 @@ internal sealed class ReleaseArchiveExtractor(
         using ZipArchive zip = new(archive, ZipArchiveMode.Read, leaveOpen: true);
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
-            string target = planner.Resolve(destination, entry.FullName);
+            string target = Contained(destination, planner.Resolve(destination, entry.FullName), entry.FullName);
             if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
             {
                 files.CreateDirectory(target);
@@ -58,7 +58,7 @@ internal sealed class ReleaseArchiveExtractor(
             if (entry.EntryType == TarEntryType.GlobalExtendedAttributes)
                 continue;
 
-            string target = planner.Resolve(destination, entry.Name);
+            string target = Contained(destination, planner.Resolve(destination, entry.Name), entry.Name);
             switch (entry.EntryType)
             {
                 case TarEntryType.Directory:
@@ -73,6 +73,22 @@ internal sealed class ReleaseArchiveExtractor(
                         $"the archive entry '{entry.Name}' was refused: a release archive holds plain files only, not a {entry.EntryType}.");
             }
         }
+    }
+
+    // The planner already refuses an escaping entry through the path seam. This repeats the containment check where
+    // the entry is written, with the framework calls a static analyser recognises, so the guard is visible at the sink.
+    private static string Contained(string destination, string target, string entryName)
+    {
+        string root = Path.GetFullPath(destination);
+        string full = Path.GetFullPath(target, root);
+        string prefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
+        StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        if (!string.Equals(full, root, comparison) && !full.StartsWith(prefix, comparison))
+            throw new SelfUpdateException($"the archive entry '{entryName}' was refused: it resolves outside the extraction directory.");
+
+        return full;
     }
 
     private void WriteFile(string target, Stream content)
