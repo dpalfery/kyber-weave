@@ -193,17 +193,13 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
 | `ArbiterPlanService` (`Arbiter/ArbiterPlanService.cs`) | paths | 4.3 |
-| `ArbiterRepositoryLocator` (`Arbiter/ArbiterRepositoryLocator.cs`) | file system, paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
-| `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
-| `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths | 4.3 |
 | `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
 | `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
-| `ArbiterRootResolver` (`Arbiter/Mcp/ArbiterRootResolver.cs`) | paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
 | `ManagedGlossary` (`Docs/Analysis/Glossary/ManagedGlossary.cs`) | paths | 4.2 |
 | `PlanCloseout` (`Docs/Closeout/PlanCloseout.cs`) | paths | 4.2 |
