@@ -2,7 +2,7 @@ using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 
-namespace KyberWeave.Tests.Fakes;
+namespace KyberWeave.Testing.Update;
 
 /// <summary>
 /// Stands in for the installed kyber-weave that an update hands off to after its binaries are committed.
@@ -15,6 +15,7 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 internal sealed class LoopbackFinishingProcess
 {
+    private readonly UpdateWorld _world;
     private readonly HttpMessageHandler _handler;
     private readonly SelfUpdateHost _parentHost;
     private readonly Action<string> _log;
@@ -33,6 +34,7 @@ internal sealed class LoopbackFinishingProcess
     internal SelfUpdateOutcome? LastChildOutcome { get; private set; }
 
     internal LoopbackFinishingProcess(
+        UpdateWorld world,
         HttpMessageHandler handler,
         SelfUpdateHost parentHost,
         Action<string> log,
@@ -43,9 +45,11 @@ internal sealed class LoopbackFinishingProcess
         IArbiterHookRefresher? arbiterHookRefresher = null,
         IArbiterRefreshTargets? arbiterTargets = null)
     {
+        ArgumentNullException.ThrowIfNull(world);
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentNullException.ThrowIfNull(parentHost);
         ArgumentNullException.ThrowIfNull(log);
+        _world = world;
         _handler = handler;
         _parentHost = parentHost;
         _log = log;
@@ -79,10 +83,10 @@ internal sealed class LoopbackFinishingProcess
         using SelfUpdater updater = new(
             _handler,
             child,
-            new KyberWeave.Data.Hooks.PhysicalFileSystem(),
-            new KyberWeave.Data.Paths.PhysicalPathResolver(new KyberWeave.Data.Hooks.PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: _readEnvironment),
-            KyberWeave.Testing.Update.RealSelfUpdateSystem.Create(),
+            _world.Files,
+            _world.Paths,
+            _world.Environment(_readEnvironment),
+            _world.CreateSystem(),
             _log,
             runProcess: _runProcess,
             canWriteDirectory: _canWriteDirectory,
