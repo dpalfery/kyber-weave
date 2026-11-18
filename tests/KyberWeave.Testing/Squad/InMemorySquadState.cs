@@ -33,6 +33,7 @@ public sealed class InMemorySquadState
         Store = new SquadStateStore(UserPaths, Files, Semantics, Paths, Environment);
         Migration = new SquadStateMigration(Store, UserPaths, Files, Semantics, new InProcessLease(LeaseHost), Time);
         Layout = new SquadStateTestLayout(Store, Files, Semantics);
+        Planner = new SquadDeploymentPlanner(Files, Semantics, Paths);
     }
 
     /// <summary>Gets the file system everything reads and writes.</summary>
@@ -64,6 +65,15 @@ public sealed class InMemorySquadState
 
     /// <summary>Gets where the state lives and how a test writes into it.</summary>
     public SquadStateTestLayout Layout { get; }
+
+    /// <summary>Gets the deployment planner over the in-memory file system.</summary>
+    public SquadDeploymentPlanner Planner { get; }
+
+    /// <summary>Builds a deployment transaction over the in-memory file system, lease host and path rules.</summary>
+    /// <param name="observer">Told of each durable step; none when null.</param>
+    /// <returns>A new transaction.</returns>
+    public SquadTransaction Transaction(ISquadTransactionObserver? observer = null) =>
+        new(Store, Files, Semantics, new InProcessLease(LeaseHost), new FakeIdGenerator(), observer);
 
     /// <summary>Creates a project directory and returns its canonical path.</summary>
     /// <param name="name">The directory name under the projects folder.</param>

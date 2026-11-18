@@ -21,7 +21,8 @@ public static class SquadCrashFailureClassifier
     {
         ArgumentNullException.ThrowIfNull(weakness);
         return weakness.Flow == flow &&
-               string.Equals(weakness.FaultPoint, faultPoint, StringComparison.Ordinal) &&
+               (string.Equals(weakness.FaultPoint, SquadCrashKnownWeakness.AnyPoint, StringComparison.Ordinal) ||
+                string.Equals(weakness.FaultPoint, faultPoint, StringComparison.Ordinal)) &&
                detail.Contains(weakness.DetailContains, StringComparison.Ordinal);
     }
 
@@ -75,4 +76,12 @@ public sealed record SquadCrashKnownWeakness(
     SquadCrashFlow Flow,
     string FaultPoint,
     string DetailContains,
-    string Reason);
+    string Reason)
+{
+    /// <summary>
+    /// The point name that stands for every point of the flow. Only a run that stops at every file-system operation
+    /// uses it, because there one weakness shows at dozens of operations whose numbers shift with any change to the
+    /// code; the symptom still has to match.
+    /// </summary>
+    public const string AnyPoint = "*";
+}
