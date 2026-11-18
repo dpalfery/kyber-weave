@@ -5,8 +5,8 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Sections;
-using KyberWeave.Data.Review;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -15,11 +15,11 @@ namespace KyberWeave.Tests.Arbiter;
 /// Characterization (task 3.21, should pass now): the bounds on the section split and the section selector. A document
 /// is read in bounded pieces, and a bound that is hit is reported as truncation or as fail-safe, never as silent loss.
 /// </summary>
-public sealed class ArbiterSectionBoundsTests : IDisposable
+public sealed class ArbiterSectionBoundsTests
 {
-    private readonly TempDirectory _temp = new();
+    private static readonly string Directory = ArbiterTestRoots.Under("section-bounds");
 
-    public void Dispose() => _temp.Dispose();
+    private readonly InMemoryFileSystem _files = new();
 
     /// <summary>A heading past the scan bound is not a section: the split stops at the bound and marks its last section truncated.</summary>
     [Fact]
@@ -58,8 +58,9 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
     [Fact]
     public async Task ADocumentOverTheSizeCapFailsSafeWithoutAskingTheProvider()
     {
-        string path = Path.Combine(_temp.Path, "huge.md");
-        await File.WriteAllTextAsync(path, "# Title\n" + new string('a', (int)SectionSelector.MaxDocumentBytes));
+        string path = Path.Combine(Directory, "huge.md");
+        _files.CreateDirectory(Directory);
+        _files.WriteAllText(path, "# Title\n" + new string('a', (int)SectionSelector.MaxDocumentBytes));
         FakeArbiterProvider provider = new() { RequestSent = false, Model = null };
 
         SectionSelection selection = await SelectorFor().SelectAsync(path, "Change the install steps.", provider);
@@ -75,12 +76,12 @@ public sealed class ArbiterSectionBoundsTests : IDisposable
         FakeArbiterProvider provider = new() { RequestSent = false, Model = null };
 
         SectionSelection selection = await SelectorFor()
-            .SelectAsync(Path.Combine(_temp.Path, "bad\0name.md"), "Change the install steps.", provider);
+            .SelectAsync(Path.Combine(Directory, "bad\0name.md"), "Change the install steps.", provider);
 
         Assert.True(selection.FailedSafe);
         Assert.Equal(0, provider.CallCount);
     }
 
-    private static IArbiterSectionSelectionService SelectorFor() =>
-        new ArbiterSectionSelectionService(new FileBoundedFileReader());
+    private IArbiterSectionSelectionService SelectorFor() =>
+        new ArbiterSectionSelectionService(new InMemoryBoundedFileReader(_files));
 }
