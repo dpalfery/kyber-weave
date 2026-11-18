@@ -328,10 +328,29 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         CopyShippedStandards(technology, target);
     }
 
+    /// <summary>
+    /// A technology with no shipped standards folder fails at the copy, as the directory read this replaced did,
+    /// instead of leaving an empty folder for the guard to grade.
+    /// </summary>
+    [Fact]
+    public void CopyingAStandardsFolderThatIsNotShippedFailsLoudly()
+    {
+        Assert.Throws<DirectoryNotFoundException>(() => CopyShippedStandards(
+            "no-such-technology",
+            Path.Combine(_repository.Path, "docs", "standards", "no-such-technology")));
+    }
+
     /// <summary>Copies the shipped standards folder for one technology into a scratch repository, byte for byte.</summary>
     private static void CopyShippedStandards(string technology, string target)
     {
-        foreach (string file in Corpus.EnumerateFiles($"products/kyber-squad/standards/{technology}", "*", recursive: false))
+        string source = $"products/kyber-squad/standards/{technology}";
+
+        // A corpus listing reports a missing directory as empty, so a misspelt technology would copy nothing and leave
+        // the guard grading an empty folder; the directory read this replaced raised instead, and so does this.
+        if (!Corpus.DirectoryExists(source))
+            throw new DirectoryNotFoundException($"The shipped standards folder is missing: '{source}'.");
+
+        foreach (string file in Corpus.EnumerateFiles(source, "*", recursive: false))
         {
             File.WriteAllBytes(Path.Combine(target, Path.GetFileName(file)), Corpus.ReadBytes(file));
         }
