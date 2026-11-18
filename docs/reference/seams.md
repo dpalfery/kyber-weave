@@ -208,6 +208,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
 | `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | 4.8 |
+| `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | 4.8 |
 | `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | 4.8 |
 | `EditHookService` (`Hooks/EditHookService.cs`) | file system, paths | 4.8 |
@@ -227,6 +228,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
 | `SuppressionScanService` (`Review/SuppressionScanService.cs`) | paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
+| `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
 | `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.8 |
 | `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.8 |
@@ -379,12 +381,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `McpWiringReceipt` (`Docs/Mcp/McpWiringReceipt.cs`) | file system | 2.5 |
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 2.5 |
 | `DocSpecValidator` (`Docs/Validation/DocSpecValidator.cs`) | file system, paths | 2.5 |
-| `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `TaskGatePlanning` (`Review/TaskGatePlanning.cs`) | paths | 2.5 |
-| `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
 | `SkillParser` (`Skills/Parsing/SkillParser.cs`) | paths | 2.5 |
 | `BriefMap` (`Squad/Briefs/BriefMap.cs`) | file system | 2.5 |
 | `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths | 2.5 |
