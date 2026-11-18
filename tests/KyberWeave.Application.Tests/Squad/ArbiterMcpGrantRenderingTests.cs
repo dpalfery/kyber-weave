@@ -3,6 +3,7 @@ using KyberWeave.Tests.Fakes;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -32,7 +33,7 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
         "mcp__kw-arbiter__arbiter_check_configuration_and_key_readiness",
     ];
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.CreateInMemory(new InMemoryFileSystem());
 
     public ArbiterMcpGrantRenderingTests()
     {
@@ -73,7 +74,7 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
     public async Task ZCode_WithoutAnEnabledProjectWiring_RendersByteIdenticalToNoArbiterSupport(int wiringKind)
     {
         // wiringKind: 0 = no wiring, 1 = disabled wiring, 2 = enabled wiring, global scope.
-        using ArbiterSquadFixture bare = ArbiterSquadFixture.Create();
+        using ArbiterSquadFixture bare = ArbiterSquadFixture.CreateInMemory(new InMemoryFileSystem());
         WriteCapabilities(bare);
         WriteToolchain(bare, withArbiter: false);
         SquadArbiterWiring? wiring = wiringKind switch
@@ -85,11 +86,11 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
         SquadDeploymentScope scope = wiringKind == 2
             ? SquadDeploymentScope.Global
             : SquadDeploymentScope.Project;
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ZCodeRenderer()]);
+        SquadRendererRegistry registry = bare.Registry([new ZCodeRenderer()]);
         SquadRenderResult baseline = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: bare.Path,
             Targets: [SquadTarget.ZCode],
-            Scope: scope).Prepared());
+            Scope: scope).Prepared(bare));
         Assert.True(baseline.Success, string.Join("; ", baseline.Errors));
 
         SquadRenderResult gated = await RenderAsync(new ZCodeRenderer(), SquadTarget.ZCode, wiring, scope);
@@ -199,7 +200,7 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
 
     private static void WriteCapabilities(ArbiterSquadFixture fixture)
     {
-        File.WriteAllText(Path.Combine(fixture.Path, "profiles/capabilities.yml"), """
+        fixture.WriteFile("profiles/capabilities.yml", """
             schema: kyber-squad.capability-profiles/v1
             capabilities:
               - filesystem.read
@@ -254,8 +255,8 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
         string arbiterEntry = withArbiter
             ? "  kw-arbiter:\n    - arbiter_evaluate_agent_dispatch_or_return\n    - arbiter_list_effective_rules_by_trigger\n    - arbiter_check_configuration_and_key_readiness\n"
             : string.Empty;
-        File.WriteAllText(
-            Path.Combine(fixture.Path, "toolchain.yml"),
+        fixture.WriteFile(
+            "toolchain.yml",
             "schema: kyber-squad.toolchain/v1\n" +
             "required-features:\n" +
             "  - agent-ir/v1\n" +
@@ -272,12 +273,12 @@ public sealed class ArbiterMcpGrantRenderingTests : IDisposable
         SquadArbiterWiring? arbiter = null,
         SquadDeploymentScope scope = SquadDeploymentScope.Project)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([renderer]);
+        SquadRendererRegistry registry = _fixture.Registry([renderer]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [target],
             Scope: scope,
-            Arbiter: arbiter).Prepared());
+            Arbiter: arbiter).Prepared(_fixture));
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

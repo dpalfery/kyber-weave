@@ -3,6 +3,7 @@ using KyberWeave.Tests.Fakes;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -31,7 +32,13 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
     private const string CliHooksFilePath = ".github/hooks/kyber-arbiter.json";
     private const int HookTimeoutSeconds = 5;
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+
+    public ArbiterCopilotRenderingTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
@@ -214,16 +221,16 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
         // carrying a space or a metacharacter would be split or executed there, so the
         // render fails naming the agent rather than lowering an unsafe command.
         const string hostile = "evil agent";
-        using ArbiterSquadFixture hostileFixture = ArbiterSquadFixture.Create();
+        using ArbiterSquadFixture hostileFixture = ArbiterSquadFixture.CreateInMemory(new InMemoryFileSystem());
         hostileFixture.WriteAgent(hostile, "worker", "worker", "[]");
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRendererRegistry registry = hostileFixture.Registry([new CopilotRenderer()]);
         ArgumentException error = await Assert.ThrowsAsync<ArgumentException>(() =>
             registry.RenderAsync(new SquadRenderRequest(
                 SourceDirectory: hostileFixture.Path,
                 Targets: [SquadTarget.Copilot],
                 Scope: SquadDeploymentScope.Project,
-                Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared()));
+                Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds)).Prepared(hostileFixture)));
 
         Assert.Contains(hostile, error.Message, StringComparison.Ordinal);
     }
@@ -289,13 +296,13 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
 
     private async Task<SquadRenderResult> RenderAsync(SquadArbiterWiring? arbiter, SquadDeploymentScope scope)
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new CopilotRenderer()]);
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: scope,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: arbiter).Prepared());
+            Arbiter: arbiter).Prepared(_fixture));
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

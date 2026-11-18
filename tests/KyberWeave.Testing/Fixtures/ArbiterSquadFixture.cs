@@ -232,6 +232,11 @@ internal sealed class ArbiterSquadFixture : IDisposable
             """);
     }
 
+    /// <summary>Writes, or replaces, a file under the corpus root.</summary>
+    /// <param name="relativePath">The path below the root.</param>
+    /// <param name="content">The file text.</param>
+    public void WriteFile(string relativePath, string content) => Write(relativePath, content);
+
     private void Write(string relativePath, string content)
     {
         string fullPath = System.IO.Path.Combine(Path, relativePath);

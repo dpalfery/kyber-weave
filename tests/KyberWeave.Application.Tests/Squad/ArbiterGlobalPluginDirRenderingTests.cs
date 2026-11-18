@@ -2,6 +2,8 @@ using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -14,15 +16,14 @@ namespace KyberWeave.Tests;
 /// <c>dispatch-unconfirmed</c> reason; Pi keeps the <c>partial</c> tier, and the Kilo path notes that
 /// <c>KILO_PURE=1</c> skips plugin loading.
 /// </summary>
-public sealed class ArbiterGlobalPluginDirRenderingTests : IDisposable
+public sealed class ArbiterGlobalPluginDirRenderingTests
 {
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
 
-    public void Dispose()
+    public ArbiterGlobalPluginDirRenderingTests()
     {
-        _fixture.Dispose();
-        _temp.Dispose();
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
     }
 
     [Fact]
@@ -77,15 +78,15 @@ public sealed class ArbiterGlobalPluginDirRenderingTests : IDisposable
         Func<string, string> globalRootFactory,
         string relativePath)
     {
-        string home = Path.Combine(_temp.Path, "home");
-        Directory.CreateDirectory(home);
+        string home = ArbiterTestRoots.Under("home");
+        _files.CreateDirectory(home);
 
-        SquadRenderResult result = await SquadTestRegistry.Create([renderer]).RenderAsync(new SquadRenderRequest(
+        SquadRenderResult result = await _fixture.Registry([renderer]).RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [target],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(home, globalRootFactory),
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 10)).Prepared());
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 10)).Prepared(_fixture));
 
         Assert.True(result.Success, string.Join(';', result.Errors));
 
