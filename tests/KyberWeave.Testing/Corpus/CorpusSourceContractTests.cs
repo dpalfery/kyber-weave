@@ -191,6 +191,8 @@ public abstract class CorpusSourceContractTests
         Assert.Throws<ArgumentException>(() => corpus.ReadText("/" + SampleFile));
         Assert.Throws<ArgumentException>(() => corpus.Exists("/" + SampleFile));
         Assert.Throws<ArgumentException>(() => corpus.EnumerateFiles("/" + SampleDirectory));
+        Assert.Throws<ArgumentException>(() => corpus.ReadText("C:/" + SampleFile));
+        Assert.Throws<ArgumentException>(() => corpus.ReadText(@"C:\" + SampleFile.Replace('/', '\\')));
     }
 
     [Fact]

@@ -15,7 +15,11 @@ internal static class CorpusPath
 
         string candidate = relativePath.Replace('\\', '/');
 
-        if (candidate.StartsWith('/') || Path.IsPathRooted(relativePath))
+        // Path.IsPathRooted is platform-dependent: "C:/x" is rooted only on Windows. A corpus path is portable, so a
+        // drive-letter form is refused everywhere.
+        bool hasDriveLetter = candidate.Length >= 2 && char.IsAsciiLetter(candidate[0]) && candidate[1] == ':';
+
+        if (candidate.StartsWith('/') || hasDriveLetter || Path.IsPathRooted(relativePath))
             throw new ArgumentException($"A corpus path must be relative to the repository root; '{relativePath}' is rooted.", nameof(relativePath));
 
         string[] segments = candidate.Split('/', StringSplitOptions.RemoveEmptyEntries);
