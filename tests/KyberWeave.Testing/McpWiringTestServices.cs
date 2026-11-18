@@ -18,6 +18,12 @@ internal static class McpWiringTestServices
     /// <summary>The service.</summary>
     public static IMcpWiringService Wiring => Provider.Value.GetRequiredService<IMcpWiringService>();
 
+    /// <summary>The repair, built by the container.</summary>
+    public static McpWiringRepairer Repairer => Provider.Value.GetRequiredService<McpWiringRepairer>();
+
+    /// <summary>The repository-containment rule, over the physical path resolver.</summary>
+    public static McpRepositoryPath RepositoryPath => Provider.Value.GetRequiredService<McpRepositoryPath>();
+
     /// <summary>The receipt store, over the physical file system.</summary>
     public static IMcpWiringReceipts Receipts => Provider.Value.GetRequiredService<IMcpWiringReceipts>();
 }

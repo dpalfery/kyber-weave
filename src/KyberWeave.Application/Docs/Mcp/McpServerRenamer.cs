@@ -34,8 +34,10 @@ public sealed class McpServerRenamer(
     IMcpConfigFiles files,
     IMcpDeclarationReader declarations,
     IMcpWiringReceipts receipts,
-    TimeProvider clock)
+    TimeProvider clock,
+    McpRepositoryPath repositoryPath)
 {
+    private readonly McpRepositoryPath _repositoryPath = repositoryPath ?? throw new ArgumentNullException(nameof(repositoryPath));
     private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
     private readonly IMcpDeclarationReader _declarations = declarations ?? throw new ArgumentNullException(nameof(declarations));
     private readonly IMcpWiringReceipts _receipts = receipts ?? throw new ArgumentNullException(nameof(receipts));
@@ -144,7 +146,7 @@ public sealed class McpServerRenamer(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
         List<McpRenameChange> changes = [];
 
         foreach (HarnessMcpEntry row in Rows(harness))
@@ -176,7 +178,7 @@ public sealed class McpServerRenamer(
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(targets);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
         List<McpRenameChange> changes = [];
         bool declaration = false;
         bool namedDeclaration = false;
@@ -447,7 +449,7 @@ public sealed class McpServerRenamer(
     {
         string relativePath = row.Paths[0];
 
-        if (McpRepositoryPath.Contained(root, relativePath) is not { } fullPath)
+        if (_repositoryPath.Contained(root, relativePath) is not { } fullPath)
         {
             return
             [
@@ -684,7 +686,7 @@ public sealed class McpServerRenamer(
 
         if (configPath is not null)
         {
-            if (McpRepositoryPath.Contained(root, relativePath) is not { } guarded)
+            if (_repositoryPath.Contained(root, relativePath) is not { } guarded)
             {
                 return
                 [
@@ -1030,7 +1032,7 @@ public sealed class McpServerRenamer(
 
         foreach (string relativePath in row.Paths)
         {
-            if (McpRepositoryPath.Contained(root, relativePath) is not { } path)
+            if (_repositoryPath.Contained(root, relativePath) is not { } path)
                 continue;
 
             McpLinkProbe probe = McpConfigurationLink.Probe(root, path, _files.InspectLink);

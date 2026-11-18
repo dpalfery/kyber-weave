@@ -24,7 +24,11 @@ public sealed class McpWiringRepairerReceiptTests
 
     private McpWiringReceiptStore Receipts() => new(_files);
 
-    private McpWiringRepairer Repairer() => new(new InMemoryMcpConfigFiles(_files), Receipts(), _clock);
+    private McpWiringRepairer Repairer() => new(
+        new InMemoryMcpConfigFiles(_files),
+        Receipts(),
+        _clock,
+        new McpRepositoryPath(new FakePathResolver(_files), new FakeProcessEnvironment()));
 
     private static McpConfig Declaration() => new()
     {

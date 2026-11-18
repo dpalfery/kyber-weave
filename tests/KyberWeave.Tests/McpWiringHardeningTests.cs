@@ -136,11 +136,11 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         Assert.Equal(
             Path.Combine(Repo, ".vscode", "mcp.json"),
-            McpWiringRepairer.ContainedPath(Repo, ".vscode/mcp.json"));
+            McpWiringTestServices.Repairer.ContainedPath(Repo, ".vscode/mcp.json"));
 
-        Assert.Null(McpWiringRepairer.ContainedPath(Repo, "../outside/mcp.json"));
-        Assert.Null(McpWiringRepairer.ContainedPath(Repo, ".vscode/../../outside/mcp.json"));
-        Assert.Null(McpWiringRepairer.ContainedPath(Repo, Path.Combine(_root.Path, "outside", "mcp.json")));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, "../outside/mcp.json"));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, ".vscode/../../outside/mcp.json"));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, Path.Combine(_root.Path, "outside", "mcp.json")));
     }
 
     // ---- One answer to "is this path inside the repository", asked by every caller.
@@ -174,8 +174,8 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         string expected = Path.Combine(Repo, name.Replace('/', Path.DirectorySeparatorChar));
 
-        Assert.Equal(expected, McpRepositoryPath.Contained(Repo, name));
-        Assert.Equal(expected, McpWiringRepairer.ContainedPath(Repo, name));
+        Assert.Equal(expected, McpWiringTestServices.RepositoryPath.Contained(Repo, name));
+        Assert.Equal(expected, McpWiringTestServices.Repairer.ContainedPath(Repo, name));
 
         McpWiringFix fix = Assert.Single(McpWiringTestServices.Wiring.Derive(ReportOffering(name), Repo));
         Assert.Equal(name, fix.Path);
@@ -199,8 +199,8 @@ public sealed class McpWiringHardeningTests : IDisposable
     [InlineData(".vscode/../../x")]
     public void ANameOutsideTheRepositoryIsRefusedByEveryCaller(string name)
     {
-        Assert.Null(McpRepositoryPath.Contained(Repo, name));
-        Assert.Null(McpWiringRepairer.ContainedPath(Repo, name));
+        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, name));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, name));
         Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(name), Repo));
     }
 
@@ -213,8 +213,8 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         string absolute = Path.Combine(_root.Path, "outside", "mcp.json");
 
-        Assert.Null(McpRepositoryPath.Contained(Repo, absolute));
-        Assert.Null(McpWiringRepairer.ContainedPath(Repo, absolute));
+        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, absolute));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, absolute));
         Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(absolute), Repo));
     }
 
@@ -235,8 +235,8 @@ public sealed class McpWiringHardeningTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(sibling)!);
         File.WriteAllText(sibling, """{"mcpServers": {}}""");
 
-        Assert.Null(McpRepositoryPath.Contained(Repo, sibling));
-        Assert.Null(McpWiringRepairer.ContainedPath(Repo, sibling));
+        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, sibling));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, sibling));
         Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(sibling), Repo));
     }
 
@@ -262,8 +262,8 @@ public sealed class McpWiringHardeningTests : IDisposable
     [Fact]
     public void ANameSpellingAParentReferenceIsRefusedBeforeItIsResolvedAndTheFixListAgrees()
     {
-        Assert.Null(McpRepositoryPath.Contained(Repo, ".vscode/../.mcp.json"));
-        Assert.Null(McpWiringRepairer.ContainedPath(Repo, ".vscode/../.mcp.json"));
+        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(Repo, ".vscode/../.mcp.json"));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(Repo, ".vscode/../.mcp.json"));
         Assert.Empty(McpWiringTestServices.Wiring.Derive(ReportOffering(".vscode/../.mcp.json"), Repo));
     }
 
@@ -293,8 +293,8 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         const string UnusableRoot = "\0";
 
-        Assert.Null(McpRepositoryPath.Contained(UnusableRoot, ".mcp.json"));
-        Assert.Null(McpWiringRepairer.ContainedPath(UnusableRoot, ".mcp.json"));
+        Assert.Null(McpWiringTestServices.RepositoryPath.Contained(UnusableRoot, ".mcp.json"));
+        Assert.Null(McpWiringTestServices.Repairer.ContainedPath(UnusableRoot, ".mcp.json"));
     }
 
     // ---- The link guard must test for a parent-reference segment, not for the two characters.

@@ -211,12 +211,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PullRequestDescription` (`Docs/Delivery/PullRequestDescription.cs`) | file system | 4.2 |
 | `RunDelivery` (`Docs/Delivery/RunDelivery.cs`) | paths | 4.2 |
 | `CorpusProvenanceService` (`Docs/Mcp/CorpusProvenanceService.cs`) | paths | 4.2 |
-| `McpServerRenamer` (`Docs/Mcp/McpServerRenamer.cs`) | paths | 4.2 |
-| `McpWiringFixes` (`Docs/Mcp/McpWiringFixes.cs`) | paths | 4.2 |
-| `McpWiringInspector` (`Docs/Mcp/McpWiringInspector.cs`) | paths | 4.2 |
-| `McpWiringRepairer` (`Docs/Mcp/McpWiringRepairer.cs`) | paths | 4.2 |
 | `RepositoryDocsAnalysisReader` (`Docs/Mcp/RepositoryDocsAnalysisReader.cs`) | paths | 4.2 |
-| `McpRepositoryPath` (`Docs/Mcp/McpRepositoryPath.cs`) | paths | 4.2 |
 | `DocsScaffolder` (`Docs/Scaffolding/DocsScaffolder.cs`) | file system, paths | 4.2 |
 | `StandardsFolderMigration` (`Docs/Scaffolding/StandardsFolderMigration.cs`) | file system, paths, identifiers | 4.2 |
 | `StandardsTemplateDiff` (`Docs/Scaffolding/StandardsTemplateDiff.cs`) | file system, paths | 4.2 |

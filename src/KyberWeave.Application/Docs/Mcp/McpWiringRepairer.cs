@@ -38,8 +38,13 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// installation itself is broken and names the install repair, not the harness configuration (6.3).
 /// </para>
 /// </remarks>
-public sealed class McpWiringRepairer(IMcpConfigFiles files, IMcpWiringReceipts receipts, TimeProvider clock)
+public sealed class McpWiringRepairer(
+    IMcpConfigFiles files,
+    IMcpWiringReceipts receipts,
+    TimeProvider clock,
+    McpRepositoryPath repositoryPath)
 {
+    private readonly McpRepositoryPath _repositoryPath = repositoryPath ?? throw new ArgumentNullException(nameof(repositoryPath));
     private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
     private readonly IMcpWiringReceipts _receipts = receipts ?? throw new ArgumentNullException(nameof(receipts));
     private readonly TimeProvider _clock = clock ?? throw new ArgumentNullException(nameof(clock));
@@ -103,7 +108,7 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files, IMcpWiringReceipts 
         if (declared.Count == 0)
             return new McpWiringRepairReport([], dryRun);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
         ReceiptJournal journal = new(_receipts, root, [.. _receipts.Load(root).Files]);
         List<McpWiringFileChange> changes = [];
 
@@ -132,7 +137,7 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files, IMcpWiringReceipts 
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(targets);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
         List<McpWiringReceiptRecord> records = [.. _receipts.Load(root).Files];
         List<McpWiringFileChange> changes = [];
         bool changed = false;
@@ -1305,8 +1310,8 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files, IMcpWiringReceipts 
     /// about one file.
     /// </para>
     /// </remarks>
-    internal static string? ContainedPath(string root, string relativePath) =>
-        McpRepositoryPath.Contained(root, relativePath);
+    internal string? ContainedPath(string root, string relativePath) =>
+        _repositoryPath.Contained(root, relativePath);
 
     /// <summary>
     /// Keeps a removal's audit note visible when the receipt could not be rewritten after it. The

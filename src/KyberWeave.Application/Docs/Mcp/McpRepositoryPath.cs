@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+
 namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>
@@ -31,8 +34,17 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// alone would answer with whatever the platform made of it.
 /// </para>
 /// </remarks>
-internal static class McpRepositoryPath
+public sealed class McpRepositoryPath(IPathResolver paths, IProcessEnvironment environment)
 {
+    private readonly IPathResolver _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+    private readonly IProcessEnvironment _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+
+    /// <summary>The absolute spelling of a repository root, resolved against the process's current directory.</summary>
+    /// <param name="repositoryRoot">The root as the caller gave it, absolute or relative.</param>
+    /// <returns>The absolute root, without a trailing separator.</returns>
+    /// <exception cref="ArgumentException">The root is blank or a spelling the platform cannot resolve.</exception>
+    public string FullRoot(string repositoryRoot) => _paths.GetFullPath(repositoryRoot, _environment.CurrentDirectory);
+
     /// <summary>
     /// The absolute path <paramref name="relativePath"/> names inside <paramref name="repositoryRoot"/>,
     /// or null when it names nothing this repository owns.
@@ -67,7 +79,7 @@ internal static class McpRepositoryPath
     /// answer with a finding instead.
     /// </para>
     /// </remarks>
-    public static string? Contained(string repositoryRoot, string relativePath)
+    public string? Contained(string repositoryRoot, string relativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
@@ -79,10 +91,11 @@ internal static class McpRepositoryPath
 
         try
         {
-            root = Path.GetFullPath(repositoryRoot);
+            root = FullRoot(repositoryRoot);
 
-            full = Path.GetFullPath(
-                Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            full = _paths.GetFullPath(
+                Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)),
+                root);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
