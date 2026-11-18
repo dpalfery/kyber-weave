@@ -33,7 +33,27 @@ public sealed class ScriptedProcessRunner : IProcessRunner
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(result);
-        _scripts.Add(new Answer(program, arguments.Length == 0 ? null : arguments, result, Exception: null));
+        _scripts.Add(new Answer(program, arguments.Length == 0 ? null : arguments, result, Exception: null, Respond: null));
+        return this;
+    }
+
+    /// <summary>Answers one program and exact argument list from a responder that sees the whole request.</summary>
+    /// <remarks>
+    /// Use this when the answer must depend on the working directory, the environment, standard input, the timeout
+    /// or the output limit. A fixed <see cref="ProcessRunResult"/> cannot prove that the caller passed those fields.
+    /// </remarks>
+    /// <param name="program">The program name the script matches.</param>
+    /// <param name="respond">Builds the result from the request the seam received.</param>
+    /// <param name="arguments">The exact arguments the script matches; omit to match any arguments.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner Script(
+        string program,
+        Func<ProcessRunRequest, ProcessRunResult> respond,
+        params string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(respond);
+        _scripts.Add(new Answer(program, arguments.Length == 0 ? null : arguments, Result: null, Exception: null, respond));
         return this;
     }
 
@@ -56,7 +76,7 @@ public sealed class ScriptedProcessRunner : IProcessRunner
     {
         ArgumentNullException.ThrowIfNull(program);
         ArgumentNullException.ThrowIfNull(exception);
-        _scripts.Add(new Answer(program, arguments.Length == 0 ? null : arguments, Result: null, exception));
+        _scripts.Add(new Answer(program, arguments.Length == 0 ? null : arguments, Result: null, exception, Respond: null));
         return this;
     }
 
@@ -110,14 +130,14 @@ public sealed class ScriptedProcessRunner : IProcessRunner
         }
 
         Answer script = _scripts.Find(candidate => candidate.Matches(request))
-                        ?? new Answer(request.Program, Arguments: null, new ProcessRunResult(0, string.Empty, TimedOut: false), Exception: null);
+                        ?? new Answer(request.Program, Arguments: null, new ProcessRunResult(0, string.Empty, TimedOut: false), Exception: null, Respond: null);
 
         if (script.Exception is { } exception)
         {
             throw exception;
         }
 
-        ProcessRunResult result = script.Result!;
+        ProcessRunResult result = script.Respond is { } respond ? respond(request) : script.Result!;
         if (request.MaxOutputBytes is { } maxOutputBytes &&
             (Encoding.UTF8.GetByteCount(result.StandardOutput) > maxOutputBytes ||
              Encoding.UTF8.GetByteCount(result.StandardError) > maxOutputBytes))
@@ -140,7 +160,12 @@ public sealed class ScriptedProcessRunner : IProcessRunner
     /// <inheritdoc />
     public string? FindOnPath(string program) => _onPath.TryGetValue(program, out string? path) ? path : null;
 
-    private sealed record Answer(string Program, string[]? Arguments, ProcessRunResult? Result, Exception? Exception)
+    private sealed record Answer(
+        string Program,
+        string[]? Arguments,
+        ProcessRunResult? Result,
+        Exception? Exception,
+        Func<ProcessRunRequest, ProcessRunResult>? Respond)
     {
         public bool Matches(ProcessRunRequest request) =>
             string.Equals(Program, request.Program, StringComparison.Ordinal) &&
