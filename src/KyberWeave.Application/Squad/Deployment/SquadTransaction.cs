@@ -549,8 +549,11 @@ public sealed class SquadTransaction : ISquadTransaction
         }
         catch (Exception cause) when (cause is not OperationCanceledException)
         {
+            // Name the entry that exists: with no intent the remaining evidence is the journal folder itself, so
+            // pointing at a file that is not there would send the operator looking for the wrong thing.
+            string location = _files.FileExists(intentPath) ? intentPath : journalDirectory;
             string message =
-                $"An unfinished Squad transaction exists at '{intentPath}' and could not be recovered: " +
+                $"An unfinished Squad transaction exists at '{location}' and could not be recovered: " +
                 $"{cause.Message} The new deployment was not started. Fix the cause and run the command again.";
             throw cause is SquadDeploymentConflictException
                 ? new SquadDeploymentConflictException(message, cause)

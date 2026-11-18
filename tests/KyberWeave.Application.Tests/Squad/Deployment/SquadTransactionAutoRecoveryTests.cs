@@ -128,6 +128,21 @@ public sealed class SquadTransactionAutoRecoveryTests
     }
 
     [Fact]
+    public void AJournalFolderWithNoIntentRefusesNamingTheFolderNotAMissingIntentFile()
+    {
+        using Crashed crashed = Crashed.Start(SquadCrashFlow.Install, points => points[points.Count / 2]);
+        string journal = Path.GetDirectoryName(crashed.IntentPath)!;
+        crashed.Fixture.Files.DeleteFile(crashed.IntentPath);
+
+        InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() =>
+            crashed.Fixture.Transaction().Execute(crashed.Fixture.Plan(SquadCrashFlow.Install)));
+
+        Assert.Contains(journal, refused.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("intent.json", refused.Message, StringComparison.Ordinal);
+        Assert.True(crashed.Fixture.Files.DirectoryExists(journal));
+    }
+
+    [Fact]
     public void AJournalPhaseFromANewerBinaryRefusesAndIsNeverDiscarded()
     {
         using Crashed crashed = Crashed.Start(SquadCrashFlow.Install, points => points[points.Count / 2]);
