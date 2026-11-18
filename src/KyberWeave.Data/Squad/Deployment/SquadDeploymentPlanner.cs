@@ -2,18 +2,44 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Rendering;
 using static KyberWeave.Core.Squad.Deployment.SquadDeploymentPlan;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
-/// <summary>Preflights install, update and uninstall operations against the deployment tree on disk.</summary>
-public static class SquadDeploymentPlanner
+/// <summary>Preflights install, update and uninstall operations against the deployment tree.</summary>
+public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+    private readonly IFileSystem _files;
+    private readonly IFileSystemPathSemantics _semantics;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
 
-    /// <summary>Preflights a new installation without changing the deployment tree.</summary>
-    public static SquadDeploymentPlan CreateInstall(
+    /// <summary>Creates a planner over the file-system, path and environment seams.</summary>
+    /// <param name="files">Every tree read the preflight performs.</param>
+    /// <param name="semantics">The canonical spelling and containment rules the plan is resolved with.</param>
+    /// <param name="paths">Turns a caller's root spelling into a full path.</param>
+    /// <param name="environment">Supplies the working directory a relative root resolves against.</param>
+    public SquadDeploymentPlanner(
+        IFileSystem files,
+        IFileSystemPathSemantics semantics,
+        IPathResolver paths,
+        IProcessEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(semantics);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        _files = files;
+        _semantics = semantics;
+        _paths = paths;
+        _environment = environment;
+    }
+
+    /// <inheritdoc />
+    public SquadDeploymentPlan CreateInstall(
         string targetRoot,
         SquadDeploymentScope scope,
         SquadLock squadLock,
@@ -29,7 +55,7 @@ public static class SquadDeploymentPlanner
         // The preflight reads the tree and writes nothing, so its repeated walks over the same
         // parent directories share one listing for the length of this call.
         using IDisposable listingScope = SquadFileSystemPathSemantics.BeginListingScope();
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics);
         string root = identity.PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
@@ -45,10 +71,10 @@ public static class SquadDeploymentPlanner
             if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, rendered.File.Target, rendered.File.RelativePath))
                 throw SiblingGlobalOwnership(rendered.File.RelativePath, rendered.File.Target);
 
-            bool existsAsFile = File.Exists(rendered.FullPath);
+            bool existsAsFile = _files.FileExists(rendered.FullPath);
             if (existsAsFile)
             {
-                byte[] diskBytes = File.ReadAllBytes(rendered.FullPath);
+                byte[] diskBytes = _files.ReadAllBytes(rendered.FullPath);
                 ReadOnlySpan<byte> diskSpan = diskBytes;
                 if (diskSpan.Length >= 3 && diskSpan[0] == 0xEF && diskSpan[1] == 0xBB && diskSpan[2] == 0xBF)
                 {
@@ -72,7 +98,7 @@ public static class SquadDeploymentPlanner
                 continue;
             }
 
-            if (Directory.Exists(rendered.FullPath))
+            if (_files.DirectoryExists(rendered.FullPath))
                 throw UnmanagedCollision(rendered.File.RelativePath);
 
             preconditions.Add(SquadFilePrecondition.Missing(
@@ -100,7 +126,7 @@ public static class SquadDeploymentPlanner
 
         SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, ownedFiles, ownedBlocks);
         return new SquadDeploymentPlan(
-            Path.GetFullPath(targetRoot),
+            _paths.GetFullPath(targetRoot, _environment.CurrentDirectory),
             identity,
             scope,
             squadLock,
@@ -113,7 +139,7 @@ public static class SquadDeploymentPlanner
     }
 
     /// <summary>Preflights an update while preserving locally edited receipt-owned files by default.</summary>
-    public static SquadDeploymentPlan CreateUpdate(
+    public SquadDeploymentPlan CreateUpdate(
         string targetRoot,
         SquadDeploymentScope scope,
         SquadLock squadLock,
@@ -140,7 +166,7 @@ public static class SquadDeploymentPlanner
         if (globalRoots is not null && IsLegacySingleRootReceipt(previousReceipt))
             throw LegacySingleRootLayoutConflict();
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics);
         string root = identity.PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
@@ -165,7 +191,7 @@ public static class SquadDeploymentPlanner
                 if (IsOwnedBySiblingReceipt(siblingGlobalReceipts, rendered.File.Target, relativePath))
                     throw SiblingGlobalOwnership(relativePath, rendered.File.Target);
 
-                if (File.Exists(rendered.FullPath) || Directory.Exists(rendered.FullPath))
+                if (_files.FileExists(rendered.FullPath) || _files.DirectoryExists(rendered.FullPath))
                     throw UnmanagedCollision(relativePath);
 
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, rendered.File.Target));
@@ -178,12 +204,12 @@ public static class SquadDeploymentPlanner
                 continue;
             }
 
-            if (Directory.Exists(rendered.FullPath))
+            if (_files.DirectoryExists(rendered.FullPath))
                 throw new SquadDeploymentConflictException(
                     $"Receipt-owned path '{relativePath}' is now a directory. " +
                     "Move it aside before updating Squad.");
 
-            if (!File.Exists(rendered.FullPath))
+            if (!_files.FileExists(rendered.FullPath))
             {
                 preconditions.Add(SquadFilePrecondition.Missing(relativePath, rendered.File.Target));
                 mutations.Add(SquadFileMutation.Write(relativePath, rendered.File.Target, rendered.File.Content));
@@ -198,7 +224,7 @@ public static class SquadDeploymentPlanner
             byte[] currentBytes;
             try
             {
-                currentBytes = File.ReadAllBytes(rendered.FullPath);
+                currentBytes = _files.ReadAllBytes(rendered.FullPath);
             }
             catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
             {
@@ -260,15 +286,15 @@ public static class SquadDeploymentPlanner
             // single-root by the time this loop runs, so every remaining entry resolves through
             // the modern per-target path.
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, previous.Target, previous.RelativePath, false, Semantics);
+                scope, root, globalRoots, previous.Target, previous.RelativePath, false, _semantics);
 
-            if (Directory.Exists(fullPath))
+            if (_files.DirectoryExists(fullPath))
             {
                 nextOwnedFiles.Add(previous);
                 continue;
             }
 
-            if (!File.Exists(fullPath))
+            if (!_files.FileExists(fullPath))
                 continue;
 
             // An adopted entry is a file the host already had whose bytes equalled the release when Squad
@@ -284,7 +310,7 @@ public static class SquadDeploymentPlanner
             byte[] previousBytes;
             try
             {
-                previousBytes = File.ReadAllBytes(fullPath);
+                previousBytes = _files.ReadAllBytes(fullPath);
             }
             catch (Exception exception) when (SquadResponseGuidanceDeployer.IsDegradableFailure(exception))
             {
@@ -346,7 +372,7 @@ public static class SquadDeploymentPlanner
             HomeFiles = previousReceipt.HomeFiles
         };
         return new SquadDeploymentPlan(
-            Path.GetFullPath(targetRoot),
+            _paths.GetFullPath(targetRoot, _environment.CurrentDirectory),
             identity,
             scope,
             squadLock,
@@ -366,7 +392,7 @@ public static class SquadDeploymentPlanner
     ///     A non-null <paramref name="onlyTarget" /> removes just that harness: every other harness's files,
     ///     blocks and degradations stay in the retained receipt, which is deleted only when nothing is left.
     /// </remarks>
-    public static SquadDeploymentPlan CreateUninstall(
+    public SquadDeploymentPlan CreateUninstall(
         string targetRoot,
         SquadDeploymentScope scope,
         SquadReceipt receipt,
@@ -389,7 +415,7 @@ public static class SquadDeploymentPlanner
         // root regardless of what a per-target resolver would answer.
         bool isSingleRootLayout = IsLegacySingleRootReceipt(receipt);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics);
         string root = identity.PhysicalPath;
         _ = ReceiptFilesByPath(root, receipt);
         RequireProjectScopeForBlocks(scope, receipt.Blocks.Count > 0, "uninstall");
@@ -409,18 +435,18 @@ public static class SquadDeploymentPlanner
             }
 
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout, Semantics);
+                scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout, _semantics);
 
-            if (Directory.Exists(fullPath))
+            if (_files.DirectoryExists(fullPath))
             {
                 retained.Add(owned);
                 continue;
             }
 
-            if (!File.Exists(fullPath))
+            if (!_files.FileExists(fullPath))
                 continue;
 
-            string currentDigest = Digest(File.ReadAllBytes(fullPath));
+            string currentDigest = Digest(_files.ReadAllBytes(fullPath));
             if (string.Equals(currentDigest, owned.Sha256, StringComparison.Ordinal))
             {
                 preconditions.Add(SquadFilePrecondition.Exact(
@@ -474,7 +500,7 @@ public static class SquadDeploymentPlanner
         };
         bool hasRetainedFiles = retained.Count > 0 || retainedBlocks.Count > 0;
         return new SquadDeploymentPlan(
-            Path.GetFullPath(targetRoot),
+            _paths.GetFullPath(targetRoot, _environment.CurrentDirectory),
             identity,
             scope,
             null,
@@ -509,7 +535,7 @@ public static class SquadDeploymentPlanner
     ///     <see cref="CreateInstall" /> still throws on the first via the existing
     ///     unmanaged-collision rule.
     /// </summary>
-    public static IReadOnlyList<SquadUnmanagedPathCollision> CollectUnmanagedCollisions(
+    public IReadOnlyList<SquadUnmanagedPathCollision> CollectUnmanagedCollisions(
         string targetRoot,
         SquadDeploymentScope scope,
         IReadOnlyList<SquadDeploymentFile> renderedFiles,
@@ -520,7 +546,7 @@ public static class SquadDeploymentPlanner
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(renderedFiles);
 
-        string root = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics).PhysicalPath;
+        string root = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
             root,
             scope,
@@ -545,15 +571,15 @@ public static class SquadDeploymentPlanner
             if (managedIdentities.Contains(DeployedFileIdentity(rendered.File.Target, rendered.File.RelativePath)))
                 continue;
 
-            if (Directory.Exists(rendered.FullPath))
+            if (_files.DirectoryExists(rendered.FullPath))
             {
                 collisions.Add(ToCollision(rendered));
                 continue;
             }
 
-            if (!File.Exists(rendered.FullPath)) continue;
+            if (!_files.FileExists(rendered.FullPath)) continue;
 
-            byte[] diskBytes = File.ReadAllBytes(rendered.FullPath);
+            byte[] diskBytes = _files.ReadAllBytes(rendered.FullPath);
             ReadOnlySpan<byte> diskSpan = diskBytes;
             if (diskSpan.Length >= 3 && diskSpan[0] == 0xEF && diskSpan[1] == 0xBB && diskSpan[2] == 0xBF)
             {
@@ -578,7 +604,7 @@ public static class SquadDeploymentPlanner
             IdentityFromRelativePath(rendered.File.RelativePath));
     }
 
-    private static IReadOnlyList<NormalizedDeploymentFile> NormalizeRenderedFiles(
+    private IReadOnlyList<NormalizedDeploymentFile> NormalizeRenderedFiles(
         string root,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots,
@@ -608,7 +634,7 @@ public static class SquadDeploymentPlanner
             // A freshly rendered file is never legacy: every renderer has stripped its Global
             // prefix since #91, so this always resolves through the modern per-target path.
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, rendered.Target, relativePath, false, Semantics);
+                scope, root, globalRoots, rendered.Target, relativePath, false, _semantics);
             if (seenFullPaths.TryGetValue(fullPath, out string? existingPath))
                 throw new SquadDeploymentConflictException(
                     $"Rendered Squad output path '{rendered.RelativePath}' resolves to the same " +
@@ -621,7 +647,7 @@ public static class SquadDeploymentPlanner
         return normalized;
     }
 
-    private static Dictionary<string, SquadOwnedFile> ReceiptFilesByPath(
+    private Dictionary<string, SquadOwnedFile> ReceiptFilesByPath(
         string root,
         SquadReceipt receipt)
     {
@@ -631,7 +657,7 @@ public static class SquadDeploymentPlanner
         {
             ArgumentNullException.ThrowIfNull(owned);
             string normalizedPath = SquadPathPolicy.NormalizeRelativePath(owned.RelativePath);
-            _ = SquadPathPolicy.ResolveFile(root, normalizedPath, Semantics);
+            _ = SquadPathPolicy.ResolveFile(root, normalizedPath, _semantics);
             if (!string.Equals(normalizedPath, owned.RelativePath, StringComparison.Ordinal))
                 throw new SquadPathContainmentException(
                     $"Receipt path '{owned.RelativePath}' is not a normalized portable path.");
@@ -728,7 +754,7 @@ public static class SquadDeploymentPlanner
     /// collide with. <see cref="SquadTransaction"/>'s claim-and-publish protocol is
     /// unchanged because a block rides it as an ordinary write with a precondition.
     /// </remarks>
-    private static List<SquadOwnedBlock> PlanBlockInstalls(
+    private List<SquadOwnedBlock> PlanBlockInstalls(
         string root,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots,
@@ -759,15 +785,15 @@ public static class SquadDeploymentPlanner
             }
 
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, Semantics);
+                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, _semantics);
             (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
-            bool existsAsFile = File.Exists(fullPath);
+            bool existsAsFile = _files.FileExists(fullPath);
             string spliced;
             IReadOnlyList<SquadHookOwnedEntry> owned;
             if (existsAsFile)
             {
-                byte[] currentBytes = File.ReadAllBytes(fullPath);
+                byte[] currentBytes = _files.ReadAllBytes(fullPath);
                 string currentText = DecodeBlockText(relativePath, currentBytes);
                 (spliced, owned) = SpliceBlockContent(block.Format, relativePath, currentText, pre, post, subagentStop);
                 preconditions.Add(SquadFilePrecondition.Exact(
@@ -779,7 +805,7 @@ public static class SquadDeploymentPlanner
             }
             else
             {
-                if (Directory.Exists(fullPath))
+                if (_files.DirectoryExists(fullPath))
                     throw UnmanagedCollision(relativePath);
 
                 (spliced, owned) = SpliceBlockContent(block.Format, relativePath, null, pre, post, subagentStop);
@@ -803,7 +829,7 @@ public static class SquadDeploymentPlanner
     /// <paramref name="replaceManaged"/> is set, in which case the drift is overwritten like
     /// any other managed byte.
     /// </summary>
-    private static (List<SquadOwnedBlock> Next, HashSet<string> Rendered) PlanBlockUpdates(
+    private (List<SquadOwnedBlock> Next, HashSet<string> Rendered) PlanBlockUpdates(
         string root,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots,
@@ -847,17 +873,17 @@ public static class SquadDeploymentPlanner
 
             renderedIdentities.Add(identity);
             string fullPath = ResolvePhysicalPath(
-                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, Semantics);
+                scope, root, globalRoots, block.Target, relativePath, isSingleRootLayout: false, _semantics);
             (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post, IReadOnlyList<JsonNode> subagentStop) = SplitBlockEntries(block);
 
             if (!previousByIdentity.TryGetValue(identity, out SquadOwnedBlock? previous))
             {
-                if (Directory.Exists(fullPath))
+                if (_files.DirectoryExists(fullPath))
                     throw UnmanagedCollision(relativePath);
 
-                if (File.Exists(fullPath))
+                if (_files.FileExists(fullPath))
                 {
-                    byte[] currentBytes = File.ReadAllBytes(fullPath);
+                    byte[] currentBytes = _files.ReadAllBytes(fullPath);
                     string currentText = DecodeBlockText(relativePath, currentBytes);
                     (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
                         block.Format, relativePath, currentText, pre, post, subagentStop);
@@ -889,14 +915,14 @@ public static class SquadDeploymentPlanner
                 continue;
             }
 
-            if (Directory.Exists(fullPath))
+            if (_files.DirectoryExists(fullPath))
             {
                 throw new SquadDeploymentConflictException(
                     $"Receipt-owned block path '{relativePath}' is now a directory. " +
                     "Move it aside before updating Squad.");
             }
 
-            if (!File.Exists(fullPath))
+            if (!_files.FileExists(fullPath))
             {
                 (string spliced, IReadOnlyList<SquadHookOwnedEntry> owned) = SpliceBlockContent(
                     block.Format, relativePath, null, pre, post, subagentStop);
@@ -910,7 +936,7 @@ public static class SquadDeploymentPlanner
                 continue;
             }
 
-            byte[] current = File.ReadAllBytes(fullPath);
+            byte[] current = _files.ReadAllBytes(fullPath);
             string currentJson = DecodeBlockText(relativePath, current, allowBlank: false);
             IReadOnlyList<SquadHookDrift> drifts = FindBlockDrift(block, relativePath, currentJson, previous);
             if (drifts.Count > 0 && !replaceManaged)
@@ -943,7 +969,7 @@ public static class SquadDeploymentPlanner
     /// Retires previously owned blocks the new render no longer carries: only the owned
     /// entries are removed, the user's file otherwise untouched.
     /// </summary>
-    private static void RetireMissingBlocks(
+    private void RetireMissingBlocks(
         string root,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots,
@@ -972,7 +998,7 @@ public static class SquadDeploymentPlanner
     /// The file is deleted only when Squad created it and no hook remains: anything else
     /// is the user's file with Squad's entries excised.
     /// </remarks>
-    private static List<SquadOwnedBlock> PlanBlockRemovals(
+    private List<SquadOwnedBlock> PlanBlockRemovals(
         string root,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots,
@@ -998,7 +1024,7 @@ public static class SquadDeploymentPlanner
         return retained;
     }
 
-    private static bool RemoveOwnedBlockEntries(
+    private bool RemoveOwnedBlockEntries(
         string root,
         SquadDeploymentScope scope,
         ISquadGlobalRootResolver? globalRoots,
@@ -1007,15 +1033,15 @@ public static class SquadDeploymentPlanner
         List<SquadFilePrecondition> preconditions)
     {
         string fullPath = ResolvePhysicalPath(
-            scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout: false, Semantics);
+            scope, root, globalRoots, owned.Target, owned.RelativePath, isSingleRootLayout: false, _semantics);
 
-        if (Directory.Exists(fullPath))
+        if (_files.DirectoryExists(fullPath))
             return true;
 
-        if (!File.Exists(fullPath))
+        if (!_files.FileExists(fullPath))
             return false;
 
-        byte[] currentBytes = File.ReadAllBytes(fullPath);
+        byte[] currentBytes = _files.ReadAllBytes(fullPath);
         string currentText;
         string trimmed;
         try

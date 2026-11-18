@@ -34,7 +34,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
                 "codex",
                 false));
         Write(fixture.Path, ".codex/agents/conductor.toml", "operator edit");
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -71,7 +71,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
         SquadDeploymentPlan plan;
         using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
         {
-            plan = SquadDeploymentPlanner.CreateUpdate(
+            plan = RealSquadDeployment.Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -105,7 +105,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
         SquadDeploymentPlan plan;
         using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(fullPath))
         {
-            plan = SquadDeploymentPlanner.CreateUpdate(
+            plan = RealSquadDeployment.Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -143,7 +143,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
         SquadDeploymentPlan plan;
         using (KyberWeave.Tests.Fakes.SquadHomeHarness.DenyReadOrSkip(codexPath))
         {
-            plan = SquadDeploymentPlanner.CreateUpdate(
+            plan = RealSquadDeployment.Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -197,7 +197,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
         const string agentContent = "# Plan path\n";
         const string skillContent = "# Requirements phase\n";
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -273,7 +273,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
         Write(fixture.Path, editedObsoleteResource, "operator legacy edit\n");
         Write(fixture.Path, unchangedObsoleteResource, "installed legacy skill\n");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -299,7 +299,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
     /// <summary>
     ///     When updating an existing deployment from Antigravity's fallback role-skill lowering
     ///     shape (.agents/skills/&lt;name&gt;/SKILL.md) to its native agent shape (.agents/agents/&lt;name&gt;/agent.md),
-    ///     receipt-diff logic in <see cref="SquadDeploymentPlanner.CreateUpdate" /> plans a Delete mutation
+    ///     receipt-diff logic in <see cref="RealSquadDeployment.Planner.CreateUpdate" /> plans a Delete mutation
     ///     for orphaned fallback skill files whose on-disk bytes still match the previous receipt digest,
     ///     and retains orphaned skill files whose bytes were locally edited by an operator.
     /// </summary>
@@ -348,7 +348,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
         Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeWorkerAgentPath)));
         Assert.False(File.Exists(ToPlatformPath(fixture.Path, nativeReviewerAgentPath)));
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -498,7 +498,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             Write(fixture.Path, retiredSkillPath, installedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
 
-            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+            SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -527,7 +527,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             Write(fixture.Path, retiredSkillPath, editedContent);
             WriteState(fixture.Path, Lock(), previousReceipt);
 
-            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+            SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -565,7 +565,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             false));
         Write(fixture.Path, resourcePath, installedContent);
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -599,7 +599,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
                 "codex",
                 false));
         Write(fixture.Path, ".codex/agents/conductor.toml", "operator edit");
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -630,7 +630,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             false));
         Write(fixture.Path, relativePath, "installed body");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -665,7 +665,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
         SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateUpdate(
+            RealSquadDeployment.Planner.CreateUpdate(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),

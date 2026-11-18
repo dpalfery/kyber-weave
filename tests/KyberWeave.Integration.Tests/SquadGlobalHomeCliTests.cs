@@ -1549,7 +1549,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
                 file.Target))
             .ToList();
 
-        return SquadDeploymentPlanner.CreateUpdate(
+        return RealSquadDeployment.Planner.CreateUpdate(
             h.Home,
             SquadDeploymentScope.Global,
             LockFor(UpdatedVersion),

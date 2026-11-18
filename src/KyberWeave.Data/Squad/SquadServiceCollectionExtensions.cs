@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Host;
 using KyberWeave.Cli.Update;
@@ -36,7 +37,11 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadCompanionSkills, FileSquadCompanionSkills>();
         services.TryAddSingleton<ISquadRenderInputReader, FileSquadRenderInputReader>();
         services.TryAddSingleton<ISquadModelPresetValidator, FileSquadModelPresetValidator>();
-        services.TryAddSingleton<ISquadDeploymentPlanner, FileSquadDeploymentPlanner>();
+        services.TryAddSingleton<ISquadDeploymentPlanner>(sp => new SquadDeploymentPlanner(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<ISquadStateStore>()));
         services.TryAddSingleton<ISquadResponseGuidanceStore, FileSquadResponseGuidanceStore>();
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();

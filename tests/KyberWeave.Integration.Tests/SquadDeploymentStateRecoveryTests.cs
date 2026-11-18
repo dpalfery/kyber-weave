@@ -81,7 +81,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         SquadDeploymentPlan plan;
         if (operation == "missing-write")
         {
-            plan = SquadDeploymentPlanner.CreateInstall(
+            plan = RealSquadDeployment.Planner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -100,7 +100,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
                 false));
             WriteState(fixturePath, Lock(), receipt);
             plan = operation == "existing-write"
-                ? SquadDeploymentPlanner.CreateUpdate(
+                ? RealSquadDeployment.Planner.CreateUpdate(
                     fixturePath,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -109,7 +109,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
                     [],
                     false,
                     new FixedTimeProvider(InstalledAt.AddDays(1)))
-                : SquadDeploymentPlanner.CreateUninstall(
+                : RealSquadDeployment.Planner.CreateUninstall(
                     fixturePath,
                     SquadDeploymentScope.Project,
                     receipt);

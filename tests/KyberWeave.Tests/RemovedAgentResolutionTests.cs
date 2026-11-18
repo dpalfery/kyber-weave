@@ -256,7 +256,7 @@ public sealed class RemovedAgentResolutionTests
             [],
             [adopted]);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             temp.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),

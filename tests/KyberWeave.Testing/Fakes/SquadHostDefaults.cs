@@ -136,7 +136,7 @@ internal static class SquadHostDefaults
             selectionStore ?? new SquadModelPresetSelectionStore(stateStore.UserPaths, new PhysicalFileSystem(), SquadFileSystemPathSemantics.Instance),
             new FileSquadSourceLoader(),
             new FileSquadModelPresetValidator(),
-            new FileSquadDeploymentPlanner(),
+            RealSquadDeployment.Planner,
             new SquadTransactionFactory(stateStore),
             new FileSquadResponseGuidanceStore(),
             new FileFactoryHooksShadowing(),

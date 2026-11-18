@@ -34,7 +34,7 @@ public sealed class SquadOwnedBlockStatusTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -71,7 +71,7 @@ public sealed class SquadOwnedBlockStatusTests
 
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -109,7 +109,7 @@ public sealed class SquadOwnedBlockStatusTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -142,7 +142,7 @@ public sealed class SquadOwnedBlockStatusTests
     {
         using TempDirectory fixture = new TempDirectory();
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -176,7 +176,7 @@ public sealed class SquadOwnedBlockStatusTests
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
         SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -218,7 +218,7 @@ public sealed class SquadOwnedBlockStatusTests
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
         SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -260,7 +260,7 @@ public sealed class SquadOwnedBlockStatusTests
         using TempDirectory fixture = new TempDirectory();
         FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
         SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -429,7 +429,7 @@ public sealed class SquadOwnedBlockStatusTests
         Directory.CreateDirectory(home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
         SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),
