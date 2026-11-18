@@ -208,6 +208,60 @@ public sealed class TaskGateResolverTests : IDisposable
 
         Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
     }
+
+    /// <summary>
+    /// A malformed standard names no parent, but a standard this process may not read is a broken
+    /// checkout rather than an absent parent: it must throw, so an operator repairs the file instead of a
+    /// task resolving against the wrong gates.
+    /// </summary>
+    [Fact]
+    public void AStandardTheProcessMayNotReadThrowsInsteadOfNamingNoParent()
+    {
+        Standard("react", "builds-on: dotnet");
+        KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
+        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+
+        if (!UnixFileModes.TryRemoveReadPermission(path, out UnixFileMode originalMode))
+            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+
+        try
+        {
+            Assert.Throws<UnauthorizedAccessException>(
+                () => TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
+        }
+        finally
+        {
+            UnixFileModes.Restore(path, originalMode);
+        }
+    }
+
+    /// <summary>
+    /// The caller that must keep going asks for the parent or none: the unreadable standard names no parent
+    /// and the reason comes back instead of a throw, so gate resolution can fall back and say why.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableStandardNamesNoParentForACallerThatCollectsTheProblem()
+    {
+        Standard("react", "builds-on: dotnet");
+        KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
+        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+
+        if (!UnixFileModes.TryRemoveReadPermission(path, out UnixFileMode originalMode))
+            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+
+        try
+        {
+            List<string> problems = [];
+            Assert.Null(TaskGateResolver.ParentTechnologyOrNone(_root.Path, config, "react", problems));
+            string problem = Assert.Single(problems);
+            Assert.Contains("react.standards.md", problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            UnixFileModes.Restore(path, originalMode);
+        }
+    }
+
     [Fact]
     public void TechnologyGatesAreKeyedByTechnologyAndReadInDeclarationOrder()
     {

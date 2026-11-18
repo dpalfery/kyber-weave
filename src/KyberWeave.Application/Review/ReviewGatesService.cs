@@ -566,11 +566,24 @@ public sealed class ReviewGatesService(
         if (refusals.Count > 0)
             return RefuseInput(report, refusals);
 
+        List<string> unreadableStandards = [];
+        string? parentTechnology = TaskGateResolver.ParentTechnologyOrNone(
+            EnclosingRepositoryRoot(root), config, target?.Entry.Technology, unreadableStandards);
+        if (unreadableStandards.Count > 0)
+        {
+            // The task's gates may be keyed on the parent technology, so a standard this process may not read
+            // makes the run's evidence unreliable. Refuse before any gate starts and name the file.
+            return RefuseInput(
+                report,
+                unreadableStandards,
+                "Make the standard readable, then run the command again.");
+        }
+
         TaskGateResolution resolved = TaskGateResolver.Resolve(
             config.Review,
             request.Agent!,
             target?.Entry.Technology,
-            TaskGateResolver.ParentTechnology(EnclosingRepositoryRoot(root), config, target?.Entry.Technology));
+            parentTechnology);
 
         IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
         if (agentGates.Count == 0)

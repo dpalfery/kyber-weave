@@ -183,6 +183,24 @@ public sealed class PlanFinalizeTests
         Assert.Equal(expected, PlanFinalize.ReadyQueueOf(taskFile));
     }
 
+    /// <summary>
+    /// A YAML tag makes the reader hand back a double, so a non-finite value reaches the JSON writer,
+    /// which has no literal for it. An unreadable task file names no ready tasks; it must not take the
+    /// whole command down with an <see cref="ArgumentException"/>.
+    /// </summary>
+    [Fact]
+    public void ATaggedNonFiniteAgentConfidenceIsAnUnreadableTaskFile()
+    {
+        const string TaskFile = """
+            schema-version: 2
+            tasks:
+              - id: T1
+                agent-confidence: !!float .nan
+            """;
+
+        Assert.Null(PlanFinalize.ReadyQueueOf(TaskFile));
+    }
+
     [Fact]
     public void ASecondRunReportsAlreadyReadyAndChangesNothing()
     {
