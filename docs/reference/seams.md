@@ -110,6 +110,8 @@ task's list.
 | `ProcessEnvironment` | Environment and platform | `KyberWeave.Data` | `Host/ProcessEnvironment.cs` | The environment and platform adapter |
 | `SystemIdGenerator` | Identifiers | `KyberWeave.Data` | `Host/SystemIdGenerator.cs` | GUIDs, random tokens and temp names |
 | `SystemConsole` | Console | `KyberWeave.Data` | `Host/SystemConsole.cs` | Console output, error and input |
+| `ProcessConsoleLauncher` | Process | `KyberWeave.Data` | `Update/ProcessConsoleLauncher.cs` | Starts an update child that shares this console, bounded; the only update code that calls `Process.Start` |
+| `UnixUpdateFileModes` | File permissions | `KyberWeave.Data` | `Update/UnixUpdateFileModes.cs` | Reads and sets the Unix permission bits of an installed binary |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Mcp` | `DrainingStreamServerTransport.cs` | Opens the standard streams for the MCP server |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
@@ -133,8 +135,8 @@ startup.
 The process seam has one sanctioned escape that is not an adapter: a class may build a
 `ProcessStartInfo` and hand it to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a
 delegate. `ProcessStartInfo` is data there, and the exceptions register below covers it. Production
-process starts are in `Kernel/Processes/ProcessRunner.cs` and `StdioSession`; `SelfUpdateSystem`
-still calls `Process.Start` itself and is on task 4.4's list.
+process starts are in `Kernel/Processes/ProcessRunner.cs`, `StdioSession` and the update's
+`ProcessConsoleLauncher`, the one child that shares the user's console.
 
 ### Composition roots (allowed to read process state at startup)
 
@@ -241,7 +243,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotMcpServerProbe` (`Squad/Rendering/CopilotMcpServerProbe.cs`) | file system | 3.5 |
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 | `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
-| `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
 
 Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 
@@ -249,8 +250,14 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   `OpenExclusive` (a read-write open that keeps every other opener out until disposed) and
   `OpenAppendShared` (an append that other appenders and readers share), proven on the fake and on
   `PhysicalFileSystem` by the file-system contract suite.
-- `SelfUpdateSystem` replaces the running binary and extracts archives, so requirement 10.2 applies: it
-  moves with crash-safety contract tests and a second reviewer, with task 4.1's `SelfUpdater`.
+- `SelfUpdateSystem` is converted. It takes the file-system, path, bounded-process and identifier seams by
+  constructor, and splits the work: `ArchiveEntryPlanner` decides where an archive entry may go and refuses an
+  absolute, climbing or link-escaping one, `ReleaseArchiveExtractor` reads the archive as a stream and writes each
+  entry through the file system, and `BinaryReplacer` stages, moves and (on Windows) rolls back one binary. Two
+  adapters hold what those seams cannot express: `ProcessConsoleLauncher` starts a child that shares the console
+  (a role view captures output), and `UnixUpdateFileModes` reads and sets permission bits (the file-system seam has
+  no member for them). It replaces the running binary, so requirement 10.2 applies: the crash-safety contract tests
+  for the replace and rollback flow run on the in-memory file system and on the real disk.
 - `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are converted: each takes the
   file-system, path, environment and bounded-process seams by constructor, and SQLite itself stays the system
   `sqlite3` executable behind the process seam. The callers open them through `IAnalysisPersistenceFactory` and

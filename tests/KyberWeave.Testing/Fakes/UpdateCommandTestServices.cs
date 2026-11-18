@@ -52,7 +52,7 @@ internal static class UpdateCommandTestServices
 
     private sealed class HandOffSystem(Func<string, IReadOnlyList<string>, bool, int>? finishingProcess) : ISelfUpdateSystem
     {
-        private readonly ISelfUpdateSystem _inner = new KyberWeave.Cli.Update.SelfUpdateSystem();
+        private readonly ISelfUpdateSystem _inner = KyberWeave.Testing.Update.RealSelfUpdateSystem.Create();
 
         public int RunProcess(string fileName, IReadOnlyList<string> arguments) => _inner.RunProcess(fileName, arguments);
 

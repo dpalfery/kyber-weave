@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Update;
 using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 using System.Diagnostics.CodeAnalysis;
@@ -71,7 +72,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _ => null),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -109,7 +110,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _ => null),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -155,7 +156,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _ => null),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             runProcess: runProcess,
             captureProcess: (_, _) => QuietSuccess,
@@ -229,7 +230,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: environment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -357,7 +358,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: environment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -419,7 +420,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             new PhysicalFileSystem(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: environment),
-            new SelfUpdateSystem(),
+            RealSelfUpdateSystem.Create(),
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,

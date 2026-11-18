@@ -47,7 +47,15 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();
         services.TryAddSingleton<ISquadInstanceLinkSync, FileSquadInstanceLinkSync>();
         services.TryAddSingleton<ISquadFileAccess, PhysicalSquadFileAccess>();
-        services.TryAddSingleton<ISelfUpdateSystem, SelfUpdateSystem>();
+        services.TryAddSingleton<IConsoleProcessLauncher, ProcessConsoleLauncher>();
+        services.TryAddSingleton<IUpdateFileModes, UnixUpdateFileModes>();
+        services.TryAddSingleton<ISelfUpdateSystem>(sp => new SelfUpdateSystem(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IBoundedProcessExecutor>(),
+            sp.GetRequiredService<IConsoleProcessLauncher>(),
+            sp.GetRequiredService<IUpdateFileModes>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadPackager>(sp => new FileSquadPackager(sp.GetRequiredService<ISquadArchiveWriter>()));
         services.TryAddSingleton<ISquadSkillShadowing, FileSquadSkillShadowing>();
         services.TryAddSingleton<IDevinImportOverlapInspector, FileDevinImportOverlapInspector>();
