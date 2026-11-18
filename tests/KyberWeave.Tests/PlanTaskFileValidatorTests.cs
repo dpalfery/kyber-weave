@@ -276,6 +276,29 @@ public sealed class PlanTaskFileValidatorTests
         Assert.Contains("agent-confidence", run.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A tag makes a map key a double, not text, and JSON has no literal for a non-finite one. The reader
+    /// must refuse it as a malformed file: a stringified key is an unknown property, which the model's reader
+    /// ignores, so the file would validate.
+    /// </summary>
+    [Fact]
+    public void ATaggedNonFiniteTaskKeyIsKWDOCTASKS001()
+    {
+        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        string file = PlanTaskFileProbe.TaskFile();
+        string tagged = file.Replace(
+            $"- id: {PlanTaskFileProbe.FirstTask}\n",
+            $"- id: {PlanTaskFileProbe.FirstTask}\n    !!float .nan : not-a-field\n",
+            StringComparison.Ordinal);
+        Assert.NotEqual(file, tagged);
+        fixture.Write(PlanTaskFileProbe.TaskFilePath, tagged);
+
+        ReportedFindings run = Validate(fixture);
+
+        AssertReports(run, Malformed);
+        Assert.Equal(1, run.Exit);
+    }
+
     /// <summary>A task file larger than the validator reads is reported as one that could not be read, never loaded whole.</summary>
     [Fact]
     public void ATaskFileLargerThanTheValidatorReadsIsKWDOCTASKS001AndNamesWhy()

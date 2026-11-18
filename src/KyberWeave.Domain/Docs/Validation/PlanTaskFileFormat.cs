@@ -72,10 +72,7 @@ internal static partial class PlanTaskFileFormat
             return list.Select(NormalizeNumbers).ToList();
         }
 
-        if (graph is double scalar && !double.IsFinite(scalar))
-        {
-            throw NonFinite(null, scalar);
-        }
+        RefuseNonFinite(graph, null);
 
         if (graph is not Dictionary<object, object> map)
         {
@@ -85,12 +82,9 @@ internal static partial class PlanTaskFileFormat
         Dictionary<string, object?> normalized = new(StringComparer.Ordinal);
         foreach ((object key, object value) in map)
         {
+            RefuseNonFinite(key, null);
             string name = key.ToString() ?? string.Empty;
-            if (value is double nonFinite && !double.IsFinite(nonFinite))
-            {
-                throw NonFinite(name, nonFinite);
-            }
-
+            RefuseNonFinite(value, name);
             normalized[name] = name switch
             {
                 "schema-version" when value is string version
@@ -105,7 +99,26 @@ internal static partial class PlanTaskFileFormat
         return normalized;
     }
 
-    private static JsonException NonFinite(string? name, double number) =>
+    /// <summary>
+    /// Refuses a number with no JSON literal, whether it is a value or a map key. A tag such as
+    /// <c>!!float</c> makes the reader hand back a number instead of text, so the checks on the text form
+    /// never run; a key that reached the writer as a string would become an unknown property the model
+    /// ignores, and the file would validate.
+    /// </summary>
+    private static void RefuseNonFinite(object? value, string? name)
+    {
+        if (value is double number && !double.IsFinite(number))
+        {
+            throw NonFinite(name, number);
+        }
+
+        if (value is float single && !float.IsFinite(single))
+        {
+            throw NonFinite(name, single);
+        }
+    }
+
+    private static JsonException NonFinite(string? name, object number) =>
         new(name is null
             ? $"the document holds '{number}', which is not a finite number."
             : $"'{name}' is '{number}', which is not a finite number.");
