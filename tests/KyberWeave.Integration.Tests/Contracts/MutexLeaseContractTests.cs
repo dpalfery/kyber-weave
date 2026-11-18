@@ -81,10 +81,14 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
             IsBackground = true
         };
         foreign.Start();
-        Thread.Sleep(100);
+
+        // A thread parked in a wait is the observable sign that it is queued on the mutex.
+        SpinWait.SpinUntil(
+            () => foreign.ThreadState.HasFlag(ThreadState.WaitSleepJoin),
+            TimeSpan.FromSeconds(30));
         Thread release = new(() =>
         {
-            Thread.Sleep(300);
+            Thread.Sleep(600);
             first.Dispose();
         });
         System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
@@ -99,7 +103,8 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
         release.Join();
         foreign.Join();
         Assert.True(foreignHolds.IsSet, "The other owner never took the mutex.");
-        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1050), $"The request waited {clock.Elapsed}.");
+        // One timeout is about 800 ms in total; the old double wait was about 1400 ms.
+        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1200), $"The request waited {clock.Elapsed}.");
     }
 
     [Fact]
