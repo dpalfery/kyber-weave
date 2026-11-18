@@ -247,7 +247,7 @@ public sealed class ReviewGatesService(
         // runs' results, so a reviewer could never finish a verifier cycle gate by gate.
         if (request.Gates.Count > 0 && request.Out is not null)
         {
-            written = MergedWithExisting(config.Review.Gates, written, request.Out);
+            written = MergedWithExisting(files, pathResolver, environment, config.Review.Gates, written, request.Out);
             report.AddMetric("kept", written.Gates.Count - gates.Gates.Count);
         }
 
@@ -509,21 +509,35 @@ public sealed class ReviewGatesService(
     }
 
     /// <summary>
-    ///     The report already at <paramref name="path"/>, with each result this run produced in place of the earlier
-    ///     result for the same gate and the rest kept, in declaration order. An unreadable or missing report is nothing
-    ///     to keep.
+    ///     The report already at <paramref name="path"/>, merged into this run's, or this run's alone when the file is
+    ///     missing or unreadable. The path is resolved the same way it is written, so a relative <c>--out</c> reads
+    ///     back what an earlier run wrote.
     /// </summary>
-    private GateReport MergedWithExisting(IReadOnlyList<ReviewGate> declared, GateReport ran, string path)
+    /// <param name="files">Reads the earlier report.</param>
+    /// <param name="paths">Resolves the path the caller spelled.</param>
+    /// <param name="environment">Names the working directory a relative path resolves against.</param>
+    /// <param name="declared">The declared gates, in declaration order.</param>
+    /// <param name="ran">The report this run produced.</param>
+    /// <param name="path">Where the earlier report was written.</param>
+    internal static GateReport MergedWithExisting(
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IReadOnlyList<ReviewGate> declared,
+        GateReport ran,
+        string path)
     {
         GateReport existing;
         try
         {
-            if (!files.FileExists(path))
+            string full = paths.GetFullPath(path, environment.CurrentDirectory);
+            if (!files.FileExists(full))
                 return ran;
 
-            existing = ReviewJson.ReadGates(files.ReadAllText(path));
+            existing = ReviewJson.ReadGates(files.ReadAllText(full));
         }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is System.Text.Json.JsonException or InvalidOperationException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is System.Text.Json.JsonException or InvalidOperationException
+                                       or ArgumentException or NotSupportedException)
         {
             return ran;
         }

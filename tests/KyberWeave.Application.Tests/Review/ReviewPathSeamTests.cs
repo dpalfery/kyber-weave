@@ -62,6 +62,34 @@ public sealed class ReviewPathSeamTests
     }
 
     [Fact]
+    public void AnEarlierGateReportSpelledRelativelyIsMergedIntoThisRun()
+    {
+        _files.CreateDirectory("/work/out");
+        _files.WriteAllText(
+            "/work/out/report.json",
+            ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [new GateResult("build", true, 0, "passed")])));
+        ReviewGate[] declared = [new ReviewGate("build", ["dotnet", "build"]), new ReviewGate("test", ["dotnet", "test"])];
+        GateReport ran = new(GateReport.CurrentSchema, [new GateResult("test", true, 0, "passed")]);
+
+        GateReport merged = ReviewGatesService.MergedWithExisting(
+            _files, Paths, _environment, declared, ran, "out/report.json");
+
+        Assert.Equal(["build", "test"], merged.Gates.Select(gate => gate.Id));
+        Assert.Equal("passed", merged.Gates[0].Summary);
+    }
+
+    [Fact]
+    public void AnEmptyOutPathKeepsNoEarlierReportAndDoesNotThrow()
+    {
+        GateReport ran = new(GateReport.CurrentSchema, [new GateResult("build", true, 0, "passed")]);
+
+        GateReport merged = ReviewGatesService.MergedWithExisting(
+            _files, Paths, _environment, [new ReviewGate("build", ["dotnet", "build"])], ran, " ");
+
+        Assert.Equal(["build"], merged.Gates.Select(gate => gate.Id));
+    }
+
+    [Fact]
     public void TheDuplicatesCommandLoadsTheConfigurationForTheResolvedRoot()
     {
         RecordingConfigs configs = new();
