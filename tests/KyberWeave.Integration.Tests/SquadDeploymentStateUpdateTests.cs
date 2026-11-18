@@ -243,7 +243,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
 
         Assert.Equal(1, drifted.Result);
         Assert.Contains(agentResource, drifted.Output, StringComparison.Ordinal);
-        Assert.Contains("drift", drifted.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("modified locally", drifted.Output, StringComparison.Ordinal);
     }
 
     /// <summary>

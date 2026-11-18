@@ -167,7 +167,8 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             pinnedVersion,
             Adopt: settings.Adopt,
             DryRun: settings.DryRun,
-            Arbiter: arbiterWiring);
+            Arbiter: arbiterWiring,
+            WorkerRoster: configResult.Config?.WorkerRoster);
 
         // A global install that names a target the install lacks adds it to the existing ones, so the confirmation
         // lists every root the run writes beneath, not only the new target's.
@@ -223,6 +224,12 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
                 // Global Warp stays fallback-only: the install still prints the MCP registration
                 // guidance, but it never mutates ~/.warp/.mcp.json.
                 WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
+                if (arbiterWiring.Enabled && scope == SquadDeploymentScope.Project && decision.Targets.Contains(SquadTarget.OpenCode)
+                    && OpenCodeArbiterRegistrationStep(scope) is { } openCodeStep)
+                {
+                    Console.WriteLine(openCodeStep);
+                }
+
                 if (scope == SquadDeploymentScope.Global && (decision.Targets.Contains(SquadTarget.Warp) || decision.Targets.Contains(SquadTarget.ZCode)))
                 {
                     string targetToken = decision.Targets.Contains(SquadTarget.Warp) ? "warp" : "zcode";
@@ -282,6 +289,19 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     {
         return $"Register kyber-weave-arbiter in {configPath}: kyber-weave-arbiter serve --repo-root <root>";
     }
+
+    /// <summary>
+    /// The OpenCode step that makes the Arbiter's MCP tools reachable, or null when the render cannot grant them.
+    /// OpenCode takes its servers from <c>opencode.json</c>, which this deployment does not own; without the entry
+    /// the conductor has no <c>arbiter_evaluate_agent_dispatch_or_return</c>, and the plugin hook remains the only
+    /// gate. The grant is project-scope only (as on ZCode), so a global install prints nothing: its agents keep
+    /// the hook path and would hold no permission for the server.
+    /// </summary>
+    internal static string? OpenCodeArbiterRegistrationStep(SquadDeploymentScope scope) =>
+        scope != SquadDeploymentScope.Project
+            ? null
+            : "Register kw-arbiter in opencode.json: kyber-weave-arbiter serve --repo-root . — its MCP tools " +
+              "(arbiter_evaluate_agent_dispatch_or_return) are served from it; the plugin hook still gates dispatch without it.";
 
     /// <summary>
     /// Prints the Arbiter trust gate for each selected target that has one.

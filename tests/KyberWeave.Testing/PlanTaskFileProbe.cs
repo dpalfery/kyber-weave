@@ -78,12 +78,13 @@ internal sealed class ReportedFindings
 internal static class PlanTaskFileProbe
 {
     /// <summary>The schema version this build reads.</summary>
-    internal const int SchemaVersion = 1;
+    internal const int SchemaVersion = 2;
 
     internal const string PlansFolder = "6-Docs/plans";
     internal const string PlanName = "2026-11-07-ready-tasks";
     internal const string PlanPath = PlansFolder + "/" + PlanName + ".md";
-    internal const string TaskFilePath = PlansFolder + "/" + PlanName + ".tasks.json";
+    internal const string TaskFilePath = PlansFolder + "/" + PlanName + ".tasks.yml";
+    internal const string LegacyTaskFilePath = PlansFolder + "/" + PlanName + ".tasks.json";
     internal const string PlanIndexPath = PlansFolder + "/README.md";
 
     /// <summary>This fixture's two tasks, the second depending on the first.</summary>
@@ -103,7 +104,15 @@ internal static class PlanTaskFileProbe
 
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    /// <summary>The test class every fixture prompt names, read from the type it names.</summary>
+    private static readonly YamlDotNet.Serialization.ISerializer Yaml =
+        new YamlDotNet.Serialization.SerializerBuilder()
+            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.HyphenatedNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(YamlDotNet.Serialization.DefaultValuesHandling.OmitNull)
+            .WithIndentedSequences()
+            .Build();
+
+    /// <summary>The test class every fixture prompt names. A literal, because this helper lives in
+    /// <c>KyberWeave.Testing</c> and cannot see the test assembly's type.</summary>
     internal static string TestClass => "KyberWeave.Tests.PlanTaskFileValidatorTests";
 
     /// <summary>The direct assembly runner command, fully qualified so it runs its class.</summary>
@@ -113,7 +122,14 @@ internal static class PlanTaskFileProbe
     /// <summary>A corpus holding the plan index and the plan, and no task file.</summary>
     internal static DocFixture Corpus(string? planMarkdown = null)
     {
-        return DocFixture.Create().WithCatalog()
+        return new DocFixture().WithCatalog()
+            .Write(
+                ".kyber-weave/kyber-weave.yml",
+                """
+                ontology:
+                  technologies:
+                    - csharp
+                """)
             .Write(
                 PlanIndexPath,
                 """
@@ -176,12 +192,14 @@ internal static class PlanTaskFileProbe
 
         - **Files:** {{Backticked(FirstTaskFiles)}}
         - **Depends on:** none
+        - **Technology:** csharp
         - **Required skills:** `csharp-dev`
 
         ### {{SecondTask}}: The drift and prompt rules
 
         - **Files:** {{Backticked(SecondTaskFiles)}}
         - **Depends on:** {{FirstTask}}
+        - **Technology:** csharp
         - **Required skills:** `test-dev`
 
         ## Out of scope
@@ -234,6 +252,48 @@ internal static class PlanTaskFileProbe
     internal static string TaskFile(
         string? planMarkdown = null,
         int schemaVersion = SchemaVersion,
+        string? edit = null,
+        string? missingPromptPart = null,
+        string? promptPrefix = null,
+        string? digest = null)
+    {
+        string plan = planMarkdown ?? PlanMarkdown();
+        List<Dictionary<string, object?>> tasks =
+        [
+            Row(
+                FirstTask,
+                "csharp-dev",
+                edit == "files" ? [FirstTaskFiles[0]] : FirstTaskFiles,
+                [],
+                Prompt(FirstTask, missingPromptPart, promptPrefix)),
+            Row(
+                SecondTask,
+                "test-dev",
+                SecondTaskFiles,
+                edit == "depends-on" ? [] : [FirstTask],
+                Prompt(SecondTask, missingPromptPart, promptPrefix))
+        ];
+
+        if (edit == "task")
+        {
+            tasks.RemoveAt(1);
+        }
+
+        Dictionary<string, object?> file = new(StringComparer.Ordinal)
+        {
+            ["schema-version"] = schemaVersion,
+            ["plan"] = PlanPath,
+            ["execution-digest"] = digest ?? ExecutionDigest(plan),
+            ["tasks"] = tasks
+        };
+
+        return Yaml.Serialize(file);
+    }
+
+    /// <summary>The same task file in the JSON form an older release wrote, for the conversion tests.</summary>
+    internal static string LegacyJsonTaskFile(
+        string? planMarkdown = null,
+        int schemaVersion = 1,
         string? edit = null,
         string? missingPromptPart = null,
         string? promptPrefix = null,
@@ -328,7 +388,8 @@ internal static class PlanTaskFileProbe
             ["depends-on"] = dependsOn,
             ["files"] = files,
             ["session"] = id,
-            ["prompt"] = prompt
+            ["prompt"] = prompt,
+            ["technology"] = "csharp"
         };
 
     private static string Prompt(string taskId, string? missingPromptPart, string? promptPrefix)
@@ -370,7 +431,8 @@ internal static class SpecTaskFileProbe
     internal const string SpecFolder = "6-Docs/specs/ready-feature";
     internal const string SpecIndexPath = "6-Docs/specs/README.md";
     internal const string TasksPath = SpecFolder + "/tasks.md";
-    internal const string TaskFilePath = SpecFolder + "/tasks.json";
+    internal const string TaskFilePath = SpecFolder + "/tasks.yml";
+    internal const string LegacyTaskFilePath = SpecFolder + "/tasks.json";
     internal const string DesignPath = SpecFolder + "/design.md";
 
     /// <summary>This fixture's two spec tasks, the second depending on the first.</summary>
@@ -381,12 +443,24 @@ internal static class SpecTaskFileProbe
     internal const string FirstTaskFile = "tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs";
     internal const string SecondTaskFile = "src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs";
 
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly YamlDotNet.Serialization.ISerializer Yaml =
+        new YamlDotNet.Serialization.SerializerBuilder()
+            .WithNamingConvention(YamlDotNet.Serialization.NamingConventions.HyphenatedNamingConvention.Instance)
+            .ConfigureDefaultValuesHandling(YamlDotNet.Serialization.DefaultValuesHandling.OmitNull)
+            .WithIndentedSequences()
+            .Build();
 
     /// <summary>A corpus holding the specification index, the spec folder and its four files.</summary>
     internal static DocFixture Corpus(string? tasksMarkdown = null)
     {
-        return DocFixture.Create().WithCatalog()
+        return new DocFixture().WithCatalog()
+            .Write(
+                ".kyber-weave/kyber-weave.yml",
+                """
+                ontology:
+                  technologies:
+                    - csharp
+                """)
             .Write(
                 SpecIndexPath,
                 """
@@ -469,6 +543,7 @@ internal static class SpecTaskFileProbe
             - `tests/KyberWeave.Tests/PlanTaskFileValidatorTests.cs`
           - **Acceptance:**
             - `Widget.Flag` is reported when the digest is stale.
+          - **Technology:** csharp
           - **Skills:** `test-dev`
           - **Depends on:** none
           - _Requirements: 1.1, 1.2_
@@ -478,6 +553,7 @@ internal static class SpecTaskFileProbe
             - `src/KyberWeave.Core.Docs/Validation/PlanTaskFileValidator.cs`
           - **Acceptance:**
             - `Widget.Flag` is reported when a task is missing.
+          - **Technology:** csharp
           - **Skills:** `csharp-dev`
           - **Depends on:** 1.1
           - _Requirements: 1.1, 1.2_
@@ -524,7 +600,7 @@ internal static class SpecTaskFileProbe
             ["tasks"] = tasks
         };
 
-        return JsonSerializer.Serialize(file, JsonOptions);
+        return Yaml.Serialize(file);
     }
 
     /// <summary>
@@ -612,6 +688,7 @@ internal static class SpecTaskFileProbe
             ["depends-on"] = dependsOn,
             ["files"] = files,
             ["session"] = id,
-            ["prompt"] = prompt
+            ["prompt"] = prompt,
+            ["technology"] = "csharp"
         };
 }

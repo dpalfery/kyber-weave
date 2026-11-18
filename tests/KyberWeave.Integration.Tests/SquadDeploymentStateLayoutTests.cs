@@ -202,7 +202,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             }));
 
         Assert.Equal(1, drifted.Result);
-        Assert.Contains("drift", drifted.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("modified locally", drifted.Output, StringComparison.Ordinal);
         Assert.Contains("(claude)", drifted.Output, StringComparison.Ordinal);
     }
 

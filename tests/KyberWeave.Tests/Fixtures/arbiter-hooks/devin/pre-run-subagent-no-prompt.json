@@ -4,6 +4,6 @@
   "hook_event_name": "PreToolUse",
   "tool_name": "run_subagent",
   "tool_input": {
-    "profile": "csharp-dev"
+    "profile": "dev-medium"
   }
 }

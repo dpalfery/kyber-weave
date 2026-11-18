@@ -5,7 +5,7 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// <summary>
 /// The dispatch header block (design section 5): the run of lines at the very start
 /// of the prompt in which every line matches
-/// <c>^(KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE):[ \t]*(\S.*?)[ \t]*$</c>.
+/// <c>^(KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY|PRIOR_RESULTS|FAILED_ATTEMPTS):[ \t]*(\S.*?)[ \t]*$</c>.
 /// The block ends at the first line that does not match. The set is closed:
 /// there is no <c>FILES:</c> header.
 /// </summary>
@@ -26,6 +26,9 @@ public sealed partial class HeaderBlock
         "LENS",
         "REFUTE",
         "REVIEW_RUN",
+        "TECHNOLOGY",
+        "PRIOR_RESULTS",
+        "FAILED_ATTEMPTS",
     };
 
     /// <summary>The fifteen lens names a <c>LENS</c> header or <c>REFUTE</c> lens may name.</summary>
@@ -213,13 +216,32 @@ public sealed partial class HeaderBlock
         return false;
     }
 
+    /// <summary>Whether a value has the shape of a task id: a plan id such as <c>T3</c> or a spec id such as <c>2.6</c>.</summary>
+    /// <param name="value">The value a dispatch wrote after <c>TASK:</c>.</param>
+    public static bool IsTaskId(string value) =>
+        value is not null && (PlanTaskIdRegex().IsMatch(value) || SpecTaskIdRegex().IsMatch(value));
+
     private static bool IsValidValue(string name, string value) => name switch
     {
         "KYBER-ARBITER" => string.Equals(value, "true", StringComparison.Ordinal),
         "PLAN_FILE" => IsValidPlanFile(value),
-        "TASK" => PlanTaskIdRegex().IsMatch(value) || SpecTaskIdRegex().IsMatch(value),
+        "TASK" => IsTaskId(value),
         "LENS" => LensNames.Contains(value),
         "REFUTE" => IsValidRefute(value),
+        // The retry's scratch file: any non-empty path. The prompt service is what confines it to the scratch area.
+        "PRIOR_RESULTS" => value.Length > 0,
+        "FAILED_ATTEMPTS" => int.TryParse(
+            value,
+            System.Globalization.NumberStyles.None,
+            System.Globalization.CultureInfo.InvariantCulture,
+            out _),
+        // A technology is the name of one standards folder: no path separator, no space, no parent hop.
+        "TECHNOLOGY" => value.Length > 0
+            && !value.Contains('/', StringComparison.Ordinal)
+            && !value.Contains('\\', StringComparison.Ordinal)
+            && !string.Equals(value, ".", StringComparison.Ordinal)
+            && !string.Equals(value, "..", StringComparison.Ordinal)
+            && value.AsSpan().IndexOfAny(' ', '\t') < 0,
         // Any non-empty value: the store keys it by digest, so its characters and length name no path.
         "REVIEW_RUN" => value.Length > 0,
         _ => false,
@@ -254,7 +276,7 @@ public sealed partial class HeaderBlock
     }
 
     [GeneratedRegex(
-        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN):[ \t]*(?<value>\S.*?)[ \t]*$",
+        @"^(?<name>KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY|PRIOR_RESULTS|FAILED_ATTEMPTS):[ \t]*(?<value>\S.*?)[ \t]*$",
         RegexOptions.CultureInvariant)]
     private static partial Regex HeaderLineRegex();
 

@@ -1,6 +1,6 @@
 ---
 id: todo/task-gate-tests-gate-misses-repopolicy-project
-title: The test-dev task gate's tests gate never runs the RepoPolicy test project
+title: The dotnet task gate's tests gate never runs the RepoPolicy test project
 doc-type: todo
 component: ReviewCouncil
 status: draft
@@ -8,7 +8,7 @@ owner: dpalfery
 last-reviewed: 2026-11-11
 ---
 
-# The test-dev task gate's tests gate never runs the RepoPolicy test project
+# The `dotnet` task gate's tests gate never runs the RepoPolicy test project
 
 The `tests` task gate in `review.task-gates` (`.kyber-weave/kyber-weave.yml`, anchor
 `&dotnet-tests`) always runs `tests/KyberWeave.Tests/KyberWeave.Tests.csproj` with the classes

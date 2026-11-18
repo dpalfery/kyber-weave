@@ -19,6 +19,11 @@ public sealed class DocsTasksSettings : DocsSettings
     [Description("Exit 1 and say what differs when the task file on disk is not exactly what --write would produce.")]
     public bool Check { get; set; }
 
+    /// <summary>Rewrites a legacy JSON task file as YAML beside the plan.</summary>
+    [CommandOption("--convert")]
+    [Description("Rewrite a JSON task file an older release wrote as <plan>.tasks.yml, and remove the JSON file.")]
+    public bool Convert { get; set; }
+
     /// <summary>Lists the plan's tasks, one line each, and changes nothing.</summary>
     [CommandOption("--list")]
     [Description("Print one line per task: id, role, depends-on, session and file count. Writes nothing.")]

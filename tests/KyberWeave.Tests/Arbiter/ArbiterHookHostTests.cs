@@ -85,7 +85,7 @@ public sealed class ArbiterHookHostTests
             new ScriptedEngine(),
             root => { loads++; return EnabledConfig(); });
 
-        (int exit, string stdout, _) = Run(command, "csharp-dev", Fixture("pre-edit-passthrough.json"));
+        (int exit, string stdout, _) = Run(command, "dev-medium", Fixture("pre-edit-passthrough.json"));
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout);

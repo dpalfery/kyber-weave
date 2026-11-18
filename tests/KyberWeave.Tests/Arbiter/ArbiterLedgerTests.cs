@@ -83,7 +83,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             "delegate",
             "conductor",
             ArbiterCallerSources.Harness,
-            "csharp-dev",
+            "dev-medium",
             planFile,
             planDigest,
             task,
@@ -122,10 +122,10 @@ public sealed class ArbiterLedgerTests : IDisposable
             PreId = "pre-1",
             Caller = "conductor",
             CallerSource = ArbiterCallerSources.Harness,
-            Target = "csharp-dev",
+            Target = "dev-medium",
             Trigger = "delegate",
             Marker = "delegate",
-            Headers = new ArbiterLedgerHeaders("docs/plans/plan.md", "T3", "infra-workflow", "finding-1"),
+            Headers = new ArbiterLedgerHeaders("docs/plans/plan.md", "T3", "infra-workflow", "finding-1", "csharp"),
             TaskFiles = ["docs/plans/plan.md"],
             Snapshot = new ArbiterSnapshot(
                 "head-sha", new Dictionary<string, string> { ["src/a.cs"] = "blob-1" }),
@@ -158,7 +158,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             "caller", "caller-source", "target", "trigger", "marker",
             "headers", "task-files", "snapshot", "changed-paths", "returns",
             "body-names-planning-path", "decision-id");
-        AssertKeys(doc.RootElement.GetProperty("headers"), "plan-file", "task", "lens", "refute");
+        AssertKeys(doc.RootElement.GetProperty("headers"), "plan-file", "task", "lens", "refute", "technology");
         AssertKeys(
             doc.RootElement.GetProperty("returns"),
             "task-review", "planner-status", "attested");
@@ -180,7 +180,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         var decision = new ArbiterDecisionRecord(
             ArbiterRecordId.New(at), at, ArbiterSources.Hook, "pi", "session-1",
             "ledger-1", "delegate", "conductor", ArbiterCallerSources.Harness,
-            "csharp-dev", "docs/plans/plan.md", "plan-digest", "T3",
+            "dev-medium", "docs/plans/plan.md", "plan-digest", "T3",
             "ruleset-sha", [rule], provider, RuleEffects.Escalate, 1, 42);
 
         await decisions.AppendAsync(decision);
@@ -413,6 +413,98 @@ public sealed class ArbiterLedgerTests : IDisposable
         Assert.Equal(excludingA, ledger.InFlightPaths(excludeEventId: a.Id));
     }
 
+    /// <summary>
+    /// A second attempt at the same task is not a concurrent writer of its own files when the first was an advisory
+    /// evaluation. The second end-to-end tiered run asked the Arbiter about task 1.2, was allowed, then spent the turn
+    /// on another task's escalation and never dispatched it; every later attempt at 1.2 saw that unpaired earlier
+    /// evaluation as work in flight and answered <c>overlaps-in-flight</c> (KW-ARB-READY-001), so the task was refused
+    /// three times and never delivered.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_DoesNotCountAnEarlierServedAttemptAtTheSameTask()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        ArbiterLedgerHeaders task13 = new(plan, "1.3");
+        var firstAttempt = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
+        var otherTask = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/Truncate.cs"], headers: task13, harness: "serve");
+        var retry = NewEvent(At(2), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
+        await ledger.AppendAsync(firstAttempt);
+        await ledger.AppendAsync(otherTask);
+        await ledger.AppendAsync(retry);
+
+        // Only the other task's files are in flight for the retry; the earlier attempt at the same task is not.
+        Assert.Equal(["src/Truncate.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
+        // The other task still sees this task's unpaired attempts: they are a different task's work.
+        Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: otherTask.Id));
+    }
+
+    /// <summary>
+    /// A hook event is a dispatch the harness itself reported, so it keeps holding its files for the whole run: a
+    /// retry of the same task is refused while that dispatch has no return.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_AHookDispatchOfTheSameTaskStillHoldsItsFiles()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        var dispatch = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        var retry = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        await ledger.AppendAsync(dispatch);
+        await ledger.AppendAsync(retry);
+
+        Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
+    }
+
+    /// <summary>
+    /// The distinction is the earlier event's, not the retry's: a hook dispatch is a worker the harness started, so a
+    /// served retry of the same task must still see it as overlap. Keying on the retry's harness would let a serve
+    /// evaluation hide a real concurrent writer and dispatch a second one to the same files.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_AServedRetryStillSeesAHookDispatchOfTheSameTask()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        var dispatch = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        var retry = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
+        await ledger.AppendAsync(dispatch);
+        await ledger.AppendAsync(retry);
+
+        Assert.Equal(["src/WordCount.cs"], ledger.InFlightPaths(excludeEventId: retry.Id));
+    }
+
+    /// <summary>
+    /// A served evaluation that never ran a worker does not hold a file against a hook retry of the same task either:
+    /// the exclusion follows the earlier event, so a harness whose dispatch runs through its own hook is not blocked by
+    /// a served ghost from the same task.
+    /// </summary>
+    [Fact]
+    public async Task InFlightPaths_AServedEvaluationDoesNotHoldAFileAgainstAHookRetryOfTheSameTask()
+    {
+        var ledger = new InFlightLedger(ArbiterDirectory);
+        const string plan = "docs/plans/2026-11-17-slug-and-shape-helpers.md";
+        ArbiterLedgerHeaders task12 = new(plan, "1.2");
+        var ghost = NewEvent(At(0), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "serve");
+        var retry = NewEvent(At(1), ArbiterLedgerPhases.Pre,
+            trigger: "delegate", taskFiles: ["src/WordCount.cs"], headers: task12, harness: "copilot-cli");
+        await ledger.AppendAsync(ghost);
+        await ledger.AppendAsync(retry);
+
+        Assert.Empty(ledger.InFlightPaths(excludeEventId: retry.Id));
+    }
+
     [Fact]
     public async Task ConcurrentWriters_ReturnsTaskFilesOfOverlappingWriterDispatches()
     {
@@ -579,7 +671,7 @@ public sealed class ArbiterLedgerTests : IDisposable
 
         var ledger = new InFlightLedger(ArbiterDirectory);
         var decisions = new DecisionLog(ArbiterDirectory);
-        var pre = NewEvent(At(0), ArbiterLedgerPhases.Pre, trigger: "delegate", target: "csharp-dev", pairDigest: digest);
+        var pre = NewEvent(At(0), ArbiterLedgerPhases.Pre, trigger: "delegate", target: "dev-medium", pairDigest: digest);
         await ledger.AppendAsync(pre);
 
         ArbiterDecisionRecord decision = Decision(

@@ -1,3 +1,4 @@
+using System.Globalization;
 using KyberWeave.Core.Arbiter;
 using YamlDotNet.Core;
 
@@ -15,6 +16,12 @@ public static class KyberWeaveConfigAssembler
     /// <summary>The repository setting the git post-checkout hook reads to decide whether a new worktree is indexed.</summary>
     private const string WorktreeIndexHookKey = "worktree-index-hook";
 
+    /// <summary>The setting that chooses the worker roster a run dispatches from.</summary>
+    private const string WorkerRosterKey = "worker-roster";
+
+    /// <summary>The setting that sets the most characters one task prompt may hold.</summary>
+    private const string TaskPromptBudgetKey = "task-prompt-budget";
+
     /// <summary>
     /// Loads configuration from YAML text. There is no repository on disk, so a gate that sets
     /// <c>working-directory</c> is refused.
@@ -31,11 +38,19 @@ public static class KyberWeaveConfigAssembler
     /// <param name="yaml">The config file's text.</param>
     /// <param name="repositoryRoot">The repository root a gate's <c>working-directory</c> is resolved against.</param>
     /// <param name="facts">What the file system says about a gate's <c>working-directory</c>.</param>
-    public static KyberWeaveConfig FromRepositoryYaml(string yaml, string repositoryRoot, ReviewWorkingDirectoryFacts facts)
+    /// <param name="readText">
+    /// Reads a repository file's text, or null when it does not exist. The data layer supplies it so the Arbiter's rule
+    /// folders can be read without the domain layer touching the file system.
+    /// </param>
+    public static KyberWeaveConfig FromRepositoryYaml(
+        string yaml,
+        string repositoryRoot,
+        ReviewWorkingDirectoryFacts facts,
+        Func<string, string?>? readText = null)
     {
         ArgumentNullException.ThrowIfNull(yaml);
         ArgumentNullException.ThrowIfNull(facts);
-        return FromDocument(KyberWeaveYamlParser.Parse(yaml), yaml, repositoryRoot, facts);
+        return FromDocument(KyberWeaveYamlParser.Parse(yaml), yaml, repositoryRoot, facts, readText);
     }
 
     /// <summary>
@@ -63,7 +78,8 @@ public static class KyberWeaveConfigAssembler
                 document.Autonomy,
                 document.Run,
                 document.StopOnToolFailure,
-                document.Onboarding),
+                document.Onboarding,
+                document.WorkerRoster is null ? null : ParseWorkerRoster(document.WorkerRoster)),
             Review = ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
@@ -71,11 +87,13 @@ public static class KyberWeaveConfigAssembler
                 ReviewConfigParser.UnknownKeyWarnings(yaml)),
             Arbiter = ArbiterConfigLoader.LoadUserConfig(yaml),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
-            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure)
+            StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
+            WorkerRoster = ParseWorkerRoster(document.WorkerRoster),
+            TaskPromptBudget = ParseTaskPromptBudget(document.TaskPromptBudget)
         };
     }
 
-    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document, string yaml, string? repositoryRoot, ReviewWorkingDirectoryFacts? facts)
+    private static KyberWeaveConfig FromDocument(KyberWeaveYamlDocument document, string yaml, string? repositoryRoot, ReviewWorkingDirectoryFacts? facts, Func<string, string?>? readText = null)
     {
         OntologyConfig ontology = OntologyConfigLoader.Merge(OntologyConfig.ProductDefaults, document.Ontology);
         return new KyberWeaveConfig
@@ -93,17 +111,29 @@ public static class KyberWeaveConfigAssembler
                 document.Autonomy,
                 document.Run,
                 document.StopOnToolFailure,
-                document.Onboarding),
+                document.Onboarding,
+                document.WorkerRoster is null ? null : ParseWorkerRoster(document.WorkerRoster)),
             Review = ReviewConfigParser.Merge(
                 ReviewConfig.ProductDefaults,
                 document.Review,
                 repositoryRoot,
                 ReviewConfigParser.UnknownKeyWarnings(yaml),
                 facts),
-            Arbiter = ArbiterConfigLoader.Merge(ArbiterConfig.ProductDefaults, document.Arbiter),
+            Arbiter = ArbiterConfigLoader.Merge(
+                ArbiterConfig.ProductDefaults,
+                document.Arbiter,
+                repositoryRoot is null
+                    ? null
+                    : new ArbiterConfigLoader.RuleFolderRequest(
+                        repositoryRoot,
+                        ontology.DocsRoots,
+                        ontology.Technologies,
+                        readText)),
             Mcp = McpConfigLoader.Merge(McpConfig.ProductDefaults, document.Mcp),
             StopsOnToolFailure = ParseStopOnToolFailure(document.StopOnToolFailure),
-            WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook)
+            WorktreeIndexHook = ParseWorktreeIndexHook(document.WorktreeIndexHook),
+            WorkerRoster = ParseWorkerRoster(document.WorkerRoster),
+            TaskPromptBudget = ParseTaskPromptBudget(document.TaskPromptBudget)
         };
     }
 
@@ -127,6 +157,52 @@ public static class KyberWeaveConfigAssembler
         throw new YamlException(
             $"{WorktreeIndexHookKey} '{value}' is not a boolean. Use 'true' to index a new worktree on its first " +
             "checkout, or 'false' to leave the git hook alone, or remove the key; an absent setting is 'true'.");
+    }
+
+    /// <summary>
+    /// Reads the top-level <c>worker-roster</c> setting. Absent means <c>tiered</c>, the only roster left after
+    /// the removal; <c>technology</c> is an error that names the change.
+    /// </summary>
+    /// <exception cref="YamlException">The value is not <c>tiered</c>.</exception>
+    private static string ParseWorkerRoster(string? value)
+    {
+        if (value is null)
+            return WorkerRosters.Tiered;
+
+        string roster = value.Trim();
+        if (WorkerRosters.IsKnown(roster))
+            return roster;
+
+        if (string.Equals(roster, WorkerRosters.Technology, StringComparison.Ordinal))
+        {
+            throw new YamlException(
+                $"{WorkerRosterKey} '{value}' names the worker roster that was removed. The per-technology worker " +
+                "agents no longer ship, so every run dispatches from the tiered roster: remove the key, or set " +
+                $"{WorkerRosterKey}: {WorkerRosters.Tiered}.");
+        }
+
+        throw new YamlException(
+            $"{WorkerRosterKey} '{value}' is not a roster. The only roster is '{WorkerRosters.Tiered}', the three " +
+            "developer agents by difficulty; remove the key for the same result.");
+    }
+
+    /// <summary>Reads the top-level <c>task-prompt-budget</c> setting. Absent means the shipped 60,000 characters.</summary>
+    /// <exception cref="YamlException">The value is not a positive whole number of characters.</exception>
+    private static int ParseTaskPromptBudget(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return KyberWeaveConfig.DefaultTaskPromptBudget;
+
+        if (int.TryParse(value.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int budget)
+            && budget > 0)
+        {
+            return budget;
+        }
+
+        throw new YamlException(
+            $"{TaskPromptBudgetKey} '{value}' is not a positive whole number of characters. Give the most " +
+            $"characters one task prompt may hold, such as {KyberWeaveConfig.DefaultTaskPromptBudget}, or " +
+            "remove the key for the shipped budget.");
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -19,6 +21,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// </remarks>
 public static class TriggerFactBuilder
 {
+    /// <summary>
+    /// True when every file the task names is a test file, read from <c>plan.task.files</c> and the
+    /// host's test-file patterns.
+    /// </summary>
+    public const string FilesAllTestsFact = "plan.task.files-all-tests";
+
     /// <summary>How many lines either side of a refuted finding's line an earlier finding may sit and still be a candidate.</summary>
     private const int PriorFindingWindowLines = 20;
 
@@ -81,6 +89,10 @@ public static class TriggerFactBuilder
     /// names none: the value of <c>delegation.model</c>.</param>
     /// <param name="secondaryTriggers">The secondary triggers the primary dispatch carries. Their declared facts
     /// join the bag, because the secondary rules read from the same bag as the primary.</param>
+    /// <param name="promptInserted">Whether the hook inserted the prompt into this dispatch. Only that evidence,
+    /// never the prompt's own text, exempts it from the plan-read rule: a conductor can type the tags itself.</param>
+    /// <param name="repoRoot">The repository root the standards folders sit under, when the caller has one. It
+    /// resolves the technology's parent template, so a parent-keyed gate is found exactly as the gate run finds it.</param>
     public static ArbiterFactSet Build(
         TriggerClassification classification,
         string prompt,
@@ -88,11 +100,14 @@ public static class TriggerFactBuilder
         bool observesReturns = true,
         string? modelOverrideField = null,
         string? delegationModel = null,
-        IReadOnlyList<string>? secondaryTriggers = null)
+        IReadOnlyList<string>? secondaryTriggers = null,
+        bool promptInserted = false,
+        string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(classification);
         ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(config);
+        _ = repoRoot;
 
         if (classification.Trigger is null)
             return new ArbiterFactSet();
@@ -107,7 +122,8 @@ public static class TriggerFactBuilder
             observesReturns,
             modelOverrideField,
             delegationModel,
-            secondaryTriggers);
+            secondaryTriggers,
+            promptInserted);
     }
 
     /// <summary>Builds the fact bag for <paramref name="trigger"/> from dispatch input.</summary>
@@ -121,6 +137,8 @@ public static class TriggerFactBuilder
     /// <param name="modelOverrideField">The dispatch field that carries a sub-agent's model, or null when the harness offers no override.</param>
     /// <param name="delegationModel">The model the dispatch input names for its sub-agent, or null.</param>
     /// <param name="secondaryTriggers">Secondary triggers whose declared facts are added to the bag.</param>
+    /// <param name="promptInserted">Whether the hook inserted the prompt into this dispatch.</param>
+    /// <param name="repoRoot">The repository root the standards folders sit under, when the caller has one.</param>
     /// <exception cref="ArgumentException">Thrown for an unknown trigger, with the known names as hint.</exception>
     public static ArbiterFactSet Build(
         string trigger,
@@ -132,7 +150,9 @@ public static class TriggerFactBuilder
         bool observesReturns = true,
         string? modelOverrideField = null,
         string? delegationModel = null,
-        IReadOnlyList<string>? secondaryTriggers = null)
+        IReadOnlyList<string>? secondaryTriggers = null,
+        bool promptInserted = false,
+        string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
@@ -159,7 +179,7 @@ public static class TriggerFactBuilder
             : null;
         IReadOnlyList<string> delegatesTo = caller is not null
                                             && catalog.Agents.TryGetValue(caller, out ArbiterSquadAgent? callerAgent)
-            ? callerAgent.DelegatesTo
+            ? RosterDelegatesTo.For(callerAgent, config.WorkerRoster, catalog)
             : [];
         Dictionary<string, string> descriptions = new(StringComparer.Ordinal);
         foreach (KeyValuePair<string, ArbiterSquadAgent> entry in catalog.Agents)
@@ -167,6 +187,10 @@ public static class TriggerFactBuilder
 
         block.Headers.TryGetValue("PLAN_FILE", out string? planFile);
         block.Headers.TryGetValue("TASK", out string? task);
+        block.Headers.TryGetValue("TECHNOLOGY", out string? technology);
+        string? parentTechnology = repoRoot is not null && technology is not null
+            ? TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, technology)
+            : null;
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);
         // REFUTE names the finding as <lens>/<slug>. The finding block's id line carries either that full value
@@ -206,18 +230,25 @@ public static class TriggerFactBuilder
                 "delegation.paths" => paths,
                 // The plan-read rule's question, asked by the one detector the docs
                 // validator also uses, so a spelling the rule accepts is a spelling
-                // KW-DOC-TASKS-005 accepts.
-                "delegation.planning-paths" => PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
+                // KW-DOC-TASKS-005 accepts. A dispatch the hook expanded is never a plan
+                // read: its host facts name the planning indexes, and the worker is told to
+                // use that prompt, not a plan (Req 9.18). Only the hook's own record of the
+                // insertion exempts it, because a conductor can type the prompt's tags too.
+                "delegation.planning-paths" => promptInserted
+                    ? []
+                    : PlanReadInstruction.NamesPathUnder(PlanReadInstruction.WithoutRoutingMetadata(stripped), planningDirs),
                 "delegation.plan-file" => planFile,
                 // Absent (null) unless PLAN_FILE was present but failed validation or repeated.
                 "delegation.plan-file-rejected" => block.RejectedNames.Contains("PLAN_FILE") ? true : null,
                 "delegation.task" => task,
                 "delegation.markers" => marker,
                 "config.planning-dirs" => planningDirs,
-                // A machine fact: whether the host's review.task-gates lists any gate for the agent that returned.
+                // A machine fact: whether the host's task gates resolve any gate for the agent that returned and
+                // the technology the dispatch names, by the same resolver the gate run uses. A host whose gates
+                // are keyed only by technology must not read as having none.
                 "config.task-gates-declared" => target is not null
-                                                && config.Review.TaskGates.TryGetValue(target, out IReadOnlyList<ReviewTaskGate>? gates)
-                                                && gates.Count > 0,
+                                                && TaskGateResolver.Resolve(
+                                                    config.Review, target, technology, parentTechnology).Gates.Count > 0,
                 "lens.name" => lens,
                 "lens.applicability" => applicability,
                 "finding.id" => finding is null ? null : refute,
@@ -237,6 +268,37 @@ public static class TriggerFactBuilder
         }
 
         return facts;
+    }
+
+    /// <summary>
+    /// Adds <see cref="FilesAllTestsFact"/> when the task names files: true when every one matches
+    /// the host's test-file patterns, false when one does not.
+    /// </summary>
+    /// <remarks>
+    /// A task that names no files leaves the fact absent rather than vacuously true: a task with no
+    /// files is a task the plan described without a scope, and exempting it from the test-first check
+    /// would be a claim about files nobody listed. The rule then decides on its other clauses.
+    /// </remarks>
+    public static ArbiterFactSet WithTestsOnlyTaskFact(
+        ArbiterFactSet facts,
+        IReadOnlyList<string> testFilePatterns)
+    {
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(testFilePatterns);
+
+        if (!facts.Contains(FilesAllTestsFact)
+            || !facts.TryGet("plan.task.files", out ArbiterFact? files)
+            || files.Value is not IEnumerable<string> paths)
+        {
+            return facts;
+        }
+
+        List<string> declared = [.. paths];
+        if (declared.Count == 0)
+            return facts;
+
+        bool allTests = declared.All(path => testFilePatterns.Any(pattern => PathGlob.IsMatch(pattern, path)));
+        return facts.With(FilesAllTestsFact, allTests, ArbiterFactLabel.Derived);
     }
 
     /// <summary>

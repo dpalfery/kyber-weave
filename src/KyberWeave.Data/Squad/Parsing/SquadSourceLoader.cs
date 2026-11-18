@@ -734,7 +734,7 @@ public static class SquadSourceLoader
             [
                 "schema", "name", "description", "invocation", "model-profile", "capability-profile",
                 "copilot-capability-profile", "copilot-tools", "pi-extensions", "pi-tools", "devin-capability-profile",
-                "delegates-to", "fallback", "aliases"
+                "delegates-to", "fallback", "aliases", "worker-roster"
             ],
             file.RelativePath,
             frontmatter.LineOffset);
@@ -793,7 +793,7 @@ public static class SquadSourceLoader
             RequireScalar(root, "name", file.RelativePath, frontmatter.LineOffset),
             RequireScalar(root, "description", file.RelativePath, frontmatter.LineOffset),
             invocation,
-            RequireScalar(root, "model-profile", file.RelativePath, frontmatter.LineOffset),
+            TryGetScalar(root, "model-profile", file.RelativePath, frontmatter.LineOffset) ?? string.Empty,
             RequireScalar(root, "capability-profile", file.RelativePath, frontmatter.LineOffset),
             TryGetScalar(root, "copilot-capability-profile", file.RelativePath, frontmatter.LineOffset),
             copilotTools,
@@ -806,7 +806,8 @@ public static class SquadSourceLoader
             frontmatter.Body,
             Sha256(frontmatter.Body),
             file.RelativePath,
-            LoadResources(logicalRoot, resolvedRoot, file.RelativePath, frontmatter.Body));
+            LoadResources(logicalRoot, resolvedRoot, file.RelativePath, frontmatter.Body),
+            TryGetScalar(root, "worker-roster", file.RelativePath, frontmatter.LineOffset));
     }
 
     /// <summary>

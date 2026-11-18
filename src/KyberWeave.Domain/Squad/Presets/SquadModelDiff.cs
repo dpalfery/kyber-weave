@@ -39,6 +39,13 @@ public static class SquadModelDiff
 
         foreach (SquadAgent agent in source.Agents)
         {
+            // An agent with no model profile (the conductor) runs on its session's model, so a
+            // preset change cannot move it and there is no token to diff.
+            if (string.IsNullOrWhiteSpace(agent.ModelProfile))
+            {
+                continue;
+            }
+
             string? oldModel = SquadModelResolution.ResolveToken(before, agent.ModelProfile, target);
             string? newModel = SquadModelResolution.ResolveToken(after, agent.ModelProfile, target);
 

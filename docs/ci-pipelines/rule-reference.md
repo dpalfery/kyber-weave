@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-17
 ---
 
 # Rule reference
@@ -35,7 +35,7 @@ generated block, or it declared `config-reg` entries of its own.
 | Id | Severity | Meaning |
 |---|---|---|
 | `KW-CONFIG-REG-001` | Error | A registry property names a path that does not exist |
-| `KW-CONFIG-REG-002` | Error | The rendered `AGENTS.md` block no longer matches configuration |
+| `KW-CONFIG-REG-002` | Error; Warning during the standards warning period | The properties the rendered `AGENTS.md` block publishes no longer match configuration. A block differing only in legacy `README.md` standard names is the warning period, and names `docs standards migrate` |
 
 ### Plan and todo lifecycle — `docs validate`
 
@@ -47,7 +47,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-LIFECYCLE-002` | Error | A `todo` document in the todo folder that the todo index cannot reach through links inside that folder |
 | `KW-DOC-LIFECYCLE-003` | Error | A plan or specification still in its active folder — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-004` | Error | An archived entry the change touches without closeout evidence (`C0`–`C9`) — raised only by `docs validate --merge-ready` |
-| `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.json` beside a plan, `tasks.json` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
+| `KW-DOC-LIFECYCLE-005` | Error | A task file (`<plan>.tasks.yml` beside a plan, `tasks.yml` in a specification folder) is left behind, under the active folders or under the archive — raised only by `docs validate --merge-ready` |
 | `KW-DOC-LIFECYCLE-006` | Error | The plan index claims an open plan that does not exist: a table row with a Draft, Ready, In progress or Blocked status whose plan file is gone, or a sentence outside the table that restates a plan's status, such as `` `Plan` (Draft) `` |
 
 ### Plan closeout — `docs closeout`
@@ -59,6 +59,7 @@ Reported only when the `plan-index` or `todo-index` registry property names a do
 | `KW-DOC-CLOSEOUT-003` | Error | The plan index is missing. (A missing archived plan inventory, or one without the `Plan / Status / Date / Archive Date / Canonical Docs / Goal` table, is created or completed by `--archive` instead of refused.) |
 | `KW-DOC-CLOSEOUT-004` | Info / Warning | A step the command took or, without `--archive`, would take. Warning: `git add` could not stage the touched files |
 | `KW-DOC-CLOSEOUT-005` | Error | `--date` is not `yyyy-MM-dd` |
+| `KW-DOC-CLOSEOUT-006` | Error | The plan's `## Tasks` section still has unchecked numbered tasks (`- [ ] <id>`). Prose checklists elsewhere and fenced examples do not count. The documentation developer ticks every completed task before archiving, so an archived plan never records unfinished work as done |
 | `KW-DOC-PLANREF-001` | Error | A plan or specification argument (to `docs closeout`, `docs tasks` or `arbiter plan`) matches more than one active file; the finding lists the candidates |
 
 ### Plan finalize — `docs finalize` and `docs_finalize_approved_plan_and_write_task_file`
@@ -89,16 +90,16 @@ Every Error refuses before anything leaves the machine and changes nothing, exce
 | `KW-DELIVER-007` | Error | `gh` could not list, create, update or read back the pull request, or an open pull request from the branch targets a different base (left for a person) |
 | `KW-DELIVER-008` | Info / Warning | A step taken. Warning: the pull request read back with a different title or description than was sent |
 
-A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C9`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem.
+A plan whose closeout evidence is incomplete is reported with `KW-DOC-LIFECYCLE-004` and nothing is moved. One run reports every missing condition (`C1`–`C10`) as its own finding, with every unmapped id named and an example row or line as the hint, together with any index problem. `C10` is the archived plan's own `## Tasks` section: a numbered task still unticked means the plan records undelivered work, and the merge gate reads the archived copy so an archive moved by an older build is still caught.
 
 ### Plan task files — `docs validate` and the docs MCP validate tool
 
 A plan's task file is the tracked file `kyber-weave docs tasks <plan> --write` derives at finalization so the conductor can
-dispatch without reading the plan: `docs/plans/<plan>.tasks.json` beside the plan. The command writes the schema version, plan path, execution digest and every task entry (kebab-case `id`, `capabilities`, `depends-on`, `files`, `session`, `prompt`, and `role` only when the plan task carries an explicit `Role:`, `Agent:` or `Specialist:` line); `capabilities` is the task's `Capabilities:` line, or an older plan's `Skills` names; `--check` exits `1` and names each difference. Nobody writes the file by hand, and every finding below names the command that fixes it, or the plan line to add first. (The merge-time rule
-`KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.json` inside a specification.) The plan stays the
+dispatch without reading the plan: `docs/plans/<plan>.tasks.yml` beside the plan. The command writes the schema version, plan path, execution digest and every task entry (kebab-case `id`, `capabilities`, `depends-on`, `files`, `session`, `prompt`, and `role` only when the plan task carries an explicit `Role:`, `Agent:` or `Specialist:` line); `capabilities` is the task's `Capabilities:` line, or an older plan's `Skills` names; `--check` exits `1` and names each difference. Nobody writes the file by hand, and every finding below names the command that fixes it, or the plan line to add first. (The merge-time rule
+`KW-DOC-LIFECYCLE-005` also covers `<spec-folder>/tasks.yml` inside a specification.) The plan stays the
 authority, so every rule here is a disagreement between the file and the plan it sits beside, or a prompt
 that cannot be acted on, or a leftover copy of the file. All seven run in `docs validate` and in `docs_validate_governed_document_schema`, not
-behind a flag, because the orchestrator has the docs tools and no shell. Rules `-001` to `-006` also check a specification's `<spec-folder>/tasks.json` against its `tasks.md`; its `plan` field holds that path, and a specification is Ready for `-006` when `tasks.md` carries the spec Ready line.
+behind a flag, because the orchestrator has the docs tools and no shell. Rules `-001` to `-006` also check a specification's `<spec-folder>/tasks.yml` against its `tasks.md`; its `plan` field holds that path, and a specification is Ready for `-006` when `tasks.md` carries the spec Ready line.
 
 | Id | Severity | Meaning |
 |---|---|---|
@@ -108,13 +109,19 @@ behind a flag, because the orchestrator has the docs tools and no shell. Rules `
 | `KW-DOC-TASKS-004` | Error | A prompt carries no command, or no acceptance criteria. `docs tasks` also reports it, for the plan task, naming the line to add (`Command: ` backticked program and argument, `Acceptance criteria: ...`, or `Capabilities: ...` when the task says neither what abilities it needs nor which agent runs it) |
 | `KW-DOC-TASKS-005` | Error | A prompt tells the worker to open a plan, specification or todo — the authoring-time half of `KW-ARB-PLANREAD-001` |
 | `KW-DOC-TASKS-006` | Warning | A Ready plan or specification task list has no task file beside it. Advisory: it never fails a merge, because every plan or specification task list sits in that state until its architect or product-owner writes one |
-| `KW-DOC-TASKS-007` | Error / Warning | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.json.new` or `.tmp`, with or without its plan beside it. The name selects the file and its content decides: its top-level JSON keys must include the task file's `execution-digest`, or `schema-version` beside `plan` or `tasks` (a file that cannot be read is reported). Error for a copy. Names ending in `.tasks.json` are `KW-DOC-LIFECYCLE-005`'s. Warning, same code, when `plan-index` names no plans folder (a root-level file), because nothing was checked, and when a plans subfolder cannot be read |
+| `KW-DOC-TASKS-007` | Error / Warning | A copy of a task file left in the plans folder under another name, such as `<plan>.tasks.yml.new` or `.tmp`, with or without its plan beside it. The name selects the file and its content decides: its top-level YAML keys must include the task file's `execution-digest`, or `schema-version` beside `plan` or `tasks` (a file that cannot be read is reported). Error for a copy. Names ending in `.tasks.yml` are `KW-DOC-LIFECYCLE-005`'s. Warning, same code, when `plan-index` names no plans folder (a root-level file), because nothing was checked, and when a plans subfolder cannot be read |
 | `KW-DOC-TASKS-008` | Warning | A task's packet cannot carry content it depends on: it cites a decision with no row in the plan's Decisions table, refers to the test contract with no row for the task, or cites more plan content than the 6,000-character packet budget (the finding names what was left out). The hint gives an example row to add |
 | `KW-DOC-TASKS-009` | Warning | A task says "see above", "as described in the plan" or the like without naming a decision, contract row or section the packet carries. A worker cannot open the plan, so the detail must be stated in the task or cited by id or heading |
 | `KW-DOC-TASKS-010` | Retired | Formerly: a test-authoring task ordered before the task that creates the production file its tests name. Retired 2026-11-13: one worker writes a test-first task's tests and code ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)) |
 | `KW-DOC-TASKS-011` | Warning | `docs tasks --check` only, when a model key is configured (skipped with an info line otherwise): the Arbiter model, asked once per packet, answers with at least 0.8 confidence that a developer reading only the packet lacks the files, behaviour, tests or command. The finding names the missing element |
 | `KW-DOC-TASKS-012` | Info | `docs tasks` (write and check): an entry in a task's files that is not a repository path (a URL, a call such as `page.goto('/')`, a route like `/api/drivers`, or a pattern with no folder name before its wildcard) was left out of the task's file scope. The message lists what was dropped. The overlap check and diff attribution use the kept entries only. The entry's text alone decides: whether the path or its folder exists yet makes no difference, so the same plan always gives the same file list |
 | `KW-DOC-TASKS-013` | Error | `docs tasks` (write, check and preview) and the finalize step: a task's files name a path under the scratch folder `.agent_scratchpad/`. That folder is git-ignored and every worker may write there, so it is never a task's file scope, and no task file is written. The message lists the entries to take out of the task's Files list |
+| `KW-DOC-TASKS-014` | Warning | The task file is in the JSON form an older release wrote (hint names `--convert`), or declares schema version 1 (hint names `--write`). It is read for two minor releases. |
+| `KW-DOC-TASKS-015` | Error | A task entry's `Difficulty:` is not `easy`, `medium` or `hard`. |
+| `KW-DOC-TASKS-016` | Error | A task entry's `Technology:` names a technology `ontology.technologies` does not declare; the finding names the declared list. |
+| `KW-DOC-TASKS-017` | Error | A task entry's `Technology:` names more than one technology; split it into one task per technology with a dependency between them. |
+| `KW-DOC-TASKS-018` | Error | Under the `tiered` worker roster, a developer task has no `Technology:` line; a documentation or delivery task, and a task that names an agent the removal deleted, needs none. |
+| `KW-DOC-TASKS-019` | Warning | The task file records a `worker-roster` value that is not `tiered`: the retired `technology`, or a value this build does not know. There is one roster, so the file is read as `tiered` and needs a `Technology:` line on every task a developer agent will do; `kyber-weave docs tasks <artifact> --write` rewrites it under the roster in use. |
 | `KW-DOC-TASKS-CLI-002` | Error | `docs packet` with no `--plan`: several plans are Ready or In progress (the finding lists each; pass `--plan <one of them>`), or none is in this checkout and no other git worktree of the repository has an active plan with the task (the finding names the directory searched), or several worktrees do (the finding lists each `cd <worktree> && kyber-weave docs packet <id>`). A worker with none reports the finding and stops |
 | `KW-DOC-TASKS-CLI-003` | Error | `docs packet`: the task id matches no task, or several. The finding lists the plan's task ids. Ids are accepted as `T1`, `t1`, `task 1`, `Task-1` or `1` |
 | `KW-DOC-TASKS-CLI-004` | Error | `docs packet`: the task file is missing or no longer matches its plan (the stale-digest and difference findings are printed with it). No packet is printed; run `kyber-weave docs tasks <plan> --write` and again |
@@ -124,7 +131,7 @@ behind a flag, because the orchestrator has the docs tools and no shell. Rules `
 
 `KW-DOC-LIFECYCLE-005` in the table above is the merge-time half: the commit that archives a plan
 removes the file, and the walk looks under the archive too, so a specification folder that carried
-its `tasks.json` into the archive is caught rather than kept as dead weight.
+its `tasks.yml` into the archive is caught rather than kept as dead weight.
 
 ### Drift — `docs drift`
 
@@ -283,7 +290,7 @@ failed gate.
 | `KW-REVIEW-024` | Info / Error | The computed verdict. Info on approve, error otherwise. |
 | `KW-REVIEW-025` | Error | A review report could not be written (`--out`) |
 | `KW-REVIEW-026` | Info | A gate does not apply to this change: no changed path matched its `applies-when.paths` or `include`, or its `os` does not match the host, so it was not executed |
-| `KW-REVIEW-027` | Warning | No task gates are declared for the named agent, so its change has no executed evidence (`--agent`) |
+| `KW-REVIEW-027` | Error / Warning | No task gate resolves for the named agent: the task's technology and its parent declare nothing under `review.technology-gates`, and the agent and the technology agent the shipped map names declare nothing under `review.task-gates`, so its change has no executed evidence (`--agent`). Error when the task names a technology, warning when it names none. |
 | `KW-REVIEW-028` | Error | The changed set, `--task` slug, or a `{changed}`, `{task}` or `{tests}` expansion was refused or could not be resolved; nothing ran. Council refusals (`--base`, `--paths`) exit `1`; `--task` or `--fix` without `--agent` is a client-input error (exit `2`) |
 | `KW-REVIEW-029` | Warning | A task gate's `fix` command failed. The verify command still decides the gate (`--agent --fix`) |
 | `KW-REVIEW-033` | Error / Warning | A gate never started: its program could not start, its working directory does not exist, or a full-suite gate was refused without `--council` outside a terminal (the other gates still run; exit `1`). Error when blocking, warning otherwise. |
@@ -345,13 +352,13 @@ receipts and logs key on them, so an id is never reused or renumbered.
 | `KW-ARB-PLAN-001` | `delegate` | 0, then 1 | The dispatch names the plan or specification its work comes from. Step 0 allows a plan read with tasks; only a confident model `no-plan` escalates |
 | `KW-ARB-SCOPE-001` | `delegate` | 0, then 1 | The work is one of the plan's tasks. Step 0 answers the file-scope answers, all allow; only a confident model `not-in-plan` escalates. The question is given the target's capability profile and reads a documentation closeout or impact review sent to a documentation-profile target as the plan's own closeout (`in-plan`) |
 | `KW-ARB-SCOPE-002` | `delegate` | 0, then 1 | Delegation asks only for work the task describes, writing and running the task's own tests included; not asked when no plan task was found |
-| `KW-ARB-READY-001` | `delegate` | 0, then 1 | Dependencies complete; files clear of work in flight. The in-flight overlap escalates at step 0; only a confident model `waiting` escalates for dependencies |
+| `KW-ARB-READY-001` | `delegate` | 0, then 1 | Dependencies complete; files clear of work in flight. The in-flight overlap escalates at step 0, and an earlier served evaluation of the same plan task is never counted as overlap (a served decision is advisory); only a confident model `waiting` escalates for dependencies |
 | `KW-ARB-OWNER-001` | `delegate` | 0, then 1 | Target is the specialist the task names in an older plan's Skills line; only a confident model `not-owner` escalates. A current plan names capabilities, so it answers `no-mapping` and allows ([ADR 0080](../adr/0080-plan-tasks-name-capabilities-and-the-conductor-chooses-the-agent.md)) |
 | `KW-ARB-OWNER-002` | `delegate` | 1 | Roster specialist owning this task; shipped disabled, never blocks (the conductor chooses the agent, ADR 0080) |
 | `KW-ARB-MODE-001` | Retired | — | Formerly: failing tests exist before an implementation dispatch in test-first mode. Retired 2026-11-13 with the RED/GREEN task split; see `KW-ARB-MODE-002` ([ADR 0076](../adr/0076-test-first-is-one-worker-per-task.md)) |
-| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode the task gate's accepted `--red` report sits, older, beside the passing report the `TASK_GATE:` line claims. Every answer allows and is logged: `no-failing-run` (none, or only a later one) is recorded for monitoring, not a stop; standard mode, a `test-dev` or documentation target and a `Not applicable` contract row answer `not-required`. A host may override the effect to `escalate` |
+| `KW-ARB-MODE-002` | `delegate.returned` | 0 | In test-first mode the task gate's accepted `--red` report sits, older, beside the passing report the `TASK_GATE:` line claims. Every answer allows and is logged: `no-failing-run` (none, or only a later one) is recorded for monitoring, not a stop; standard mode, a documentation target, a task whose files are all test files and a `Not applicable` contract row answer `not-required`. A host may override the effect to `escalate` |
 | `KW-ARB-ROSTER-001` | `delegate`, `investigate` | 0 | Target is in the caller's `delegates-to`. Judged only for a caller the catalog names with a `delegates-to` list; any other caller answers `no-roster`, which allows |
-| `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | A run is live for the repository before an orchestrator hands a specialist that writes files (`worker`, `documentation`, or a planner's `architect` or `product-planning` profile) any work. `not-started` escalates and names `kyber-weave run start`; the run-start dispatch, `github-devops` and read-only targets are exempt, and unreadable evidence allows |
+| `KW-ARB-RUN-001` | `delegate`, `delegate.planner`, `investigate` | 0 | A run is live for the repository before an orchestrator hands a specialist that writes files (`worker`, `documentation`, or a planner's `architect` or `product-planning` profile) any work. `not-started` escalates and names `kyber-weave run start`; the run-start dispatch, `devops` and read-only targets are exempt, and unreadable evidence allows |
 | `KW-ARB-PLANREAD-001` | `delegate` | 0, then 1 | The dispatch does not tell the worker to open a plan, specification or todo file; a documentation-profile target is exempt, and only a confident model `names-plan` escalates |
 | `KW-ARB-DIFF-001` | `delegate.returned` | 0, then 1 | Delegation changed only files of its task's work, after the files of sibling dispatches in flight in the same working tree are set aside; what cannot be attributed allows. `out-of-scope` escalates at step 0; only a confident model `outside-task` escalates otherwise |
 | `KW-ARB-GATE-REPORT-001` | `delegate.returned` | 0, then 1 | The worker ran the task gate. A report that contradicts the `TASK_GATE` claim (`disagrees`) escalates at step 0; a host that declares no `review.task-gates` entry for the returning agent gets a non-escalating `no-gates-declared` at step 0 (the documentation developer has no task gate); an unreadable line otherwise goes to the model, and only a confident `missing` escalates |
@@ -413,7 +420,13 @@ Hook guards are not rules: hosts cannot tune a guard by id, but `arbiter.enabled
 | `KW-ARB-CONFIG-014` | Error | `shadow` is set on `KW-ARB-DIFFICULTY-001` or `KW-ARB-LADDER-001`, whose shadow state `model-targeting.mode` owns |
 | `KW-ARB-CONFIG-015` | Error | A savings value is out of range or in a forbidden place: `stores.max-item-bytes` outside 1 to 1048576, `stores.retain-days` below 1 (a value above 3650 is clamped, not refused), a blank `comment-triage.bot-logins` entry, a `dispatch-budget` value below 1, a host rule using `for-each`, or a host rule mapping an answer to an effect only shipped rules may use |
 | `KW-ARB-CONFIG-016` | Warning | The provider timeout in force (after the user override) plus two seconds of evaluation does not fit the hook timeout rendered from the repository's `timeout-ms` |
-| `KW-ARB-MODEL-001` | Warning | Model targeting is not `off`, a hooked global target is installed, and its `model-targets.<harness>.json` is missing, unreadable, or older than the Squad lock. Remedy: `kyber-weave squad update`. Reported by `arbiter doctor` |
+| `KW-ARB-CONFIG-017` | Error | A role or technology folder's `<name>.arbiter-rules.yml` cannot be read, or holds a rule the Arbiter cannot use. The file and rule are named, and the shipped rules are used for that folder |
+| `KW-ARB-CONFIG-018` | Warning | A technology standard's `builds-on` names a parent whose standard does not exist. The parent's Arbiter rules are not read |
+| `KW-ARB-CONFIG-019` | Error | Technology standards name each other as `builds-on` parents in a cycle. The chain stops where it repeats |
+| `KW-ARB-CONFIG-020` | Info | A host folder declares a shipped rule id and so replaces or disables it. No rule is locked, so the declaration takes effect and the finding makes it visible |
+| `KW-ARB-CONFIG-021` | Warning | One folder file declares a rule id more than once. The last declaration wins, as it does across files |
+| `KW-ARB-CONFIG-022` | Warning | A folder rules file has a top-level or rule key the Arbiter does not know. The key is ignored, and the name and file are reported |
+| `KW-ARB-MODEL-001` | Warning | Model targeting is not `off`, a hooked global target is installed, and its `model-targets.<harness>.json` is missing, unreadable, or not the table the last Squad update wrote. Remedy: `kyber-weave squad update`. Reported by `arbiter doctor` |
 | `KW-ARB-INSTALL-001` | Error | `--global` and `--project` were used together, or the target-scope input is otherwise invalid for the CLI; the install defaults to global and project scope is opt-in |
 | `KW-ARB-KEY-001` | Warning | Remote provider configured and no key resolves for its origin |
 | `KW-ARB-PROJECT-001` | Warning | The project enables Arbiter but a harness is not gated: no project hook, and no live global hook that evaluates under the project. Raised once per ungated harness, naming it; hint is its fix command (`kyber-weave arbiter install --project --target <token>`, or `kyber-weave arbiter install --target claude` for Claude). Reported by `arbiter doctor` |

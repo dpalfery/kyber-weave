@@ -81,48 +81,30 @@ public sealed class SquadCanonicalContentTests
     /// </summary>
     private static readonly string[] DeveloperGateAgents =
     [
-        "csharp-dev",
-        "dal-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev"
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops"
     ];
 
-    /// <summary>The approved canonical agent roster, in ordinal order.</summary>
+    /// <summary>The approved canonical agent roster, in ordinal order: the fifteen agents left after removal.</summary>
     private static readonly string[] ExpectedAgents =
     [
         "architect",
-        "azure-reader",
         "bug-crusher",
         "bug-crusher-investigator",
         "code-reviewer",
         "conductor",
-        "csharp-dev",
-        "dal-dev",
+        "dev-easy",
+        "dev-hard",
+        "dev-medium",
+        "devops",
         "docs-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
+        "platform-researcher",
         "product-owner",
-        "pulumi-dev",
-        "python-dev",
-        "react-dev",
         "research-agent",
         "review-lens",
-        "review-triage",
-        "rust-dev",
-        "sql-database-architect",
-        "tauri-dev",
-        "test-dev",
-        "typescript-dev"
+        "review-triage"
     ];
 
     private static readonly string[] ExpectedSkills =
@@ -154,47 +136,26 @@ public sealed class SquadCanonicalContentTests
         "security-review",
         "setup-dev-environment",
         "task-gate",
-        "testing",
         "typescript-dev"
     ];
 
     /// <summary>
-    /// Every identity carried by both an agent and a canonical skill. `product-owner` and
-    /// `bug-crusher` are the primary shared identities (thin wrappers reusing the canonical
-    /// skill as their entry point); the rest are distinct-body collisions lowered to a
-    /// role-prefixed skill on a fallback target.
+    /// Every identity carried by both an agent and a canonical skill. After the removal only the two
+    /// primary shared identities are left: each is a thin wrapper reusing the canonical skill as its entry point.
     /// </summary>
     private static readonly string[] ExpectedAgentSkillIntersections =
     [
         "bug-crusher",
-        "csharp-dev",
-        "dal-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
-        "product-owner",
-        "python-dev",
-        "rust-dev",
-        "typescript-dev"
+        "product-owner"
     ];
 
     /// <summary>
     /// The intersections whose agent and skill bodies differ AND are not declared shared
     /// identities, so a fallback target must project the agent to <c>role-&lt;name&gt;</c>.
     /// The two primary shared identities are excluded: their canonical skill is the entry point,
-    /// so no role-prefixed duplicate is generated.
+    /// so no role-prefixed duplicate is generated. The removal left no others.
     /// </summary>
-    private static readonly string[] DistinctBodyAgentSkillCollisions =
-    [
-        "csharp-dev",
-        "dal-dev",
-        "github-devops",
-        "go-dev",
-        "maui-dev",
-        "python-dev",
-        "rust-dev",
-        "typescript-dev"
-    ];
+    private static readonly string[] DistinctBodyAgentSkillCollisions = [];
 
     /// <summary>The primary shared identities declared by the <c>role-skill</c> profile.</summary>
     private static readonly string[] ExpectedSharedIdentities = ["bug-crusher", "product-owner"];
@@ -630,7 +591,9 @@ public sealed class SquadCanonicalContentTests
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
-        Assert.Equal("orchestration", conductor.ModelProfile);
+        Assert.True(string.IsNullOrEmpty(conductor.ModelProfile));
+        Assert.Contains("dev-hard", source.ModelProfiles.Profiles.Keys);
+        Assert.DoesNotContain("orchestration", source.ModelProfiles.Profiles.Keys);
         Assert.Equal("architect", architect.ModelProfile);
         Assert.Contains("architect", conductor.DelegatesTo);
         Assert.Contains("product-owner", conductor.DelegatesTo);
@@ -703,22 +666,9 @@ public sealed class SquadCanonicalContentTests
     [InlineData("architect")]
     [InlineData("bug-crusher-investigator")]
     [InlineData("code-reviewer")]
-    [InlineData("csharp-dev")]
-    [InlineData("dal-dev")]
     [InlineData("docs-dev")]
-    [InlineData("github-devops")]
-    [InlineData("go-dev")]
-    [InlineData("maui-dev")]
-    [InlineData("pulumi-dev")]
-    [InlineData("python-dev")]
-    [InlineData("react-dev")]
     [InlineData("review-lens")]
     [InlineData("review-triage")]
-    [InlineData("rust-dev")]
-    [InlineData("sql-database-architect")]
-    [InlineData("tauri-dev")]
-    [InlineData("test-dev")]
-    [InlineData("typescript-dev")]
     public void LoadCodeReadingAgentsDirectIndexedDiscoveryBeforeRawReads(string agentName)
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
@@ -885,24 +835,30 @@ public sealed class SquadCanonicalContentTests
     /// Developer agents close every task by reporting the <c>task-gate</c> digest. A developer body
     /// that does not name the gate would silently skip the exit check.
     /// </summary>
+    /// <summary>
+    /// Developer agents close every task by reporting the <c>task-gate</c> digest. A developer body
+    /// that does not name the gate would silently skip the exit check. The tiered developer bodies name
+    /// the gate in prose and emit the digest; they name no skill, so the delivery agent's body is the one
+    /// that also names the <c>task-gate</c> skill by path.
+    /// </summary>
     [Theory]
-    [InlineData("csharp-dev")]
-    [InlineData("dal-dev")]
-    [InlineData("github-devops")]
-    [InlineData("go-dev")]
-    [InlineData("maui-dev")]
-    [InlineData("pulumi-dev")]
-    [InlineData("python-dev")]
-    [InlineData("react-dev")]
-    [InlineData("rust-dev")]
-    [InlineData("sql-database-architect")]
-    [InlineData("tauri-dev")]
-    [InlineData("test-dev")]
-    [InlineData("typescript-dev")]
-    public void DeveloperAgentBodyNamesTaskGateAndEmitsDigestLine(string agentName)
+    [InlineData("dev-easy")]
+    [InlineData("dev-hard")]
+    [InlineData("dev-medium")]
+    public void DeveloperTierBodyRunsTheTaskGateAndEmitsItsDigest(string agentName)
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
+
+        Assert.Contains("task gate", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("TASK_GATE:", agent.InstructionBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DeliveryAgentBodyNamesTheTaskGateSkillAndEmitsItsDigest()
+    {
+        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadAgent agent = Assert.Single(source.Agents, a => a.Name == "devops");
 
         Assert.Contains("task-gate", agent.InstructionBody, StringComparison.Ordinal);
         Assert.Contains("TASK_GATE:", agent.InstructionBody, StringComparison.Ordinal);
@@ -916,19 +872,9 @@ public sealed class SquadCanonicalContentTests
     /// </summary>
     /// <param name="agentName">The canonical developer agent identity.</param>
     [Theory]
-    [InlineData("csharp-dev")]
-    [InlineData("dal-dev")]
-    [InlineData("github-devops")]
-    [InlineData("go-dev")]
-    [InlineData("maui-dev")]
-    [InlineData("pulumi-dev")]
-    [InlineData("python-dev")]
-    [InlineData("react-dev")]
-    [InlineData("rust-dev")]
-    [InlineData("sql-database-architect")]
-    [InlineData("tauri-dev")]
-    [InlineData("test-dev")]
-    [InlineData("typescript-dev")]
+    [InlineData("dev-easy")]
+    [InlineData("dev-hard")]
+    [InlineData("dev-medium")]
     public void DeveloperAgentBodyRoutesItsCodingStandardThroughTheTool(string agentName)
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
@@ -1048,7 +994,7 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// A specification's task file lives in the specification folder
-    /// (<c>&lt;spec-folder&gt;/tasks.json</c>), removed before the folder is moved to the archive,
+    /// (<c>&lt;spec-folder&gt;/tasks.yml</c>), removed before the folder is moved to the archive,
     /// so the closeout the owner text describes and the rule that catches a leftover file agree.
     /// </summary>
     [Fact]
@@ -1067,11 +1013,11 @@ public sealed class SquadCanonicalContentTests
         ];
 
         string? carrier = surfaces.FirstOrDefault(
-            surface => File.ReadAllText(surface).Contains("<spec-folder>/tasks.json", StringComparison.Ordinal));
+            surface => File.ReadAllText(surface).Contains("<spec-folder>/tasks.yml", StringComparison.Ordinal));
 
         Assert.True(
             carrier is not null,
-            "the product-owner text must name `<spec-folder>/tasks.json` as the specification form of the " +
+            "the product-owner text must name `<spec-folder>/tasks.yml` as the specification form of the " +
             "tracked task file. Searched: " + string.Join(", ", surfaces));
     }
 

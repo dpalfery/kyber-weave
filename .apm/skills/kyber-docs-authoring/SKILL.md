@@ -178,7 +178,7 @@ one home.
 1. Read the technologies list in `<documentation-ontology>`. It is the same list as
    `ontology.technologies` in `.kyber-weave/kyber-weave.yml`. A value that is not on
    it is not a legal `technology`.
-2. Write the document at `<docs-root>/standards/<technology>/README.md`. The folder
+2. Write the document at `<docs-root>/standards/<technology>/<technology>.standards.md`. The folder
    name and the `technology` value are the same string. That is the file the
    registry property `<technology>-coding-standard` points at.
 3. Frontmatter is the six base keys plus `technology`. Do not set `component`. One
@@ -210,7 +210,7 @@ last-reviewed: 2026-08-01
 ---
 ```
 
-The file is `<docs-root>/standards/csharp/README.md`.
+The file is `<docs-root>/standards/csharp/csharp.standards.md`.
 
 ## Setting up a new repository
 

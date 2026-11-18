@@ -200,7 +200,7 @@ public sealed class DevinHookAdapterTests
     public void PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
     {
         string stdin = Fixture("pre-run-subagent-dispatch.json").Replace(
-            "\"profile\": \"csharp-dev\"", "\"profile\": \"docs-dev\"", StringComparison.Ordinal);
+            "\"profile\": \"dev-medium\"", "\"profile\": \"docs-dev\"", StringComparison.Ordinal);
 
         (int exit, string stdout, _) = Run(stdin, null, new ScriptedEngine());
 
@@ -214,7 +214,7 @@ public sealed class DevinHookAdapterTests
     [Fact]
     public void PreDispatch_AllowWithRewrite_WritesRewrittenPromptOnly()
     {
-        const string rewritten = """{"prompt":"Hello.","profile":"csharp-dev"}""";
+        const string rewritten = """{"prompt":"Hello.","profile":"dev-medium"}""";
         ScriptedEngine engine = new()
         {
             PreResult = new HookOutcome(HookOutcomeKind.AllowWithRewrite, RewrittenInputJson: rewritten),
@@ -238,7 +238,7 @@ public sealed class DevinHookAdapterTests
 
         Assert.Equal(0, exit);
         Assert.Equal(DevinHookAdapter.Token, engine.SeenPreHarness);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
         Assert.StartsWith("KYBER-ARBITER: true", engine.SeenPrePrompt, StringComparison.Ordinal);
         Assert.Contains("Implement the adapter.", engine.SeenPrePrompt, StringComparison.Ordinal);
     }
@@ -274,7 +274,7 @@ public sealed class DevinHookAdapterTests
             Fixture("pre-run-subagent-no-prompt.json"), null, engine);
 
         Assert.Equal(0, exit);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
         Assert.Equal(string.Empty, engine.SeenPrePrompt);
         Assert.Contains("unmarked", log, StringComparison.Ordinal);
         Assert.Equal(string.Empty, stdout);

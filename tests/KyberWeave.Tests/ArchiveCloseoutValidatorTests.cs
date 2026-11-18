@@ -71,6 +71,68 @@ public sealed class ArchiveCloseoutValidatorTests
     }
 
     /// <summary>
+    /// A plan archived with a task it never delivered is not closed work, however complete its harvest is. The
+    /// second end-to-end tiered run archived a plan whose task 1.2 was never implemented, and the build that ran the
+    /// archive tool carried no checkbox gate at all; this is the check the merge gate can make of the archived copy
+    /// whatever tool moved it.
+    /// </summary>
+    [Fact]
+    public void AnArchivedPlanWithAnUncheckedNumberedTaskIsReported()
+    {
+        string sections = CloseoutCorpus.DecisionsSection("D1")
+            + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
+            + CloseoutCorpus.DesignHarvestSection("H1")
+            + """
+
+              ## Tasks
+
+              - [x] 1.1 Slug rule
+              - [ ] 1.2 Word count
+
+              """;
+        using DocFixture fixture = WithTarget(new DocFixture())
+            .Write(PlanPath, CloseoutCorpus.PlanDocument(sections: sections));
+
+        Diagnostic finding = Assert.Single(
+            Validate(fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added)).Items);
+
+        Assert.Equal(ArchiveCloseoutValidator.MissingCloseoutEvidence, finding.Code);
+        Assert.Equal(PlanPath, finding.FilePath);
+        Assert.Contains("1.2", FindingText(finding), StringComparison.Ordinal);
+    }
+
+    /// <summary>A prose checklist and a fenced example are not tasks, so a closed plan carrying them still validates.</summary>
+    [Fact]
+    public void AProseChecklistAndAFencedExampleAreNotUncheckedTasks()
+    {
+        string sections = CloseoutCorpus.DecisionsSection("D1")
+            + CloseoutCorpus.CloseoutMappingSection(("D1, H1", "[Widget architecture](../../reference/widget.md)"))
+            + CloseoutCorpus.DesignHarvestSection("H1")
+            + """
+
+              ## Tasks
+
+              - [x] 1.1 Slug rule
+
+              ## Open questions
+
+              - [ ] confirm rollout with the owner
+
+              ```text
+              - [ ] 9.9 an example of the checkbox grammar
+              ```
+
+              """;
+        using DocFixture fixture = WithTarget(new DocFixture())
+            .Write(PlanPath, CloseoutCorpus.PlanDocument(sections: sections));
+
+        DiagnosticReport report = Validate(
+            fixture, KyberWeaveConfig.ProductDefaults, new ChangedPath(PlanPath, ChangeKind.Added));
+
+        Assert.DoesNotContain(report.Items, item => item.Code == ArchiveCloseoutValidator.MissingCloseoutEvidence);
+    }
+
+    /// <summary>
     /// The inventory a kind keeps in its archive folder lists archived entries and is not one,
     /// so it carries no closeout evidence to check.
     /// </summary>

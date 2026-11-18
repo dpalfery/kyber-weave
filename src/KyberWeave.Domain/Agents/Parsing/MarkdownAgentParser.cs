@@ -30,7 +30,7 @@ public sealed partial class MarkdownAgentParser : IAgentParser
         string dirName = Path.GetDirectoryName(Path.GetFullPath(filePath))!;
         string fileName = Path.GetFileName(filePath);
 
-        // Standardize role name from file name (e.g. architect.agent.md -> architect, csharp-dev.md -> csharp-dev)
+        // Standardize role name from file name (e.g. architect.agent.md -> architect, dev-medium.md -> dev-medium)
         string roleName = fileName.Replace(".agent.md", "", StringComparison.OrdinalIgnoreCase)
                                  .Replace(".md", "", StringComparison.OrdinalIgnoreCase);
 

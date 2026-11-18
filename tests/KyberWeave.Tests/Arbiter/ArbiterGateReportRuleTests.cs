@@ -31,8 +31,12 @@ public sealed class ArbiterGateReportRuleTests
 {
     private const string GateReportRule = "KW-ARB-GATE-REPORT-001";
 
-    private static readonly string ShippedRulesPath = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Arbiter", "Rules", "default-rules.yml");
+    private static readonly string[] RoleRulesPaths =
+    [
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "conductor", "conductor.arbiter-rules.yml"),
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "architect", "architect.arbiter-rules.yml"),
+        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "reviewer", "reviewer.arbiter-rules.yml")
+    ];
 
     /// <summary>
     /// The seventeen rules the file shipped before it that it still ships, pinned so the new one joins without renumbering any.
@@ -154,6 +158,138 @@ public sealed class ArbiterGateReportRuleTests
 
         Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
         Assert.Equal(declared, fact.Value);
+    }
+
+    /// <summary>
+    /// A host with only technology-keyed gates must not read as having none: the fact resolves through the
+    /// technology the dispatch names, by the same resolver the gate run uses.
+    /// </summary>
+    [Theory]
+    [InlineData("csharp", true)]
+    [InlineData("cobol", false)]
+    public void TheDeclaredTaskGateFactUsesTheDispatchedTechnology(string technology, bool declared)
+    {
+        ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
+        KyberWeaveConfig config = new()
+        {
+            Review = new ReviewConfig
+            {
+                TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+                {
+                    ["csharp"] = [gate]
+                }
+            }
+        };
+
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", "developer",
+            $"KYBER-ARBITER: true\nTECHNOLOGY: {technology}\n\nDo the work.", "conductor",
+            ArbiterCallerSources.Harness, config);
+
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(declared, fact.Value);
+    }
+
+    /// <summary>
+    /// A technology inherits its parent template's gates, as the packet, the gate run and the prompt all resolve
+    /// them. The Arbiter's fact must use the same resolution, or a host with gates only on the parent reads as
+    /// having none and the return's gate report goes unchecked.
+    /// </summary>
+    [Fact]
+    public void TheDeclaredTaskGateFactUsesTheParentsTechnology()
+    {
+        using TempDirectory repository = new();
+        string standard = Path.Combine(repository.Path, "docs", "standards", "react", "react.standards.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(standard)!);
+        File.WriteAllText(
+            standard,
+            """
+            ---
+            builds-on: typescript
+            ---
+
+            # React standard
+            """);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+            ontology:
+              docs-root: docs
+            """);
+        ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
+        config = new KyberWeaveConfig
+        {
+            Ontology = config.Ontology,
+            Review = new ReviewConfig
+            {
+                TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+                {
+                    ["typescript"] = [gate]
+                }
+            }
+        };
+
+        ArbiterFactSet facts = TriggerFactBuilder.Build(
+            "delegate.returned", "developer",
+            "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
+            ArbiterCallerSources.Harness, config, repoRoot: repository.Path);
+
+        Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+        Assert.Equal(true, fact.Value);
+    }
+
+    /// <summary>
+    /// A dispatch naming a technology whose standard this process may not read must still produce the fact.
+    /// The build is fail-open (ADR 0072: errors allow), so the fact reports the gates it could resolve and
+    /// the hook keeps going, instead of the permission failure escaping and stopping the dispatch.
+    /// </summary>
+    [Fact]
+    public void TheDeclaredTaskGateFactSurvivesAStandardTheProcessMayNotRead()
+    {
+        using TempDirectory repository = new();
+        string standard = Path.Combine(repository.Path, "docs", "standards", "react", "react.standards.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(standard)!);
+        File.WriteAllText(
+            standard,
+            """
+            ---
+            builds-on: typescript
+            ---
+
+            # React standard
+            """);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+            ontology:
+              docs-root: docs
+            """);
+        ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
+        config = new KyberWeaveConfig
+        {
+            Ontology = config.Ontology,
+            Review = new ReviewConfig
+            {
+                TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
+                {
+                    ["typescript"] = [gate]
+                }
+            }
+        };
+
+        if (!UnixFileModes.TryRemoveReadPermission(standard, out UnixFileMode originalMode))
+            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+
+        try
+        {
+            ArbiterFactSet facts = TriggerFactBuilder.Build(
+                "delegate.returned", "developer",
+                "KYBER-ARBITER: true\nTECHNOLOGY: react\n\nDo the work.", "conductor",
+                ArbiterCallerSources.Harness, config, repoRoot: repository.Path);
+
+            Assert.True(facts.TryGet("config.task-gates-declared", out ArbiterFact? fact));
+            Assert.Equal(false, fact.Value);
+        }
+        finally
+        {
+            UnixFileModes.Restore(standard, originalMode);
+        }
     }
 
     [Fact]
@@ -372,22 +508,17 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void TheShippedFileCountsTheNewRuleAndRenumbersNone()
     {
-        Assert.True(File.Exists(ShippedRulesPath), $"the shipped rules file must live at '{ShippedRulesPath}'.");
-        string[] lines = File.ReadAllLines(ShippedRulesPath);
-
+        Assert.All(RoleRulesPaths, path => Assert.True(File.Exists(path), $"the role rules file must live at '{path}'."));
         string[] ids =
         [
-            .. lines
+            .. RoleRulesPaths
+                .SelectMany(File.ReadAllLines)
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())
         ];
 
-        int declared = DeclaredRuleCount(lines[0]);
-        Assert.True(
-            declared == ids.Length,
-            $"The header declares {declared} shipped Arbiter rules and the file declares {ids.Length}. " +
-            "Update the count in the first line with the rule.");
+        Assert.Equal(36, ids.Length);
         Assert.Contains(GateReportRule, ids);
         Assert.All(ShippedBeforeThisSlice, id => Assert.Contains(id, ids));
         Assert.True(

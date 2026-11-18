@@ -13,15 +13,18 @@ public static class SquadModelResolution
     ///     Resolves the concrete model token for a category and harness target.
     /// </summary>
     /// <param name="profiles">The model profiles to resolve against.</param>
-    /// <param name="category">The profile category name.</param>
+    /// <param name="category">
+    /// The profile category name, or blank for an agent that names no profile, which has no model of its
+    /// own and runs on its session's.
+    /// </param>
     /// <param name="target">The harness target name.</param>
-    /// <returns>The resolved model token, or <c>null</c> if inherited or undefined.</returns>
+    /// <returns>The resolved model token, or <c>null</c> if the agent names no profile, or it is inherited or undefined.</returns>
     public static string? ResolveToken(SquadModelProfiles profiles, string category, string target)
     {
         ArgumentNullException.ThrowIfNull(profiles);
-        ArgumentException.ThrowIfNullOrWhiteSpace(category);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
 
+        if (string.IsNullOrWhiteSpace(category)) return null;
         if (!profiles.Profiles.TryGetValue(category, out SquadModelProfile? profile)) return null;
 
         string? token;

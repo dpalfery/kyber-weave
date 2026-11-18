@@ -10,7 +10,11 @@ The conductor supplies `DEVELOPMENT_MODE`. If omitted, record `test-first`. Reco
 
 ## Work
 
-Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, a `Capabilities:` line naming in plain words the abilities the work needs (never an agent or skill name), and requirement ids. Tasks must be executable by a cold worker without design decisions.
+Produce a numbered checkbox task list with at most two hierarchy levels. Group tasks under `###` headings, and use checkbox items only for dispatchable tasks, because every checkbox item needs its own task-file entry. Every task includes a concrete objective, exact files or components, acceptance criteria, dependencies, a `Capabilities:` line naming in plain words the abilities the work needs (never an agent or skill name), and requirement ids.
+
+Every task that changes files also carries two lines. `Difficulty:` is `easy` (a small, local change with one obvious path), `medium` (several files or a non-obvious path, no cross-cutting risk) or `hard` (spans layers, alters contracts, or needs careful design); a task with no line is `medium`. `Technology:` names exactly one technology from `ontology.technologies`. Work that spans two unrelated technologies is two tasks with a dependency — an endpoint and its database migration are separate tasks, the migration first — because one prompt carries one technology's rules and gates. A technology built on another (React on TypeScript) stays one task, and the parent's rules arrive with it.
+
+Read a technology's standard through `docs_get_coding_standard_for_technology`, for the one technology a task names. Read a standards file directly only when that tool is missing or reports a failure, and say so. Tasks must be executable by a cold worker without design decisions.
 
 Persist:
 
@@ -33,17 +37,17 @@ Mark any genuinely no-test task explicitly and name its replacement validation. 
 
 ## Task file
 
-Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.json` is the specification form of the same contract a plan uses, and the conductor writes it with `kyber-weave docs tasks` before finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
+Beside `tasks.md`, the tracked task file `<spec-folder>/tasks.yml` is the specification form of the same contract a plan uses, and the conductor writes it with `kyber-weave docs tasks` before finalization (see below). It carries a schema version, the specification's path, the execution digest, and one entry per task: id, role, dependencies, file scope, `session` group and the full prompt, each prompt naming files by path plus symbol, the full test class names and the exact commands.
 
 Only two slots stay unfilled — `{worktree}` and `{prior_results}` — because the conductor fills them at dispatch from what no authoring phase can know.
 
-The conductor writes the file with `kyber-weave docs tasks <spec-folder>/tasks.md --write` before the finalization invocation; it derives every field, the digest and each prompt from `tasks.md`, so `product-owner` never writes, edits or computes `tasks.json`. Put what each prompt needs in the task itself: its `Command:` line (a backticked program and argument) and its `Acceptance criteria:` line, or the test contract row's runner and acceptance cells. An optional `Session:` line sets the worker session group (default: the task id); add `Role: <agent>` only when the owner assigned the task to a named agent.
+The conductor writes the file with `kyber-weave docs tasks <spec-folder>/tasks.md --write` before the finalization invocation; it derives every field, the digest and each prompt from `tasks.md`, so `product-owner` never writes, edits or computes `tasks.yml`. Put what each prompt needs in the task itself: its `Command:` line (a backticked program and argument) and its `Acceptance criteria:` line, or the test contract row's runner and acceptance cells. An optional `Session:` line sets the worker session group (default: the task id); add `Role: <agent>` only when the owner assigned the task to a named agent.
 
 Finalization runs in this order:
 
-1. Check that `tasks.json` exists beside `tasks.md`. If not, return `STATUS: BLOCKED` naming `task file: run kyber-weave docs tasks <spec-folder>/tasks.md --write in <checkout>`. Nothing else is written, so the spec is not left Ready without a task file.
+1. Check that `tasks.yml` exists beside `tasks.md`. If not, return `STATUS: BLOCKED` naming `task file: run kyber-weave docs tasks <spec-folder>/tasks.md --write in <checkout>`. Nothing else is written, so the spec is not left Ready without a task file.
 2. Record the approval rows, write the spec Ready line (`**Status:** Ready`) in `tasks.md`, and synchronize the index. A status edit does not move the digest.
-3. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.json`.
+3. Return `SPEC_FINALIZED` with `TASK_FILE: <spec-folder>/tasks.yml`.
 
 ## Gaps and coverage
 
@@ -67,7 +71,7 @@ CONTRACT: <Test contract | verification contract>
 COVERAGE: <all requirement ids covered, or list gaps>
 ```
 
-On conductor-supplied explicit approval, record `Phase status: Approved` and return `STATUS: PHASE_APPROVED`. When all three phases are approved, synchronize the spec index as Draft awaiting final approval and return `STATUS: SPEC_READY`. Only a later finalization invocation carrying explicit **approve and execute** authorization records Ready and returns `STATUS: SPEC_FINALIZED`. `SPEC_FINALIZED` also returns `TASK_FILE: <spec-folder>/tasks.json`.
+On conductor-supplied explicit approval, record `Phase status: Approved` and return `STATUS: PHASE_APPROVED`. When all three phases are approved, synchronize the spec index as Draft awaiting final approval and return `STATUS: SPEC_READY`. Only a later finalization invocation carrying explicit **approve and execute** authorization records Ready and returns `STATUS: SPEC_FINALIZED`. `SPEC_FINALIZED` also returns `TASK_FILE: <spec-folder>/tasks.yml`.
 
 ## Consolidated review recording
 

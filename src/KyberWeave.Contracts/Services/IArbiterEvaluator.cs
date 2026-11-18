@@ -33,13 +33,19 @@ public interface IArbiterEvaluatorFactory
     /// <param name="gitFacts">Git-derived facts.</param>
     /// <param name="planReader">Plan-derived facts.</param>
     /// <param name="clock">The evaluation clock; the registered clock when null.</param>
+    /// <param name="modelTargetsDirectory">
+    /// The directory holding the harness's model targets table, or null for <paramref name="arbiterDirectory"/>.
+    /// A global-scope evaluation keeps per-project state under the user's home but reads the table a user-scope
+    /// install deployed beside the harness's hooks, so the two directories differ there.
+    /// </param>
     IArbiterEvaluator Create(
         IArbiterProvider provider,
         Func<Uri, string?> keyResolver,
         string arbiterDirectory,
         IArbiterGitFacts gitFacts,
         IArbiterPlanReader planReader,
-        TimeProvider? clock = null);
+        TimeProvider? clock = null,
+        string? modelTargetsDirectory = null);
 }
 
 /// <summary>Classifies bot review comments against the code as it is now, through the comment rule.</summary>

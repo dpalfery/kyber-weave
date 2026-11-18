@@ -22,7 +22,7 @@ namespace KyberWeave.Integration.Tests;
 public sealed class DocsCloseoutCommandTests
 {
     private const string Plan = "6-Docs/plans/2026-10-20-widget.md";
-    private const string TaskFile = "6-Docs/plans/2026-10-20-widget.tasks.json";
+    private const string TaskFile = "6-Docs/plans/2026-10-20-widget.tasks.yml";
     private const string Archived = "6-Docs/archive/plans/2026-10-20-widget.md";
     private const string PlanIndex = "6-Docs/plans/README.md";
     private const string Inventory = "6-Docs/archive/plans/README.md";
@@ -212,6 +212,117 @@ public sealed class DocsCloseoutCommandTests
         Run(fixture, archive: true);
 
         Assert.DoesNotContain("KW-DOC-LIFECYCLE", new ReportedFindings(fixture).Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AnUncheckedTaskListRefusesTheArchiveAndMovesNothing()
+    {
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+
+            ## Tasks
+
+            - [ ] 1.1 Widget
+              - **Files:** `src/Widget.cs`
+            - [ ] 1.2 Gadget
+              - **Files:** `src/Gadget.cs`
+            """;
+        using DocFixture fixture = Repository(plan);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-CLOSEOUT-006", output, StringComparison.Ordinal);
+        Assert.Contains("1.1", output, StringComparison.Ordinal);
+        Assert.True(Exists(fixture, Plan));
+        Assert.False(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void ATickedTaskListArchivesNormally()
+    {
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+
+            ## Tasks
+
+            - [x] 1.1 Widget
+              - **Files:** `src/Widget.cs`
+            """;
+        using DocFixture fixture = Repository(plan);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.True(exit == 0, output);
+        Assert.True(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void AProseChecklistOutsideTheTasksSectionDoesNotRefuseTheArchive()
+    {
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+
+            ## Tasks
+
+            - [x] 1.1 Widget
+              - **Files:** `src/Widget.cs`
+
+            ## Open Questions
+
+            - [ ] confirm rollout with owner
+            """;
+        using DocFixture fixture = Repository(plan);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.True(exit == 0, output);
+        Assert.True(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void AFencedCheckboxExampleInsideTheTasksSectionDoesNotRefuseTheArchive()
+    {
+        string plan = CloseoutCorpus.PlanDocument(status: "ready", bodyStatus: "Ready") + """
+
+            ## Tasks
+
+            - [x] 1.1 Widget
+              - **Files:** `src/Widget.cs`
+
+            The grammar is:
+
+            ```text
+            - [ ] 9.9 An example, not a task
+            ```
+            """;
+        using DocFixture fixture = Repository(plan);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.True(exit == 0, output);
+        Assert.True(Exists(fixture, Archived));
+    }
+
+    [Fact]
+    public void AnUncheckedTaskStillReportsTheOtherCloseoutGapsInTheSameRun()
+    {
+        string plan = CloseoutCorpus.PlanDocument(
+            status: "ready",
+            bodyStatus: "Ready",
+            sections: CloseoutCorpus.DecisionsSection("D1") + CloseoutCorpus.DesignHarvestSection("H1")) + """
+
+            ## Tasks
+
+            - [ ] 1.1 Widget
+              - **Files:** `src/Widget.cs`
+            """;
+        using DocFixture fixture = Repository(plan);
+
+        (int exit, string output) = Run(fixture, archive: true);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("KW-DOC-CLOSEOUT-006", output, StringComparison.Ordinal);
+        Assert.Contains("KW-DOC-LIFECYCLE-004", output, StringComparison.Ordinal);
+        Assert.True(Exists(fixture, Plan));
+        Assert.False(Exists(fixture, Archived));
     }
 
     [Fact]

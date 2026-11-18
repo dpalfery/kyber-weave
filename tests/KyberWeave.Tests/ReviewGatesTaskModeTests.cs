@@ -74,6 +74,36 @@ public sealed class ReviewGatesTaskModeTests : IDisposable
         Assert.Contains("FILES: " + string.Join(", ", PlanTaskFileProbe.FirstTaskFiles), output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A standard this process may not read may be the one the task's parent technology keys its gates on, so
+    /// the run is refused with a diagnostic naming it instead of letting the failure out of the command.
+    /// </summary>
+    [Fact]
+    public void AStandardTheProcessMayNotReadRefusesTheRunAndNamesIt()
+    {
+        SkipOnWindows();
+        Gate("Passed!  - Failed:     0, Passed:    1, Skipped:     0, Total:    1, Duration: 1 s", 0);
+        string standard = Path.Combine(_fixture.Root, "6-Docs", "standards", "csharp", "csharp.standards.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(standard)!);
+        File.WriteAllText(standard, "---\nbuilds-on: dotnet\n---\n\n# csharp\n");
+
+        if (!UnixFileModes.TryRemoveReadPermission(standard, out UnixFileMode originalMode))
+            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+
+        try
+        {
+            (int exit, string output) = Run();
+
+            Assert.Equal(1, exit);
+            Assert.Contains("could not be read", output, StringComparison.Ordinal);
+            Assert.Contains("csharp.standards.md", output, StringComparison.Ordinal);
+        }
+        finally
+        {
+            UnixFileModes.Restore(standard, originalMode);
+        }
+    }
+
     [Fact]
     public void AFailingRunPrintsEachFailingTestShortAndKeepsTheFullOutputInTheLog()
     {

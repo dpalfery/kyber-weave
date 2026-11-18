@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Application.Review;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -53,8 +54,15 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
     /// <param name="role">The agent working the task: the worker's own name, else the one the plan assigned; null when neither is known.</param>
     /// <param name="taskId">The task id, for the scratchpad path.</param>
     /// <param name="diagnostics">Receives notes for the log, such as an empty rules section that was skipped; they are never part of the returned text.</param>
+    /// <param name="technology">The one technology the task names, so its gates resolve by technology; null when it names none.</param>
     /// <returns>The section, starting with <see cref="Heading" />.</returns>
-    public string Render(string repoRoot, KyberWeaveConfig config, string? role, string? taskId, IList<string>? diagnostics = null)
+    public string Render(
+        string repoRoot,
+        KyberWeaveConfig config,
+        string? role,
+        string? taskId,
+        IList<string>? diagnostics = null,
+        string? technology = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
@@ -71,7 +79,7 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
                 text.AppendLine(CultureInfo.InvariantCulture, $"- <{entry.Name}>: `{entry.Path}`");
         }
 
-        AppendGates(text, config, role);
+        AppendGates(text, repoRoot, config, role, technology, diagnostics);
         AppendRules(text, repoRoot, config, diagnostics);
         text.AppendLine();
         text.AppendLine(CultureInfo.InvariantCulture,
@@ -79,22 +87,45 @@ public sealed partial class PacketHostFacts(IFileSystem files) : IPacketHostFact
         return text.ToString().TrimEnd();
     }
 
-    private static void AppendGates(StringBuilder text, KyberWeaveConfig config, string? role)
+    private static void AppendGates(
+        StringBuilder text,
+        string repoRoot,
+        KyberWeaveConfig config,
+        string? role,
+        string? technology,
+        IList<string>? diagnostics)
     {
-        if (role is null)
+        if (role is null && string.IsNullOrWhiteSpace(technology))
         {
             text.AppendLine("- Task gates: `review.task-gates` lists them per agent; print this packet again with `--agent <your agent name>` to see yours.");
             return;
         }
 
-        if (!config.Review.TaskGates.TryGetValue(role, out IReadOnlyList<ReviewTaskGate>? gates) || gates.Count == 0)
+        TaskGateResolution resolved = TaskGateResolver.Resolve(
+            config.Review,
+            role,
+            technology,
+            TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, technology, diagnostics));
+
+        string forWhom = role is null
+            ? $"technology {technology}"
+            : string.IsNullOrWhiteSpace(technology) ? role : $"{role} in technology {technology}";
+
+        if (resolved.Gates.Count == 0)
         {
-            text.AppendLine(CultureInfo.InvariantCulture, $"- Task gates for {role}: none declared under review.task-gates.");
+            if (resolved.IsRefused)
+                text.AppendLine(CultureInfo.InvariantCulture, $"- {resolved.Refusal}");
+            else
+                text.AppendLine(CultureInfo.InvariantCulture, $"- Task gates for {forWhom}: none declared under review.task-gates.");
             return;
         }
 
-        text.AppendLine(CultureInfo.InvariantCulture, $"- Task gates for {role} (review.task-gates; `review gates --agent {role}` runs them):");
-        foreach (ReviewTaskGate gate in gates)
+        string source = resolved.Source == TaskGateSource.Technology
+            ? $"review.technology-gates.{resolved.EntryKey}"
+            : $"review.task-gates.{resolved.EntryKey}";
+        string run = role is null ? string.Empty : $"; `review gates --agent {role}` runs them";
+        text.AppendLine(CultureInfo.InvariantCulture, $"- Task gates for {forWhom} ({source}{run}):");
+        foreach (ReviewTaskGate gate in resolved.Gates)
             text.AppendLine(CultureInfo.InvariantCulture, $"  - `{gate.Id}`: `{string.Join(' ', gate.Run)}`");
     }
 

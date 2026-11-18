@@ -6,6 +6,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
@@ -72,6 +73,25 @@ public sealed class PlanFinalizeTests
     }
 
     [Fact]
+    public void FinalizingWritesExactlyOneYamlTaskFileEvenWhenALegacyJsonSitsBesideIt()
+    {
+        using DocFixture fixture = Repository();
+        PlanTaskFileOutcome seeded = new PlanTaskFileGenerator(
+            fixture.Root, KyberWeaveConfig.ProductDefaults, DocsPorts.Files)
+            .Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Write);
+        Assert.False(seeded.Report.HasErrors, string.Join("; ", seeded.Report.Items.Select(item => item.Message)));
+        File.WriteAllText(
+            Path.Combine(fixture.Root, PlanTaskFileProbe.LegacyTaskFilePath.Replace('/', Path.DirectorySeparatorChar)),
+            PlanTaskFileProbe.LegacyJsonTaskFile());
+
+        (int exit, string output) = Run(fixture);
+
+        Assert.True(exit == 0, output);
+        Assert.True(Exists(fixture, PlanTaskFileProbe.TaskFilePath));
+        Assert.False(Exists(fixture, PlanTaskFileProbe.LegacyTaskFilePath));
+    }
+
+    [Fact]
     public void ASupervisedApprovalIsRecordedAsTheOwners()
     {
         using DocFixture fixture = Repository(DraftPlan(autonomous: false));
@@ -115,8 +135,9 @@ public sealed class PlanFinalizeTests
 
     [Theory]
     [InlineData("""{"schema-version":1,"tasks":[]}""", "(no tasks)")]
+    [InlineData("{ schema-version: 2, tasks: [] }", "(no tasks)")]
     [InlineData("""{"tasks":[]}""", null)]
-    [InlineData("""{"schema-version":2,"tasks":[]}""", null)]
+    [InlineData("""{"schema-version":2,"tasks":[]}""", "(no tasks)")]
     [InlineData("""{"version":1}""", null)]
     [InlineData("""{"schema-version":1}""", null)]
     [InlineData("""{"schema-version":1,"tasks":null}""", null)]
@@ -129,6 +150,24 @@ public sealed class PlanFinalizeTests
     public void TheReadyQueueSaysNoTasksForAValidEmptyFileAndNothingForAnUnreadableOne(string taskFile, string? expected)
     {
         Assert.Equal(expected, PlanFinalize.ReadyQueueOf(taskFile));
+    }
+
+    /// <summary>
+    /// A YAML tag makes the reader hand back a double, so a non-finite value reaches the JSON writer,
+    /// which has no literal for it. An unreadable task file names no ready tasks; it must not take the
+    /// whole command down with an <see cref="ArgumentException"/>.
+    /// </summary>
+    [Fact]
+    public void ATaggedNonFiniteAgentConfidenceIsAnUnreadableTaskFile()
+    {
+        const string TaskFile = """
+            schema-version: 2
+            tasks:
+              - id: T1
+                agent-confidence: !!float .nan
+            """;
+
+        Assert.Null(PlanFinalize.ReadyQueueOf(TaskFile));
     }
 
     [Fact]

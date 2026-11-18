@@ -45,6 +45,11 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// <summary>The one file the configuration registry is rendered into.</summary>
     private const string AgentsFilePath = "AGENTS.md";
 
+    /// <summary>The note a skipped standard carries while its folder still holds README.md.</summary>
+    private const string LegacyStandardNote =
+        "the folder still holds its standard as README.md; run '" +
+        DocsLayout.MigrateStandardsCommand + "' to rename it";
+
     /// <summary>Roots checked, in order, when no docs root is supplied.</summary>
     private readonly string[] ConventionalRoots = ["docs", "6-Docs", "doc", "documentation"];
 
@@ -74,7 +79,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         string owner = "unassigned",
         bool force = false,
         bool kyberStandards = false,
-        bool reviewGates = true)
+        bool reviewGates = true,
+        IReadOnlyList<string>? standards = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         string root = Path.GetFullPath(repoRoot);
@@ -101,12 +107,30 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults)
             .Ontology.WithDocsRoot(resolvedDocsRoot);
 
+        // The two choices add to each other rather than replace each other: an operator may ask
+        // for every shipped technology and one role folder in the same run. Only the technology
+        // folders this run was asked for are remembered: naming one folder is not a request to
+        // restyle a technology the host already declared, and that folder keeps the stub it would
+        // have been given without either flag. A delivery platform ships a template and is stored
+        // as a technology, so "every folder except a role" is the set --kyber-standards names.
+        HashSet<string> templatedTechnologies = new(StringComparer.Ordinal);
         if (kyberStandards)
         {
             IReadOnlyList<string> mergedTechnologies = ontology.Technologies
                 .Union(KyberStandardsTemplates.All, StringComparer.Ordinal)
                 .ToList();
             ontology = ontology.Clone(technologies: mergedTechnologies);
+            templatedTechnologies.UnionWith(KyberStandardsTemplates.AllFolders.Where(
+                name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
+        }
+
+        bool writesShippedTemplates = kyberStandards;
+        if (standards is { Count: > 0 })
+        {
+            ontology = WithChosenStandards(ontology, standards);
+            templatedTechnologies.UnionWith(standards.Where(
+                name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
+            writesShippedTemplates = true;
         }
 
         // Planned before the first host-config write so a newly created file carries the
@@ -120,7 +144,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
         List<ScaffoldedFile> files =
         [
-            WriteHostConfig(root, resolvedDocsRoot, kyberStandards, ReviewBlockFor(reviewPlan)),
+            WriteHostConfig(root, resolvedDocsRoot, ontology, ReviewBlockFor(reviewPlan)),
             WriteLocalStateIgnore(root),
             Write(root, DocsLayout.Ontology(resolvedDocsRoot),
                 DocsScaffoldTemplates.OntologyReference(resolvedDocsRoot, resolvedOwner, Today), force),
@@ -138,12 +162,63 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
         foreach (string technology in ontology.Technologies)
         {
-            string standardContent = kyberStandards && KyberStandardsTemplates.TryRender(technology, resolvedOwner, Today, out string? rendered)
-                ? rendered
-                : DocsScaffoldTemplates.TechnologyStandard(technology, resolvedOwner, Today);
+            // A technology folder holds four files. A shipped template supplies all four; a
+            // declared technology with no template gets four stubs, so the folder check has
+            // the same shape to grade either way.
+            foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
+            {
+                string path =
+                    $"{resolvedDocsRoot}/{DocsLayout.Standards}/{technology}/{KyberStandardsTemplates.FileName(technology, part)}";
+                if (part == KyberStandardsTemplates.Part.Standard
+                    && HasLegacyStandard(root, resolvedDocsRoot, technology, path))
+                {
+                    files.Add(new ScaffoldedFile(
+                        path, ScaffoldOutcome.Skipped, LegacyStandardNote));
+                    continue;
+                }
 
-            files.Add(Write(root, DocsLayout.TechnologyStandard(resolvedDocsRoot, technology),
-                standardContent, force));
+                string content =
+                    templatedTechnologies.Contains(technology)
+                    && KyberStandardsTemplates.TryRenderPart(
+                        technology, part, resolvedOwner, Today, out string? rendered)
+                        ? rendered
+                        : TechnologyStub(technology, part, resolvedOwner);
+
+                files.Add(Write(root, path, content, force));
+            }
+        }
+
+        foreach (string role in ontology.Roles)
+        {
+            foreach (KyberStandardsTemplates.Part part in Enum.GetValues<KyberStandardsTemplates.Part>())
+            {
+                string path =
+                    $"{resolvedDocsRoot}/{DocsLayout.Standards}/{role}/{KyberStandardsTemplates.FileName(role, part)}";
+                if (part == KyberStandardsTemplates.Part.Standard
+                    && HasLegacyStandard(root, resolvedDocsRoot, role, path))
+                {
+                    files.Add(new ScaffoldedFile(
+                        path, ScaffoldOutcome.Skipped, LegacyStandardNote));
+                    continue;
+                }
+
+                string content =
+                    KyberStandardsTemplates.TryRenderPart(role, part, resolvedOwner, Today, out string? rendered)
+                        ? rendered
+                        : RoleStub(role, part, resolvedOwner);
+
+                files.Add(Write(root, path, content, force));
+            }
+        }
+
+        if ((kyberStandards || standards is { Count: > 0 })
+            && KyberStandardsTemplates.TryRenderSharedRules(resolvedOwner, Today, out string? sharedRules))
+        {
+            files.Add(Write(
+                root,
+                $"{resolvedDocsRoot}/{DocsLayout.Standards}/shared-rules.md",
+                sharedRules,
+                force));
         }
 
         ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg;
@@ -154,6 +229,95 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             ReviewGates = BuildReviewOutcome(root, reviewPlan, hadReviewSection, loadedConfig.Config?.Review)
         };
     }
+
+    /// <summary>
+    /// True when a scope folder still holds its standard as <c>README.md</c> and the prefixed
+    /// standard does not exist yet. Scaffolding a stub beside it would give the folder two
+    /// standards carrying the same id; the migration command is what names the standard.
+    /// </summary>
+    private bool HasLegacyStandard(
+        string repoRoot,
+        string docsRoot,
+        string scope,
+        string standardPath)
+    {
+        if (_files.FileExists(RequireContained(repoRoot, standardPath, nameof(standardPath))))
+            return false;
+
+        string legacy = $"{docsRoot}/{DocsLayout.Standards}/{scope}/README.md";
+        return _files.FileExists(RequireContained(repoRoot, legacy, nameof(scope)));
+    }
+
+    /// <summary>The stub written for a role part a shipped template does not supply.</summary>
+    private string RoleStub(
+        string role,
+        KyberStandardsTemplates.Part part,
+        string owner) => part switch
+        {
+            KyberStandardsTemplates.Part.Standard =>
+                DocsScaffoldTemplates.RoleStandard(role, owner, Today),
+            KyberStandardsTemplates.Part.Rules =>
+                DocsScaffoldTemplates.RoleRules(role, owner, Today),
+            KyberStandardsTemplates.Part.Skills =>
+                DocsScaffoldTemplates.RoleSkills(role, owner, Today),
+            KyberStandardsTemplates.Part.ArbiterRules =>
+                DocsScaffoldTemplates.TechnologyArbiterRules(role),
+            _ => throw new ArgumentOutOfRangeException(nameof(part))
+        };
+
+    /// <summary>
+    /// Declares exactly the folders the operator named: a technology or platform name joins
+    /// <c>ontology.technologies</c>, a role name joins <c>ontology.roles</c>. An unknown name
+    /// is refused with the nearest known one rather than creating a folder nothing scopes.
+    /// </summary>
+    private static OntologyConfig WithChosenStandards(
+        OntologyConfig ontology,
+        IReadOnlyList<string> chosen)
+    {
+        List<string> technologies = [.. ontology.Technologies];
+        List<string> roles = [.. ontology.Roles];
+
+        foreach (string name in chosen.Distinct(StringComparer.Ordinal))
+        {
+            if (!KyberStandardsTemplates.AllFolders.Contains(name, StringComparer.Ordinal))
+            {
+                string? nearest = KyberWeave.Core.Text.StringDistance.Nearest(
+                    name, KyberStandardsTemplates.AllFolders);
+                throw new ArgumentException(
+                    nearest is null
+                        ? $"Unknown standards folder '{name}'. Name a technology, role or platform template."
+                        : $"Unknown standards folder '{name}'. Did you mean '{nearest}'?",
+                    nameof(chosen));
+            }
+
+            if (KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal))
+            {
+                if (!roles.Contains(name, StringComparer.Ordinal)) roles.Add(name);
+            }
+            else if (!technologies.Contains(name, StringComparer.Ordinal))
+            {
+                technologies.Add(name);
+            }
+        }
+
+        return ontology.Clone(technologies: technologies, roles: roles);
+    }
+
+    /// <summary>The stub written for a folder part a shipped template does not supply.</summary>
+    private string TechnologyStub(string technology,
+        KyberStandardsTemplates.Part part,
+        string owner) => part switch
+        {
+            KyberStandardsTemplates.Part.Standard =>
+                DocsScaffoldTemplates.TechnologyStandard(technology, owner, Today),
+            KyberStandardsTemplates.Part.Rules =>
+                DocsScaffoldTemplates.TechnologyRules(technology, owner, Today),
+            KyberStandardsTemplates.Part.Skills =>
+                DocsScaffoldTemplates.TechnologySkills(technology, owner, Today),
+            KyberStandardsTemplates.Part.ArbiterRules =>
+                DocsScaffoldTemplates.TechnologyArbiterRules(technology),
+            _ => throw new ArgumentOutOfRangeException(nameof(part))
+        };
 
     /// <summary>The rendered block to write, or null when there is nothing to write.</summary>
     private RenderedReviewBlock? ReviewBlockFor(ReviewGatesPlan? reviewPlan) =>
@@ -287,8 +451,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         string absolute = Path.GetFullPath(
             Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-        string boundary = repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!IsWithinRepositoryBoundary(absolute, boundary, OperatingSystem.IsWindows()))
+        string boundary = RepositoryBoundary.For(repoRoot, Path.DirectorySeparatorChar);
+        if (!RepositoryBoundary.IsWithin(absolute, boundary, OperatingSystem.IsWindows()))
         {
             throw new ArgumentException(
                 $"Refusing to write outside the repository root: '{relativePath}' resolves to '{absolute}'.",
@@ -297,15 +461,6 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
         return absolute;
     }
-
-    /// <summary>
-    /// Applies the path-comparison semantics of the target platform to a normalized path
-    /// and repository boundary. Kept separate so Windows behavior is testable on every CI host.
-    /// </summary>
-    internal static bool IsWithinRepositoryBoundary(string absolutePath, string boundary, bool isWindows) =>
-        absolutePath.StartsWith(
-            boundary,
-            isWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     /// <summary>
     /// Creates the host config when the repository has none — with the <c>mcp:</c> declaration
@@ -338,13 +493,16 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     private ScaffoldedFile WriteHostConfig(
         string repoRoot,
         string docsRoot,
-        bool kyberStandards,
+        OntologyConfig ontology,
         RenderedReviewBlock? reviewBlock)
     {
         string? existingPath = _config.FindConfigPath(repoRoot);
         if (existingPath is null)
         {
-            string created = DocsScaffoldTemplates.HostConfig(docsRoot, kyberStandards);
+            string created = DocsScaffoldTemplates.HostConfig(
+                docsRoot,
+                technologies: ontology.Technologies,
+                roles: ontology.Roles);
             if (reviewBlock is not null)
             {
                 string finalText = created.TrimEnd('\r', '\n') + "\n\n" + ReviewBlockWriter.KeyFirstYaml(reviewBlock);
@@ -362,9 +520,14 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         string relativePath = Path.GetRelativePath(repoRoot, existingPath).Replace('\\', '/');
         string existing = _files.ReadAllText(existingPath);
         string updated = HostConfigYaml.WithDocsRoot(existing, docsRoot);
-        if (kyberStandards)
+        if (ontology.Technologies.Count > 0)
         {
-            updated = HostConfigYaml.WithTechnologies(updated, KyberStandardsTemplates.All);
+            updated = HostConfigYaml.WithTechnologies(updated, ontology.Technologies);
+        }
+
+        if (ontology.Roles.Count > 0)
+        {
+            updated = HostConfigYaml.WithRoles(updated, ontology.Roles);
         }
 
         bool mergeChanged = !string.Equals(existing, updated, StringComparison.Ordinal);
@@ -398,9 +561,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         List<string> changes = [];
         if (mergeChanged)
         {
-            changes.Add(kyberStandards
-                ? "docs-root and technologies rewritten"
-                : "docs-root rewritten");
+            changes.Add("docs-root and ontology lists merged");
         }
 
         if (mcpAppended)

@@ -28,10 +28,10 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
 
         for (int call = 0; call < 3; call++)
         {
-            Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
+            Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
         }
 
-        string answer = Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget);
+        string answer = Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget);
 
         using JsonDocument document = JsonDocument.Parse(answer);
         Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
@@ -45,10 +45,10 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 15);
 
-        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start, budget));
-        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start.AddMinutes(14), budget));
+        Assert.Empty(Guard("claude", Claude("dev-medium", "a-1"), Start, budget));
+        Assert.Empty(Guard("claude", Claude("dev-medium", "a-1"), Start.AddMinutes(14), budget));
 
-        string answer = Guard("claude", Claude("csharp-dev", "a-1"), Start.AddMinutes(16), budget);
+        string answer = Guard("claude", Claude("dev-medium", "a-1"), Start.AddMinutes(16), budget);
 
         using JsonDocument document = JsonDocument.Parse(answer);
         Assert.Equal("deny", document.RootElement.GetProperty("hookSpecificOutput").GetProperty("permissionDecision").GetString());
@@ -59,9 +59,9 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 60, ToolCalls: 1);
 
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-2"), Start, budget));
-        Assert.NotEmpty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-2"), Start, budget));
+        Assert.NotEmpty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
     }
 
     [Fact]
@@ -69,10 +69,10 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 60, ToolCalls: 1);
 
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
-        Assert.NotEmpty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddSeconds(10), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+        Assert.NotEmpty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddSeconds(10), budget));
 
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddMinutes(3), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(3), budget));
     }
 
     [Fact]
@@ -80,9 +80,9 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 15);
 
-        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start, budget));
-        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start.AddMinutes(40), budget));
-        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start.AddMinutes(50), budget));
+        Assert.Empty(Guard("claude", Claude("dev-medium", "a-1"), Start, budget));
+        Assert.Empty(Guard("claude", Claude("dev-medium", "a-1"), Start.AddMinutes(40), budget));
+        Assert.Empty(Guard("claude", Claude("dev-medium", "a-1"), Start.AddMinutes(50), budget));
     }
 
     [Fact]
@@ -92,12 +92,12 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         // 14:40:12 was denied on its first command for being 19 minutes after the first dispatch.
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 15);
 
-        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start, budget));
-        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(5), budget));
-        Assert.Empty(Guard("copilot-cli", TurnEnd("csharp-dev", "agent-1"), Start.AddMinutes(6), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(5), budget));
+        Assert.Empty(Guard("copilot-cli", TurnEnd("dev-medium", "agent-1"), Start.AddMinutes(6), budget));
 
-        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(20), budget));
-        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(30), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(20), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(30), budget));
     }
 
     [Fact]
@@ -105,12 +105,12 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 150, CallMinutes: 15);
 
-        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start, budget));
-        Assert.Empty(Guard("copilot-cli", TurnEnd("csharp-dev", "agent-1"), Start.AddMinutes(1), budget));
-        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(20), budget));
-        Assert.Empty(Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(30), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", TurnEnd("dev-medium", "agent-1"), Start.AddMinutes(1), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(20), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(30), budget));
 
-        string answer = Guard("copilot-cli", Copilot("csharp-dev", "agent-1"), Start.AddMinutes(36), budget);
+        string answer = Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(36), budget);
 
         using JsonDocument document = JsonDocument.Parse(answer);
         Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
@@ -122,11 +122,11 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 60, ToolCalls: 1);
 
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
-        Assert.Empty(Guard("copilot-cli", TurnEnd("csharp-dev", "agent-2"), Start.AddSeconds(1), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", TurnEnd("dev-medium", "agent-2"), Start.AddSeconds(1), budget));
 
-        Assert.NotEmpty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddSeconds(2), budget));
-        Assert.True(WorkerGuard.NeedsDecision("copilot-cli", TurnEnd("csharp-dev", "agent-2")));
+        Assert.NotEmpty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddSeconds(2), budget));
+        Assert.True(WorkerGuard.NeedsDecision("copilot-cli", TurnEnd("dev-medium", "agent-2")));
     }
 
     [Fact]
@@ -134,10 +134,10 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
 
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddMinutes(4), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(4), budget));
 
-        string answer = Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddMinutes(10), budget);
+        string answer = Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(10), budget);
 
         using JsonDocument document = JsonDocument.Parse(answer);
         Assert.Equal("deny", document.RootElement.GetProperty("permissionDecision").GetString());
@@ -146,7 +146,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         Assert.Contains("NOT VERIFIED:", reason, StringComparison.Ordinal);
         Assert.DoesNotContain(WorkerGuard.BudgetExceededStatus, reason, StringComparison.Ordinal);
 
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddMinutes(10).AddSeconds(5), budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(10).AddSeconds(5), budget));
     }
 
     [Fact]
@@ -154,8 +154,8 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 5);
 
-        Assert.Empty(Guard("claude", Claude("csharp-dev", "a-1"), Start, budget));
-        string answer = Guard("claude", Claude("csharp-dev", "a-1"), Start.AddMinutes(6), budget);
+        Assert.Empty(Guard("claude", Claude("dev-medium", "a-1"), Start, budget));
+        string answer = Guard("claude", Claude("dev-medium", "a-1"), Start.AddMinutes(6), budget);
 
         using JsonDocument document = JsonDocument.Parse(answer);
         Assert.Equal("deny", document.RootElement.GetProperty("hookSpecificOutput").GetProperty("permissionDecision").GetString());
@@ -166,20 +166,20 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         string directory = Path.Combine(_home.Path, ".kyber-weave", "arbiter", "budgets");
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 14);
-        Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget));
+        Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
         string file = Assert.Single(Directory.GetFiles(directory));
         string[] lines = File.ReadAllLines(file);
         string[] header = lines[0].Split(' ');
         Assert.Equal("14", header[4]);
         File.WriteAllLines(file, [string.Join(' ', header[..4]), .. lines[1..]]);
 
-        Assert.NotEmpty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start.AddMinutes(6), budget));
+        Assert.NotEmpty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(6), budget));
     }
 
     [Theory]
     [InlineData("code-reviewer")]
     [InlineData("architect")]
-    [InlineData("github-devops")]
+    [InlineData("devops")]
     [InlineData("general-purpose")]
     public void Budget_IsNotChargedToReviewersPlannersPublishersOrAgentsOutsideTheSquad(string agentType)
     {
@@ -196,7 +196,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     {
         for (int call = 0; call < 3; call++)
         {
-            Assert.Empty(Guard("copilot-cli", Copilot("dal-dev", "agent-1"), Start, budget: null));
+            Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget: null));
         }
     }
 
@@ -264,8 +264,8 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
 
         Assert.Empty(SeatGuard(Copilot("review-triage", "seat-3"), Start, seatBudget));
         Assert.NotEmpty(SeatGuard(Copilot("review-triage", "seat-3"), Start.AddSeconds(10), seatBudget));
-        Assert.Empty(SeatGuard(Copilot("dal-dev", "dev-3"), Start, seatBudget));
-        Assert.Empty(SeatGuard(Copilot("dal-dev", "dev-3"), Start.AddSeconds(10), seatBudget));
+        Assert.Empty(SeatGuard(Copilot("dev-medium", "dev-3"), Start, seatBudget));
+        Assert.Empty(SeatGuard(Copilot("dev-medium", "dev-3"), Start.AddSeconds(10), seatBudget));
     }
 
     [Fact]

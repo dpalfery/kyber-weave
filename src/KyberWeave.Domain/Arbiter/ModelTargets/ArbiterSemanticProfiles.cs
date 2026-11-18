@@ -11,9 +11,9 @@ public static class ArbiterSemanticProfiles
     [
         "architect",
         "deep-planning",
+        "dev-hard",
         "fast",
         "general",
-        "orchestration",
         "reviewer",
     ];
 }

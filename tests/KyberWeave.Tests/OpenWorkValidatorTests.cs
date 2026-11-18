@@ -219,7 +219,7 @@ public sealed class OpenWorkValidatorTests
                 """)
             .Write("6-Docs/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"))
             .Write(
-                "6-Docs/plans/2026-09-14-kilo.tasks.json",
+                "6-Docs/plans/2026-09-14-kilo.tasks.yml",
                 """{ "schema-version": 1, "plan": "6-Docs/plans/2026-09-14-kilo.md", "tasks": [] }""");
 
         MergedRun withoutTheGate = ValidateThroughTheCommand(fixture, mergeReady: false);
@@ -247,7 +247,7 @@ public sealed class OpenWorkValidatorTests
         using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SpecIndex, Index("specs/index"))
             .Write(
-                "6-Docs/archive/specs/tray/tasks.json",
+                "6-Docs/archive/specs/tray/tasks.yml",
                 """{ "schema-version": 1, "plan": "6-Docs/archive/specs/tray/design.md", "tasks": [] }""");
 
         MergedRun run = ValidateThroughTheCommand(fixture, mergeReady: true);
@@ -267,7 +267,7 @@ public sealed class OpenWorkValidatorTests
         using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write(
-                "secondary/plans/2026-09-14-kilo.tasks.json",
+                "secondary/plans/2026-09-14-kilo.tasks.yml",
                 """{ "schema-version": 1, "plan": "secondary/plans/2026-09-14-kilo.md", "tasks": [] }""");
 
         KyberWeaveConfig config = new()
@@ -278,7 +278,7 @@ public sealed class OpenWorkValidatorTests
         DiagnosticReport report = new OpenWorkValidator(config, DocsPorts.Files, fixture.Root).Validate(fixture.Load());
 
         Assert.True(
-            report.Items.Any(i => i.Code == LeftoverTaskFile && i.FilePath == "secondary/plans/2026-09-14-kilo.tasks.json"),
+            report.Items.Any(i => i.Code == LeftoverTaskFile && i.FilePath == "secondary/plans/2026-09-14-kilo.tasks.yml"),
             $"leftover task file in secondary docs root must be reported as {LeftoverTaskFile}; reported: {Describe(report)}");
     }
 

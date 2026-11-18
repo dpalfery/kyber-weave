@@ -56,8 +56,9 @@ public interface IArbiterDoctorService
     public const string GuardWithoutIndex = "KW-ARB-GUARD-001";
 
     /// <summary>
-    /// Model targeting is on for a hooked target whose model targets file is missing, unreadable, or older
-    /// than the Squad lock. Without a current file the model override is dropped without anyone seeing it.
+    /// Model targeting is on for a hooked target whose model targets file is missing, unreadable, or not
+    /// the table the last Squad update wrote. Without a current file the model override is dropped without
+    /// anyone seeing it.
     /// </summary>
     public const string ModelTargetsMissing = "KW-ARB-MODEL-001";
 

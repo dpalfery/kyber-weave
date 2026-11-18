@@ -125,19 +125,31 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_DisabledArbiter_RendersNoHookSurfaces()
+    public async Task RenderAsync_DisabledArbiter_RendersTheDispatchHookForDispatchersOnly()
     {
+        // Prompt insertion runs with the Arbiter off, so a dispatcher's frontmatter and the project CLI hook file
+        // carry the dispatch hook. A guarded worker's own calls are not gated, so its file has no hook.
         SquadRenderResult result = await RenderAsync(
             new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: HookTimeoutSeconds),
             SquadDeploymentScope.Project);
 
-        Assert.DoesNotContain(result.Files, file => file.RelativePath == CliHooksFilePath);
-        foreach (string agentName in DispatcherAgents.Concat(GuardedAgents))
+        SquadDeploymentFile cliHooks = Assert.Single(result.Files, file => file.RelativePath == CliHooksFilePath);
+        string cliText = System.Text.Encoding.UTF8.GetString(cliHooks.Content.Span);
+        Assert.True(cliText.Contains("kyber-weave-arbiter hook", StringComparison.Ordinal), cliText);
+        foreach (string agentName in DispatcherAgents)
+        {
+            YamlMappingNode frontmatter = FrontmatterOf(AgentFile(result, agentName, SquadDeploymentScope.Project), agentName);
+            Assert.True(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
+                $"Dispatcher '{agentName}' must carry the dispatch hook while the wiring is disabled.");
+        }
+
+        foreach (string agentName in GuardedAgents)
         {
             YamlMappingNode frontmatter = FrontmatterOf(AgentFile(result, agentName, SquadDeploymentScope.Project), agentName);
             Assert.False(
                 frontmatter.Children.ContainsKey(new YamlScalarNode("hooks")),
-                $"Agent '{agentName}' must not carry a 'hooks' frontmatter entry while the wiring is disabled.");
+                $"Guarded agent '{agentName}' must not carry a hook while the wiring is disabled.");
         }
     }
 
@@ -169,7 +181,7 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
     }
 
     [Fact]
-    public async Task RenderAsync_DisabledArbiter_RendersByteForByteAsOmittingTheWiring()
+    public async Task RenderAsync_DisabledArbiter_ChangesOnlyTheDispatchHookSurface()
     {
         SquadRenderResult omitted = await RenderAsync(null, SquadDeploymentScope.Project);
         SquadRenderResult disabled = await RenderAsync(
@@ -177,19 +189,21 @@ public sealed class ArbiterCopilotRenderingTests : IDisposable
             SquadDeploymentScope.Project);
 
         Assert.Equal(
-            omitted.Files.Select(file => (file.Target, file.RelativePath)).Order().ToList(),
+            omitted.Files.Select(file => (file.Target, file.RelativePath)).Append(("copilot", CliHooksFilePath)).Order().ToList(),
             disabled.Files.Select(file => (file.Target, file.RelativePath)).Order().ToList());
-        foreach ((SquadDeploymentFile expected, SquadDeploymentFile actual) in omitted.Files
-            .OrderBy(file => file.Target, StringComparer.Ordinal)
-            .ThenBy(file => file.RelativePath, StringComparer.Ordinal)
-            .Zip(disabled.Files
-                .OrderBy(file => file.Target, StringComparer.Ordinal)
-                .ThenBy(file => file.RelativePath, StringComparer.Ordinal)))
+        foreach (SquadDeploymentFile file in disabled.Files.Where(file => file.RelativePath != CliHooksFilePath))
         {
-            Assert.True(
-                expected.Content.Span.SequenceEqual(actual.Content.Span),
-                $"Rendered bytes differ for {actual.Target}/{actual.RelativePath} when the " +
-                "Arbiter wiring is disabled; a disabled wiring must not change today's render.");
+            SquadDeploymentFile expected = Assert.Single(
+                omitted.Files,
+                candidate => candidate.Target == file.Target && candidate.RelativePath == file.RelativePath);
+            bool dispatcherAgent = DispatcherAgents.Any(agent =>
+                file.RelativePath.EndsWith($"/{agent}.agent.md", StringComparison.Ordinal));
+            if (!dispatcherAgent)
+            {
+                Assert.True(
+                    expected.Content.Span.SequenceEqual(file.Content.Span),
+                    $"Rendered bytes differ for {file.Target}/{file.RelativePath} when the Arbiter wiring is disabled.");
+            }
         }
     }
 

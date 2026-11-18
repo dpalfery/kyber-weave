@@ -20,11 +20,9 @@ public sealed class ArbiterSquadCatalogTests
 
         string[] expected =
         [
-            "architect", "azure-reader", "bug-crusher", "bug-crusher-investigator", "code-reviewer",
-            "conductor", "csharp-dev", "dal-dev", "docs-dev", "github-devops", "go-dev", "maui-dev",
-            "product-owner", "pulumi-dev", "python-dev", "react-dev", "research-agent", "review-lens",
-            "review-triage", "rust-dev", "sql-database-architect", "tauri-dev", "test-dev",
-            "typescript-dev",
+            "architect", "bug-crusher", "bug-crusher-investigator", "code-reviewer", "conductor",
+            "dev-easy", "dev-hard", "dev-medium", "devops", "docs-dev", "platform-researcher",
+            "product-owner", "research-agent", "review-lens", "review-triage",
         ];
 
         Assert.Equal(expected.Order(StringComparer.Ordinal), catalog.Agents.Keys.Order(StringComparer.Ordinal));
@@ -37,15 +35,15 @@ public sealed class ArbiterSquadCatalogTests
 
         ArbiterSquadAgent conductor = catalog.Agents["conductor"];
         Assert.Contains("architect", conductor.DelegatesTo);
-        Assert.Contains("test-dev", conductor.DelegatesTo);
+        Assert.Contains("dev-hard", conductor.DelegatesTo);
 
-        ArbiterSquadAgent csharp = catalog.Agents["csharp-dev"];
-        Assert.Empty(csharp.DelegatesTo);
-        Assert.Equal("worker", csharp.CapabilityProfile);
+        ArbiterSquadAgent developer = catalog.Agents["dev-medium"];
+        Assert.Empty(developer.DelegatesTo);
+        Assert.Equal("worker", developer.CapabilityProfile);
 
         ArbiterSquadAgent reviewer = catalog.Agents["code-reviewer"];
         Assert.Equal(
-            ["azure-reader", "review-lens", "review-triage"],
+            ["platform-researcher", "review-lens", "review-triage"],
             reviewer.DelegatesTo.Order(StringComparer.Ordinal));
     }
 
@@ -63,9 +61,18 @@ public sealed class ArbiterSquadCatalogTests
         Assert.Equal("not-squad", ArbiterSquadCatalog.TargetClassFor("orchestrator"));
 
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
-        Assert.Equal("implementation", catalog.Agents["csharp-dev"].TargetClass);
+        Assert.Equal("implementation", catalog.Agents["dev-medium"].TargetClass);
         Assert.Equal("planner", catalog.Agents["architect"].TargetClass);
         Assert.Equal("read-only", catalog.Agents["code-reviewer"].TargetClass);
+    }
+
+    [Fact]
+    public void PlatformReader_ClassifiesAsReadOnly_BecauseItCannotWriteItsWork()
+    {
+        Assert.Equal("read-only", ArbiterSquadCatalog.TargetClassFor("platform-reader"));
+
+        ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
+        Assert.Equal("read-only", catalog.Agents["platform-researcher"].TargetClass);
     }
 
     [Fact]

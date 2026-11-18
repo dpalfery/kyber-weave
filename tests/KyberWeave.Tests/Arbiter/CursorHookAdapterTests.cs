@@ -168,7 +168,7 @@ public sealed class CursorHookAdapterTests
 
         // updated_input is the complete tool_input: every original field survives.
         JsonElement updated = doc.RootElement.GetProperty("updated_input");
-        Assert.Equal("csharp-dev", updated.GetProperty("subagent_type").GetString());
+        Assert.Equal("dev-medium", updated.GetProperty("subagent_type").GetString());
         Assert.Equal("Implement T12.5", updated.GetProperty("description").GetString());
         string prompt = updated.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal("Implement the adapter.", prompt);
@@ -180,7 +180,7 @@ public sealed class CursorHookAdapterTests
     public void PreDispatch_Allow_NonSpecialistTarget_WritesAllowOnly()
     {
         string stdin = Fixture("pre-task-dispatch.json").Replace(
-            "\"subagent_type\": \"csharp-dev\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
+            "\"subagent_type\": \"dev-medium\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
         (int exit, string stdout, _) = Run(stdin, null, new ScriptedEngine());
 
@@ -193,7 +193,7 @@ public sealed class CursorHookAdapterTests
     [Fact]
     public void PreDispatch_AllowWithRewrite_WritesRewrittenInput()
     {
-        const string rewritten = """{"prompt":"Hello.","subagent_type":"csharp-dev"}""";
+        const string rewritten = """{"prompt":"Hello.","subagent_type":"dev-medium"}""";
         ScriptedEngine engine = new()
         {
             PreResult = new HookOutcome(HookOutcomeKind.AllowWithRewrite, RewrittenInputJson: rewritten),
@@ -215,7 +215,7 @@ public sealed class CursorHookAdapterTests
         (int exit, _, _) = Run(Fixture("pre-task-dispatch.json"), null, engine);
 
         Assert.Equal(0, exit);
-        Assert.Equal("csharp-dev", engine.SeenPreTarget);
+        Assert.Equal("dev-medium", engine.SeenPreTarget);
         Assert.StartsWith("KYBER-ARBITER: true", engine.SeenPrePrompt, StringComparison.Ordinal);
         Assert.Contains("Implement the adapter.", engine.SeenPrePrompt, StringComparison.Ordinal);
     }
@@ -338,7 +338,7 @@ public sealed class CursorHookAdapterTests
         (int exit, string stdout, string log) = Run(
             """
             {"hook_event_name":"postToolUse","tool_name":"Task","tool_use_id":"toolu-cursor-post-1",
-             "tool_input":{"prompt":"Implement the adapter.","subagent_type":"csharp-dev"},
+             "tool_input":{"prompt":"Implement the adapter.","subagent_type":"dev-medium"},
              "tool_output":null}
             """,
             null,

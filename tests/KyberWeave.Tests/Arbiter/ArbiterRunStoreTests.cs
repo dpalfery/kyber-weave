@@ -54,7 +54,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
         new(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "test-harness", "session-1", ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
-            Target = "csharp-dev",
+            Target = "dev-medium",
             PairDigest = Sha256Hex("prompt-body"),
         };
 
@@ -69,7 +69,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
             "delegate",
             "conductor",
             ArbiterCallerSources.Harness,
-            "csharp-dev",
+            "dev-medium",
             "docs/plans/plan.md",
             "plan-digest-1",
             "3.1",

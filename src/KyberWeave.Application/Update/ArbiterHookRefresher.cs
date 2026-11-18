@@ -110,7 +110,7 @@ internal sealed class ArbiterHookRefresher(
             List<SquadOwnedFile>? updatedFiles = receipt is not null ? new(receipt.Files) : null;
             List<SquadOwnedBlock>? updatedBlocks = receipt is not null ? new(receipt.Blocks) : null;
 
-            foreach ((string? targetToken, string? hookPath) in ResolveGlobalHookTargets(home))
+            foreach ((string? targetToken, string? hookPath, string? hookRelativePath) in ResolveGlobalHookTargets(home))
             {
                 if (string.IsNullOrWhiteSpace(hookPath))
                     continue;
@@ -128,7 +128,8 @@ internal sealed class ArbiterHookRefresher(
                         {
                             if (newOwnedEntries is { Count: > 0 } && updatedBlocks is not null)
                             {
-                                int blockIdx = updatedBlocks.FindIndex(b => string.Equals(b.Target, targetToken, StringComparison.OrdinalIgnoreCase));
+                                int blockIdx = FindOwnedIndex(
+                                    updatedBlocks, targetToken, hookRelativePath, b => b.Target, b => b.RelativePath);
                                 if (blockIdx >= 0)
                                 {
                                     SquadOwnedBlock existingBlock = updatedBlocks[blockIdx];
@@ -141,7 +142,8 @@ internal sealed class ArbiterHookRefresher(
                             }
                             else if (!string.IsNullOrEmpty(newContent) && updatedFiles is not null)
                             {
-                                int fileIdx = updatedFiles.FindIndex(f => string.Equals(f.Target, targetToken, StringComparison.OrdinalIgnoreCase));
+                                int fileIdx = FindOwnedIndex(
+                                    updatedFiles, targetToken, hookRelativePath, f => f.Target, f => f.RelativePath);
                                 if (fileIdx >= 0)
                                 {
                                     SquadOwnedFile existingFile = updatedFiles[fileIdx];
@@ -215,8 +217,9 @@ internal sealed class ArbiterHookRefresher(
         return Wiring(ArbiterConfig.ProductDefaults).HookTimeoutSeconds;
     }
 
-    private IEnumerable<(string TargetToken, string HookPath)> ResolveGlobalHookTargets(string home)
+    private IEnumerable<(string TargetToken, string HookPath, string? RelativePath)> ResolveGlobalHookTargets(string home)
     {
+        SquadGlobalRoots roots = new(_environmentReader, home);
         foreach (string token in userConfig.ReadGlobalTargets(home))
         {
             if (string.IsNullOrWhiteSpace(token))
@@ -225,10 +228,66 @@ internal sealed class ArbiterHookRefresher(
             if (!SquadTargetCatalog.TryResolve(token, out SquadTarget target))
                 continue;
 
-            string? hookPath = ArbiterGlobalHookPaths.Resolve(target, home, environmentReader: _environmentReader);
+            string? hookPath = ArbiterGlobalHookPaths.Resolve(target, home, roots);
             if (!string.IsNullOrWhiteSpace(hookPath))
-                yield return (SquadTargetCatalog.GetToken(target), hookPath);
+            {
+                yield return (
+                    SquadTargetCatalog.GetToken(target),
+                    hookPath,
+                    RelativePathUnderGlobalRoot(roots, target, hookPath));
+            }
         }
+    }
+
+    /// <summary>
+    /// The hook file's receipt path, relative to its target's own global root, so a receipt entry
+    /// is picked out by path as well as target. Null when the path cannot be expressed as a
+    /// portable relative path, which leaves the caller with the unambiguous single-target match.
+    /// </summary>
+    private static string? RelativePathUnderGlobalRoot(ISquadGlobalRootResolver roots, SquadTarget target, string hookPath)
+    {
+        try
+        {
+            string relative = Path.GetRelativePath(roots.ResolveGlobalRoot(target), hookPath)
+                .Replace(Path.DirectorySeparatorChar, '/');
+            return SquadPathPolicy.NormalizeRelativePath(relative);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Finds the receipt entry an updated hook file belongs to: the same target, and the same path
+    /// when the caller can derive it. A target is not an identity — a global receipt records many
+    /// files for one harness — so a target with several entries and no path match answers -1
+    /// rather than the first entry, which is what stamped a hook file's digest onto an agent file.
+    /// </summary>
+    private static int FindOwnedIndex<T>(
+        List<T> entries,
+        string targetToken,
+        string? relativePath,
+        Func<T, string> targetOf,
+        Func<T, string> pathOf)
+    {
+        int singleTargetMatch = -1;
+        int targetMatches = 0;
+        for (int index = 0; index < entries.Count; index++)
+        {
+            if (!string.Equals(targetOf(entries[index]), targetToken, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            targetMatches++;
+            singleTargetMatch = index;
+            if (relativePath is not null
+                && string.Equals(pathOf(entries[index]), relativePath, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return targetMatches == 1 ? singleTargetMatch : -1;
     }
 
     private bool RefreshGlobalHook(

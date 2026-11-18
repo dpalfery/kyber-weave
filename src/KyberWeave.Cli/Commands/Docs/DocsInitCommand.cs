@@ -187,7 +187,8 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
                 settings.Owner,
                 settings.Force,
                 settings.KyberStandards,
-                reviewGates: !settings.NoReviewGates);
+                reviewGates: !settings.NoReviewGates,
+                standards: settings.ChosenStandards);
             return (0, result, null);
         }
         catch (Exception ex) when (ex is

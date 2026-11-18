@@ -269,7 +269,7 @@ public static partial class PlanReadInstruction
     private static partial Regex PacketCommandRegex();
 
     // A routing header line: the closed header names plus the run-mode lines the conductor writes beside them.
-    [GeneratedRegex(@"^\s*[-*]?\s*\**`?(?:KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|development-mode|autonomy)`?\**\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^\s*[-*]?\s*\**`?(?:KYBER-ARBITER|PLAN_FILE|TASK|LENS|REFUTE|REVIEW_RUN|TECHNOLOGY|PRIOR_RESULTS|FAILED_ATTEMPTS|development-mode|autonomy)`?\**\s*:", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex RoutingLineRegex();
 
     [GeneratedRegex(@"(?<=[.!?])[ \t]+", RegexOptions.CultureInvariant)]

@@ -91,7 +91,7 @@ Nothing durable is lost: the archived plan keeps the decisions, tasks and test c
 ## Related
 
 - [ADR 0053](0053-kyber-arbiter-three-step-decision-gates.md) — decision 23 adds `KW-ARB-PLANREAD-001`, and decision 9 takes the changed-path basis this contract depends on
-- [Kyber-Squad architecture](../kyber-squad/architecture.md#the-tracked-task-file-and-the-paste-and-fill-dispatch) — the task file, its digest and the packet the machine delivers
+- [Kyber-Squad architecture](../kyber-squad/architecture.md#the-tracked-task-file-and-the-inserted-task-prompt) — the task file, its digest and the prompt the machine delivers
 - [Kyber-Squad adoption guide](../kyber-squad/onboarding.md#inlined-task-packets-zero-plan-context-hunting) — what the conductor does with the file at dispatch
 - [Plan inventory policy](../plans/README.md#plan-decisions-and-closeout-policy) — the authoring and closeout duties in the plan lifecycle
 - [Rule reference](../ci-pipelines/rule-reference.md) — every `KW-DOC-TASKS-*` id and `KW-DOC-LIFECYCLE-005`

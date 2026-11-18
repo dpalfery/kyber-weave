@@ -27,7 +27,7 @@ facts, security floors, and procedure belong in the skill regardless of what a h
 
 **Classification rule, in brief.** A line is **policy** — a stack, library, naming, layout, or
 required-practice choice a host could reasonably reverse — when the matching
-`standards/<tech>/README.md` template either already states it (`duplicate`, pointer added) or
+`standards/<tech>/<tech>.standards.md` template either already states it (`duplicate`, pointer added) or
 lacks it (`migrated`, added to the template). A line is **technique** when it is a
 framework-correctness fact, a security floor, or a how-to whose violation is a defect no
 matter what the host prefers; it stays in the skill. A line that names a project fact or one
@@ -86,9 +86,9 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/code-review/references/python.md` | review-pointer | pointer-already-#126 | rendered | the declared `<python-coding-standard>` | Pointer-only since #126; resolves `<python-coding-standard>` where declared. |
 | `skills/code-review/references/react.md` | review-pointer | pointer-already-#126 | rendered | the declared `<react-coding-standard>` | Pointer-only since #126; resolves `<react-coding-standard>` where declared. |
 | `skills/code-review/references/rust.md` | review-pointer | pointer-already-#126 | rendered | the declared `<rust-coding-standard>` | Pointer-only; names the `<rust-coding-standard>` registry token and reports "no Rust standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |
-| `skills/code-review/references/sql.md` | review-pointer | pointer-already-#126 | rendered | the declared `<sql-coding-standard>` | Pointer-only since #126 (finding 7 verified this file directly); resolves `<sql-coding-standard>` where declared. |
+| `skills/code-review/references/sql.md` | review-pointer | pointer-already-#126 | rendered | the declared `<sql-server-coding-standard>` | Pointer-only since #126 (finding 7 verified this file directly); resolves `<sql-server-coding-standard>` where declared. |
 | `skills/code-review/references/tauri.md` | review-pointer | pointer-already-#126 | rendered | the declared `<tauri-coding-standard>` | Pointer-only; names the `<tauri-coding-standard>` registry token and reports "no Tauri standard declared" when undeclared. Linked from `SKILL.md` under Technology checklists. |
-| `skills/code-review/references/typescript.md` | review-pointer | pointer-already-#126 | rendered | the declared `<typescript-coding-standard>` | Pointer-only; names the `<typescript-coding-standard>` registry token (`docs/standards/typescript/README.md`). Linked from `SKILL.md` under Technology checklists. |
+| `skills/code-review/references/typescript.md` | review-pointer | pointer-already-#126 | rendered | the declared `<typescript-coding-standard>` | Pointer-only; names the `<typescript-coding-standard>` registry token (`docs/standards/typescript/typescript.standards.md`). Linked from `SKILL.md` under Technology checklists. |
 | `skills/create-pull-request/assets/pull-request-description.md` | procedure | retain-in-place | rendered | — | The default pull request description template the skill fills when the host declares none. |
 | `skills/create-pull-request/providers/azure-devops.md` | provider-guidance | retain-in-place | rendered | — | Rewritten by the archived [provider-aware create-pull-request plan](../archive/plans/2026-09-28-provider-aware-create-pull-request.md); provider facts are sourced and cited in this file (D2). |
 | `skills/create-pull-request/providers/github.md` | provider-guidance | retain-in-place | rendered | — | Rewritten by the archived provider-aware create-pull-request plan; provider facts are sourced and cited in this file (D2). |
@@ -101,8 +101,8 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/csharp-dev/references/file-upload.md` | technique | retain-in-place | rendered | — | File-upload implementation technique; not a host-reversible policy (D2). |
 | `skills/csharp-dev/references/opentelemetry.md` | technique | retain-in-place | rendered | — | OpenTelemetry instrumentation technique; not a host-reversible policy (D2). |
 | `skills/dal-dev/references/adonet-repository.md` | policy-bearing | policy-migrated-to-template | rendered | data-access-layer standard | 10 duplicate Policy-line ledger rows below point to `<data-access-layer-coding-standard>` (the token is already present at :8-9); no gaps or host facts found. |
-| `skills/dal-dev/references/migration-scripts.md` | policy-bearing | policy-migrated-to-template | rendered | sql & data-access-layer standards | 11 Policy-line ledger rows below: 3 migrated gaps move to the new `data-access-layer § Migrations` section; 2 duplicate lines point to `<sql-coding-standard>`; 1 line superseded by D3 (the `Down()` mandate); 5 retained, including the rollback command (annotated per D3) and the FluentMigrator/sql-database-architect handoff procedure (D2). |
-| `skills/dal-dev/references/schema-design.md` | policy-bearing | policy-migrated-to-template | rendered | sql standard | 31 Policy-line ledger rows below: 5 migrated gaps and 21 duplicate lines point to `<sql-coding-standard>`; 5 retained as security floor or procedure (the Prime Directive, the agent-boundary section, two hardcoded-credential/injection floors, one index-cost rule of thumb — D2). |
+| `skills/dal-dev/references/migration-scripts.md` | policy-bearing | policy-migrated-to-template | rendered | sql & data-access-layer standards | 11 Policy-line ledger rows below: 3 migrated gaps move to the new `data-access-layer § Migrations` section; 2 duplicate lines point to `<sql-server-coding-standard>`; 1 line superseded by D3 (the `Down()` mandate); 5 retained, including the rollback command (annotated per D3) and the FluentMigrator/sql-database-architect handoff procedure (D2). |
+| `skills/dal-dev/references/schema-design.md` | policy-bearing | policy-migrated-to-template | rendered | sql-server standard | 31 Policy-line ledger rows below: 5 migrated gaps and 21 duplicate lines point to `<sql-server-coding-standard>`; 5 retained as security floor or procedure (the Prime Directive, the agent-boundary section, two hardcoded-credential/injection floors, one index-cost rule of thumb — D2). |
 | `skills/github-devops/references/build-performance.md` | technique | retain-in-place | rendered | — | MSBuild/CI build technique; not a host-reversible policy (D2). |
 | `skills/github-devops/references/ci-build-diagnostics.md` | technique | retain-in-place | rendered | — | CI diagnostics technique; not a host-reversible policy (D2). |
 | `skills/github-devops/references/directory-build-organization.md` | technique | retain-in-place | rendered | — | MSBuild project-organization technique; not a host-reversible policy (D2). |
@@ -140,12 +140,6 @@ it stands, not this ledger's quotations of what it used to say.
 | `skills/setup-dev-environment/agents/openai.yaml` | metadata | retain-in-place | packaged-only | — | Codex skill-UI metadata (display name, default prompt, implicit-invocation policy); no instruction references it, so no closure reaches it (D2, D6). |
 | `skills/setup-dev-environment/references/inventory.md` | inventory | retain-in-place | rendered | — | Host bootstrap inventory reference; not a host-reversible policy (D2). |
 | `skills/task-gate/references/rework.md` | procedure | retain-in-place | rendered | — | The failure loop a gate failure sends a worker round: what to fix, when to rework, when to stop. Kyber-authored procedure rather than host-reversible policy, and the single home the trim in slice 8 moved the copies to. |
-| `skills/testing/references/e2e-test-patterns.md` | technique | retain-in-place | rendered | — | Playwright E2E technique; not a host-reversible policy (D2). |
-| `skills/testing/references/integration-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 9 Policy-line ledger rows below: 7 duplicate lines point to `<test-coding-standard>`; 2 migrated gaps move into the existing `test § Isolation` section. |
-| `skills/testing/references/mock-usage-analysis.md` | technique | retain-in-place | rendered | — | Mocking-analysis technique; not a host-reversible policy (D2). |
-| `skills/testing/references/rust-go-test-patterns.md` | technique | retain-in-place | rendered | — | Rust and Go test technique; runner and assertion policy lives in `<test-coding-standard>` § Rust and § Go (D2). |
-| `skills/testing/references/test-maintainability.md` | technique | retain-in-place | rendered | — | Test-maintainability technique; not a host-reversible policy (D2). |
-| `skills/testing/references/unit-test-patterns.md` | policy-bearing | policy-migrated-to-template | rendered | test standard | 8 duplicate Policy-line ledger rows below point to `<test-coding-standard>`. |
 | `skills/typescript-dev/references/data-access.md` | technique | retain-in-place | rendered | — | Column-selection, N+1, bounded-read, and transaction technique; data-access policy lives in `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/errors-and-async.md` | technique | retain-in-place | rendered | — | Error-subclass, promise, cancellation, and shutdown technique; the policy lives in `<typescript-coding-standard>` (D2). |
 | `skills/typescript-dev/references/esm-and-gates.md` | procedure | retain-in-place | rendered | — | ESM conventions and the per-platform procedure for running the TypeScript gates; the commands themselves are named by `<typescript-coding-standard>` (D2). |
@@ -154,7 +148,7 @@ it stands, not this ledger's quotations of what it used to say.
 Eighty-nine rows: 11 `policy-migrated-to-template`, 11 `pointer-already-#126`, 67
 `retain-in-place`, 0 `superseded-intentionally` (every file with a `superseded` ledger row
 below also carries a `migrated` or `duplicate` row, so the derivation table resolves it to
-`policy-migrated-to-template`). Delivery: 88 `rendered`, 1 `packaged-only` (`openai.yaml`).
+`policy-migrated-to-template`). Delivery: 82 `rendered`, 1 `packaged-only` (`openai.yaml`).
 
 ## Policy-line ledger
 
@@ -183,44 +177,44 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/dal-dev/references/adonet-repository.md` | 116 | `On failure, log with structured properties` | duplicate | data-access-layer § Hard rules | `Do not swallow database exceptions` | — |
 | `skills/dal-dev/references/schema-design.md` | 10 | `Before asserting a best practice, version-specific behavior, or syntax, verify against Microsoft Learn` | retained | — | | Procedure: Microsoft Learn verification workflow (the Prime Directive), not a host-reversible policy (D2). |
 | `skills/dal-dev/references/schema-design.md` | 16 | `build T-SQL by concatenating unvalidated input. Use parameterized commands and` | retained | — | | Security floor: SQL-injection prevention is a defect regardless of host preference (D2). |
-| `skills/dal-dev/references/schema-design.md` | 17 | `Use SQLCLR or an external process instead` | migrated | sql § Least privilege | `Use SQLCLR or an external process instead of xp_cmdshell` | — |
-| `skills/dal-dev/references/schema-design.md` | 18 | `Apply **least privilege**: grant minimum permissions` | duplicate | sql § Least privilege | `get the permissions the application uses, and no more` | — |
-| `skills/dal-dev/references/schema-design.md` | 19 | `Prefer **Microsoft Entra ID / Kerberos authentication**` | migrated | sql § Least privilege | `Prefer Microsoft Entra ID or Kerberos authentication over SQL authentication` | — |
+| `skills/dal-dev/references/schema-design.md` | 17 | `Use SQLCLR or an external process instead` | migrated | sql-server § Least privilege | `SQLCLR or an external process instead of `xp_cmdshell`` | — |
+| `skills/dal-dev/references/schema-design.md` | 18 | `Apply **least privilege**: grant minimum permissions` | duplicate | sql-server § Least privilege | `get the permissions the application uses, and no more` | — |
+| `skills/dal-dev/references/schema-design.md` | 19 | `Prefer **Microsoft Entra ID / Kerberos authentication**` | migrated | sql-server § Least privilege | `Prefer Microsoft Entra ID or Kerberos authentication over SQL authentication` | — |
 | `skills/dal-dev/references/schema-design.md` | 20 | `Never hardcode credentials, connection strings, or secrets` | retained | — | | Security floor: credential hardcoding is a defect regardless of host preference (D2). |
-| `skills/dal-dev/references/schema-design.md` | 26 | `Schema-qualify every object reference` | duplicate | sql § T-SQL authoring | `Schema-qualify every object reference` | — |
-| `skills/dal-dev/references/schema-design.md` | 27 | `SET NOCOUNT ON;` | duplicate | sql § T-SQL authoring | `is the first statement in a stored-procedure body` | — |
-| `skills/dal-dev/references/schema-design.md` | 28 | `in stored procedures, views, or table-valued functions. List columns explicitly.` | duplicate | sql § Queries | `couples the caller to column order and leaks whatever gets added later` | — |
-| `skills/dal-dev/references/schema-design.md` | 29 | `Do not prefix user stored procedures with` | duplicate | sql § T-SQL authoring | `User procedures take a` | — |
-| `skills/dal-dev/references/schema-design.md` | 30 | `SCOPE_IDENTITY()` | migrated | sql § T-SQL authoring | `Use SCOPE_IDENTITY() rather than @@IDENTITY` | — |
-| `skills/dal-dev/references/schema-design.md` | 31 | `Make scripts **idempotent**: use` | duplicate | sql § T-SQL authoring | `so a script can run twice` | — |
-| `skills/dal-dev/references/schema-design.md` | 33 | `Write **sargable predicates**: don't wrap functions around columns` | migrated | sql § Queries | `Write sargable predicates: do not wrap functions around columns in WHERE or JOIN` | — |
-| `skills/dal-dev/references/schema-design.md` | 39 | `Denormalize only as a documented performance decision` | duplicate | sql § Schema and types | `documented performance decision` | — |
-| `skills/dal-dev/references/schema-design.md` | 40 | `Choose the **narrowest correct data type**:` | duplicate | sql § Schema and types | `The narrowest correct type.` | — |
-| `skills/dal-dev/references/schema-design.md` | 41 | `for Unicode text. Avoid deprecated` | migrated | sql § Schema and types | `Avoid the deprecated text, ntext, and image types` | — |
-| `skills/dal-dev/references/schema-design.md` | 42 | `Every table must have a clustered index` | duplicate | sql § Schema and types | `Every table has a clustered index` | — |
-| `skills/dal-dev/references/schema-design.md` | 43 | `Ideal clustered key: **narrow, unique, ever-increasing, immutable, non-nullable, fixed-width**` | duplicate | sql § Schema and types | `narrow, unique, ever-increasing, immutable, non-nullable, and fixed-width` | — |
-| `skills/dal-dev/references/schema-design.md` | 44 | `as clustered key (16 bytes, not ever-increasing) unless sequentially generated` | duplicate | sql § Schema and types | `unless its values are generated sequentially` | — |
-| `skills/dal-dev/references/schema-design.md` | 45 | `Enforce integrity with constraints` | duplicate | sql § Schema and types | `Integrity is enforced with constraints` | — |
-| `skills/dal-dev/references/schema-design.md` | 51 | `Order multi-column index keys: equality/join columns first` | duplicate | sql § Indexes | `equality and join columns first` | — |
-| `skills/dal-dev/references/schema-design.md` | 52 | `clause to cover queries with non-key columns. Don't include` | duplicate | sql § Indexes | `rather than widening the key, and never include` | — |
-| `skills/dal-dev/references/schema-design.md` | 53 | `Before adding an index, check for overlapping indexes` | duplicate | sql § Indexes | `Check for an existing or overlapping index first` | — |
-| `skills/dal-dev/references/schema-design.md` | 54 | `For large tables, build/rebuild with` | duplicate | sql § Indexes | `Build or rebuild large indexes` | — |
+| `skills/dal-dev/references/schema-design.md` | 26 | `Schema-qualify every object reference` | duplicate | sql-server § T-SQL authoring | `Schema-qualify every object reference` | — |
+| `skills/dal-dev/references/schema-design.md` | 27 | `SET NOCOUNT ON;` | duplicate | sql-server § T-SQL authoring | `is the first statement in a stored-procedure body` | — |
+| `skills/dal-dev/references/schema-design.md` | 28 | `in stored procedures, views, or table-valued functions. List columns explicitly.` | duplicate | sql-server § Queries | `couples the caller to column order and leaks whatever gets added later` | — |
+| `skills/dal-dev/references/schema-design.md` | 29 | `Do not prefix user stored procedures with` | duplicate | sql-server § T-SQL authoring | `User procedures take a` | — |
+| `skills/dal-dev/references/schema-design.md` | 30 | `SCOPE_IDENTITY()` | migrated | sql-server § T-SQL authoring | `Use SCOPE_IDENTITY() rather than @@IDENTITY` | — |
+| `skills/dal-dev/references/schema-design.md` | 31 | `Make scripts **idempotent**: use` | duplicate | sql-server § T-SQL authoring | `so a script can run twice` | — |
+| `skills/dal-dev/references/schema-design.md` | 33 | `Write **sargable predicates**: don't wrap functions around columns` | migrated | sql-server § Queries | `Write sargable predicates: do not wrap functions around columns in WHERE or JOIN` | — |
+| `skills/dal-dev/references/schema-design.md` | 39 | `Denormalize only as a documented performance decision` | duplicate | sql-server § Schema and types | `documented performance decision` | — |
+| `skills/dal-dev/references/schema-design.md` | 40 | `Choose the **narrowest correct data type**:` | duplicate | sql-server § Schema and types | `The narrowest correct type.` | — |
+| `skills/dal-dev/references/schema-design.md` | 41 | `for Unicode text. Avoid deprecated` | migrated | sql-server § Schema and types | `Avoid the deprecated text, ntext, and image types` | — |
+| `skills/dal-dev/references/schema-design.md` | 42 | `Every table must have a clustered index` | duplicate | sql-server § Schema and types | `Every table has a clustered index` | — |
+| `skills/dal-dev/references/schema-design.md` | 43 | `Ideal clustered key: **narrow, unique, ever-increasing, immutable, non-nullable, fixed-width**` | duplicate | sql-server § Schema and types | `narrow, unique, ever-increasing, immutable, non-nullable, and fixed-width` | — |
+| `skills/dal-dev/references/schema-design.md` | 44 | `as clustered key (16 bytes, not ever-increasing) unless sequentially generated` | duplicate | sql-server § Schema and types | `unless its values are generated sequentially` | — |
+| `skills/dal-dev/references/schema-design.md` | 45 | `Enforce integrity with constraints` | duplicate | sql-server § Schema and types | `Integrity is enforced with constraints` | — |
+| `skills/dal-dev/references/schema-design.md` | 51 | `Order multi-column index keys: equality/join columns first` | duplicate | sql-server § Indexes | `equality and join columns first` | — |
+| `skills/dal-dev/references/schema-design.md` | 52 | `clause to cover queries with non-key columns. Don't include` | duplicate | sql-server § Indexes | `rather than widening the key, and never include` | — |
+| `skills/dal-dev/references/schema-design.md` | 53 | `Before adding an index, check for overlapping indexes` | duplicate | sql-server § Indexes | `Check for an existing or overlapping index first` | — |
+| `skills/dal-dev/references/schema-design.md` | 54 | `For large tables, build/rebuild with` | duplicate | sql-server § Indexes | `Build or rebuild large indexes` | — |
 | `skills/dal-dev/references/schema-design.md` | 55 | `Avoid over-indexing — every index has write and storage cost` | retained | — | | Technique: a general index-cost rule of thumb, not a host-reversible policy (D2). |
-| `skills/dal-dev/references/schema-design.md` | 61 | `Single source of truth` | duplicate | sql § Delivery | `source of truth is an SDK-style SQL database project` | — |
-| `skills/dal-dev/references/schema-design.md` | 62 | `artifact. Run SQL code analysis during build` | duplicate | sql § Delivery | `with SQL code analysis on, so the rules above are checked by the build` | — |
-| `skills/dal-dev/references/schema-design.md` | 64 | `Deployment is diff-based and idempotent` | duplicate | sql § Delivery | `Deploy with SqlPackage` | — |
-| `skills/dal-dev/references/schema-design.md` | 65 | `Before production deployment, generate a change preview` | duplicate | sql § Delivery | `generate a preview with SqlPackage` | — |
-| `skills/dal-dev/references/schema-design.md` | 66 | `Pass connection strings via secrets; prefer Entra/managed identity` | duplicate | sql § Delivery | `connect with a managed or Entra identity rather than a password` | — |
-| `skills/dal-dev/references/schema-design.md` | 70 | `owns schema design end-to-end: table definitions, data types, constraints` | retained | — | | Procedure: the agent-boundary allocation between sql-database-architect, dal-dev and csharp-dev, not a host-reversible policy (D2). |
+| `skills/dal-dev/references/schema-design.md` | 61 | `Single source of truth` | duplicate | sql-server § Delivery | `source of truth is an SDK-style SQL database project` | — |
+| `skills/dal-dev/references/schema-design.md` | 62 | `artifact. Run SQL code analysis during build` | duplicate | sql-server § Delivery | `with SQL code analysis on, so the rules above are checked by the build` | — |
+| `skills/dal-dev/references/schema-design.md` | 64 | `Deployment is diff-based and idempotent` | duplicate | sql-server § Delivery | `Deploy with SqlPackage` | — |
+| `skills/dal-dev/references/schema-design.md` | 65 | `Before production deployment, generate a change preview` | duplicate | sql-server § Delivery | `generate a preview with SqlPackage` | — |
+| `skills/dal-dev/references/schema-design.md` | 66 | `Pass connection strings via secrets; prefer Entra/managed identity` | duplicate | sql-server § Delivery | `connect with a managed or Entra identity rather than a password` | — |
+| `skills/dal-dev/references/schema-design.md` | 70 | `owns schema design end-to-end: table definitions, data types, constraints` | superseded | — | | The agent-boundary allocation named three agents the removal deleted; the section now names the architect for the design and the developer tier for the code (D4). |
 | `skills/dal-dev/references/migration-scripts.md` | 18 | `fluentmigrator rollback` | retained | — | | Technique: the rollback command stays as an annotated, host-decision-dependent example; sql keeps its forward-only rule (D3). |
-| `skills/dal-dev/references/migration-scripts.md` | 50 | `must be safe to re-run: check for existence before creating` | duplicate | sql § Migrations | `idempotent where the platform allows it` | — |
+| `skills/dal-dev/references/migration-scripts.md` | 50 | `must be safe to re-run: check for existence before creating` | duplicate | sql-server § Migrations | `idempotent where the platform allows it` | — |
 | `skills/dal-dev/references/migration-scripts.md` | 51 | `Every migration **must** implement` | superseded | data-access-layer § Migrations | `Down() is a host decision` | Superseded by D3: `data-access-layer` states that `Down()` is a host decision, and `sql` keeps its forward-only rule. |
 | `skills/dal-dev/references/migration-scripts.md` | 52 | `must match exactly what FluentMigrator applies` | retained | — | | Procedure: agent-boundary correctness between sql-database-architect and dal-dev, not a host-reversible policy (D2). |
 | `skills/dal-dev/references/migration-scripts.md` | 58 | `One migration per schema change` | migrated | data-access-layer § Migrations | `One migration per schema change` | — |
 | `skills/dal-dev/references/migration-scripts.md` | 59 | `Never modify an already-applied migration` | migrated | data-access-layer § Migrations | `Never edit an applied migration; add a new one instead` | — |
 | `skills/dal-dev/references/migration-scripts.md` | 61 | `For non-nullable column additions to existing tables` | migrated | data-access-layer § Migrations | `add a default first, then remove the default in a separate migration` | — |
 | `skills/dal-dev/references/migration-scripts.md` | 60 | `for audit timestamp columns, not hardcoded values` | retained | — | | Technique: FluentMigrator convention for audit-timestamp defaults, not a host-reversible policy (D2). |
-| `skills/dal-dev/references/migration-scripts.md` | 62 | `Schema-qualify all table references` | duplicate | sql § T-SQL authoring | `Schema-qualify every object reference` | — |
+| `skills/dal-dev/references/migration-scripts.md` | 62 | `Schema-qualify all table references` | duplicate | sql-server § T-SQL authoring | `Schema-qualify every object reference` | — |
 | `skills/dal-dev/references/migration-scripts.md` | 63 | `verify with the SQL database project dacpac that schema state matches expectations` | retained | — | | Procedure: post-migration verification step, not a host-reversible policy (D2). |
 | `skills/dal-dev/references/migration-scripts.md` | 71 | `Do not apply the migration` | retained | — | | Procedure: the conflict-resolution sequence (report the divergence, do not apply), not a host-reversible policy (D2). |
 | `skills/csharp-dev/references/aspnetcore-webapi.md` | 11 | `for request/response DTOs. The compiler generates` | duplicate | csharp § Types | `Request and response DTOs are` | — |
@@ -261,23 +255,6 @@ in the three policy-bearing maui-dev references. One hundred sixteen rows: 20 `m
 | `skills/csharp-dev/references/azure-ai-rag.md` | 92 | `Microsoft.SemanticKernel` | superseded | — | | Host project fact (same rule as :25), not portable policy (D4). |
 | `skills/csharp-dev/references/azure-ai-rag.md` | 93 | `Use direct Azure SDK calls outside the persistence wrapper layer` | superseded | — | | Host wrapper-layer names, not portable policy (D4). |
 | `skills/csharp-dev/references/azure-ai-rag.md` | 94 | `Hardcode Azure endpoints, keys, or connection strings` | duplicate | csharp § Safety | `Secrets come from User Secrets locally and Key Vault` | — |
-| `skills/testing/references/integration-test-patterns.md` | 8 | `CRITICAL: Never Mock the Database` | duplicate | test § Layer boundaries | `Never mock the database in integration tests.` | — |
-| `skills/testing/references/integration-test-patterns.md` | 10 | `Integration tests must hit a real SQL Server instance` | duplicate | test § Layer boundaries | `Never mock the database in integration tests.` | — |
-| `skills/testing/references/integration-test-patterns.md` | 114 | `Each test must arrange its own data` | duplicate | test § Isolation | `Each test arranges its own data` | — |
-| `skills/testing/references/integration-test-patterns.md` | 115 | `Tests must be order-independent — don't assume another test ran first` | duplicate | test § Isolation | `Tests run in any order and do not depend on each other` | — |
-| `skills/testing/references/integration-test-patterns.md` | 116 | `Clean up test data in` | migrated | test § Isolation | `Clean up test data in DisposeAsync or use a transaction-per-test pattern` | — |
-| `skills/testing/references/integration-test-patterns.md` | 117 | `Use unique identifiers (GUID) for test records` | migrated | test § Isolation | `Use unique identifiers for test records to avoid conflicts with parallel runs` | — |
-| `skills/testing/references/integration-test-patterns.md` | 123 | `Real SQL Server only` | duplicate | test § Layer boundaries | `Use a real SQL Server instance` | — |
-| `skills/testing/references/integration-test-patterns.md` | 124 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
-| `skills/testing/references/integration-test-patterns.md` | 125 | `Regression test for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
-| `skills/testing/references/unit-test-patterns.md` | 11 | `NSubstitute (prefer over Moq` | duplicate | test § Stack | `Prefer it over Moq` | — |
-| `skills/testing/references/unit-test-patterns.md` | 20 | `MethodName_StateUnderTest_ExpectedBehavior` | duplicate | test § Stack | `MethodName_StateUnderTest_ExpectedBehavior` | — |
-| `skills/testing/references/unit-test-patterns.md` | 51 | `Blank lines between Arrange, Act, Assert sections` | duplicate | test § Stack | `Arrange / Act / Assert with blank-line separation` | — |
-| `skills/testing/references/unit-test-patterns.md` | 53 | `No test logic shared via inheritance` | duplicate | test § Stack | `no test logic shared via inheritance` | — |
-| `skills/testing/references/unit-test-patterns.md` | 80 | `Prefer builder classes over inline object creation` | duplicate | test § What to assert | `Prefer builder classes over inline object creation` | — |
-| `skills/testing/references/unit-test-patterns.md` | 95 | `or polling helpers with timeout` | duplicate | test § What to assert | `polling helper with a timeout` | — |
-| `skills/testing/references/unit-test-patterns.md` | 98 | `Regression tests for every bug fix` | duplicate | test § What to assert | `regression test whose name encodes the scenario that was broken` | — |
-| `skills/testing/references/unit-test-patterns.md` | 106 | `mock at I/O boundary, never inside domain logic` | duplicate | test § Stack | `Mock at the I/O boundary, never inside domain logic` | — |
 | `skills/maui-dev/references/data-binding.md` | 11 | `faster than reflection-based bindings` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |
 | `skills/maui-dev/references/data-binding.md` | 27 | `this re-enables reflection and defeats compile-time checking` | retained | — | | Technique: framework-correctness detail about `x:DataType` scope, distinct from the policy choice already ledgered at :11 (D2). |
 | `skills/maui-dev/references/collectionview.md` | 25 | `enables compiled bindings and catches typos at build time` | duplicate | maui § MVVM | `to its ViewModel so bindings compile` | — |

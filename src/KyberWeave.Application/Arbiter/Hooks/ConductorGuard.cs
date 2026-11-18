@@ -230,7 +230,7 @@ public sealed class ConductorGuard(
     /// <c>~/.kyber-weave/runs</c>, and, in the working directory or any other worktree of the same repository (a run
     /// works in a worktree of its own), an <c>AGENTS.md</c>, anything under the configured planning directories, and
     /// a <c>.md</c> or <c>.json</c> file under a <c>plans</c>, <c>specs</c> or <c>todo</c> directory, such as a plan's
-    /// <c>.tasks.json</c>. Reading is all <c>view</c> does.
+    /// <c>.tasks.yml</c>. Reading is all <c>view</c> does.
     /// </summary>
     private bool IsContractPath(string path, string? cwd, string copilotHome, string home)
     {

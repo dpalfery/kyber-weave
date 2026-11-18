@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using KyberWeave.Arbiter;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -63,6 +64,14 @@ public static class ArbiterLedgerQueries
     /// A dispatch whose return never arrives (a harness that crashed, or a background agent whose turn-end event
     /// was not delivered) stops holding its files <see cref="UnreturnedDispatchHorizon"/> after it started,
     /// measured against the dispatch being gated, or the newest event when that one is not recorded.
+    /// <para>
+    /// A served evaluation is advisory: the calling agent asserts the facts and then decides whether to dispatch at
+    /// all, so an allowed one is no evidence that a worker ran. An earlier served evaluation of the same plan task
+    /// therefore does not hold that task's files against its next attempt. A conductor was allowed task 1.2's
+    /// dispatch, spent the turn on another task's escalation, and every later attempt at 1.2 intersected that
+    /// evaluation's files and answered <c>overlaps-in-flight</c> forever, losing the task. A hook event is a
+    /// dispatch the harness itself reported, so it keeps holding its files for the whole run, as it always has.
+    /// </para>
     /// </remarks>
     /// <param name="events">The events a ledger read returned, in append order.</param>
     /// <param name="excludeEventId">The pre event being gated now, if it is already recorded.</param>
@@ -80,11 +89,17 @@ public static class ArbiterLedgerQueries
             .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
             .Select(e => e.PreId!)
             .ToHashSet(StringComparer.Ordinal);
-        DateTimeOffset? now = (events.FirstOrDefault(e => e.Id == excludeEventId) ?? (events.Count > 0 ? events[^1] : null))?.At;
+        ArbiterLedgerEvent? gated = excludeEventId is null
+            ? null
+            : events.FirstOrDefault(e => e.Id == excludeEventId);
+        string? gatedTask = gated?.Headers?.Task;
+        string? gatedPlan = gated?.Headers?.PlanFile;
+        DateTimeOffset? now = (gated ?? (events.Count > 0 ? events[^1] : null))?.At;
         return [.. events
             .Where(e => e.Phase == ArbiterLedgerPhases.Pre
                 && e.Id != excludeEventId
                 && !paired.Contains(e.Id)
+                && !(IsServed(e) && SameTask(e, gatedTask, gatedPlan))
                 && (now is null || now.Value - e.At <= UnreturnedDispatchHorizon)
                 && notDispatched?.Contains(e.Id) != true
                 && (session is null || string.Equals(e.Session, session, StringComparison.Ordinal))
@@ -93,6 +108,30 @@ public static class ArbiterLedgerQueries
             .SelectMany(e => e.TaskFiles ?? [])
             .Distinct(StringComparer.Ordinal)
             .OrderBy(path => path, StringComparer.Ordinal)];
+    }
+
+    /// <summary>
+    /// Whether <paramref name="e"/> is an advisory evaluation rather than a dispatch: a served event, whose caller
+    /// asserts the facts and then decides whether to dispatch at all.
+    /// </summary>
+    private static bool IsServed(ArbiterLedgerEvent e) =>
+        string.Equals(e.Harness, ArbiterServeToken.Harness, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Whether <paramref name="e"/> is another attempt at the same plan task the gated dispatch names: same task id,
+    /// and the same plan file (or both naming none).
+    /// </summary>
+    private static bool SameTask(ArbiterLedgerEvent e, string? task, string? planFile)
+    {
+        if (string.IsNullOrWhiteSpace(task)
+            || !string.Equals(e.Headers?.Task, task, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        string? otherPlan = e.Headers?.PlanFile;
+        return string.IsNullOrWhiteSpace(planFile) && string.IsNullOrWhiteSpace(otherPlan)
+            || string.Equals(otherPlan, planFile, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -169,6 +208,52 @@ public static class ArbiterLedgerQueries
         }
 
         return events.FirstOrDefault(e => string.Equals(e.Id, post.PreId, StringComparison.Ordinal))?.Headers;
+    }
+
+    /// <summary>
+    /// The technology a read-only agent's dispatch names, read from its unreturned pre events in one session.
+    /// </summary>
+    /// <remarks>
+    /// A tool call names neither the task nor the technology it belongs to, so the dispatch it answers is the one
+    /// pre event for <paramref name="target"/> in <paramref name="session"/> that no return has claimed. Parallel
+    /// dispatches of the same agent cannot be told apart from the call, and a dispatch that names no technology
+    /// names none for this purpose: both answer null, which the caller reads as "apply every technology's rules"
+    /// so a refusal is never lost.
+    /// </remarks>
+    /// <param name="events">The events a ledger read returned, in append order.</param>
+    /// <param name="target">The calling agent's name, as the event's dispatch target.</param>
+    /// <param name="session">The harness session the call belongs to; null names no session and answers null.</param>
+    public static string? DispatchTechnology(IReadOnlyList<ArbiterLedgerEvent> events, string target, string? session)
+    {
+        ArgumentNullException.ThrowIfNull(events);
+        ArgumentException.ThrowIfNullOrWhiteSpace(target);
+        if (string.IsNullOrWhiteSpace(session))
+        {
+            return null;
+        }
+
+        HashSet<string> returned = events
+            .Where(e => e.Phase == ArbiterLedgerPhases.Post && e.PreId is not null)
+            .Select(e => e.PreId!)
+            .ToHashSet(StringComparer.Ordinal);
+        List<ArbiterLedgerEvent> candidates = [.. events
+            .Where(e => e.Phase == ArbiterLedgerPhases.Pre
+                && !returned.Contains(e.Id)
+                && string.Equals(e.Target, target, StringComparison.Ordinal)
+                && string.Equals(e.Session, session, StringComparison.Ordinal))];
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        string[] technologies = [.. candidates
+            .Select(e => e.Headers?.Technology?.Trim())
+            .OfType<string>()
+            .Where(technology => technology.Length > 0)
+            .Distinct(StringComparer.Ordinal)];
+        return technologies.Length == 1 && candidates.All(e => !string.IsNullOrWhiteSpace(e.Headers?.Technology))
+            ? technologies[0]
+            : null;
     }
 
     /// <summary>

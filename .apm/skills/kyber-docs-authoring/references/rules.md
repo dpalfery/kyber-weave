@@ -22,9 +22,10 @@ title: "Skills in your ALM: a governance playbook"
 
 `doc-type` or `status` is not in the closed set, `last-reviewed` is not ISO
 `yyyy-MM-dd`, or `technology` names a stack the repository has not declared in
-`ontology.technologies`. `2026-8-1` fails; `2026-08-01` passes. `Current` fails on
-the value, not the case — comparison is case-insensitive, so the real cause is a
-value like `active` or `published` that simply is not in the set.
+`ontology.technologies` (or `role` names one not in `ontology.roles`). `2026-8-1` fails;
+`2026-08-01` passes. `Current` fails on the value, not the case — comparison is
+case-insensitive, so the real cause is a value like `active` or `published` that simply
+is not in the set.
 
 An undeclared technology is this rule, not `KW-DOC-SPEC-007`. Add the stack under
 `ontology.technologies` and re-run `docs init` only when the repository writes that
@@ -64,17 +65,32 @@ no document declares.
 Ids are permanent and unique. When two collide, the newer document changes — renaming an
 established id breaks every reference to it.
 
-### `KW-DOC-SPEC-007` — technology on the wrong document
+### `KW-DOC-SPEC-007` — technology or role on the wrong document
 
-`technology` is set on a document that is not a `coding-standard`, or the value does
-not match the folder the file sits in.
+`technology` is set on a document that is not a `coding-standard`, a `rule` or a
+`skill`; `role` is set on a document that is not one of those three; or the value
+does not match the folder the file sits in.
 
-Clear a misplaced key by dropping it, or by making the document a `coding-standard`
-when that is what it is and the file is already the registry target,
-`<docs-root>/standards/<technology>/README.md`. A folder mismatch on that file is
-cleared by changing the key to the folder's name. A file anywhere else is cleared
-by moving it there; changing its key does not make the registry resolve it. The
-folder name, the key, and `ontology.technologies` are one value.
+Clear a misplaced key by dropping it, or by making the document the type that takes the
+key when that is what it is and the file is already in the folder of that name under
+`<docs-root>/standards/`. A standard lives at
+`standards/<technology>/<technology>.standards.md`. A folder mismatch is cleared by changing the key to the
+folder's name. A file anywhere else is cleared by moving it there; changing its key
+does not make the scope resolve. The folder name, the key, and `ontology.technologies`
+(or `ontology.roles`) are one value.
+
+### `KW-DOC-SPEC-011` — neither scope declared
+
+A `skill` document, or a standard, must carry `technology` or `role`, and sit in that
+scope's folder under `<docs-root>/standards/`. Pick the one scope the document covers: a
+skill about a stack is scoped by technology, a skill about a role's procedure by role. A
+document that covers both is two documents.
+
+### `KW-DOC-SPEC-014` — invalid `builds-on`
+
+A standard's `builds-on` key must name one declared technology, must not name the
+standard's own technology, and that parent must not itself declare `builds-on`. One level,
+because the task prompt is sized for one parent. Only a `coding-standard` takes the key.
 
 ## Drift — `docs drift`
 

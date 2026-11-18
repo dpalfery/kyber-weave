@@ -2025,7 +2025,7 @@ receiver child spawns ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-
 **.NET side of the audit.** The .NET project runs the same kind of audit over `tests/KyberWeave.Tests`,
 `dash/server.tests`, `src/`, and `dash/server/`, and its product process starts carry their own timeouts. The bounds and the one
 deliberate exception (`ProcessRunner.RunInteractive`, unbounded by design) are in the
-[test standard](../standards/test/README.md#tests-that-start-processes).
+[test standard](../standards/test/test.standards.md#tests-that-start-processes).
 
 ### Web Dashboard (dash/web/)
 

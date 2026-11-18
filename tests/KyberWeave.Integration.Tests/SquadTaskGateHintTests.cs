@@ -82,6 +82,28 @@ public sealed class SquadTaskGateHintTests
     }
 
     /// <summary>
+    /// A tiered-rostered project keys its gates by technology, so technology-keyed gates are gates: no hint.
+    /// </summary>
+    [Fact]
+    public void Install_ProjectScopeWithTechnologyGates_PrintsNoTaskGateHint()
+    {
+        const string yaml = """
+            review:
+              technology-gates:
+                csharp:
+                  - id: probe
+                    run: [dotnet, build]
+            """;
+        PreparedCase prepared = InstallCase("install-with-technology-gates", yaml, global: false);
+        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TechnologyGates);
+
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        prepared.AssertConfigurationUnchanged();
+    }
+
+    /// <summary>
     /// Global scope prints no hint, because there is no project whose gates could be missing.
     /// </summary>
     [Fact]
@@ -137,6 +159,28 @@ public sealed class SquadTaskGateHintTests
                     run: [git, --version]
             """;
         PreparedCase prepared = UpdateCase("update-with-gates", yaml);
+
+        Assert.Equal(0, prepared.Record.ExitCode);
+        Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
+        prepared.AssertConfigurationUnchanged();
+    }
+
+    /// <summary>
+    /// Update stays silent when the project declares only technology-keyed task gates.
+    /// </summary>
+    [Fact]
+    public void Update_ProjectScopeWithTechnologyGates_PrintsNoTaskGateHint()
+    {
+        const string yaml = """
+            review:
+              technology-gates:
+                csharp:
+                  - id: probe
+                    run: [dotnet, build]
+            """;
+        PreparedCase prepared = UpdateCase("update-with-technology-gates", yaml);
+        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TechnologyGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);

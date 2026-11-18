@@ -50,13 +50,13 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     private static readonly DateTime Earlier = new(2026, 11, 13, 10, 0, 0, DateTimeKind.Utc);
     private static readonly DateTime Later = Earlier.AddMinutes(20);
 
-    private static string Claim(string path) => $"STATUS: PASS\nTASK_GATE: PASS — agent=csharp-dev gates=2 failed=none skipped=0 report={path} runs=2";
+    private static string Claim(string path) => $"STATUS: PASS\nTASK_GATE: PASS — agent=dev-medium gates=2 failed=none skipped=0 report={path} runs=2";
 
     private static ArbiterFactSet TestFirstReturn(bool? failingRunFirst) =>
         new ArbiterFactSet()
             .With("plan.task", "T3", ArbiterFactLabel.Derived)
             .With("plan.development-mode", "test-first", ArbiterFactLabel.Derived)
-            .With("delegation.target", "csharp-dev", ArbiterFactLabel.Derived)
+            .With("delegation.target", "dev-medium", ArbiterFactLabel.Derived)
             .With("delegation.target-profile", "worker", ArbiterFactLabel.Derived)
             .With(GateReportFacts.FailingRunFirstFact, failingRunFirst, ArbiterFactLabel.Derived);
 
@@ -107,8 +107,8 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
 
     [Theory]
     [InlineData("Done. Tests pass.")]
-    [InlineData("TASK_GATE: NONE_DECLARED — agent=go-dev gates=0 failed=none skipped=0 report=<none> runs=1")]
-    [InlineData("TASK_GATE: PASS — agent=csharp-dev report=.agent_scratchpad/T3/missing.json")]
+    [InlineData("TASK_GATE: NONE_DECLARED — agent=dev-medium gates=0 failed=none skipped=0 report=<none> runs=1")]
+    [InlineData("TASK_GATE: PASS — agent=dev-medium report=.agent_scratchpad/T3/missing.json")]
     public void AClaimOrReportThatCannotBeReadLeavesTheFactAbsent(string returned)
     {
         Assert.Null(new GateReportFacts().FailingRunFirst(returned, _root));
@@ -136,12 +136,25 @@ public sealed class ArbiterMode002FailingRunFirstTests : IDisposable
     /// <summary>Each exemption the plan or the dispatch states allows before the fact is read, even when the fact is false.</summary>
     [Theory]
     [InlineData("plan.development-mode", "standard")]
-    [InlineData("delegation.target", "test-dev")]
     [InlineData("delegation.target-profile", "documentation")]
     [InlineData("plan.test-contract.row", "Not applicable")]
     public void ATaskWithNoFailingRunOwedIsNotRequiredToShowOne(string fact, string value)
     {
         ArbiterFactSet facts = TestFirstReturn(false).With(fact, value, ArbiterFactLabel.Derived);
+
+        Assert.Equal("not-required", RuleEngine.Decide(Rule(), facts));
+        Assert.Equal(RuleEffects.Allow, Rule().Effects["not-required"]);
+    }
+
+    /// <summary>
+    /// A test-only task owes no failing run: writing the tests is the task. The exemption is a
+    /// machine fact about the task's files, not the retired roster's clause on the agent name.
+    /// </summary>
+    [Fact]
+    public void ATaskWhoseFilesAreAllTestsIsNotRequiredToShowAFailingRun()
+    {
+        ArbiterFactSet facts = TestFirstReturn(false)
+            .With(TriggerFactBuilder.FilesAllTestsFact, true, ArbiterFactLabel.Derived);
 
         Assert.Equal("not-required", RuleEngine.Decide(Rule(), facts));
         Assert.Equal(RuleEffects.Allow, Rule().Effects["not-required"]);

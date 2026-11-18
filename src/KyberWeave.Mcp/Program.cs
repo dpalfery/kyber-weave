@@ -1,14 +1,6 @@
 using System.Reflection;
 
 using KyberWeave.Application;
-using KyberWeave.Contracts.Docs;
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Docs.Delivery;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Core.CodeGraph;
-using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Docs.Parsing;
-using KyberWeave.Core.Docs.Search;
 using KyberWeave.Mcp;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.DependencyInjection;
@@ -97,60 +89,12 @@ if (!expectRootFromFlag && !string.IsNullOrWhiteSpace(expectRootEnvironment))
     }
 }
 
-// Composition root. The shared layers register their own services first; every registration below this line
-// is a host decision made once from this process's own argv and root. Core never invents these collaborators.
+// Composition root. The shared layers register their own services first; AddDocsHostServices adds every
+// registration below it that is a host decision made once from this process's own argv and root. Core never
+// invents these collaborators. The composition-root test builds the same container, so a tool whose constructor
+// asks for a service this root does not register fails there rather than on its first call.
 builder.Services.AddWeaveApplication();
-builder.Services.AddSingleton(services =>
-{
-    // Read through the container's configuration repository once, at first resolution, so the
-    // corpus this process serves is the one its configuration names.
-    OntologyConfig ontology = DocsRootRegistry.ResolveOntology(repoRoot, services);
-    return new DocumentIndexHost(
-        repoRoot,
-        () => services.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repoRoot).Resolver,
-        () => services.GetRequiredService<IDocumentSourceFactory>().Create(repoRoot, ontology).Load(),
-        ontology.DocsRoots,
-        ontology.ResolvedCatalogPath);
-});
-builder.Services.AddSingleton<IDocsAnalysisReader>(services => DocsToolsComposition.AnalysisReader(services, repoRoot));
-
-// The refresh schedule is a process-wide decision, made once from this process's own argv. The
-// tools receive it by injection so a test that asks them directly gets the default cadence.
-builder.Services.AddSingleton<ICodeGraphFreshnessGate>(services => new CodeGraphFreshness(
-    repoRoot,
-    codeGraphRefreshEnabled,
-    services.GetRequiredService<ICodeGraphProvisioner>(),
-    services.GetRequiredService<IKyberWeaveConfigRepository>(),
-    services.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
-builder.Services.AddSingleton<IDocsQueryService, DocsQueryService>();
-builder.Services.AddSingleton<IPlanLifecycleService>(services =>
-    new PlanLifecycleService(
-        repoRoot,
-        services.GetRequiredService<IDocsQueryService>(),
-        services.GetRequiredService<IDocsHostConfiguration>(),
-        services.GetRequiredService<IPlanFinalizeService>(),
-        services.GetRequiredService<IPlanCloseoutService>(),
-        services.GetRequiredService<IRepositoryFileStore>(),
-        services.GetRequiredService<TimeProvider>()));
-builder.Services.AddSingleton<IRunDeliveryService>(services =>
-    new RunDeliveryService(
-        repoRoot,
-        services.GetRequiredService<IDocsQueryService>(),
-        services.GetRequiredService<IDocsHostConfiguration>(),
-        services.GetRequiredService<RunDeliveryPorts>()));
-builder.Services.AddSingleton<IToolingCheckService>(services =>
-    new ToolingCheckService(
-        repoRoot,
-        services.GetRequiredService<IDocsQueryService>(),
-        services.GetRequiredService<IRepositoryDoctor>(),
-        services.GetRequiredService<IBoundedProcessExecutor>(),
-        services.GetRequiredService<IProcessEnvironment>()));
-
-// A tool call may name another worktree of this repository with projectPath. Those are served by
-// tools of their own, built on demand and kept in a small least-recently-used set.
-builder.Services.AddSingleton(services =>
-    DocsRootRegistry.ForRepository(repoRoot, codeGraphRefreshEnabled, services));
+builder.Services.AddDocsHostServices(repoRoot, codeGraphRefreshEnabled);
 
 builder.Services
     .AddMcpServer(DocsServerInstructions.Configure)

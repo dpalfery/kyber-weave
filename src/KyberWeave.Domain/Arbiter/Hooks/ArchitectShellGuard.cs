@@ -944,7 +944,7 @@ public static class ArchitectShellGuard
             && string.Equals(words[2], "drift", StringComparison.Ordinal)
             && !IsFlag(words[3]);
         // The task file writer: exactly one path operand, then --write or --check. The command derives the file from
-        // the plan and writes only <plan>.tasks.json beside it, so the guard needs no path rule of its own.
+        // the plan and writes only <plan>.tasks.yml beside it, so the guard needs no path rule of its own.
         bool docsTasks = docs
             && words.Count == 5
             && string.Equals(words[2], "tasks", StringComparison.Ordinal)
@@ -1301,7 +1301,7 @@ public static class ArchitectShellGuard
 
     /// <summary>
     /// Checks <c>touch</c>: literal operands with no flags, each resolved against the effective directory,
-    /// beneath one of the planning directories, and named <c>.md</c> or <c>.json</c>.
+    /// beneath one of the planning directories, and named <c>.md</c>, <c>.json</c> or <c>.yml</c>.
     /// </summary>
     private static Refusal? CheckTouch(
         List<string> words,
@@ -1378,11 +1378,13 @@ public static class ArchitectShellGuard
 
             string path = fromOrigin;
             if (!path.EndsWith(".md", StringComparison.OrdinalIgnoreCase)
-                && !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                && !path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                && !path.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
+                && !path.EndsWith(".yaml", StringComparison.OrdinalIgnoreCase))
             {
                 return new Refusal(
-                    "names a file that is not .md or .json",
-                    "Create only .md or .json planning files");
+                    "names a file that is not .md, .json or .yml",
+                    "Create only .md, .json or .yml planning files");
             }
         }
 

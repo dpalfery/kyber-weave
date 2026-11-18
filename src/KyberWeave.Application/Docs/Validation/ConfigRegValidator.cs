@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -11,12 +12,24 @@ namespace KyberWeave.Core.Docs.Validation;
 /// configuration says.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The registry is the one artifact a portable skill is allowed to depend on, which makes a
 /// broken entry expensive in a way an ordinary broken link is not: the skill fails in a host
 /// repository, where nobody can see the configuration that caused it. Both checks are errors
-/// for that reason, and both are fixed by the same command that generated the registry.
+/// for that reason, and both are fixed by the same command that generated the registry. The
+/// one exception is a host still in the standards warning period: its entry points at the
+/// prefixed standard that a folder still holding <c>README.md</c> has not gained yet, and that
+/// is a warning naming the migration command so the host's runs are not blocked.
+/// </para>
+/// <para>
+/// The rendered block has the same exception, because the standards migration moves the values
+/// it publishes. A block whose only differences are those legacy standard names is stale
+/// because the host has not upgraded, and it warns rather than failing the planning check. The
+/// generated prose around the property lines is not checked: it is template text whose wording
+/// changes between builds, and it publishes no path or setting an agent resolves.
+/// </para>
 /// </remarks>
-public sealed class ConfigRegValidator
+public sealed partial class ConfigRegValidator
 {
     /// <summary>A registry property naming a path that does not exist.</summary>
     public const string UnresolvedPath = "KW-CONFIG-REG-001";
@@ -26,6 +39,11 @@ public sealed class ConfigRegValidator
 
     private const string AgentsFilePath = "AGENTS.md";
     private const string Subject = "config-reg";
+
+    [GeneratedRegex(
+        @"^- \*\*<(?<name>[^>]+)>\*\*: `(?<value>[^`]*)`$",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex PropertyLine();
 
     private readonly string _repoRoot;
     private readonly IDocsEngineConfig _config;
@@ -83,6 +101,18 @@ public sealed class ConfigRegValidator
             if (_files.DirectoryExists(absolute) || _files.FileExists(absolute))
                 continue;
 
+            if (LegacyStandard(entry.Path) is { } legacy)
+            {
+                report.Add(new Diagnostic(
+                    UnresolvedPath, Severity.Warning,
+                    $"<{entry.Name}> points at '{entry.Path}', which does not exist: the " +
+                    $"'{legacy.Scope}' folder still holds its standard as README.md.",
+                    Subject, entry.Path,
+                    $"Run '{DocsLayout.MigrateStandardsCommand}' to rename it to " +
+                    $"'{legacy.Scope}{DocsLayout.StandardsSuffix}' and reshape it under the six headings."));
+                continue;
+            }
+
             report.Add(new Diagnostic(
                 UnresolvedPath, Severity.Error,
                 $"<{entry.Name}> points at '{entry.Path}', which does not exist.",
@@ -96,10 +126,49 @@ public sealed class ConfigRegValidator
     }
 
     /// <summary>
+    /// The legacy standard that still stands where this registry path points, or null when the
+    /// path is not a standard's or the legacy file is absent.
+    /// </summary>
+    /// <returns>The scope, and the <c>README.md</c> path a block generated before the migration names.</returns>
+    private (string Scope, string LegacyPath)? LegacyStandard(string relativePath)
+    {
+        OntologyConfig ontology = _config.Ontology;
+        IEnumerable<string> scopes = ontology.Technologies.Concat(ontology.Roles)
+            .Distinct(StringComparer.Ordinal);
+
+        foreach (string docsRoot in ontology.DocsRoots)
+        {
+            foreach (string scope in scopes)
+            {
+                if (!string.Equals(
+                        relativePath,
+                        DocsLayout.StandardFile(docsRoot, scope),
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                string legacy = $"{docsRoot}/{DocsLayout.Standards}/{scope}/README.md";
+                string absolute = Path.Combine(
+                    _repoRoot, legacy.Replace('/', Path.DirectorySeparatorChar));
+                return _files.FileExists(absolute) ? (scope, legacy) : null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Compares the generated region of <c>AGENTS.md</c> to what the current configuration
     /// renders. An absent file, an absent block and a stale block are one finding with one
     /// fix, so they share an id and differ only in what the message says happened.
     /// </summary>
+    /// <remarks>
+    /// A block whose only differences are legacy standard names is the upgrade period the
+    /// standards migration defines, so it warns and names the migration command. Every other
+    /// divergence is an error. Properties are what an agent resolves, so they are what is
+    /// compared; the generated prose between them is not.
+    /// </remarks>
     private void ValidateRendering(IReadOnlyList<ConfigRegEntry> entries, DiagnosticReport report)
     {
         string absolute = Path.Combine(_repoRoot, AgentsFilePath);
@@ -130,10 +199,96 @@ public sealed class ConfigRegValidator
         if (string.Equals(existing, expected, StringComparison.Ordinal))
             return;
 
+        if (ReadPublishedProperties(existing) is not { } published)
+        {
+            ReportContradiction(report);
+            return;
+        }
+
+        Dictionary<string, string> configured = new(StringComparer.Ordinal);
+        foreach (ConfigRegEntry entry in entries)
+            configured[entry.Name] = entry.Path;
+        if (_config.ConfigReg.Autonomy is not null)
+            configured[ConfigRegConfig.AutonomyProperty] = _config.ConfigReg.Autonomy;
+
+        List<string> upgradeScopes = [];
+        List<string> contradictions = [];
+
+        foreach ((string name, string value) in configured)
+        {
+            if (published.TryGetValue(name, out string? written)
+                && string.Equals(written, value, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            ConfigRegEntry? entry = entries.FirstOrDefault(
+                e => string.Equals(e.Name, name, StringComparison.Ordinal));
+            if (entry is not null
+                && published.TryGetValue(name, out written)
+                && LegacyStandard(entry.Path) is { } legacy
+                && string.Equals(written, legacy.LegacyPath, StringComparison.Ordinal))
+            {
+                upgradeScopes.Add(legacy.Scope);
+                continue;
+            }
+
+            contradictions.Add(name);
+        }
+
+        foreach (string name in published.Keys)
+        {
+            if (!configured.ContainsKey(name))
+                contradictions.Add(name);
+        }
+
+        if (contradictions.Count > 0)
+        {
+            ReportContradiction(report);
+            return;
+        }
+
+        if (upgradeScopes.Count == 0)
+            return;
+
+        report.Add(new Diagnostic(
+            StaleRendering, Severity.Warning,
+            $"The Config Reg block in {AgentsFilePath} still names " +
+            $"{string.Join(", ", upgradeScopes)} as README.md: the project has not run the " +
+            "standards migration, so this is the warning period, not a configuration fault.",
+            Subject, AgentsFilePath,
+            $"Run '{DocsLayout.MigrateStandardsCommand}', then 'kyber-weave docs init', to rename " +
+            "the standards and regenerate this block."));
+    }
+
+    private void ReportContradiction(DiagnosticReport report) =>
         report.Add(new Diagnostic(
             StaleRendering, Severity.Error,
             $"The Config Reg block in {AgentsFilePath} does not match .kyber-weave/kyber-weave.yml.",
             Subject, AgentsFilePath,
             "Run 'kyber-weave docs init'. The block is generated; edit the configuration instead."));
+
+    /// <summary>
+    /// The registry properties the block publishes, keyed by name, or null when the file has no
+    /// generated region. Only lines in the block's own property format count, so hand-authored
+    /// text outside the markers cannot be mistaken for one.
+    /// </summary>
+    private static Dictionary<string, string>? ReadPublishedProperties(string content)
+    {
+        int start = content.IndexOf(ConfigRegMarkdown.StartMarker, StringComparison.Ordinal);
+        if (start < 0)
+            return null;
+
+        Dictionary<string, string> properties = new(StringComparer.Ordinal);
+        int end = content.IndexOf(ConfigRegMarkdown.EndMarker, start, StringComparison.Ordinal);
+        string region = end < 0 ? content[start..] : content[start..end];
+        foreach (string line in region.Split('\n'))
+        {
+            Match match = PropertyLine().Match(line.TrimEnd('\r'));
+            if (match.Success)
+                properties[match.Groups["name"].Value] = match.Groups["value"].Value;
+        }
+
+        return properties;
     }
 }

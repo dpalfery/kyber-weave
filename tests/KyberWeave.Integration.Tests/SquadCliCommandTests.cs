@@ -285,7 +285,8 @@ public sealed class SquadCliCommandTests : IDisposable
 
         Assert.Equal(1, execution.ExitCode);
         Assert.Contains("agents/architect.md", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("modified locally", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("--replace-managed", execution.Output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -1817,9 +1818,9 @@ public sealed class SquadCliCommandTests : IDisposable
             }));
 
         Assert.Equal(1, execution.ExitCode);
-        Assert.Contains("drift", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("modified locally", execution.Output, StringComparison.Ordinal);
         Assert.Contains(".codex/agents/conductor.toml", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("(modified)", execution.Output, StringComparison.Ordinal);
+        Assert.Contains("--replace-managed", execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("missing", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 

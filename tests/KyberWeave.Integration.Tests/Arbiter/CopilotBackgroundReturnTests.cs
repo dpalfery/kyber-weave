@@ -29,7 +29,7 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
         "FILES: src/JobStatusSummaryDto.cs\n" +
         "TESTS: total=49 failed=0 passed=49\n" +
         "COMMIT: 4fd4083\n" +
-        "TASK_GATE: PASS — agent=csharp-dev gates=1 failed=none skipped=0 report=.agent_scratchpad/t1/task-gate.json runs=4";
+        "TASK_GATE: PASS — agent=dev-medium gates=1 failed=none skipped=0 report=.agent_scratchpad/t1/task-gate.json runs=4";
 
     private readonly RunStartProbe _probe = RunStartProbe.Create();
     private readonly TempDirectory _home = new();
@@ -52,9 +52,9 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void ABackgroundStart_RecordsNoReturn()
     {
-        Run(Pre("csharp-dev", "T1"));
+        Run(Pre("dev-medium", "T1"));
 
-        string stdout = Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
+        string stdout = Run(BackgroundStart("dev-medium", "T1", BackendAgent));
 
         Assert.Empty(stdout);
         Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
@@ -64,22 +64,22 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void ASyncDispatchMovedToTheBackground_RecordsNoReturnUntilItsTurnEnds()
     {
-        Run(Pre("csharp-dev", "T1"));
+        Run(Pre("dev-medium", "T1"));
 
-        Run(MovedToBackground("csharp-dev", "T1", BackendAgent));
+        Run(MovedToBackground("dev-medium", "T1", BackendAgent));
         Assert.DoesNotContain(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
 
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
         Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
     }
 
     [Fact]
     public void TheEndOfABackgroundAgentsTurn_IsRecordedAsItsDispatchsReturn_AndTheReturnRulesRun()
     {
-        Run(Pre("csharp-dev", "T1"));
-        Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
+        Run(Pre("dev-medium", "T1"));
+        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
 
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
         ArbiterLedgerEvent pre = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
         ArbiterLedgerEvent post = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
@@ -94,11 +94,11 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void TheSameTurnDeliveredTwice_IsRecordedOnce()
     {
-        Run(Pre("csharp-dev", "T1"));
-        Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
+        Run(Pre("dev-medium", "T1"));
+        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
 
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
         Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
     }
@@ -106,11 +106,11 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void AReworkTurnOnTheSameAgent_RecordsANewReturnForTheSameTask()
     {
-        Run(Pre("csharp-dev", "T1"));
-        Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
-        Run(Stop(BackendAgent, "csharp-dev", "Blocked on the migration.\n\nSTATUS: BLOCKED\nTASK_GATE: FAIL — agent=csharp-dev gates=1 failed=build"));
+        Run(Pre("dev-medium", "T1"));
+        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        Run(Stop(BackendAgent, "dev-medium", "Blocked on the migration.\n\nSTATUS: BLOCKED\nTASK_GATE: FAIL — agent=dev-medium gates=1 failed=build"));
 
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
         ArbiterLedgerEvent pre = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
         List<ArbiterLedgerEvent> posts = [.. Ledger().Where(e => e.Phase == ArbiterLedgerPhases.Post)];
@@ -131,11 +131,11 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void ASynchronousDispatch_IsRecordedOnceFromItsToolResult_ThoughItsTurnEndAlsoFires()
     {
-        Run(Pre("csharp-dev", "T1"));
+        Run(Pre("dev-medium", "T1"));
 
         // Copilot fires subagentStop for a synchronous agent too, before the task's postToolUse.
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
-        Run(SyncReturn("csharp-dev", "T1", BackendAgent, PassDigest));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
+        Run(SyncReturn("dev-medium", "T1", BackendAgent, PassDigest));
 
         ArbiterLedgerEvent pre = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Pre);
         ArbiterLedgerEvent post = Assert.Single(Ledger(), e => e.Phase == ArbiterLedgerPhases.Post);
@@ -146,15 +146,15 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void ATaskWhoseDependenciesReturnedPassingDigestsInTheBackground_IsReadyWithoutAskingTheModel()
     {
-        Run(Pre("csharp-dev", "T1"));
-        Run(Pre("react-dev", "T2"));
-        Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
-        Run(BackgroundStart("react-dev", "T2", FrontendAgent));
-        Run(Stop(FrontendAgent, "react-dev", PassDigest.Replace("csharp-dev", "react-dev", StringComparison.Ordinal)));
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
+        Run(Pre("dev-medium", "T1"));
+        Run(Pre("dev-medium", "T2"));
+        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
+        Run(Stop(FrontendAgent, "dev-medium", PassDigest.Replace("dev-medium", "dev-medium", StringComparison.Ordinal)));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
         _provider.Asked.Clear();
 
-        Run(Pre("test-dev", "T3"));
+        Run(Pre("dev-medium", "T3"));
 
         ArbiterDecisionRecord decision = Decisions().Last(d => d.Trigger == "delegate");
         ArbiterDecisionRule ready = Assert.Single(decision.Rules, rule => rule.Id == "KW-ARB-READY-001");
@@ -166,13 +166,13 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void ATaskWhoseDependencyIsStillRunningInTheBackground_IsNotReadyAtStepZero()
     {
-        Run(Pre("csharp-dev", "T1"));
-        Run(Pre("react-dev", "T2"));
-        Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
-        Run(BackgroundStart("react-dev", "T2", FrontendAgent));
-        Run(Stop(BackendAgent, "csharp-dev", PassDigest));
+        Run(Pre("dev-medium", "T1"));
+        Run(Pre("dev-medium", "T2"));
+        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
+        Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
+        Run(Stop(BackendAgent, "dev-medium", PassDigest));
 
-        Run(Pre("test-dev", "T3"));
+        Run(Pre("dev-medium", "T3"));
 
         ArbiterDecisionRecord decision = Decisions().Last(d => d.Trigger == "delegate");
         Assert.DoesNotContain(decision.Rules, rule => rule.Id == "KW-ARB-READY-001" && rule.Answer == "ready");
@@ -181,20 +181,20 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     [Fact]
     public void ANoteOnABackgroundReturn_IsHandedToItsDispatcherOnce_OnItsNextTaskResult()
     {
-        Run(Pre("csharp-dev", "T1"));
-        Run(BackgroundStart("csharp-dev", "T1", BackendAgent));
+        Run(Pre("dev-medium", "T1"));
+        Run(BackgroundStart("dev-medium", "T1", BackendAgent));
         IBackgroundDispatchStore store = ArbiterTestServices.Get<IBackgroundDispatchStore>();
         BackgroundDispatchRecord record = Assert.Single(store.ForSession(ArbiterDirectory, Session));
         Assert.Equal("unidentified", record.Dispatch.Caller);
         store.Save(ArbiterDirectory, record with { PendingNote = "ARBITER_ESCALATION: the gate report disagrees" });
-        Run(Pre("react-dev", "T2"));
+        Run(Pre("dev-medium", "T2"));
 
-        string first = Run(BackgroundStart("react-dev", "T2", FrontendAgent));
-        string second = Run(SyncReturn("react-dev", "T2", FrontendAgent, "still here"));
+        string first = Run(BackgroundStart("dev-medium", "T2", FrontendAgent));
+        string second = Run(SyncReturn("dev-medium", "T2", FrontendAgent, "still here"));
 
         using JsonDocument document = JsonDocument.Parse(first);
         string context = document.RootElement.GetProperty("additionalContext").GetString()!;
-        Assert.Contains("background agent 'csharp-dev'", context, StringComparison.Ordinal);
+        Assert.Contains("background agent 'dev-medium'", context, StringComparison.Ordinal);
         Assert.Contains("ARBITER_ESCALATION: the gate report disagrees", context, StringComparison.Ordinal);
         Assert.DoesNotContain("ARBITER_ESCALATION", second, StringComparison.Ordinal);
     }
@@ -203,11 +203,11 @@ public sealed class CopilotBackgroundReturnTests : IDisposable
     public void AWorkersDigest_CompletesItsTaskOnlyWhenItsGatePassedUnderAFinishedStatus()
     {
         Assert.Equal("PASS", ReturnMarkerParser.Parse(PassDigest, readAttestations: false)?.TaskGate);
-        Assert.Equal(["T1"], Completed("STATUS: READY_FOR_REVIEW\nTASK_GATE: PASS — agent=csharp-dev gates=1"));
-        Assert.Empty(Completed("STATUS: BLOCKED\nTASK_GATE: PASS — agent=csharp-dev gates=1"));
-        Assert.Empty(Completed("STATUS: PASS\nTASK_GATE: FAIL — agent=csharp-dev gates=1 failed=build"));
-        Assert.Empty(Completed("STATUS: PASS\nTASK_GATE: NONE_DECLARED — agent=csharp-dev gates=0"));
-        Assert.Empty(Completed("STATUS: PASS\nRESULT: FAIL\nTASK_GATE: PASS — agent=csharp-dev gates=1"));
+        Assert.Equal(["T1"], Completed("STATUS: READY_FOR_REVIEW\nTASK_GATE: PASS — agent=dev-medium gates=1"));
+        Assert.Empty(Completed("STATUS: BLOCKED\nTASK_GATE: PASS — agent=dev-medium gates=1"));
+        Assert.Empty(Completed("STATUS: PASS\nTASK_GATE: FAIL — agent=dev-medium gates=1 failed=build"));
+        Assert.Empty(Completed("STATUS: PASS\nTASK_GATE: NONE_DECLARED — agent=dev-medium gates=0"));
+        Assert.Empty(Completed("STATUS: PASS\nRESULT: FAIL\nTASK_GATE: PASS — agent=dev-medium gates=1"));
     }
 
     private static IReadOnlyList<string> Completed(string report)

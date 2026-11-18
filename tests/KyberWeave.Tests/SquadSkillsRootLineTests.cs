@@ -17,7 +17,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadSkillsRootLineTests
 {
-    private const string SampleWorker = "csharp-dev";
+    private const string SampleWorker = "dev-medium";
     private const string SampleSkill = "task-gate";
 
     private static readonly Regex SkillsLine = new(

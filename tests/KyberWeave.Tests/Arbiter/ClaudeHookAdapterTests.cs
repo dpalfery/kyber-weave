@@ -84,7 +84,7 @@ public sealed class ClaudeHookAdapterTests
     public void PreDispatch_Allow_NonSpecialistTarget_WritesNothing()
     {
         string stdin = Fixture("pre-agent-dispatch.json").Replace(
-            "\"subagent_type\": \"csharp-dev\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
+            "\"subagent_type\": \"dev-medium\"", "\"subagent_type\": \"docs-dev\"", StringComparison.Ordinal);
 
         (int exit, string stdout) = Run(stdin, "conductor", new ScriptedEngine());
 
@@ -106,7 +106,7 @@ public sealed class ClaudeHookAdapterTests
         // updatedInput is the complete tool_input: every original field survives.
         JsonElement updated = output.GetProperty("updatedInput");
         Assert.Equal("Implement T3", updated.GetProperty("description").GetString());
-        Assert.Equal("csharp-dev", updated.GetProperty("subagent_type").GetString());
+        Assert.Equal("dev-medium", updated.GetProperty("subagent_type").GetString());
         string prompt = updated.GetProperty("prompt").GetString() ?? string.Empty;
         Assert.Equal("Implement the plan parser.", prompt);
         Assert.DoesNotContain("KYBER-ARBITER", prompt, StringComparison.Ordinal);
@@ -187,7 +187,7 @@ public sealed class ClaudeHookAdapterTests
     {
         ScriptedEngine engine = new();
 
-        Run(Fixture("pre-agent-dispatch.json"), "csharp-dev", engine);
+        Run(Fixture("pre-agent-dispatch.json"), "dev-medium", engine);
 
         Assert.Equal("conductor", engine.SeenPreCaller);
     }
@@ -199,10 +199,10 @@ public sealed class ClaudeHookAdapterTests
             "\"agent_type\": \"conductor\",", string.Empty, StringComparison.Ordinal);
         ScriptedEngine engine = new();
 
-        (int exit, _) = Run(stdin, "test-dev", engine);
+        (int exit, _) = Run(stdin, "dev-medium", engine);
 
         Assert.Equal(0, exit);
-        Assert.Equal("test-dev", engine.SeenPreCaller);
+        Assert.Equal("dev-medium", engine.SeenPreCaller);
     }
 
     [Fact]
@@ -287,7 +287,7 @@ public sealed class ClaudeHookAdapterTests
     /// The tool input also carries fields the adapter never reads (<c>run_in_background</c>, <c>isolation</c>, a nested
     /// object and an array). Every rewrite must hand them back unchanged: <see cref="AssertExtraFieldsSurvive"/>.
     /// </remarks>
-    private static string DispatchPayload(string prompt, string? model = null, string subagent = "csharp-dev")
+    private static string DispatchPayload(string prompt, string? model = null, string subagent = "dev-medium")
     {
         JsonObject input = new()
         {
@@ -339,7 +339,7 @@ public sealed class ClaudeHookAdapterTests
 
         Assert.Equal(0, exit);
         JsonElement updated = UpdatedInput(stdout);
-        Assert.Equal("csharp-dev", updated.GetProperty("subagent_type").GetString());
+        Assert.Equal("dev-medium", updated.GetProperty("subagent_type").GetString());
         Assert.Equal("Implement T2", updated.GetProperty("description").GetString());
         Assert.Equal("Implement T2.", updated.GetProperty("prompt").GetString());
         Assert.Equal("sonnet", updated.GetProperty("model").GetString());
@@ -487,7 +487,7 @@ public sealed class ClaudeHookAdapterTests
     /// which left the header in the prompt the subagent received.
     /// </summary>
     [Theory]
-    [InlineData("csharp-dev")]
+    [InlineData("dev-medium")]
     [InlineData("code-reviewer")]
     public void ModelWriteFailure_StripsTheHeaderForEveryTargetClass(string subagent)
     {
@@ -599,7 +599,7 @@ public sealed class ClaudeHookAdapterTests
         string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig())[0];
 
         (int exit, string stdout) = Run(
-            ShellPayload("PowerShell", $"Get-Content {planningDirectory}/plan.md", "csharp-dev"),
+            ShellPayload("PowerShell", $"Get-Content {planningDirectory}/plan.md", "dev-medium"),
             "conductor",
             new ScriptedEngine());
 
@@ -614,7 +614,7 @@ public sealed class ClaudeHookAdapterTests
     public void ReadGuard_CsharpDevPowerShellCall_AllowsAnOrdinaryCommand()
     {
         (int exit, string stdout) = Run(
-            ShellPayload("PowerShell", "Get-ChildItem src", "csharp-dev"),
+            ShellPayload("PowerShell", "Get-ChildItem src", "dev-medium"),
             "conductor",
             new ScriptedEngine());
 
@@ -625,11 +625,11 @@ public sealed class ClaudeHookAdapterTests
     [Fact]
     public void ShellGuard_CsharpDevBashCall_KeepsTheWorkerPlanningPathDeny()
     {
-        // grep is on the architect's list, so an allow here would mean the shell guard reached csharp-dev.
+        // grep is on the architect's list, so an allow here would mean the shell guard reached dev-medium.
         string planningDirectory = ReadGuard.ProtectedDirectories(new KyberWeaveConfig())[0];
 
         (int exit, string stdout) = Run(
-            ShellPayload("Bash", $"grep -rn x {planningDirectory}", "csharp-dev"),
+            ShellPayload("Bash", $"grep -rn x {planningDirectory}", "dev-medium"),
             "conductor",
             new ScriptedEngine());
 

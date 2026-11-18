@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Rules;
 
 namespace KyberWeave.Arbiter.Hooks;
 
@@ -15,6 +16,39 @@ internal static class WorkerGuardRules
 
     /// <summary>The rule id an exhausted budget is refused under.</summary>
     internal const string BudgetRuleId = "KW-ARB-BUDGET-001";
+
+    /// <summary>The trigger a sub-agent's own command call raises, so a technology's rules can allow-list its forms.</summary>
+    internal const string CommandTrigger = "worker.command";
+
+    /// <summary>The fact holding the command as the harness reported it.</summary>
+    internal const string CommandTextFact = "command.text";
+
+    /// <summary>The fact holding the command's form: its program and leading words, options and their values removed.</summary>
+    internal const string CommandFormFact = "command.form";
+
+    /// <summary>The fact that is true when the command is one command, with no join, redirect, subshell or substitution.</summary>
+    internal const string CommandSingleFact = "command.single";
+
+    /// <summary>The fact holding the form's words before its first option, where a mutating verb appears.</summary>
+    internal const string CommandHeadFact = "command.head";
+
+    /// <summary>The fact holding every word of the command, so a rule sees the tool however it was reached.</summary>
+    internal const string CommandWordsFact = "command.words";
+
+    /// <summary>The fact holding the command's program, the form's first word.</summary>
+    internal const string CommandProgramFact = "command.program";
+
+    /// <summary>The fact naming the calling sub-agent.</summary>
+    internal const string WorkerNameFact = "worker.name";
+
+    /// <summary>The fact naming the calling sub-agent's capability profile.</summary>
+    internal const string WorkerProfileFact = "worker.capability-profile";
+
+    /// <summary>The fact naming the harness the call arrived from.</summary>
+    internal const string WorkerHarnessFact = "worker.harness";
+
+    /// <summary>The capability profile whose command calls a technology's allow-list judges: read-only, can run commands.</summary>
+    internal const string PlatformReaderProfile = "platform-reader";
 
     /// <summary>The status line a worker whose budget ran out returns.</summary>
     internal const string BudgetExceededStatus = "STATUS: BUDGET_EXCEEDED";
@@ -37,6 +71,19 @@ internal static class WorkerGuardRules
     /// <summary>The capability profiles whose dispatches carry a budget: the developers and docs-dev.</summary>
     private static readonly HashSet<string> BudgetedProfiles = new(StringComparer.Ordinal) { "worker", "documentation" };
 
+    /// <summary>The leading words a command may carry before its program, which the form skips.</summary>
+    private static readonly HashSet<string> CommandWrappers = new(StringComparer.Ordinal)
+    {
+        "sudo", "env", "command", "exec", "nohup",
+    };
+
+    /// <summary>The characters that join, redirect, group or negate commands: a command holding one has no single form.</summary>
+    private static readonly System.Buffers.SearchValues<char> ShellControl =
+        System.Buffers.SearchValues.Create(";&|<>`(){}!~\n\r");
+
+    /// <summary>The punctuation a word may still carry from the shell around it, removed before a rule reads it.</summary>
+    private static readonly char[] WordWrapping = ['\'', '"', '(', ')', '{', '}', '!', '~', '`', ';', '&', '|', '<', '>'];
+
     /// <summary>
     /// Whether the event can need a refusal at all, decided from the event alone: a root agent, an agent outside the Squad
     /// catalog, and a developer-less call that writes no file are never guarded. The guard process asks it before it
@@ -57,6 +104,7 @@ internal static class WorkerGuardRules
             ToolCall? call = Read(harness, stdin);
             return call is not null
                 && (call.WritePath is not null
+                    || IsCommandJudged(call)
                     || string.Equals(call.Agent.CapabilityProfile, SeatProfile, StringComparison.Ordinal)
                     || IsBudgeted(call.Agent.CapabilityProfile));
         }
@@ -68,6 +116,227 @@ internal static class WorkerGuardRules
 
     /// <summary>Whether a dispatch with this capability profile carries a budget.</summary>
     internal static bool IsBudgeted(string capabilityProfile) => BudgetedProfiles.Contains(capabilityProfile);
+
+    /// <summary>Whether a technology's command allow-list judges this call's command.</summary>
+    /// <remarks>
+    /// Only a profile that may run commands and may not write files is judged: a developer's commands are its
+    /// work, and judging them would refuse every build and test run.
+    /// </remarks>
+    internal static bool IsCommandJudged(ToolCall call) =>
+        call.Command is { Length: > 0 }
+        && string.Equals(call.Agent.CapabilityProfile, PlatformReaderProfile, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The refusal a technology's command allow-list makes, or null when no rule refuses this command. A rule
+    /// loaded from a technology folder judges only a task of that technology, so the caller passes the technology
+    /// the read-only dispatch named. A dispatch that names none, or one the caller cannot identify, passes null,
+    /// which applies every loaded technology's list: the fail-closed reading. Each rule still narrows itself to
+    /// its own tool's commands.
+    /// </summary>
+    /// <param name="rules">Every rule the configuration loaded.</param>
+    /// <param name="call">The sub-agent's tool call.</param>
+    /// <param name="command">The command the call declares.</param>
+    /// <param name="technologyScope">The technology whose rules apply, or null for every rule.</param>
+    /// <param name="parents">Each technology folder's <c>builds-on</c> parent, so a parent's list reaches its child.</param>
+    internal static string? CommandRefusal(
+        IReadOnlyList<ArbiterRule> rules,
+        ToolCall call,
+        string command,
+        IReadOnlyCollection<string>? technologyScope = null,
+        IReadOnlyDictionary<string, string>? parents = null)
+    {
+        ArgumentNullException.ThrowIfNull(rules);
+
+        IReadOnlyList<ArbiterRule> scoped = ArbiterRuleScopes.Applicable(rules, technologyScope, parents);
+        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(scoped, CommandFacts(call, command), CommandTrigger);
+        if (!string.Equals(outcome.CombinedEffect, RuleEffects.Escalate, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        string refusing = string.Join(", ", outcome.RuleAnswers
+            .Where(answer => !answer.Shadow
+                && string.Equals(answer.Effect, RuleEffects.Escalate, StringComparison.Ordinal))
+            .Select(answer => $"{answer.RuleId} ({answer.Answer})")
+            .Distinct(StringComparer.Ordinal));
+        return $"{refusing}: this command is outside the forms this technology allows a read-only agent to run " +
+            $"('{ShapeOf(command).Form}'). Nothing ran. Use a listed read form, or report what you could not inspect.";
+    }
+
+    /// <summary>The facts a <c>worker.command</c> rule reads, from the call the harness reported.</summary>
+    internal static ArbiterFactSet CommandFacts(ToolCall call, string command)
+    {
+        CommandShape shape = ShapeOf(command);
+        return new ArbiterFactSet()
+            .With(WorkerNameFact, call.Agent.Name, ArbiterFactLabel.Derived)
+            .With(WorkerProfileFact, call.Agent.CapabilityProfile, ArbiterFactLabel.Derived)
+            .With(WorkerHarnessFact, call.Harness, ArbiterFactLabel.Derived)
+            .With(CommandTextFact, shape.Text, ArbiterFactLabel.Asserted)
+            .With(CommandFormFact, shape.Form, ArbiterFactLabel.Asserted)
+            .With(CommandSingleFact, shape.Single, ArbiterFactLabel.Derived)
+            .With(CommandHeadFact, shape.Head, ArbiterFactLabel.Asserted)
+            .With(CommandProgramFact, shape.Program, ArbiterFactLabel.Asserted)
+            .With(CommandWordsFact, shape.Words, ArbiterFactLabel.Asserted);
+    }
+
+    /// <summary>A command's form, whether it is one command, its head words, its program, and every word it names.</summary>
+    /// <param name="Text">The command as reported, whitespace collapsed.</param>
+    /// <param name="Form">The single form's program and leading words, or the whole text when there is no single form.</param>
+    /// <param name="Single">Whether the command is one command, with no join, redirect, subshell or substitution.</param>
+    /// <param name="Head">The form's words before its first option, where a mutating verb appears; empty when not one command.</param>
+    /// <param name="Program">The form's first word, or null when the command has no single form.</param>
+    /// <param name="Words">Every word the command names, with quotes and wrapping punctuation removed and a path's directory stripped.</param>
+    private sealed record CommandShape(
+        string Text,
+        string Form,
+        bool Single,
+        IReadOnlyList<string> Head,
+        string? Program,
+        IReadOnlyList<string> Words);
+
+    /// <summary>
+    /// Reads one command into the shape a rule judges. A single command yields its form and its head; a compound
+    /// command, a redirect, a subshell, a grouping or a substitution yields its whole text, no head and no program,
+    /// because it is not one form and no listed form may allow it. Its words still name every tool it reaches, which
+    /// is how a technology's rule refuses it.
+    /// </summary>
+    private static CommandShape ShapeOf(string command)
+    {
+        string text = Collapse(command);
+        IReadOnlyList<string> words = WordsOf(text);
+        if (!IsSingleCommand(command))
+        {
+            return new CommandShape(text, text, Single: false, Head: [], Program: null, words);
+        }
+
+        string[] tokens = text.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        int start = 0;
+        while (start < tokens.Length
+               && (CommandWrappers.Contains(tokens[start]) || IsAssignment(tokens[start])))
+        {
+            start++;
+        }
+
+        List<string> leading = [];
+        for (int index = start; index < tokens.Length; index++)
+        {
+            if (tokens[index].StartsWith('-'))
+            {
+                break;
+            }
+
+            leading.Add(tokens[index]);
+        }
+
+        string form = leading.Count == 0 ? text : string.Join(' ', leading);
+        return new CommandShape(
+            text,
+            form,
+            Single: true,
+            Head: leading,
+            Program: leading.Count > 0 ? Normalise(leading[0]) : null,
+            words);
+    }
+
+    /// <summary>
+    /// Whether the command is exactly one command: no unquoted character joins, redirects, groups or substitutes,
+    /// and no <c>$(</c> outside single quotes. Quotes are honoured so a query such as <c>--query "{a:b}"</c> is still
+    /// one command.
+    /// </summary>
+    private static bool IsSingleCommand(string command)
+    {
+        bool singleQuoted = false;
+        bool doubleQuoted = false;
+        for (int index = 0; index < command.Length; index++)
+        {
+            char current = command[index];
+            if (singleQuoted)
+            {
+                if (current == '\'')
+                {
+                    singleQuoted = false;
+                }
+
+                continue;
+            }
+
+            if (current == '\'')
+            {
+                singleQuoted = true;
+                continue;
+            }
+
+            if (doubleQuoted)
+            {
+                // A substitution runs inside double quotes, so only the closing quote ends the literal run.
+                if (current == '`'
+                    || (current == '$' && index + 1 < command.Length && command[index + 1] == '('))
+                {
+                    return false;
+                }
+
+                if (current == '"')
+                {
+                    doubleQuoted = false;
+                }
+
+                continue;
+            }
+
+            if (current == '"')
+            {
+                doubleQuoted = true;
+                continue;
+            }
+
+            if (ShellControl.Contains(current)
+                || (current == '$' && index + 1 < command.Length && command[index + 1] == '('))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Every word the command names, for a rule that must see the tool however it was reached: a quoted program, an
+    /// absolute path, a word inside a compound command, or a token still carrying a subshell's bracket.
+    /// </summary>
+    private static IReadOnlyList<string> WordsOf(string text)
+    {
+        List<string> words = [];
+        foreach (string token in text.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            string word = Normalise(token);
+            if (word.Length > 0)
+            {
+                words.Add(word);
+            }
+        }
+
+        return words;
+    }
+
+    /// <summary>
+    /// One word reduced to the name a rule can match: quotes and the shell's wrapping punctuation removed, and a
+    /// path's directory stripped so <c>/usr/bin/az</c> is <c>az</c>.
+    /// </summary>
+    private static string Normalise(string token)
+    {
+        string trimmed = token.Trim(WordWrapping);
+        int slash = trimmed.LastIndexOf('/');
+        return slash >= 0 ? trimmed[(slash + 1)..] : trimmed;
+    }
+
+    private static bool IsAssignment(string token)
+    {
+        int equals = token.IndexOf('=', StringComparison.Ordinal);
+        return equals > 0 && token[..equals].All(c => char.IsLetterOrDigit(c) || c == '_');
+    }
+
+    private static string Collapse(string command) =>
+        string.Join(' ', command.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
     /// <summary>
     /// The one-time deny after a call that ran past the per-call limit. The denied call is counted like any other, so
@@ -140,7 +409,8 @@ internal static class WorkerGuardRules
 
             JsonObject? args = ArgumentsOf(root, "toolArgs");
             string? path = tool is "edit" or "create" && args is not null ? NodeText(args, "path") : null;
-            return new ToolCall(harness, agentId, agent, cwd, path);
+            string? command = tool is "bash" && args is not null ? NodeText(args, "command") : null;
+            return new ToolCall(harness, agentId, agent, cwd, path, command, Text(root, "sessionId"));
         }
 
         if (string.Equals(harness, ClaudeHarness, StringComparison.Ordinal))
@@ -162,7 +432,8 @@ internal static class WorkerGuardRules
                     "NotebookEdit" => NodeText(input, "notebook_path"),
                     _ => null,
                 };
-            return new ToolCall(harness, agentId, agent, cwd, path);
+            string? command = tool is "Bash" && input is not null ? NodeText(input, "command") : null;
+            return new ToolCall(harness, agentId, agent, cwd, path, command, Text(root, "session_id"));
         }
 
         return null;
@@ -300,5 +571,12 @@ internal static class WorkerGuardRules
         }
     }
 
-    internal sealed record ToolCall(string Harness, string AgentId, ArbiterSquadAgent Agent, string? Cwd, string? WritePath);
+    internal sealed record ToolCall(
+        string Harness,
+        string AgentId,
+        ArbiterSquadAgent Agent,
+        string? Cwd,
+        string? WritePath,
+        string? Command,
+        string? SessionId = null);
 }

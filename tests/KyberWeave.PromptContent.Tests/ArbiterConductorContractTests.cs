@@ -17,6 +17,17 @@ public sealed class ArbiterConductorContractTests
     private static string ConductorContract => ReadConductorContract();
 
     [Fact]
+    public void TheFallbackDoesNotRequireAToolTheHarnessDoesNotServe()
+    {
+        string contract = ConductorContract;
+
+        Assert.Contains(
+            "A harness without `arbiter_evaluate_agent_dispatch_or_return` still runs: use the routing markers below",
+            contract,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Dispatches_StartWithKyberArbiterMarker()
     {
         Assert.Contains("KYBER-ARBITER: true", ConductorContract, StringComparison.Ordinal);

@@ -4,13 +4,14 @@ title: Kyber Arbiter runbook
 doc-type: runbook
 component: KyberArbiter
 owner: dpalfery
-last-reviewed: 2026-11-12
+last-reviewed: 2026-11-17
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
   - adr/0054-squad-owned-blocks-in-shared-hook-files
   - adr/0071-the-arbiter-enforces-the-architect-shell-allowlist-on-claude
   - adr/0072-the-arbiter-blocks-only-on-machine-facts-and-confident-model-answers
+  - adr/0087-arbiter-rules-live-in-role-and-technology-folders
 ---
 
 # Kyber Arbiter runbook
@@ -133,7 +134,7 @@ never spawning with a possibly-wrong cwd.
 
 When the Arbiter is enabled, the Copilot conductor's agent file runs `kyber-weave-arbiter guard` on `preToolUse` and `userPromptTransformed`. It denies the conductor's own project work and restates the workflow on every model-facing message, because VS Code requires the conductor to hold tools its workers need. See [ADR 0066](../adr/0066-the-copilot-conductor-holds-tools-a-hook-denies-it.md).
 
-The guard permits the conductor's bookkeeping: delegation, its own todo list (`update_todo`), the docs tools, and `view` of its own references and skills (`~/.copilot/agents/conductor/`, `~/.copilot/skills/`, `.github/agents/conductor/`, `.github/skills/`), the run records under `~/.kyber-weave/runs/`, and, in the working directory or any other worktree git lists for the same repository (a run works in a worktree of its own), any `AGENTS.md`, any `.md` or `.json` file under a `plans`, `specs` or `todo` directory, and any file under a planning directory the Config Reg names, so a plan's `.tasks.json` reads without a subagent. Writes and shell stay denied, except the exact run-start and `doctor --ensure` commands. Other harnesses render no such guard: their conductor's tool list grants reads and the todo tool directly.
+The guard permits the conductor's bookkeeping: delegation, its own todo list (`update_todo`), the docs tools, and `view` of its own references and skills (`~/.copilot/agents/conductor/`, `~/.copilot/skills/`, `.github/agents/conductor/`, `.github/skills/`), the run records under `~/.kyber-weave/runs/`, and, in the working directory or any other worktree git lists for the same repository (a run works in a worktree of its own), any `AGENTS.md`, any `.md` or `.json` file under a `plans`, `specs` or `todo` directory, and any file under a planning directory the Config Reg names, so a plan's `.tasks.yml` reads without a subagent. Writes and shell stay denied, except the exact run-start and `doctor --ensure` commands. Other harnesses render no such guard: their conductor's tool list grants reads and the todo tool directly.
 
 A denial names the blocked tool. If the conductor genuinely needs a new Copilot tool, add it to `ConductorGuard`. The guard also refuses a `task` dispatch of a specialist that writes files while no run is live, as `KW-ARB-RUN-001` does; see [reading a run-start refusal](#reading-a-run-start-refusal). The guard is rendered only when the Arbiter is enabled at install. Once rendered it reads configuration only for the planning directories, so setting `arbiter.enabled: false` later does not remove it until the agents are rendered again.
 
@@ -312,14 +313,14 @@ project files (capability profile `worker` or `documentation`, or a planner: `ar
 `product-planning`) any work while no run is live for the repository. Without it, a conductor that skipped
 run start sent every developer to edit the canonical checkout on the default branch, and a conductor that
 planned first left the plan and its task file untracked there. `NEXT` names the fix: run
-`kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `github-devops` with
+`kyber-weave run start --harness <harness> --type <type> --slug <slug>`, or dispatch `devops` with
 `RUN-START: true` and that command, then send the dispatch again.
 
 A run is live when a record under `~/.kyber-weave/runs/` names this repository's common git directory and
 its recorded worktree still has the run's branch checked out. `run start` writes that record. The check
 reads only those facts:
 
-- Read-only and `github-devops` dispatches are never refused, nor is the run-start dispatch itself.
+- Read-only and `devops` dispatches are never refused, nor is the run-start dispatch itself.
 - A caller that is not a Squad orchestrator is never refused: a developer agent a person invokes directly
   has no `delegates-to` list.
 - When git cannot name the repository or the records cannot be read, the dispatch is allowed and the
@@ -371,7 +372,7 @@ minutes, or for a minute after it was stopped; the resumed dispatch starts a fre
 `review-triage`, the `review-seat` profile) has its own `arbiter.seat-budget` (default 3 minutes or 30 tool
 calls, 2 minutes for one call): past it every read is denied with the instruction to return the findings it has
 and a `Budget reached, not examined: …` line, and the write of its seat file is still allowed. Reviewers,
-planners and `github-devops` are not budgeted, because a full test run or a CI wait is long by design.
+planners and `devops` are not budgeted, because a full test run or a CI wait is long by design.
 
 A single hung call is caught sooner. The guard sees only the start of each call, so when the gap since the
 dispatch's previous call is past `dispatch-budget.call-minutes` (default 5; the gap includes the model's own
@@ -475,6 +476,93 @@ pre/post events, and implementation packets whose body names a planning path
 (`KW-ARB-AUDIT-001`…`-004`), and lists attestations for information. code-reviewer runs
 `audit --plan <PLAN_FILE>` at the end of a run and cites the result.
 
+## Overriding a shipped rule in a folder
+
+The 36 shipped rules live in three role files (`conductor` 21, `architect` 2, `reviewer` 13).
+A host's own copy of a role or technology folder sits under
+`<docs-root>/standards/<name>/<name>.arbiter-rules.yml`, and its declarations apply over the
+shipped ones before `arbiter.rules`. A technology folder's rule judges only an event whose task names
+that technology or a technology that builds on it; an event that names no task technology, such as a
+task-less dispatch, is judged by the role folders and `arbiter.rules` alone. A technology folder's
+restatement of an id a role folder or another technology already declares is an override for its own
+technology and the technologies that build on it; the earlier rule stays in force for the others. A
+read-only dispatch's
+command allow-list follows the technology named on its dispatch and the technologies it builds on:
+the worker guard reads the dispatch's `technology` header from its ledger pre event, and falls back to
+every declared list when the dispatch names none, names a technology the host does not declare, or
+cannot be identified. To get the folder to edit, install it:
+
+```bash
+kyber-weave docs init . --standards conductor
+```
+
+**Replace one rule in the folder.** A folder declaration with a shipped id replaces the whole
+rule, keeping its position in the set, so the entry restates the rule. To turn
+`KW-ARB-ROSTER-001` down to log only, write the rule as it ships with `enabled: false`:
+
+```yaml
+# docs/standards/conductor/conductor.arbiter-rules.yml
+rules:
+  - id: KW-ARB-ROSTER-001
+    enabled: false
+    trigger: [delegate, investigate]
+    question: Is the target in the caller's delegates-to?
+    answers: [listed, no-roster, not-listed]
+    decide:
+      - when: { fact: delegation.target, in: roster.caller.delegates-to }
+        answer: listed
+      - when: { fact: roster.caller.delegates-to, count: 0 }
+        answer: no-roster
+      - when: { fact: caller, exists: true }
+        answer: not-listed
+    effects: { listed: allow, no-roster: allow, not-listed: escalate }
+```
+
+`id` and `enabled: false` on their own are not enough: a rule with no trigger, question and
+answers is not a rule, and `arbiter validate` refuses the file as `KW-ARB-CONFIG-017`. To adjust
+effects instead, restate the rule the same way with the `effects` you want. Keep the trigger,
+question and answers as the rule ships: changing them puts a different question under a shipped
+id, and the informational finding is the only warning that you did.
+
+**Turn one rule down without restating it.** `arbiter.rules` in
+`.kyber-weave/kyber-weave.yml` tunes the loaded rule in place, so it needs only the fields that
+change:
+
+```yaml
+arbiter:
+  rules:
+    - id: KW-ARB-ROSTER-001
+      enabled: false
+```
+
+`arbiter.rules` is applied after every folder, so it wins over a folder declaration of the same
+rule. The two model rules are the exception: their shadow state belongs to
+`arbiter.model-targeting.mode`. In `arbiter.rules`, `shadow` on either is refused as
+`KW-ARB-CONFIG-014`; in a folder file the mode overwrites it, and a folder restatement of a model
+rule is refused anyway because its `retarget` effects are reserved to shipped rules (`-015`).
+
+**Check the result.** Either route is reported and takes effect; no rule is locked, including the
+six that guard the tree and the run order. Run:
+
+```bash
+kyber-weave arbiter validate .
+```
+
+A folder declaration of a shipped id is listed as `KW-ARB-CONFIG-020` at informational severity,
+saying which file replaces or disables which rule; `--no-info` hides it. A host that installs a
+role folder verbatim gets one such finding per rule, because the copied template declares every
+shipped id — that is expected, not a fault.
+
+A file that cannot be read or parsed, or that names a trigger the Arbiter does not have,
+is `KW-ARB-CONFIG-017` naming the file and the rule, and the shipped rules for that folder stay
+in force. A rule that reads a fact its trigger does not supply is `KW-ARB-CONFIG-002`, and a
+folder entry with a reserved id, a rule-level `for-each` or an effect only a shipped rule may use
+is `-005` or `-015`; those are errors too, and skip the file the same way. `KW-ARB-CONFIG-018`
+reports a `builds-on` parent with no standard, `-019` a
+`builds-on` cycle, `-021` one file declaring an id twice (the last wins), and `-022` a key the
+file shape does not have (the key is ignored). `arbiter validate` exits non-zero on an error; a
+run itself still loads, with the shipped rules for that folder.
+
 ## Tuning thresholds (`arbiter tune`)
 
 `arbiter tune` reads `decisions.jsonl` and `ledger.jsonl` from the Arbiter directory and writes
@@ -517,13 +605,16 @@ judgement would have said.
 
 `kyber-weave arbiter doctor` raises `KW-ARB-MODEL-001` (warning) when model targeting is not `off`,
 a hooked global target is installed, and its `model-targets.<harness>.json` file is missing,
-unreadable, or older than the Squad lock. The remedy is the one the message names:
+unreadable, or not the table the last Squad update wrote. The doctor compares the table's bytes with
+the digest the deployment recorded for it, so a table an update left untouched because its content
+did not change is current. The remedy is the one the message names:
 
 ```bash
 kyber-weave squad update
 ```
 
-The update rewrites the table from the current presets. A stale table changes what a retarget is
+The update rewrites the table only when the render changes it, which is why the check reads the
+recorded digest rather than the file's write time. A stale table changes what a retarget is
 pointed at, so refresh it after changing a preset. A project-scope target is not checked by this
 diagnostic.
 
@@ -544,7 +635,8 @@ To move from shadow to enforce:
 2. Confirm the table exists for the harness: `kyber-weave arbiter doctor` must not raise
    `KW-ARB-MODEL-001`.
 3. Set `arbiter.model-targeting.mode: enforce` in the configuration. This is the only switch for the
-   two model rules; a per-rule `shadow` override on either fails `KW-ARB-CONFIG-014`.
+   two model rules: a per-rule `shadow` override on either in `arbiter.rules` fails
+   `KW-ARB-CONFIG-014`, and a folder file cannot set it either.
 4. Run `kyber-weave arbiter doctor` and `kyber-weave arbiter validate` to check the configuration.
 
 ### Reading the `tune` profile column

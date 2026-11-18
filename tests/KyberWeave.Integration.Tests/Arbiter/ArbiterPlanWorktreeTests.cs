@@ -126,7 +126,7 @@ public sealed class ArbiterPlanWorktreeTests
         {
             ["description"] = "T7",
             ["prompt"] = Prompt($"Worktree: {worktree}\n\nWrite the failing tests."),
-            ["subagent_type"] = "test-dev",
+            ["subagent_type"] = "dev-medium",
         });
         string stdin = "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"s-wt\",\"cwd\":" +
             JsonSerializer.Serialize(probe.Root) + ",\"agent_type\":\"conductor\",\"tool_name\":\"Agent\"," +
@@ -172,7 +172,7 @@ public sealed class ArbiterPlanWorktreeTests
             ["timestamp"] = 1_731_400_000_000,
             ["cwd"] = probe.Root,
             ["toolName"] = "task",
-            ["toolArgs"] = JsonSerializer.Serialize(new { agent_type = "test-dev", description = "T7", prompt }),
+            ["toolArgs"] = JsonSerializer.Serialize(new { agent_type = "dev-medium", description = "T7", prompt }),
         });
         using StringWriter stdout = new();
         using StringWriter log = new();

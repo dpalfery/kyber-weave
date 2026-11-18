@@ -14,6 +14,8 @@ public static class OntologyConfigLoader
 
     private const string TechnologiesKey = "ontology.technologies";
 
+    private const string RolesKey = "ontology.roles";
+
     internal static OntologyConfig Merge(OntologyConfig defaults, OntologyYamlSection? section)
     {
         if (section is null)
@@ -30,7 +32,7 @@ public static class OntologyConfigLoader
                     throw new YamlException(
                         $"Unknown ontology required-keys doc type '{typeName}'. " +
                         "Known types: architecture, onboarding, requirements, adr, plan, spec, todo, " +
-                        "runbook, reference, rule, governance, index, coding-standard.");
+                        "runbook, reference, rule, governance, index, coding-standard, skill.");
                 }
 
                 merged[docType] = keys is null
@@ -51,6 +53,7 @@ public static class OntologyConfigLoader
             docTypes: section.DocTypes,
             statuses: section.Statuses,
             technologies: NormalizeTechnologies(section.Technologies),
+            roles: NormalizeRoles(section.Roles),
             baseRequiredKeys: section.BaseRequiredKeys,
             requiredKeysByType: requiredKeys,
             intake: section.Intake);
@@ -151,6 +154,44 @@ public static class OntologyConfigLoader
         return normalized;
     }
 
+    /// <summary>
+    /// Validates the declared role vocabulary the same way technologies are validated: a role
+    /// names a directory under <c>&lt;docs-root&gt;/standards/</c> and legalizes a rules or
+    /// skills document's <c>role</c> key.
+    /// </summary>
+    private static IReadOnlyList<string>? NormalizeRoles(List<string>? values)
+    {
+        if (values is null) return null;
+
+        List<string> normalized = new List<string>(values.Count);
+        foreach (string? value in values)
+        {
+            if (value is null)
+            {
+                throw new YamlException(
+                    $"{RolesKey} contains a null entry. Use a slug such as 'reviewer'.");
+            }
+
+            string role = value.Trim();
+            if (!ConfigSlug.IsValid(role))
+            {
+                throw new YamlException(
+                    $"{RolesKey} entry '{value}' is not a slug. Use lowercase letters, digits " +
+                    "and single hyphens — 'architect', not 'Architect Role'. The value names a " +
+                    "directory and legalizes a rules or skills document's 'role' key.");
+            }
+
+            if (normalized.Contains(role, StringComparer.Ordinal))
+            {
+                throw new YamlException($"{RolesKey} declares '{role}' more than once.");
+            }
+
+            normalized.Add(role);
+        }
+
+        return normalized;
+    }
+
     private static bool TryParseDocType(string? name, out DocType docType)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -176,6 +217,7 @@ public static class OntologyConfigLoader
             "governance" => DocType.Governance,
             "index" => DocType.Index,
             "coding-standard" => DocType.CodingStandard,
+            "skill" => DocType.Skill,
             _ => DocType.Unknown
         };
         return docType != DocType.Unknown;

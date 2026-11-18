@@ -18,7 +18,7 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
         "\"preset\":{\"name\":\"work\",\"digest\":\"d\"},\"bundle-digest\":\"b\"," +
         "\"profiles\":{\"fast\":\"claude-haiku-5-5\",\"general\":\"claude-sonnet-5-5\"," +
         "\"architect\":\"opus\",\"orchestration\":null}," +
-        "\"agents\":{\"csharp-dev\":{\"profile\":\"general\",\"token\":\"claude-sonnet-5-5\"}}}";
+        "\"agents\":{\"dev-medium\":{\"profile\":\"general\",\"token\":\"claude-sonnet-5-5\"}}}";
 
     private readonly TempDirectory _arbiterDirectory = new();
 
@@ -46,8 +46,8 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
         Assert.Equal(4, targets.Profiles.Count);
         Assert.True(targets.Profiles.ContainsKey("orchestration"));
         Assert.Null(targets.Profiles["orchestration"]);
-        Assert.Equal("general", targets.Agents["csharp-dev"].Profile);
-        Assert.Equal("claude-sonnet-5-5", targets.Agents["csharp-dev"].Token);
+        Assert.Equal("general", targets.Agents["dev-medium"].Profile);
+        Assert.Equal("claude-sonnet-5-5", targets.Agents["dev-medium"].Token);
     }
 
     [Fact]
@@ -59,8 +59,8 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
         ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(_arbiterDirectory.Path, "claude");
 
         Assert.NotNull(targets);
-        Assert.Equal("general", targets.Agents["csharp-dev"].Profile);
-        Assert.Null(targets.Agents["csharp-dev"].Token);
+        Assert.Equal("general", targets.Agents["dev-medium"].Profile);
+        Assert.Null(targets.Agents["dev-medium"].Token);
     }
 
     [Fact]

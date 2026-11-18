@@ -1,7 +1,7 @@
 # Kyber-Squad Canonical Source Tree
 
 Kyber-Squad is the canonical source tree for unified agent and skill governance and deployment.
-It maintains a target-neutral, declarative catalog of **24 canonical agents** and the canonical skills,
+It maintains a target-neutral, declarative catalog of **29 canonical agents** and the canonical skills,
 governed by explicit schemas, model profiles, semantic capability profiles, and fallback lowering rules.
 
 `products/kyber-squad/` is the canonical and package authority from which target-native agent and
@@ -32,33 +32,24 @@ products/kyber-squad/
 │   ├── models.yml                      # Model tiers, aliases, and temperature parameters
 │   ├── capabilities.yml                # Capability taxonomy and permission assignments
 │   └── fallbacks.yml                   # Lowering rules and collision resolution for fallback harnesses
-├── agents/                             # 24 canonical agent definition files plus owned references
+├── agents/                             # 15 canonical agent definition files plus owned references
 │   ├── architect.md
 │   ├── architect/                      # Progressive-disclosure references (Markdown)
-│   ├── azure-reader.md
 │   ├── bug-crusher-investigator.md
 │   ├── bug-crusher.md
 │   ├── code-reviewer.md
 │   ├── conductor.md
 │   ├── conductor/                      # Progressive-disclosure references (Markdown)
-│   ├── csharp-dev.md
-│   ├── dal-dev.md
+│   ├── dev-easy.md
+│   ├── dev-hard.md
+│   ├── dev-medium.md
+│   ├── devops.md
 │   ├── docs-dev.md
-│   ├── github-devops.md
-│   ├── go-dev.md
-│   ├── maui-dev.md
+│   ├── platform-researcher.md
 │   ├── product-owner.md
-│   ├── pulumi-dev.md
-│   ├── python-dev.md
-│   ├── react-dev.md
 │   ├── research-agent.md
 │   ├── review-lens.md
-│   ├── review-triage.md
-│   ├── rust-dev.md
-│   ├── sql-database-architect.md
-│   ├── tauri-dev.md
-│   ├── test-dev.md
-│   └── typescript-dev.md
+│   └── review-triage.md
 └── skills/                             # canonical skill directories and their resources
     ├── app-docs-standard/
     ├── architecture-decision-record/
@@ -82,11 +73,11 @@ products/kyber-squad/
     ├── pr-review-fix-comments/
     ├── product-owner/
     ├── python-dev/
+    ├── review-council/
     ├── rust-dev/
     ├── security-review/
     ├── setup-dev-environment/
     ├── task-gate/
-    ├── test-dev/
     └── typescript-dev/
 ```
 
@@ -94,7 +85,7 @@ products/kyber-squad/
 
 ## Canonical Components
 
-### 1. Agents (24 Canonical Roles)
+### 1. Agents (15 Canonical Roles)
 
 Each agent in `agents/<name>.md` contains LF-normalized UTF-8 Markdown with strict YAML frontmatter conforming to `schemas/agent.schema.json`:
 
@@ -109,7 +100,7 @@ capability-profile: architect
 copilot-capability-profile: architect-copilot
 devin-capability-profile: architect-devin
 copilot-tools: [vscode, execute, read, agent, edit, search, web, todo]
-delegates-to: [azure-reader, research-agent]
+delegates-to: [platform-researcher, research-agent]
 fallback: role-skill
 aliases: []
 ---
@@ -177,19 +168,17 @@ them beside the canonical skills, so every Squad deployment carries them. They a
 
 ### 3. Profiles
 
-- **Model Profiles (`profiles/models.yml`)**: Defines the `architect`, `deep-planning`, `fast`, `general`, `orchestration`, and `reviewer` tiers and maps them to target model identifiers where an override is required.
+- **Model Profiles (`profiles/models.yml`)**: Defines the `architect`, `deep-planning`, `dev-hard`, `fast`, `general`, and `reviewer` tiers and maps them to target model identifiers where an override is required. `dev-hard` is the developer tier's own profile, so a change to a planning model never changes it. An agent's `model-profile` is optional: the `conductor` declares none and runs on the model its session was started with.
 - **Capability Profiles (`profiles/capabilities.yml`)**: Declares a closed capability lattice and assigns permissions (`deny`, `ask`, `allow`) to each agent role. A target-scoped internal profile may validate an exact Copilot tool allow-list without replacing or widening the agent's shared capability profile.
 - **Fallback Profiles (`profiles/fallbacks.yml`)**: Governs role-skill lowering on harnesses lacking native agent support.
 
 ### 4. Namespace Collision and Fallback Lowering
 
-Agent and skill namespaces intersect at exactly eleven names. Two — `product-owner` and
-`bug-crusher` — are primary shared identities: root agents whose body is a thin pointer at the
-same-name canonical skill, which carries the role. The remaining nine are distinct-body collisions:
-`csharp-dev`, `dal-dev`, `github-devops`, `go-dev`, `maui-dev`, `python-dev`, `rust-dev`, `test-dev`, and `typescript-dev`. On fallback
-harnesses, each distinct-body collision's canonical skill retains `<name>` and the agent projects
-to `role-<name>`, while a primary shared identity reuses its canonical skill as the entry point.
-`role-` is reserved exclusively for generated projections.
+Agent and skill namespaces intersect at exactly two names: `product-owner` and `bug-crusher`. Both are
+primary shared identities — root agents whose body is a thin pointer at the same-name canonical skill,
+which carries the role — so a fallback target reuses that canonical skill as the entry point. `role-` is
+reserved exclusively for generated projections, and with no distinct-body collision left none is generated
+from a shipped agent.
 
 `conductor` has no canonical skill, so fallback targets
 lower it through the unoccupied-identity rule to a same-name role skill. `conductor` is the single
@@ -206,6 +195,23 @@ symlink escape, invalid UTF-8, or portable path alias collision fails source loa
 actionable path and hint. Closures are de-duplicated by normalized ordinal path and rendered in
 ordinal order beside the principal output, so progressively disclosed workflow detail survives
 deployment without link rewriting.
+
+### 6. Worker Rosters
+
+One worker roster ships: the three developer tiers `dev-easy`, `dev-medium` and `dev-hard`, beside
+`docs-dev`, `devops` and `platform-researcher` for documentation, delivery and live-platform work. The
+per-technology developer agents and the planning, testing and GitHub-delivery agents they replaced no
+longer ship; a plan or task file that still names one resolves to its replacement and reports the
+substitution. `worker-roster` defaults to `tiered`, and the removed value `technology` is a
+configuration error that names the change. An agent declares its roster in frontmatter with the same
+key, and an agent with no key serves the roster anyway.
+
+The task file records the tier the task's rating gives and the task's difficulty, and the dispatch
+tool turns them into the attempt's tier with `tier = min(hard, rated difficulty + failed attempts)`: `easy` starts on
+`dev-easy`, `medium` and an unrated task on `dev-medium`, `hard` on `dev-hard`, and a failed attempt
+moves one tier up and never down. The roster and the tier table are documented in the
+[Squad architecture §12](../../docs/kyber-squad/architecture.md#12-the-worker-roster-and-developer-tiers)
+and the [`worker-roster` setting](../../docs/configuration.md).
 
 ---
 

@@ -566,16 +566,40 @@ public sealed class ReviewGatesService(
         if (refusals.Count > 0)
             return RefuseInput(report, refusals);
 
-        if (!config.Review.TaskGates.TryGetValue(request.Agent!, out IReadOnlyList<ReviewTaskGate>? agentGates) ||
-            agentGates.Count == 0)
+        List<string> unreadableStandards = [];
+        string? parentTechnology = TaskGateResolver.ParentTechnologyOrNone(
+            EnclosingRepositoryRoot(root), config, target?.Entry.Technology, unreadableStandards);
+        if (unreadableStandards.Count > 0)
         {
-            // Like the repository-wide case, an agent with no gates is reported rather than read as a pass.
+            // The task's gates may be keyed on the parent technology, so a standard this process may not read
+            // makes the run's evidence unreliable. Refuse before any gate starts and name the file.
+            return RefuseInput(
+                report,
+                unreadableStandards,
+                "Make the standard readable, then run the command again.");
+        }
+
+        TaskGateResolution resolved = TaskGateResolver.Resolve(
+            config.Review,
+            request.Agent!,
+            target?.Entry.Technology,
+            parentTechnology);
+
+        IReadOnlyList<ReviewTaskGate> agentGates = resolved.Gates;
+        if (agentGates.Count == 0)
+        {
+            // No route names a gate: not the task's technology, not its parent, not the agent. A task that names a
+            // technology is an error, because a developer change with no gate has no evidence behind it; a task that
+            // names none keeps the warning this command gave before technology-keyed gates existed.
             report.Add(new Diagnostic(
                 ReviewGateReporting.NoGatesForAgent,
-                Severity.Warning,
-                $"No task gates are declared for agent '{request.Agent}', so its change has no executed evidence behind it.",
-                "review.task-gates",
-                Hint: "Declare the agent's gates under review.task-gates in kyber-weave.yml."));
+                resolved.IsRefused ? Severity.Error : Severity.Warning,
+                resolved.Refusal
+                ?? $"No task gates resolve for agent '{request.Agent}': the task names no technology this host declares " +
+                "gates for, and review.task-gates has no entry for the agent, so its change has no executed evidence behind it.",
+                "review",
+                Hint: "Declare gates under review.technology-gates for the task's technology, or its parent, or under " +
+                      "review.task-gates for the agent."));
             ReviewReportWriter.TryWrite(
                 files,
                 outPath,
@@ -585,7 +609,7 @@ public sealed class ReviewGatesService(
             return ReviewCommandResult.Reported(
                 report.HasErrors ? 1 : 0,
                 report,
-                request.HumanOutput ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath) : []);
+                request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath) : []);
         }
 
         IReadOnlyList<string> changed;

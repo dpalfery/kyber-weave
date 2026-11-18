@@ -15,8 +15,9 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// The table is the arbiter's read of what a model preset actually routes to, so it is produced from
 /// <see cref="SquadModelResolution.ResolveToken(SquadModelProfiles, string, string)"/> and nothing else:
 /// a second resolution path would let the table drift from the agent files it describes. Project scope
-/// writes it under <c>artifacts/arbiter</c>; global scope writes it under the user's <c>.kyber-weave</c>
-/// directory; instance scope writes none, because no hook runs there.
+/// writes it under <c>artifacts/arbiter</c>; global scope writes it under the hooked harness's own
+/// <c>.kyber-weave</c> directory, beside that harness's hooks, so one user-level install keeps one table per
+/// harness wherever that harness reads its files from; instance scope writes none, because no hook runs there.
 /// </remarks>
 public static class ArbiterModelTargetsFile
 {
@@ -29,7 +30,7 @@ public static class ArbiterModelTargetsFile
     /// <param name="harness">The harness token.</param>
     public static string ProjectRelativePath(string harness) => $"artifacts/arbiter/model-targets.{harness}.json";
 
-    /// <summary>The global-scope path of one harness's table, relative to the user's home.</summary>
+    /// <summary>The global-scope path of one harness's table, relative to that harness's global root.</summary>
     /// <param name="harness">The harness token.</param>
     public static string GlobalRelativePath(string harness) => $".kyber-weave/arbiter/model-targets.{harness}.json";
 
@@ -71,6 +72,9 @@ public static class ArbiterModelTargetsFile
             Dictionary<string, string> agentProfiles = new(StringComparer.Ordinal);
             foreach (SquadAgent agent in merged.Agents)
             {
+                // Every agent gets a row. One with no profile records an empty profile and a null
+                // token: it runs on its session's model, and the table says so rather than leaving
+                // the agent out of a table that otherwise names the whole roster.
                 agentProfiles[agent.Name] = agent.ModelProfile;
             }
 

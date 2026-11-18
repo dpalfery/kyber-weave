@@ -482,6 +482,18 @@
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
     },
     {
+      "file": "tests/KyberWeave.Integration.Tests/ReviewGatesTechnologyGateTests.cs",
+      "text": "ProcessStartInfo start = new(\"git\")",
+      "count": 1,
+      "bound": "Started by the Run in the Git helper at line 199: ProcessRunner timeout 60 s kills the child tree on expiry. git argv only (init, add, commit, worktree add) in a temp fixture repository; the test needs a real worktree to prove the plan is found outside this checkout."
+    },
+    {
+      "file": "tests/KyberWeave.Integration.Tests/ReviewGatesTechnologyGateTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(start, string.Empty, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp fixture repository. The helper asserts the exit code, so a failed git call fails the test rather than hanging."
+    },
+    {
       "file": "tests/KyberWeave.RepoPolicy.Tests/SbomTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"python3\")",
       "count": 1,
@@ -1248,6 +1260,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout);",
       "count": 1,
       "bound": "ProcessRunner.Run with the runner's timeout (120 s for kyber-weave run start); the process tree is killed on expiry and the TimeoutException reaches the caller. argv only, in the repository root."
+    },
+    {
+      "file": "tests/KyberWeave.Integration.Tests/McpCompositionRootTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
+      "count": 1,
+      "bound": "Builds only; nothing starts on this line. Started by the ProcessRunner.Run call below with a 60 s timeout, which kills the child tree. argv only: the built docs assembly, the fixture repository root and --no-codegraph-refresh; stdin is the fixed request list in the test."
+    },
+    {
+      "file": "tests/KyberWeave.Integration.Tests/McpCompositionRootTests.cs",
+      "text": "ProcessResult result = ProcessRunner.Run(startInfo, Requests, TimeSpan.FromSeconds(60));",
+      "count": 1,
+      "bound": "ProcessRunner.Run with a 60 s timeout kills the child tree on expiry. The child is the docs MCP assembly in a temporary fixture repository with --no-codegraph-refresh, fed the fixed request list in the test, so it exits once that input ends."
     }
   ]
 }

@@ -13,7 +13,7 @@ public sealed class HookFastPathTests
         "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"prompt\":\"x\"},\"cwd\":\"/repo\",\"session_id\":\"s\"}";
 
     private const string Dispatch =
-        "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"prompt\":\"x\",\"subagent_type\":\"csharp-dev\"},\"cwd\":\"/repo\",\"session_id\":\"s\"}";
+        "{\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"prompt\":\"x\",\"subagent_type\":\"dev-medium\"},\"cwd\":\"/repo\",\"session_id\":\"s\"}";
 
     [Theory]
     [InlineData(PlainBash)]
@@ -52,7 +52,7 @@ public sealed class HookFastPathTests
     public void ASubagentsFileWrite_NeedsTheWorkerGuard()
     {
         const string stdin =
-            "{\"agent_id\":\"a1\",\"agent_type\":\"csharp-dev\",\"tool_name\":\"Write\",\"cwd\":\"/repo\",\"tool_input\":{\"file_path\":\"x.cs\"}}";
+            "{\"agent_id\":\"a1\",\"agent_type\":\"dev-medium\",\"tool_name\":\"Write\",\"cwd\":\"/repo\",\"tool_input\":{\"file_path\":\"x.cs\"}}";
 
         Assert.True(KyberWeave.Arbiter.Hooks.WorkerGuard.NeedsDecision("claude", stdin));
     }

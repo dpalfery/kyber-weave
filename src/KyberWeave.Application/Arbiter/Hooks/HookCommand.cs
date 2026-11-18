@@ -34,6 +34,7 @@ public sealed class HookCommand : IArbiterHookHost
     private readonly IClaudeHookCoverage _coverage;
     private readonly IProcessEnvironment _environment;
     private readonly Func<string> _newDecisionId;
+    private readonly ITaskPromptServiceFactory? _promptFactory;
 
     /// <summary>
     /// Creates a host over an adapter registry and the ports it decides through. The configuration loader is a port so
@@ -45,13 +46,16 @@ public sealed class HookCommand : IArbiterHookHost
     /// <param name="coverage">Reads the hook sources a project declares, so the user-level hook can tell whether a project hook covers a dispatch.</param>
     /// <param name="environment">The process directory a payload with no <c>cwd</c> falls back to.</param>
     /// <param name="newDecisionId">Builds a decision id; a new GUID when null.</param>
+    /// <param name="prompts">Builds the task prompt a dispatch's identity line is replaced with; null installs no
+    /// prompt service, so no dispatch is expanded.</param>
     public HookCommand(
         HarnessAdapterRegistry registry,
         IArbiterHostConfig hostConfig,
         IDispatchClaimStore claims,
         IClaudeHookCoverage coverage,
         IProcessEnvironment environment,
-        Func<string>? newDecisionId = null)
+        Func<string>? newDecisionId = null,
+        ITaskPromptServiceFactory? prompts = null)
     {
         ArgumentNullException.ThrowIfNull(registry);
         ArgumentNullException.ThrowIfNull(hostConfig);
@@ -64,6 +68,7 @@ public sealed class HookCommand : IArbiterHookHost
         _coverage = coverage;
         _environment = environment;
         _newDecisionId = newDecisionId ?? (() => Guid.NewGuid().ToString("N"));
+        _promptFactory = prompts;
     }
 
     /// <summary>
@@ -125,7 +130,14 @@ public sealed class HookCommand : IArbiterHookHost
                 if (projectConfig?.Arbiter.ExplicitlyEnabled == false)
                 {
                     log.WriteLine("Arbiter global scope: deferred-to-project (project opts out: arbiter.enabled: false).");
-                    return WriteDisabledAllow(adapter, stdout);
+                    // The Arbiter is off, but prompt insertion is not an Arbiter action: the dispatch still gets its
+                    // prompt. A project hook may insert it too; a dispatch already carrying the prompt is left alone.
+                    return AllowWithoutEvaluation(
+                        adapter,
+                        payload,
+                        caller,
+                        NewContext(adapter, repoRoot, home, HookScope.Project, projectConfig!, log),
+                        stdout);
                 }
 
                 if (projectConfig is not null && projectConfig.Arbiter.Enabled)
@@ -161,9 +173,15 @@ public sealed class HookCommand : IArbiterHookHost
             if (!config.Arbiter.Enabled)
             {
                 log.WriteLine("Arbiter is disabled (arbiter.enabled: false): allowing without evaluation.");
-                // A harness whose protocol has no silent answer (Antigravity writes {}
-                // for every event) still receives its allow document here.
-                return WriteDisabledAllow(adapter, stdout);
+                // Prompt insertion is not an Arbiter action: a host with the Arbiter off still expands the dispatch.
+                // A harness whose protocol has no silent answer (Antigravity writes {} for every event) still
+                // receives its allow document here.
+                return AllowWithoutEvaluation(
+                    adapter,
+                    payload,
+                    caller,
+                    NewContext(adapter, repoRoot, home, evaluationScope, config, log),
+                    stdout);
             }
 
             if (scope == HookScope.Project && TryYieldToGlobalClaim(adapter, payload, repoRoot, log))
@@ -178,7 +196,8 @@ public sealed class HookCommand : IArbiterHookHost
                 adapter.ObservesReturns,
                 home,
                 evaluationScope,
-                adapter.ModelOverride);
+                adapter.ModelOverride,
+                BuildDispatchPrompt: PromptExpander(repoRoot, config));
             string output = adapter.Handle(payload, stdin, caller, config, context);
             if (output.Length > 0)
             {
@@ -372,6 +391,76 @@ public sealed class HookCommand : IArbiterHookHost
         }
 
         return 0;
+    }
+
+    /// <summary>The context an unevaluated event is answered under, carrying the prompt service when one is installed.</summary>
+    private HookContext NewContext(
+        IHarnessHookAdapter adapter,
+        string repoRoot,
+        string home,
+        HookScope scope,
+        KyberWeaveConfig config,
+        TextWriter log) =>
+        new(
+            repoRoot,
+            _newDecisionId,
+            log,
+            adapter.ObservesReturns,
+            home,
+            scope,
+            adapter.ModelOverride,
+            BuildDispatchPrompt: PromptExpander(repoRoot, config));
+
+    /// <summary>The prompt builder this host passes to the adapters, or null when no prompt service was installed.</summary>
+    /// <remarks>
+    /// The service is built once per hook process and reads the checkout's documentation, so it is created on the
+    /// first dispatch that needs it rather than for every event.
+    /// </remarks>
+    private Func<DispatchPromptQuery, DispatchPromptExpansion>? PromptExpander(string repoRoot, KyberWeaveConfig config)
+    {
+        if (_promptFactory is null)
+        {
+            return null;
+        }
+
+        ITaskPromptService? service = null;
+        return query =>
+        {
+            service ??= _promptFactory.ForRepository(repoRoot, config);
+            TaskPromptResult result = service.Build(
+                new TaskPromptRequest(
+                    repoRoot,
+                    query.TaskId,
+                    query.PlanFile,
+                    Agent: null,
+                    query.PriorResultsPath,
+                    Technology: query.Technology,
+                    query.FailedAttempts,
+                    RetryText: query.RetryText),
+                config);
+            return new DispatchPromptExpansion(result.Built, result.Prompt, result.Refusal);
+        };
+    }
+
+    /// <summary>
+    /// Answers an event this hook does not evaluate: with the dispatch expanded when it names a task, else with the
+    /// harness's own allow document.
+    /// </summary>
+    private static int AllowWithoutEvaluation(
+        IHarnessHookAdapter adapter,
+        JsonElement payload,
+        string? caller,
+        HookContext context,
+        TextWriter stdout)
+    {
+        string? insertion = adapter.RenderPromptInsertion(payload, caller, context);
+        if (insertion is not null)
+        {
+            stdout.Write(insertion);
+            return 0;
+        }
+
+        return WriteDisabledAllow(adapter, stdout);
     }
 
     private static string OneLine(string message) =>

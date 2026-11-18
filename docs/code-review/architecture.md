@@ -16,6 +16,7 @@ decided-by:
   - adr/0069-the-review-council-loops-until-approve-and-computes-its-verdict-from-seat-output
   - adr/0077-the-dispatching-session-seats-the-council-from-the-gate-runs-evidence
   - adr/0079-the-reviewer-starts-its-own-seats-where-sub-agents-can-dispatch
+  - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
 code-refs:
   - VerdictEngine
   - GateRunService
@@ -566,12 +567,17 @@ lens prompt. That is the injection surface closed at the point the value is writ
 ### Task gates
 
 `review.task-gates` is the developer exit gate's counterpart to `review.gates`: a map from an
-agent slug to that agent's ordered gates, run by `kyber-weave review gates --agent <slug>`
-against the files that agent changed. It is optional; absent, no agent has task gates and
-`--agent` reports `KW-REVIEW-027`. With `--task <id>` and no `--paths`, the files and the test
-classes for `{tests}` come from the task in the active plan, the report goes to the task's scratch
-folder, and each test gate prints a short result (failing tests with their first error line) with
-the full output in a log beside it; see the [command surface](../cli-command-surface.md).
+agent slug to that agent's ordered gates, and `review.technology-gates` is the same map keyed by
+the technology the task names, which is what the tiered developer roster uses. `kyber-weave review
+gates --agent <slug>` runs the first of those that resolves — the agent's own entry, then the task
+technology's, then the entry of the technology agent the shipped map names, then the parent
+technology's — against the files the agent changed. Both are optional; when no route declares a
+gate, `--agent` reports `KW-REVIEW-027`, naming both keys. With `--task <id>` and no `--paths`, the
+files and the test classes for `{tests}` come from the task in the active plan, the report goes to
+the task's scratch folder, and each test gate prints a short result (failing tests with their first
+error line) with the full output in a log beside it; the plan is also read from another worktree of
+the repository, so a worker whose checkout does not hold the run's plan resolves the task the way
+`docs packet` does. See the [command surface](../cli-command-surface.md).
 
 ```yaml
 review:
@@ -612,24 +618,28 @@ path that is absolute, leaves the repository, begins with `-`, or passes through
 whose target lies outside the repository, and a `--task` that is not a slug, refuse the whole run
 (`KW-REVIEW-028`) before any process starts.
 
-A YAML anchor is the way to share a gate between agents: define it on the first agent and alias
-it under the others. This repository does so for:
+A YAML anchor is the way to share a gate between entries: define it on the first and alias it
+under the others. This repository's block below is still keyed by the retired agent slugs, which
+the shipped technology map keeps resolvable for two minor releases, and
+`kyber-weave review migrate-task-gates` rewrites it as `review.technology-gates`. Its gates are
+anchored for:
 
-- .NET: `format-whitespace`, `format-style` and `dotnet-build`, anchored under `csharp-dev`. `format-analyzers` was removed because `dotnet-build` immediately follows it and already runs all Roslyn analyzers under `AnalysisMode=all` with `TreatWarningsAsErrors=true` (D3), eliminating ~24s of redundant overhead per task completion with no loss of analyzer enforcement.
-- TypeScript: `dash-typecheck` and `dash-lint`, anchored under `react-dev`; `tray-ui-typecheck` is anchored there too.
-- Tray Rust: `cargo-fmt` and `cargo-clippy`, anchored under `tauri-dev`.
-- SQL: `sql-format` (`sqlfluff lint`), declared under `sql-database-architect`. A migration or a schema file is frequently the one thing a build never touches, so a change to `*.sql` needs a gate of its own.
-- Repository plumbing: `workflow-lint` (`actionlint`), `shellcheck` and `review-config` (`kyber-weave review catalogue .`), anchored under `github-devops`. `review-config` is aliased under `sql-database-architect` and `docs-dev` too, so a configuration change made in any of the three roles selects it.
+- .NET: `format-whitespace`, `format-style` and `dotnet-build`, anchored under the `csharp` entry (`csharp-dev` until the migration runs). `format-analyzers` was removed because `dotnet-build` immediately follows it and already runs all Roslyn analyzers under `AnalysisMode=all` with `TreatWarningsAsErrors=true` (D3), eliminating ~24s of redundant overhead per task completion with no loss of analyzer enforcement.
+- TypeScript: `dash-typecheck` and `dash-lint`, anchored under the `react` entry (`react-dev`); `tray-ui-typecheck` is anchored there too.
+- Tray Rust: `cargo-fmt` and `cargo-clippy`, anchored under the `tauri` entry (`tauri-dev`).
+- SQL: `sql-format` (`sqlfluff lint`), declared under the `sql-server` entry (`sql-database-architect`). A migration or a schema file is frequently the one thing a build never touches, so a change to `*.sql` needs a gate of its own.
+- Repository plumbing: `workflow-lint` (`actionlint`), `shellcheck` and `review-config` (`kyber-weave review catalogue .`), anchored under the `github-actions` entry (`github-devops`). `review-config` is aliased under `docs-dev` too, so a configuration change in either role selects it.
 
 The three plumbing gates exist because `include` alone decides whether a gate is selected, and no
 gate covered those file kinds: a task that edited only a workflow, a shell script or the review
 configuration selected nothing and reported `NONE_APPLICABLE`, which a reader of a completion
 digest cannot tell apart from a change that was checked and passed.
 
-`typescript-dev` aliases the dash gates and `rust-dev` the cargo format and lint gates. `test-dev`
-runs the .NET format and build gates, the dash gates and the cargo format and lint gates, because
-its tests span all three. `go-dev` and `python-dev` declare no task gates, because this repository
-has no Go or Python project for one to check. `cargo test` has no task gate: it runs in the council
+The `typescript` entry aliases the dash gates and the `rust` entry the cargo format and lint gates.
+The retired testing agent ran the .NET format and build gates, the dash gates and the cargo format
+and lint gates, because its tests spanned all three; a task whose files are all tests now runs the
+gates of its own technology. The `go` and `python` entries declare no task gates, because this
+repository has no Go or Python project for one to check. `cargo test` has no task gate: it runs in the council
 only, because a whole-crate test run per task would fail on another worker's concurrent edit.
 
 `docs-dev` declares one gate, and it selects one file: `.kyber-weave/kyber-weave.yml`. A change
@@ -731,8 +741,8 @@ suppression passes untouched, and a change that adds none passes.
 found on a context line satisfies nothing, and an empty change is a pass. The command needs no
 `review:` section, so it runs in a host that declares none.
 
-Every .NET authoring role runs it as a task gate: `csharp-dev`, `dal-dev`, `maui-dev`, `pulumi-dev`,
-`sql-database-architect` and `test-dev`. A suppression is the same defect wherever it is written, and a
+Every .NET authoring task runs it as a task gate, whichever developer tier takes it. A suppression
+is the same defect wherever it is written, and a
 test file is written by an author like any other. The gate's argv is bare — `review suppressions "."` —
 and never carries `{changed}`: the command reads the change against its base itself, so a changed-file
 list would scan those files twice and still miss a suppression added to a file the gate's `include` did
@@ -752,10 +762,11 @@ three plumbing gates it carries no `os` restriction: a .NET authoring role write
 platform, and `kyber-weave` is a dotnet tool that resolves the way `dotnet` does, so restricting it would
 leave a Windows host with every other csharp gate and not this one. Windows is not exercised. That entry
 names the
-five developers the catalogue's developer-slug vocabulary admits; `sql-database-architect` is not one of
-them, so a host scaffolded from the catalogue gets the gate for the other five and
-[sql-database-architect is not a catalogue developer slug](../todo/sql-database-architect-is-not-a-catalogue-developer-slug.md)
-tracks the gap.
+five developers the catalogue's developer-slug vocabulary admitted; the retired planning agent was
+not one of them, so a host scaffolded from the catalogue got the gate for the other five. The removal
+closed that gap: the agent it named is deleted, and the
+[record of the vocabulary question](../archive/todo/sql-database-architect-is-not-a-catalogue-developer-slug.md)
+is archived.
 
 ### Council gates
 
@@ -965,7 +976,7 @@ version-1 technology set:
 |---|---|---|---|---|
 | `csharp` | `csharp` | `*.slnx`, `*.sln` (fallback `*.csproj`) | each solution | The test form follows the repository `global.json` (`vstest` or `mtp`) |
 | `typescript` | `typescript`, `react` | `tsconfig.json` + `package.json` (pair) | each root | Every gate declares `os: unix`: `npm` and `npx` are `.cmd` shims on Windows |
-| `rust` | `rust`, `tauri` | `Cargo.toml` | outermost | A root under `src-tauri` belongs to `tauri-dev` when `tauri` is declared, else to `rust-dev`; every other root belongs to `rust-dev` |
+| `rust` | `rust`, `tauri` | `Cargo.toml` | outermost | A root under `src-tauri` takes the `tauri` technology's gates when `tauri` is declared, else the `rust` technology's; every other root takes `rust` |
 | `go` | `go` | `go.mod` | each module | Council gates run with `working-directory` at the module root. `golangci-lint` is third-party: it ships commented out (`when: optional`), to be enabled by hand |
 | `python` | `python` | `pyproject.toml` | outermost | `pytest` exit 5 (no tests collected) fails the gate on purpose |
 
@@ -1002,7 +1013,7 @@ that marked none both fail.
 **Three of the entries cover repository plumbing rather than a language.** `workflow-lint`
 (`actionlint` over `.github/workflows/*.yml`), `shellcheck` (over `**/*.sh`) and `review-config`
 (`kyber-weave review catalogue .`, which fails when the configuration no longer loads) live in the
-csharp family but are written for `github-devops` and `docs-dev`, the two agents that edit those
+csharp family but are written for `devops` and `docs-dev`, the two roles that edit those
 files. Those two agents map to the `github-actions` technology, so a host that declares it receives
 their gates and a host that does not receives none of them. Each of the three carries `os: unix`,
 and the family's `sources` map carries the download or install page for its tool; a gate skipped
@@ -1029,7 +1040,9 @@ and `pulumi-dev` from the csharp family; `github-devops` from that family's plum
 (the workflow linter, `shellcheck` and the review-config load check); `docs-dev` from the
 review-config entry alone; `typescript-dev` and `react-dev` from
 typescript; `rust-dev` and `tauri-dev` from rust; `go-dev` from go; `python-dev` from
-python. `test-dev` gets a copy of every written format and lint gate. The written block
+python; and the retired testing agent got a copy of every written format and lint gate. Eleven of
+those thirteen slugs name agents the removal deleted: the block is written for a host that still
+holds it, and `kyber-weave review migrate-task-gates` rewrites it as `review.technology-gates`. The written block
 is host-owned from then on: re-running `docs init` never edits an existing `review:`
 section, even with `--force` — it only lists catalogue ids missing from the host's
 section, as information. `ReviewConfig.ProductDefaults` stays empty, so upgrading

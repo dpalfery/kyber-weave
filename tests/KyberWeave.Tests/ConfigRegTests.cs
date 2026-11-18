@@ -40,8 +40,8 @@ public class ConfigRegResolutionTests
     {
         IReadOnlyList<ConfigRegEntry> entries = ConfigRegConfig.ProductDefaults.Resolve(Ontology("dotnet", "github-actions"));
 
-        Assert.Equal("docs/standards/dotnet/README.md", PathOf(entries, "dotnet-coding-standard"));
-        Assert.Equal("docs/standards/github-actions/README.md", PathOf(entries, "github-actions-coding-standard"));
+        Assert.Equal("docs/standards/dotnet/dotnet.standards.md", PathOf(entries, "dotnet-coding-standard"));
+        Assert.Equal("docs/standards/github-actions/github-actions.standards.md", PathOf(entries, "github-actions-coding-standard"));
     }
 
     /// <summary>
@@ -379,6 +379,46 @@ public sealed class ConfigRegValidatorTests : IDisposable
             i.Code == ConfigRegValidator.UnresolvedPath && i.Message.Contains("adr-index", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A host that still holds its standard as <c>README.md</c> is in the warning period: the
+    /// registry entry points at the prefixed name that does not exist yet, and that must not
+    /// fail the host's own runs. The warning names the one command that finishes the migration.
+    /// </summary>
+    [Fact]
+    public void ALegacyReadmeStandardIsAWarningNamingTheMigrationCommand()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+        KyberWeaveConfig config = Configured("dotnet");
+        string agents = Path.Combine(_temp.Path, "AGENTS.md");
+        Write("AGENTS.md", ConfigRegMarkdown.Splice(
+            File.ReadAllText(agents),
+            ConfigRegMarkdown.Render(config.ConfigReg.Resolve(config.Ontology))));
+        Write("docs/standards/dotnet/README.md", """
+            ---
+            id: standards/dotnet
+            title: dotnet standard
+            doc-type: coding-standard
+            status: current
+            technology: dotnet
+            owner: Maintainers
+            last-reviewed: 2026-07-21
+            ---
+
+            # dotnet standard
+
+            ## Stack
+            """);
+
+        DiagnosticReport report = Validate(config);
+
+        Assert.False(report.HasErrors);
+        Diagnostic warning = Assert.Single(
+            report.Items, i => i.Code == ConfigRegValidator.UnresolvedPath);
+        Assert.Equal(Severity.Warning, warning.Severity);
+        Assert.Contains("README.md", warning.Message, StringComparison.Ordinal);
+        Assert.Contains("docs standards migrate", warning.Hint, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AFreshlyScaffoldedRepositoryHasNoRegistryFindings()
     {
@@ -387,6 +427,29 @@ public sealed class ConfigRegValidatorTests : IDisposable
         DiagnosticReport report = Validate(Configured());
 
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+    }
+
+    /// <summary>
+    /// The prose between the property lines is template text, not configuration. A block whose
+    /// properties all match is current even after its prose was edited, so the comparison must
+    /// not fall through to a contradiction finding on the text alone.
+    /// </summary>
+    [Fact]
+    public void ProseInsideTheGeneratedBlockIsNotChecked()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+        string agents = Path.Combine(_temp.Path, "AGENTS.md");
+        string original = File.ReadAllText(agents);
+        string edited = original.Replace(
+            "Agents and skills look up the following properties",
+            "Agents and skills find the following properties",
+            StringComparison.Ordinal);
+        Assert.NotEqual(original, edited);
+        Write("AGENTS.md", edited);
+
+        DiagnosticReport report = Validate(Configured());
+
+        Assert.DoesNotContain(report.Items, i => i.Code == ConfigRegValidator.StaleRendering);
     }
 
     [Fact]
@@ -555,6 +618,59 @@ public sealed class ConfigRegValidatorTests : IDisposable
     }
 
     /// <summary>
+    /// The roster is a published mode property. This block was generated before the host chose the tiered roster,
+    /// so it carries no <c>worker-roster</c> line while the configuration now publishes one. The finding must name
+    /// the property and the command that fixes it, because the block is generated output.
+    /// </summary>
+    [Fact]
+    public void AChangedWorkerRosterMakesTheScaffoldedBlockStaleAndNamesDocsInit()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+
+        DiagnosticReport report = Validate(Tiered());
+
+        Assert.Contains(report.Items, i =>
+            i.Code == ConfigRegValidator.StaleRendering
+            && i.Hint is not null
+            && i.Hint.Contains("docs init", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A roster the configuration actually chose is published, and the block regenerated from that configuration
+    /// validates: the finding above is about staleness, not about the roster being unpublishable.
+    /// </summary>
+    [Fact]
+    public void AChosenWorkerRosterIsPublishedAndValidates()
+    {
+        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+        KyberWeaveConfig config = Tiered();
+        Write(
+            "AGENTS.md",
+            ConfigRegMarkdown.Splice(
+                File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+                ConfigRegMarkdown.Render(config.ConfigReg.Resolve(config.Ontology))));
+
+        DiagnosticReport report = Validate(config);
+
+        Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
+        Assert.Contains(
+            "- **<worker-roster>**: `tiered`",
+            File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md")),
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>The generated block states which file wins, so a reader of any host knows before a run starts.</summary>
+    [Fact]
+    public void TheGeneratedBlockStatesThatTheConfigurationOutranksIt()
+    {
+        string block = ConfigRegMarkdown.Render(
+            ConfigRegConfig.ProductDefaults.Resolve(new OntologyConfig { DocsRoots = ["docs"] }));
+
+        Assert.Contains("The configuration is the authority", block, StringComparison.Ordinal);
+        Assert.Contains("docs init", block, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Adding a mode property is not a licence to stop checking paths: a registry that published
     /// <c>&lt;intake-assessment&gt;</c> and nothing else would pass while every path property
     /// pointed at nothing.
@@ -580,4 +696,8 @@ public sealed class ConfigRegValidatorTests : IDisposable
     /// </summary>
     private static KyberWeaveConfig IntakeEnabled() =>
         KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\n  intake: true\n");
+
+    /// <summary>A host configuration that chose the tiered worker roster.</summary>
+    private static KyberWeaveConfig Tiered() =>
+        KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\nworker-roster: tiered\n");
 }

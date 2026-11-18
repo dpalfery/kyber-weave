@@ -90,6 +90,7 @@ public sealed class DevinRendererContractTests : IDisposable
         ["deep-planning"] = "claude-opus-5-5-high",
         ["fast"] = "deepseek-v4-1-flash-high",
         ["general"] = "swe-2-high",
+        ["dev-hard"] = "claude-opus-5-5-high",
         ["reviewer"] = "grok-4-7-high"
     };
 
@@ -491,6 +492,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [InlineData("deep-planning", "claude-opus-5-5-high")]
     [InlineData("fast", "deepseek-v4-1-flash-high")]
     [InlineData("general", "swe-2-high")]
+    [InlineData("dev-hard", "claude-opus-5-5-high")]
     [InlineData("reviewer", "grok-4-7-high")]
     public async Task RenderAsync_Devin_CanonicalProfilesEmitTheirPinnedModel(
         string profileName,
@@ -523,7 +525,7 @@ public sealed class DevinRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = Assert.Single(source.Agents, a => a.Name == "conductor");
-        Assert.Equal("orchestration", conductor.ModelProfile);
+        Assert.True(string.IsNullOrEmpty(conductor.ModelProfile));
 
         SquadRenderResult result = await RenderDevinAsync(ProductRoot);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -665,10 +667,10 @@ public sealed class DevinRendererContractTests : IDisposable
 internal sealed class DevinModelOverrideFixture : IDisposable
 {
     internal const string OverriddenProfile = "general";
-    internal const string OverriddenAgentName = "go-dev";
+    internal const string OverriddenAgentName = "dev-medium";
     internal const string OverrideModel = "swe-1-6";
     internal const string InheritProfile = "fast";
-    internal const string InheritAgentName = "csharp-dev";
+    internal const string InheritAgentName = "dev-easy";
 
     private readonly TempDirectory _temp = new();
 

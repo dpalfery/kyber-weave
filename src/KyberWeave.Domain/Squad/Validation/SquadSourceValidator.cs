@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Model;
 
@@ -38,7 +39,22 @@ public static class SquadSourceValidator
 
         foreach (SquadAgent agent in agents)
         {
-            if (!models.Profiles.ContainsKey(agent.ModelProfile))
+            ValidateWorkerRoster(agent);
+            if (string.IsNullOrWhiteSpace(agent.ModelProfile))
+            {
+                // The model comes from the agent, so every agent but the conductor names a profile.
+                // The conductor runs on the model its session was started with.
+                if (!string.Equals(agent.Name, "conductor", StringComparison.Ordinal))
+                {
+                    Throw(
+                        $"Agent '{agent.Name}' declares no model-profile.",
+                        agent.Name,
+                        agent.SourcePath,
+                        "Add a model-profile declared in profiles/models.yml; only the conductor runs " +
+                        "without one, on the model its session was started with.");
+                }
+            }
+            else if (!models.Profiles.ContainsKey(agent.ModelProfile))
             {
                 Throw(
                     $"Agent '{agent.Name}' references unknown model profile '{agent.ModelProfile}'.",
@@ -298,6 +314,30 @@ public static class SquadSourceValidator
             startLine,
             relatedLocations));
         throw new SquadSourceValidationException(report);
+    }
+
+    /// <summary>
+    /// A roster key is optional: an agent that declares none serves the one roster that ships. The retired
+    /// <c>technology</c> value is refused by name, because a host may still carry it and needs to be told the
+    /// roster it selected was deleted rather than that it misspelled one.
+    /// </summary>
+    private static void ValidateWorkerRoster(SquadAgent agent)
+    {
+        if (string.IsNullOrWhiteSpace(agent.WorkerRoster) || WorkerRosters.IsKnown(agent.WorkerRoster))
+        {
+            return;
+        }
+
+        string declared = agent.WorkerRoster.Trim();
+        bool retired = string.Equals(declared, WorkerRosters.Technology, StringComparison.Ordinal);
+        Throw(
+            retired
+                ? $"Agent '{agent.Name}' declares worker-roster '{declared}', the roster the removal deleted."
+                : $"Agent '{agent.Name}' declares worker-roster '{declared}', which is not a roster.",
+            agent.Name,
+            agent.SourcePath,
+            $"There is one roster, '{WorkerRosters.Tiered}'. Set worker-roster: {WorkerRosters.Tiered}, or " +
+            "remove the key; an agent with no key serves that roster.");
     }
 
     private static void ValidateDuplicateAgents(IReadOnlyList<SquadAgent> agents)

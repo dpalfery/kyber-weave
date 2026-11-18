@@ -289,7 +289,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public void AnUnrelatedInvestigateDerivesNoShortcut()
     {
         ArbiterEvent architect = BugCrusherInvestigate() with { HarnessCaller = "architect" };
-        ArbiterEvent otherTarget = BugCrusherInvestigate() with { Target = "csharp-dev" };
+        ArbiterEvent otherTarget = BugCrusherInvestigate() with { Target = "dev-medium" };
 
         Assert.Empty(SecondaryTriggers.For("investigate", architect));
         Assert.Empty(SecondaryTriggers.For("investigate", otherTarget));

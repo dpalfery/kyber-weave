@@ -254,7 +254,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
             {
                 Harness = "claude",
                 Phase = phase,
-                Target = "csharp-dev",
+                Target = "dev-medium",
                 Prompt = $"KYBER-ARBITER: true\nPLAN_FILE: docs/plans/widget.md\nTASK: {task}\n\nDo the task.",
                 HarnessCaller = "conductor",
                 Session = "s1",
