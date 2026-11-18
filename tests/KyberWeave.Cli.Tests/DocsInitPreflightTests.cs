@@ -11,7 +11,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DocsInitPreflightTests
 {
-    private readonly MemoryDocsHost _host = new();
+    private readonly MemoryScaffoldHost _host = new();
 
     /// <summary>
     /// The CLI must translate the preflight failure into its normal handled-error contract;

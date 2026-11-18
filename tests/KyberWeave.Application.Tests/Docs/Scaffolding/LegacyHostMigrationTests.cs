@@ -25,7 +25,7 @@ public class LegacyHostMigrationTests
     private static readonly string[] Technologies =
         ["azure", "csharp", "data-access-layer", "github-actions", "react", "sql", "test"];
 
-    private readonly MemoryDocsHost _repo = new();
+    private readonly MemoryScaffoldHost _repo = new();
 
     private string PathOf(string relative) => _repo.FullPath(relative);
 

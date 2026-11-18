@@ -23,7 +23,7 @@ namespace KyberWeave.Tests;
 /// environment, clock and a scripted git. A unit test of scaffolding or migration arranges files here and reads
 /// them back; nothing touches the disk, the clock or a process.
 /// </summary>
-internal sealed class MemoryDocsHost
+internal sealed class MemoryScaffoldHost
 {
     /// <summary>The date the fixed clock reads, as the scaffolder stamps it.</summary>
     public const string Today = "2026-11-18";
@@ -31,7 +31,7 @@ internal sealed class MemoryDocsHost
     private readonly ScriptedProcessExecutor _git = new(_ => new ProcessResult(128, string.Empty, "fatal: not a git repository"));
 
     /// <summary>Creates a host over a new in-memory file system, with an empty checkout.</summary>
-    public MemoryDocsHost()
+    public MemoryScaffoldHost()
     {
         Memory = new InMemoryFileSystem();
         Root = Path.Combine(Memory.Root, "repo");

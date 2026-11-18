@@ -44,7 +44,7 @@ public sealed class DocsScaffolderTests
 
     private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
 
-    private readonly MemoryDocsHost _host = new();
+    private readonly MemoryScaffoldHost _host = new();
 
     private string Read(string relativePath) => _host.Read(relativePath);
 
@@ -965,7 +965,7 @@ public sealed class DocsScaffolderTests
     [Fact]
     public void ScaffoldWithKyberStandardsOnFreshRepoScaffoldsAllRichStandardsAndUpdatesConfig()
     {
-        string today = MemoryDocsHost.Today;
+        string today = MemoryScaffoldHost.Today;
 
         ScaffoldResult result = _host.Scaffolder.Scaffold(_host.Root, kyberStandards: true);
 
@@ -1024,7 +1024,7 @@ public sealed class DocsScaffolderTests
     [Fact]
     public void ScaffoldWithKyberStandardsSkipsExistingWithoutForceAndOverwritesWithForce()
     {
-        string today = MemoryDocsHost.Today;
+        string today = MemoryScaffoldHost.Today;
         _host.Memory.CreateDirectory(Path.Combine(_host.Root, "docs", "standards", "csharp"));
         const string customText =
             """
