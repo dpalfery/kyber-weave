@@ -14,7 +14,7 @@ namespace KyberWeave.Core.Arbiter.Rules;
 public static class RuleEngine
 {
     /// <summary>The answer when no <c>decide</c> clause matches.</summary>
-    public const string Undecidable = "undecidable";
+    public const string Undecidable = RuleEffects.Undecidable;
 
     /// <summary>
     /// Evaluates one rule's step-0 clauses: the first matching clause answers,

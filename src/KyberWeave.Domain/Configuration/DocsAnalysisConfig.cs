@@ -16,21 +16,6 @@ public sealed class DocsAnalysisConfig
     /// <summary>Effective path including the primary-root default resolved at config load.</summary>
     public string ResolvedGlossaryPath { get; private init; } = "glossary.md";
 
-    /// <summary>Resolves an omitted path to the primary documentation root.</summary>
-    public string ResolveGlossaryPath(OntologyConfig ontology)
-    {
-        ArgumentNullException.ThrowIfNull(ontology);
-        return string.IsNullOrWhiteSpace(GlossaryPath)
-            ? ontology.DocsRoot == "."
-                ? "glossary.md"
-                : $"{ontology.DocsRoot.TrimEnd('/')}/glossary.md"
-            : GlossaryPath.Replace('\\', '/');
-    }
-
-    /// <summary>Returns this analysis configuration with ontology-derived paths resolved.</summary>
-    public DocsAnalysisConfig ResolveFor(OntologyConfig ontology) =>
-        Clone(resolvedGlossaryPath: ResolveGlossaryPath(ontology));
-
     public double VerdictConfidence { get; private init; } = 0.80;
 
     public DocsAnalysisSearchConfig Search { get; init; } = DocsAnalysisSearchConfig.ProductDefaults;

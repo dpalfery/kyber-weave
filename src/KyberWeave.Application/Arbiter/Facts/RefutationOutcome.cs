@@ -1,18 +1,5 @@
 namespace KyberWeave.Core.Arbiter.Facts;
 
-/// <summary>What a refuter's return says about the finding it was asked to refute.</summary>
-public enum RefutationVerdict
-{
-    /// <summary>The refuter could not defeat the finding (<c>SUPPORTED:</c>).</summary>
-    Confirmed,
-
-    /// <summary>The refuter defeated the finding (<c>REFUTED:</c>).</summary>
-    Refuted,
-
-    /// <summary>The return carries no recognised verdict. The finding is kept; nothing is inferred from it.</summary>
-    Unknown,
-}
-
 /// <summary>Reads the verdict a refuter returns, as the review-lens agent states it.</summary>
 /// <remarks>
 /// A refuter returns one outcome line: <c>REFUTED: &lt;evidence&gt;</c> or <c>SUPPORTED: &lt;evidence&gt;</c>.

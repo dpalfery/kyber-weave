@@ -81,6 +81,9 @@ public static class RuleEffects
 
     /// <summary>A refutation duplicates an earlier finding and is not spawned.</summary>
     public const string Duplicate = "duplicate";
+
+    /// <summary>The answer a rule gives when it cannot decide; each trigger family maps it to its own effect.</summary>
+    public const string Undecidable = "undecidable";
 }
 
 /// <summary>
