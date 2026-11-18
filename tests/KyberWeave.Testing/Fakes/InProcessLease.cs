@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using KyberWeave.Contracts.Host;
 
 namespace KyberWeave.Tests.Fakes;
@@ -10,11 +9,45 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 public sealed class InProcessLeaseHost
 {
-    private readonly ConcurrentDictionary<string, byte> _held = new(StringComparer.Ordinal);
+    private readonly object _gate = new();
+    private readonly HashSet<string> _held = new(StringComparer.Ordinal);
 
-    internal bool TryTake(string name) => _held.TryAdd(name, 0);
+    internal bool TryTake(string name, TimeSpan timeout)
+    {
+        lock (_gate)
+        {
+            if (_held.Add(name))
+            {
+                return true;
+            }
 
-    internal bool TryRelease(string name) => _held.TryRemove(name, out _);
+            long deadline = Environment.TickCount64 + (long)timeout.TotalMilliseconds;
+            while (_held.Contains(name))
+            {
+                long remaining = deadline - Environment.TickCount64;
+                if (remaining <= 0)
+                {
+                    return false;
+                }
+
+                _ = Monitor.Wait(_gate, TimeSpan.FromMilliseconds(remaining));
+            }
+
+            _ = _held.Add(name);
+            return true;
+        }
+    }
+
+    internal void Release(string name)
+    {
+        lock (_gate)
+        {
+            if (_held.Remove(name))
+            {
+                Monitor.PulseAll(_gate);
+            }
+        }
+    }
 }
 
 /// <summary>The one fake for <see cref="ILease"/>: a lease table shared by every instance built from one host.</summary>
@@ -25,8 +58,7 @@ public sealed class InProcessLeaseHost
 /// instances built without a host share nothing, so tests that run in parallel cannot block or refuse each other.
 /// </para>
 /// <para>
-/// A contended request reports <see cref="LeaseTimeoutException"/> at once instead of waiting out its timeout, so a unit
-/// test proves the caller's decision without spending the time the real lease would spend waiting.
+/// A request waits for the current owner to release, up to its timeout, as <see cref="ILease"/> documents.
 /// </para>
 /// </remarks>
 public sealed class InProcessLease : ILease
@@ -53,7 +85,7 @@ public sealed class InProcessLease : ILease
         _ = LeaseNames.Validate(name);
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
 
-        if (!_host.TryTake(name))
+        if (!_host.TryTake(name, timeout))
         {
             throw new LeaseTimeoutException(name, timeout);
         }
@@ -68,7 +100,7 @@ public sealed class InProcessLease : ILease
     public IDisposable Hold(string name)
     {
         _ = LeaseNames.Validate(name);
-        return _host.TryTake(name)
+        return _host.TryTake(name, TimeSpan.Zero)
             ? new HeldLease(_host, name)
             : throw new InvalidOperationException($"The lease '{name}' is already held.");
     }
@@ -85,7 +117,7 @@ public sealed class InProcessLease : ILease
             }
 
             _disposed = true;
-            _ = host.TryRelease(name);
+            host.Release(name);
         }
     }
 }
