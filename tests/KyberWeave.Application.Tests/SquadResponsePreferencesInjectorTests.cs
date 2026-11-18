@@ -1,8 +1,7 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.Squad;
@@ -13,15 +12,24 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed class SquadResponsePreferencesInjectorTests
 {
-    private static SquadResponseGuidanceReader Reader => new(new PhysicalFileSystem());
+    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly string _home;
+
+    public SquadResponsePreferencesInjectorTests()
+    {
+        _home = Path.Combine(_files.Root, "home");
+        _files.CreateDirectory(_home);
+    }
+
+    private SquadResponseGuidanceReader Reader => new(_files);
 
     [Fact]
     public void ReadEffective_UsesHomeFileWhenPresentAndNonWhitespace()
     {
-        string home = NewHomeDirectory();
+        string home = _home;
         string expected = "Use short tool calls and be explicit about assumptions.";
         string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
-        File.WriteAllText(path, expected, Encoding.UTF8);
+        _files.WriteAllText(path, expected);
 
         List<string> warnings = [];
         string actual = Reader.ReadEffective(home, warnings);
@@ -38,9 +46,9 @@ public sealed class SquadResponsePreferencesInjectorTests
     {
         // A blank file is operator input that was accepted as empty. Falling back silently would hide that
         // the operator's edit is being ignored, so the run must say so once.
-        string home = NewHomeDirectory();
+        string home = _home;
         string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
-        File.WriteAllText(path, homeText, Encoding.UTF8);
+        _files.WriteAllText(path, homeText);
 
         List<string> warnings = [];
         string actual = Reader.ReadEffective(home, warnings);
@@ -53,10 +61,8 @@ public sealed class SquadResponsePreferencesInjectorTests
     [Fact]
     public void ReadEffective_WhenTheHomeFileIsAbsent_UsesTheShippedDefaultWithoutWarnings()
     {
-        string home = NewHomeDirectory();
-
         List<string> warnings = [];
-        string actual = Reader.ReadEffective(home, warnings);
+        string actual = Reader.ReadEffective(_home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         Assert.Empty(warnings);
@@ -67,11 +73,10 @@ public sealed class SquadResponsePreferencesInjectorTests
     {
         // A directory where the file should be is an operator problem the run must report, not a silent
         // absence. File.Exists answers false for a directory, so the source has to name it explicitly.
-        string home = NewHomeDirectory();
-        Directory.CreateDirectory(Path.Combine(home, SquadResponseGuidanceDeployer.FileName));
+        _files.CreateDirectory(Path.Combine(_home, SquadResponseGuidanceDeployer.FileName));
 
         List<string> warnings = [];
-        string actual = Reader.ReadEffective(home, warnings);
+        string actual = Reader.ReadEffective(_home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
@@ -81,40 +86,38 @@ public sealed class SquadResponsePreferencesInjectorTests
     [Fact]
     public void ReadEffective_WhenSourceIsUnreadable_FallsBackToDefaultAndWarnsExactlyOnceWithoutWriting()
     {
-        string home = NewHomeDirectory();
-        string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
+        string path = Path.Combine(_home, SquadResponseGuidanceDeployer.FileName);
         const string originalText = "operator text";
-        File.WriteAllText(path, originalText, Encoding.UTF8);
+        _files.WriteAllText(path, originalText);
 
         List<string> warnings = [];
-        string actual;
-        using (SquadHomeHarness.DenyReadOrSkip(path))
-        {
-            // The file exists but the process is refused its bytes: a genuine degradable read failure.
-            actual = Reader.ReadEffective(home, warnings);
-        }
+        // The file exists but its bytes are refused: a genuine degradable read failure. Only the reader's
+        // own read fails, so the assertions still read the file back afterwards.
+        int reads = 0;
+        _files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.ReadAllText) && ++reads == 1,
+            new IOException("read denied"));
+        string actual = Reader.ReadEffective(_home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
         Assert.Contains("response-guidance", warning, StringComparison.OrdinalIgnoreCase);
-        Assert.True(File.Exists(path), "The source must not delete or replace the home file while it falls back.");
-        Assert.Equal(originalText, File.ReadAllText(path));
+        Assert.True(_files.FileExists(path), "The source must not delete or replace the home file while it falls back.");
+        Assert.Equal(originalText, _files.ReadAllText(path));
     }
 
     [Fact]
     public void ReadEffective_WhenTheHomeReadFailsAndTheSeamSuppliesTheDefault_ReturnsThatDefaultAndWarnsExactlyOnce()
     {
-        string home = NewHomeDirectory();
-        string path = Path.Combine(home, SquadResponseGuidanceDeployer.FileName);
-        File.WriteAllText(path, "operator text", Encoding.UTF8);
+        string path = Path.Combine(_home, SquadResponseGuidanceDeployer.FileName);
+        _files.WriteAllText(path, "operator text");
         const string seamDefault = "default supplied through the read seam";
 
         List<string> warnings = [];
-        string actual;
-        using (SquadHomeHarness.DenyReadOrSkip(path))
-        {
-            actual = Reader.ReadEffective(home, warnings, () => seamDefault);
-        }
+        _files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.ReadAllText),
+            new IOException("read denied"));
+        string actual = Reader.ReadEffective(_home, warnings, () => seamDefault);
 
         Assert.Equal(seamDefault, actual);
         string warning = Assert.Single(warnings);
@@ -126,12 +129,10 @@ public sealed class SquadResponsePreferencesInjectorTests
     {
         // A build without its embedded default is a defect a rerun cannot fix. The source must surface the typed
         // exception so the deployer can name it, rather than swallow it into a generic warning here.
-        string home = NewHomeDirectory();
-
         List<string> warnings = [];
         Assert.Throws<SquadShippedGuidanceUnavailableException>(() =>
             Reader.ReadEffective(
-                home,
+                _home,
                 warnings,
                 () => throw new SquadShippedGuidanceUnavailableException("The embedded default is missing.")));
 
@@ -303,13 +304,6 @@ public sealed class SquadResponsePreferencesInjectorTests
             (".claude/agents/conductor.md", "<response-preferences>old</response-preferences>"),
             (".claude/agents/bug-crusher.md", "bug-crusher without block"));
         Assert.Throws<SquadRenderValidationException>(() => SquadResponsePreferencesInjector.Inject(partial, "effective"));
-    }
-
-    private static string NewHomeDirectory()
-    {
-        string home = Path.Combine(Path.GetTempPath(), "kw-response-guidance-home-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(home);
-        return home;
     }
 
     private static SquadRenderResult RenderResult(params (string RelativePath, string Content)[] entries)
