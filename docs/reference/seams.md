@@ -76,7 +76,7 @@ task's list.
 | `PhysicalMcpConfigFiles` | File system | `KyberWeave.Data` | `Docs/Mcp/PhysicalMcpConfigFiles.cs` | Reads, attributes and deletes MCP configuration files |
 | `FileGitHookFiles` | File system | `KyberWeave.Data` | `Doctor/FileGitHookFiles.cs` | Hook files and executable bits |
 | `FileStatusLineFiles` | File system | `KyberWeave.Data` | `Utilities/FileStatusLineFiles.cs` | Status-line artifact files |
-| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file; its wait uses `DateTime.UtcNow` and `Thread.Sleep`, which task 4.4 puts on `TimeProvider` |
+| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file. It also reads the clock and sleeps directly, which is a second seam; the conversion register below tracks that as `clock: unassigned` |
 | `ExclusiveFileWriter` | File system | `KyberWeave.Data` | `Docs/Closeout/ExclusiveFileWriter.cs` | Exclusive create |
 | `FileBoundedFileReader` | File system | `KyberWeave.Data` | `Review/FileBoundedFileReader.cs` | Reads up to a byte limit and refuses a file that grew |
 | `FileHookFileWindowReader` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileHookFileWindowReader.cs` | Reads a line window from a file |
@@ -89,7 +89,7 @@ task's list.
 | `SquadFileSystemPathSemantics` | Paths | `KyberWeave.Data` | `Squad/Deployment/SquadFileSystemPathSemantics.cs` | Instance singleton the deployment code shares; it implements `IPathResolver` and `IFileSystemPathSemantics` |
 | `KernelProcessRunner` | Process | `KyberWeave.Data` | `Hooks/KernelProcessRunner.cs` | The product's one `IProcessRunner` |
 | `ProcessRunner` | Process | `KyberWeave.Kernel` | `Processes/ProcessRunner.cs` | The one place that calls `Process.Start`; `KernelProcessRunner` and the role-view adapters build on it |
-| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session; its timeout still reads `DateTime.UtcNow`, so the clock conversion is outstanding |
+| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session. Its timeout reads `DateTime.UtcNow` directly, which is a second seam; the conversion register below tracks that as `clock: unassigned` |
 | `ProcessProgramRunner` | Process | `KyberWeave.Data` | `Review/ProcessProgramRunner.cs` | The `IProgramRunner` role view |
 | `KernelBoundedProcessExecutor` | Process | `KyberWeave.Data` | `Docs/FileSystem/KernelBoundedProcessExecutor.cs` | The `IBoundedProcessExecutor` role view |
 | `ProcessGitCommandRunner` | Process | `KyberWeave.Data` | `RunStart/ProcessGitCommandRunner.cs` | Git with standard output and error kept apart |
@@ -141,17 +141,21 @@ file list or folder covers the class. **`unassigned` means the approved task lis
 for that class.** The register does not invent coverage: the gaps are listed after the tables and
 task 1.8's acceptance criterion is not met for them until `tasks.md` assigns an owner.
 
+Two rows are adapters for another seam whose remaining direct call is the clock. They are counted
+here, with `clock: unassigned`, because otherwise a test through the adapter still reads the real
+clock and no task would track the fix.
+
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
 | `KyberWeave.Application` | 64 | 208 | 4.1, 4.2, 4.3, unassigned |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 80 | 705 | 3.2, 3.3, 3.4, 3.5, 4.4 |
+| `KyberWeave.Data` | 81 | 714 | 3.2, 3.3, 3.4, 3.5, 4.4, clock: unassigned |
 | `KyberWeave.Domain` | 26 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
-| `KyberWeave.Kernel` | 2 | 18 | unassigned |
+| `KyberWeave.Kernel` | 3 | 22 | unassigned, clock: unassigned |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
-| **Total** | **226** | **1,174** | |
+| **Total** | **228** | **1,187** | |
 
 The totals before adapters and roots are taken out are 68 classes and 212 sites in Application,
 52 and 183 in Cli, 111 and 955 in Data, 28 and 49 in Domain, 2 and 3 in Hooks, 6 and 47 in Kernel,
@@ -282,7 +286,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
-#### KyberWeave.Data (80 classes)
+#### KyberWeave.Data (81 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -301,6 +305,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
 | `CodeGraphResolverAdapter` (`CodeGraph/CodeGraphResolverAdapter.cs`) | file system, paths | 4.4 |
 | `FileUserHostConfigStore` (`Configuration/FileUserHostConfigStore.cs`) | file system | 4.4 |
+| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: unassigned |
 | `OpenAiCompatibleEmbeddingGenerator` (`Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs`) | environment, network | 4.4 |
 | `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
@@ -404,11 +409,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 |---|---|---|
 | `HooksCli` (`HooksCli.cs`) | environment | 4.7 |
 
-#### KyberWeave.Kernel (2 classes)
+#### KyberWeave.Kernel (3 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
 | `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | unassigned |
+| `StdioSession` (`Processes/StdioSession.cs`) | process, clock | clock: unassigned |
 | `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | unassigned |
 
 #### KyberWeave.Mcp (4 classes)
@@ -430,6 +436,7 @@ amending the task list, not by inventing a task number in this page.
 |---|---|---|
 | `Application` folders with no phase 4 task | 12 classes: `Agents/AgentFileReader`, `Doctor/CodeGraphIndexProvisioner`, `Doctor/McpServerLiveProbe`, `Doctor/PostCheckoutHookInstaller`, `Hooks/EditHookService`, `RunStart/RunStartRunner`, `Skills/SkillFileReader`, `Squad/Briefs/SquadBriefBuilder`, `Squad/Deployment/FactoryMcpConfiguration`, `Squad/Instances/SquadInstanceService`, `Squad/Packaging/SquadPackService`, `Utilities/StatusLineProductArtifactSource` | Task 4.1 names `Update`, 4.2 names `Docs`, and 4.3 names `Review` and `Arbiter`. No task names these folders, so nobody owns the conversion |
 | `Kernel` classes with no phase 2 or phase 4 task | `Parsing/FileReferenceExtractor`, `VersionControl/CodeGraphIndexStaleness` | Task 2.2 names `Core` and `Core.Docs`; 4.6 names `Mcp`. Kernel still calls the file system and path directly |
+| Clock inside a process or lease adapter | `Data/Doctor/FileCodeGraphIndexWorkspace`, `Kernel/Processes/StdioSession` | Each adapter calls a second resource, the clock. A test through either still reads real time and `Thread.Sleep`; no task owns the fix |
 | Configuration fake and contract suite | `IKyberWeaveConfigRepository` | Task 2.3 owns this; until then a caller is tested with a private fake, not a shared one |
 
 ## The exceptions register
