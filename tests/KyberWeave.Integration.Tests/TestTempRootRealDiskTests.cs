@@ -74,4 +74,25 @@ public sealed class TestTempRootRealDiskTests
             ownProcessId: 999,
             _ => true);
     }
+
+    /// <summary>
+    /// A sibling folder that is only seconds old may belong to a concurrent run whose PID has just been
+    /// recycled, so a minimum age spares it while a folder older than that threshold is still removed.
+    /// </summary>
+    [Fact]
+    public void DeadSiblingCleanupRespectsMinimumAge()
+    {
+        using TempDirectory temp = new();
+        string parent = Path.Combine(temp.Path, "kw-" + Key);
+        string recent = Path.Combine(parent, "111");
+        string stale = Path.Combine(parent, "222");
+        Directory.CreateDirectory(recent);
+        Directory.CreateDirectory(stale);
+        Directory.SetLastWriteTimeUtc(stale, DateTime.UtcNow.AddMinutes(-15));
+
+        TestTempRoot.RemoveDeadSiblings(parent, ownProcessId: 999, _ => false, minAge: TimeSpan.FromMinutes(5));
+
+        Assert.True(Directory.Exists(recent));
+        Assert.False(Directory.Exists(stale));
+    }
 }
