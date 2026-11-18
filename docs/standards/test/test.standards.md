@@ -333,8 +333,8 @@ format check, then report. Run these `dotnet` commands directly from the reposit
 runs it, person or agent, times it and reports the number: it must finish in 120 seconds or less
 ([the .NET test budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)).
 The integration project (`tests/KyberWeave.Integration.Tests`) is not part of that budget: CI and the
-council's `integration-test` gate run it, and a developer agent runs only the integration classes its
-change touches when it is asked to.
+council's `integration-test` gate run it, and a developer agent does not run it (except when
+explicitly asked to reproduce a CI failure by running the reported class).
 
 ```bash
 dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
