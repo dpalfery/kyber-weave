@@ -183,6 +183,8 @@ public sealed class SquadDoctorSeamTests
     {
         FakeProcessExecutor executor = new();
         executor.WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
+        FakeProcessEnvironment environment = new(currentDirectory: "/launched-from", readVariable: _ => null);
+        SquadConsole console = new(_ansi, _streams);
         return new SquadDoctorCommand(
             _state,
             _migration,
@@ -191,7 +193,7 @@ public sealed class SquadDoctorSeamTests
             new EmptyPresetStore(),
             new UnusedPlanner(),
             new SilentGuidance(),
-            new FakeProcessEnvironment(currentDirectory: "/launched-from", readVariable: _ => null),
+            environment,
             _locator,
             new UnusedSourceLoader(),
             new NoShadowing(),
@@ -200,8 +202,9 @@ public sealed class SquadDoctorSeamTests
             new SquadDoctorOptions(executor, WorkingDirectory: null),
             SquadFileSystemPathSemantics.Instance,
             new FakeKyberWeaveConfigRepository(),
-            new SquadConsole(_ansi, _streams),
-            _files);
+            console,
+            _files,
+            new SquadCommandRoots(_files, new FakePathResolver(_files), environment, console));
     }
 
     private readonly EmptyStateStore _state = new();

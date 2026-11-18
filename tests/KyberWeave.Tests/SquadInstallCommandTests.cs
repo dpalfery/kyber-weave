@@ -168,7 +168,7 @@ public sealed class SquadInstallCommandTests
             console,
             new SquadTargetRootConfirmation(console),
             new FakeProcessEnvironment(currentDirectory: WorkingDirectory),
-            FakePathResolver.OverEmptyFileSystem(),
+            SquadTestCommands.InMemoryRoots(console, WorkingDirectory),
             _configs);
     }
 

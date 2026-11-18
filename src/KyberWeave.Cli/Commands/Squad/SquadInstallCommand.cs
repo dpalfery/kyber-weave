@@ -1,5 +1,4 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Update;
@@ -26,7 +25,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     private readonly SquadConsole _output;
     private readonly SquadTargetRootConfirmation _confirmation;
     private readonly IProcessEnvironment _environment;
-    private readonly IPathResolver _paths;
+    private readonly SquadCommandRoots _roots;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
     private readonly IKyberWeaveConfigRepository _configs;
 
@@ -40,7 +39,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
     /// <param name="output">Where the command writes and asks.</param>
     /// <param name="confirmation">Echoes the target root and asks before anything is written.</param>
     /// <param name="environment">Names the working directory a relative path resolves against.</param>
-    /// <param name="paths">Resolves the target root to its absolute form.</param>
+    /// <param name="roots">Resolves the target root, anchors a global run and reads the scope's configuration.</param>
     /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
     /// <param name="configs">Reads the project's host config for the task-gate hint.</param>
     public SquadInstallCommand(
@@ -53,7 +52,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         SquadConsole output,
         SquadTargetRootConfirmation confirmation,
         IProcessEnvironment environment,
-        IPathResolver paths,
+        SquadCommandRoots roots,
         IKyberWeaveConfigRepository configs,
         KyberDashCapturePluginStep? capturePluginStep = null)
     {
@@ -66,7 +65,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(confirmation);
         ArgumentNullException.ThrowIfNull(environment);
-        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(roots);
         ArgumentNullException.ThrowIfNull(configs);
         _lifecycle = lifecycle;
         _stateStore = stateStore;
@@ -77,7 +76,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         _output = output;
         _confirmation = confirmation;
         _environment = environment;
-        _paths = paths;
+        _roots = roots;
         _configs = configs;
         _capturePluginStep = capturePluginStep;
     }
@@ -114,11 +113,11 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return 2;
         }
 
-        string projectRoot = ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         // Legacy state is migrated before the install reads any of it. A dry run reports what the next
         // real run would move, and stops without reading a deployment it has not yet moved.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
             _environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
@@ -132,7 +131,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // A --global install is anchored at the home directory whatever the working directory is, or at the
         // recorded root of a legacy single-root receipt the migration has just copied. Chosen after the migration.
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
+            ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
         // Load configuration if present. A project that cannot be read — no config file,
@@ -140,7 +139,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // defaults and the task-gate hint below says where review gates come from. Only a
         // global run, which has no project whose gates could be missing, keeps the load
         // failure fatal.
-        KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
             _configs,
             targetRoot,
             scope,
@@ -306,9 +305,6 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
             return 1;
         }
     }
-
-    private string ResolveTargetRoot(string? path) =>
-        _paths.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path, _environment.CurrentDirectory);
 
     public int Execute(CommandContext context, SquadInstallSettings settings)
     {

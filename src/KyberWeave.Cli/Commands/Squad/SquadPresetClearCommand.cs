@@ -24,6 +24,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
     private readonly ISquadDeploymentPlanner _planner;
     private readonly ISquadTransactionFactory _transactions;
     private readonly IFileSystemPathSemantics _pathSemantics;
+    private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -33,6 +34,8 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
     /// <param name="canonicalProfiles">Finds the canonical model profiles to re-render with.</param>
     /// <param name="planner">Preflights the re-render.</param>
     /// <param name="transactions">Applies the re-render.</param>
+    /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
+    /// <param name="roots">Resolves the target root and anchors a global run.</param>
     public SquadPresetClearCommand(
         ISquadStateStore stateStore,
         ISquadGlobalRootResolver globalRoots,
@@ -41,7 +44,8 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
         ISquadCanonicalProfileResolver canonicalProfiles,
         ISquadDeploymentPlanner planner,
         ISquadTransactionFactory transactions,
-        IFileSystemPathSemantics pathSemantics)
+        IFileSystemPathSemantics pathSemantics,
+        SquadCommandRoots roots)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(globalRoots);
@@ -51,6 +55,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
         ArgumentNullException.ThrowIfNull(planner);
         ArgumentNullException.ThrowIfNull(transactions);
         ArgumentNullException.ThrowIfNull(pathSemantics);
+        ArgumentNullException.ThrowIfNull(roots);
         _stateStore = stateStore;
         _globalRoots = globalRoots;
         _presetStore = presetStore;
@@ -59,6 +64,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
         _planner = planner;
         _transactions = transactions;
         _pathSemantics = pathSemantics;
+        _roots = roots;
     }
 
     /// <inheritdoc />
@@ -72,7 +78,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
 
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
-        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         IReadOnlyList<SquadTarget> targets;
         try
@@ -84,7 +90,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
             else
             {
                 string checkRoot = scope == SquadDeploymentScope.Global
-                    ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
+                    ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
                     : projectRoot;
                 SquadReceipt? receipt = stateStore.ReadReceipt(checkRoot, scope);
                 if (receipt is not null && receipt.Files.Count > 0)
@@ -108,7 +114,7 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
         if (scope == SquadDeploymentScope.Global)
         {
             string globalAnchor =
-                SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun);
+                _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun);
             SquadReceipt? globalReceipt = stateStore.ReadReceipt(globalAnchor, SquadDeploymentScope.Global);
             SquadLock? globalLock = stateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global);
 

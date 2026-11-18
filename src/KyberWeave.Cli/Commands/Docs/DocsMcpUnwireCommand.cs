@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
@@ -32,14 +34,28 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
 
     private readonly IMcpWiringService _wiring;
     private readonly IMcpWiringReceipts _receipts;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+    private readonly IAnsiConsole _console;
 
     /// <summary>Creates the command over the MCP wiring service and receipt store the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
     /// <param name="receipts">Reads the record of what the repair wrote.</param>
-    public DocsMcpUnwireCommand(IMcpWiringService wiring, IMcpWiringReceipts receipts)
+    /// <param name="paths">Turns the operator's spelling of the repository root into a full path.</param>
+    /// <param name="environment">Names the directory a relative root is resolved against.</param>
+    /// <param name="console">Receives everything the operator reads.</param>
+    public DocsMcpUnwireCommand(
+        IMcpWiringService wiring,
+        IMcpWiringReceipts receipts,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IAnsiConsole console)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _receipts = receipts ?? throw new ArgumentNullException(nameof(receipts));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
     /// <inheritdoc />
@@ -51,9 +67,9 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        if (!DocsMcpWireCommand.TryRoot(settings.Path, report, out string root))
+        if (!DocsMcpWireCommand.TryRoot(_paths, _environment, settings.Path, report, out string root))
         {
-            DocsMcpWireCommand.PrintDiagnostics(report);
+            DocsMcpWireCommand.PrintDiagnostics(_console, report);
             return 1;
         }
 
@@ -69,10 +85,10 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
 
         McpWiringRepairReport removal = _wiring.Unwire(root, targets);
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
             foreach (McpWiringFileChange change in removal.Files)
-                DocsMcpWireCommand.PrintChange(change, dryRun: false);
+                DocsMcpWireCommand.PrintChange(_console, change, dryRun: false);
         });
 
         return removal.Files.Any(change => change.Outcome == McpWiringChangeOutcome.Refused) ? 1 : 0;
@@ -96,17 +112,17 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
     {
         McpWiringReceipt receipt = _receipts.Load(root);
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
             if (receipt.Files.Count == 0)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"[yellow]No receipt record[/] at {Markup.Escape(McpWiringReceipt.RelativePath)}: this repository "
                     + "holds nothing the repair wrote, so there is nothing to remove.");
             }
             else
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"[bold]Recorded writes[/] ({Markup.Escape(McpWiringReceipt.RelativePath)}):");
 
                 foreach (McpWiringReceiptRecord record in receipt.Files)
@@ -114,12 +130,12 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
                     string path = Markup.Escape(TerminalText.Line(record.Path));
                     string servers = Markup.Escape(TerminalText.Line(string.Join(", ", record.Servers)));
 
-                    AnsiConsole.MarkupLine($"  [bold]{path}[/] [grey]({servers})[/]");
+                    _console.MarkupLine($"  [bold]{path}[/] [grey]({servers})[/]");
                 }
             }
 
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine(
+            _console.WriteLine();
+            _console.MarkupLine(
                 $"[grey]Nothing was removed. Name the harnesses to restore: {Markup.Escape(UnwireCommand + " " + DocsMcpWireCommand.TargetPlaceholder)}.[/]");
         });
     }

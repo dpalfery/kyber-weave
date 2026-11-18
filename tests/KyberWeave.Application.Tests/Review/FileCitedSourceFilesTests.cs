@@ -1,4 +1,5 @@
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -17,7 +18,11 @@ public sealed class FileCitedSourceFilesTests
 
     public FileCitedSourceFilesTests()
     {
-        _sources = new FileCitedSourceFiles(_files, new FileContainedFileReader(_files));
+        _sources = new FileCitedSourceFiles(
+            _files,
+            new FileContainedFileReader(_files),
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: "/"));
         _files.CreateDirectory(Path.Combine(Root, "src"));
         _files.WriteAllText(Path.Combine(Root, "src", "a.cs"), "one\ntwo\nthree\nfour");
     }
@@ -62,6 +67,21 @@ public sealed class FileCitedSourceFilesTests
 
         Assert.Equal(["two", "three"], _sources.ReadWindow(path, firstLine: 2, count: 2));
         Assert.Equal(["four"], _sources.ReadWindow(path, firstLine: 4, count: 10));
+    }
+
+    [Fact]
+    public void ResolveReadsARelativeRootAgainstTheWorkingDirectory()
+    {
+        InMemoryFileSystem files = new();
+        files.CreateDirectory("/work/repo/src");
+        files.WriteAllText("/work/repo/src/b.cs", "one");
+        FileCitedSourceFiles sources = new(
+            files,
+            new FileContainedFileReader(files),
+            new FakePathResolver(files),
+            new FakeProcessEnvironment(currentDirectory: "/work"));
+
+        Assert.Equal("/work/repo/src/b.cs", sources.Resolve("repo", "src/b.cs", maxBytes: 1024));
     }
 
     [Fact]

@@ -1,7 +1,10 @@
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -14,19 +17,25 @@ public sealed class SquadScopeConfigTests
 {
     private const string CustomVersion = "squad:\n  version: 9.9.9\n";
 
-    private readonly string _home = Path.Combine(Path.GetTempPath(), "kw-squad-home-" + Guid.NewGuid().ToString("N"));
+    private const string Home = "/kw/home";
+
+    private readonly SquadCommandRoots _roots = new(
+        new InMemoryFileSystem(),
+        FakePathResolver.OverEmptyFileSystem(),
+        new FakeProcessEnvironment(),
+        new SquadConsole(new TestConsole(), new FakeConsole()));
 
     [Fact]
     public void GlobalScopeReadsTheLegacyHomeConfigTheRepositoryHolds()
     {
         FakeKyberWeaveConfigRepository configs = new();
-        configs.WriteLegacyConfig(_home, CustomVersion);
+        configs.WriteLegacyConfig(Home, CustomVersion);
 
-        KyberWeaveConfigLoadResult result = SquadCommandComposition.TryLoadScopeConfig(
-            configs, _home, SquadDeploymentScope.Global, _home);
+        KyberWeaveConfigLoadResult result = _roots.TryLoadScopeConfig(
+            configs, Home, SquadDeploymentScope.Global, Home);
 
         Assert.True(result.Success, result.Error);
-        Assert.Equal(FakeKyberWeaveConfigRepository.LegacyConfigPath(_home), result.ConfigPath);
+        Assert.Equal(FakeKyberWeaveConfigRepository.LegacyConfigPath(Home), result.ConfigPath);
         Assert.Equal("9.9.9", result.Config!.Squad.Version);
     }
 
@@ -34,14 +43,14 @@ public sealed class SquadScopeConfigTests
     public void GlobalScopePrefersTheUserConfigOverTheLegacyRootFile()
     {
         FakeKyberWeaveConfigRepository configs = new();
-        configs.WriteUserConfig(_home, "squad:\n  version: 1.1.1\n");
-        configs.WriteLegacyConfig(_home, CustomVersion);
+        configs.WriteUserConfig(Home, "squad:\n  version: 1.1.1\n");
+        configs.WriteLegacyConfig(Home, CustomVersion);
 
-        KyberWeaveConfigLoadResult result = SquadCommandComposition.TryLoadScopeConfig(
-            configs, _home, SquadDeploymentScope.Global, _home);
+        KyberWeaveConfigLoadResult result = _roots.TryLoadScopeConfig(
+            configs, Home, SquadDeploymentScope.Global, Home);
 
         Assert.True(result.Success, result.Error);
-        Assert.Equal(FakeKyberWeaveConfigRepository.UserConfigPath(_home), result.ConfigPath);
+        Assert.Equal(FakeKyberWeaveConfigRepository.UserConfigPath(Home), result.ConfigPath);
         Assert.Equal("1.1.1", result.Config!.Squad.Version);
     }
 
@@ -49,13 +58,13 @@ public sealed class SquadScopeConfigTests
     public void ProjectScopeReadsTheRepositoryConfigTheRepositoryHolds()
     {
         FakeKyberWeaveConfigRepository configs = new();
-        configs.WriteRepositoryConfig(_home, CustomVersion);
+        configs.WriteRepositoryConfig(Home, CustomVersion);
 
-        KyberWeaveConfigLoadResult result = SquadCommandComposition.TryLoadScopeConfig(
-            configs, _home, SquadDeploymentScope.Project, _home);
+        KyberWeaveConfigLoadResult result = _roots.TryLoadScopeConfig(
+            configs, Home, SquadDeploymentScope.Project, Home);
 
         Assert.True(result.Success, result.Error);
-        Assert.Equal(FakeKyberWeaveConfigRepository.RepositoryConfigPath(_home), result.ConfigPath);
+        Assert.Equal(FakeKyberWeaveConfigRepository.RepositoryConfigPath(Home), result.ConfigPath);
         Assert.Equal("9.9.9", result.Config!.Squad.Version);
     }
 }

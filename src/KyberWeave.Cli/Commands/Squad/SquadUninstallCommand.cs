@@ -1,5 +1,4 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
-using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
@@ -21,7 +20,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     private readonly SquadConsole _output;
     private readonly SquadTargetRootConfirmation _confirmation;
     private readonly IProcessEnvironment _environment;
-    private readonly IPathResolver _paths;
+    private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the uninstall command over the Squad services the host registers.</summary>
     /// <param name="lifecycle">Removes the deployment.</param>
@@ -32,7 +31,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
     /// <param name="output">Where the command writes and asks.</param>
     /// <param name="confirmation">Echoes the target root and asks before anything is written.</param>
     /// <param name="environment">Names the working directory a relative path resolves against.</param>
-    /// <param name="paths">Resolves the target root to its absolute form.</param>
+    /// <param name="roots">Resolves the target root, anchors a global run and reads the scope's configuration.</param>
     public SquadUninstallCommand(
         ISquadLifecycleService lifecycle,
         ISquadStateStore stateStore,
@@ -42,7 +41,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         SquadConsole output,
         SquadTargetRootConfirmation confirmation,
         IProcessEnvironment environment,
-        IPathResolver paths)
+        SquadCommandRoots roots)
     {
         ArgumentNullException.ThrowIfNull(lifecycle);
         ArgumentNullException.ThrowIfNull(stateStore);
@@ -52,7 +51,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(confirmation);
         ArgumentNullException.ThrowIfNull(environment);
-        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(roots);
         _lifecycle = lifecycle;
         _stateStore = stateStore;
         _migration = migration;
@@ -61,7 +60,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         _output = output;
         _confirmation = confirmation;
         _environment = environment;
-        _paths = paths;
+        _roots = roots;
     }
 
     /// <inheritdoc />
@@ -125,10 +124,10 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         string? effectivePath = settings.PathOption;
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(isGlobal);
 
-        string projectRoot = ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         // Legacy state is migrated before the uninstall reads the receipt it removes.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
             _environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
@@ -143,7 +142,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
         // whatever the working directory is, or at the recorded root of a legacy single-root receipt. It never reads
         // or changes a project or the registry. Chosen after the migration, so the receipt it removes is the migrated one.
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
+            ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
         ISquadLifecycleService lifecycleService = _lifecycle;
@@ -242,9 +241,6 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
             return 1;
         }
     }
-
-    private string ResolveTargetRoot(string? path) =>
-        _paths.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path, _environment.CurrentDirectory);
 
     public int Execute(CommandContext context, SquadUninstallSettings settings)
     {

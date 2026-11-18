@@ -1,5 +1,7 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Review;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Review;
@@ -20,7 +22,7 @@ namespace KyberWeave.Cli.Commands.Review;
 ///     value that is refused before anything runs.
 /// </para>
 /// </remarks>
-public sealed class ReviewSuppressionsCommand(IReviewSuppressionsService service) : Command<ReviewSuppressionsSettings>
+public sealed class ReviewSuppressionsCommand(IReviewSuppressionsService service, IConsole standard, IAnsiConsole ansi) : Command<ReviewSuppressionsSettings>
 {
     /// <summary>A suppression the change added without stating a reason.</summary>
     public const string UnreasonedSuppression = ReviewSuppressionOutcome.NoReason;
@@ -45,17 +47,17 @@ public sealed class ReviewSuppressionsCommand(IReviewSuppressionsService service
         }
 
         if (result.Report is not null)
-            CommandHelpers.Finish(result.Report, settings, "review suppressions", "Suppression");
+            CommandHelpers.Finish(ansi, result.Report, settings, "review suppressions", "Suppression");
 
         return result.ExitCode;
     }
 
     /// <summary>
-    /// Client-input errors go through <see cref="Console"/> rather than Spectre markup, so a ref or a path
+    /// Client-input errors go through the standard output rather than Spectre markup, so a ref or a path
     /// containing brackets is printed as written instead of being read as markup.
     /// </summary>
-    private static void WriteClientInputError(string message)
+    private void WriteClientInputError(string message)
     {
-        Console.WriteLine($"kyber-weave review suppressions: error: {message}");
+        standard.Out.WriteLine($"kyber-weave review suppressions: error: {message}");
     }
 }

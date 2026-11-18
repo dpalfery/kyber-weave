@@ -16,10 +16,12 @@ public static class RealFileKyberWeaveConfigRepository
     public static FileKyberWeaveConfigRepository Create()
     {
         PhysicalFileSystem files = new();
+        PhysicalPathResolver paths = new(files);
+        ProcessEnvironment environment = new();
         return new FileKyberWeaveConfigRepository(
-            new FileRepositoryTreeProbe(files),
+            new FileRepositoryTreeProbe(files, paths, environment),
             files,
-            new PhysicalPathResolver(files),
-            new ProcessEnvironment());
+            paths,
+            environment);
     }
 }

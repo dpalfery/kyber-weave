@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -7,7 +8,11 @@ namespace KyberWeave.Data.Review;
 /// <summary>Lists the <c>.cs</c> files under a repository root and reads the namespace they declare.</summary>
 /// <param name="files">Answers every existence, listing, link and read question.</param>
 /// <param name="environment">Names the working directory and the program's own directory.</param>
-public sealed class FileTestClassSources(IFileSystem files, IProcessEnvironment environment) : ITestClassSources
+/// <param name="paths">Resolves a root the caller spelled relatively.</param>
+public sealed class FileTestClassSources(
+    IFileSystem files,
+    IProcessEnvironment environment,
+    IPathResolver paths) : ITestClassSources
 {
     private const string SourceExtension = ".cs";
 
@@ -15,23 +20,32 @@ public sealed class FileTestClassSources(IFileSystem files, IProcessEnvironment 
     public TestSourceTree? Open(string? root)
     {
         string candidateRoot = root ?? DefaultRepositoryRoot();
-        if (string.IsNullOrWhiteSpace(candidateRoot) || !files.DirectoryExists(candidateRoot))
+        if (string.IsNullOrWhiteSpace(candidateRoot))
             return null;
 
+        // Resolve first: a root the caller spelled relatively names the working directory's repository, and probing
+        // the spelling would ask the file system about a path that only exists relative to the process.
         string repository;
         try
         {
-            _ = files.EnumerateEntries(candidateRoot).FirstOrDefault();
-            repository = Path.GetFullPath(candidateRoot);
+            repository = paths.GetFullPath(candidateRoot, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        if (!files.DirectoryExists(repository))
+            return null;
+
+        try
+        {
+            _ = files.EnumerateEntries(repository).FirstOrDefault();
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
             string target = root ?? candidateRoot;
             throw new InvalidOperationException($"The repository root '{target}' is not accessible: {ex.Message}", ex);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
         }
 
         return new TestSourceTree(repository, SourceFilesByName(repository));
@@ -77,7 +91,7 @@ public sealed class FileTestClassSources(IFileSystem files, IProcessEnvironment 
 
     private string? NearestRepositoryRoot(string start)
     {
-        string? current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(start));
+        string? current = Path.TrimEndingDirectorySeparator(paths.GetFullPath(start, environment.CurrentDirectory));
         while (current is not null)
         {
             // A worktree carries .git as a file and a checkout carries it as a directory.

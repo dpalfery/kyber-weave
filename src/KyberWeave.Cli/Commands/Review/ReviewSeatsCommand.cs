@@ -1,9 +1,11 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Review;
 using KyberWeave.Domain.Doctor;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Review;
@@ -17,6 +19,8 @@ namespace KyberWeave.Cli.Commands.Review;
 public sealed class ReviewSeatsCommand(
     IReviewSeatsService service,
     IReviewDecisionModelFactory decisionModels,
+    IConsole standard,
+    IAnsiConsole ansi,
     IProcessExecutor? indexExecutor = null) : Command<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
@@ -42,7 +46,7 @@ public sealed class ReviewSeatsCommand(
             Request(settings),
             (repositoryRoot, config) => decisionModels.CreateForRepository(repositoryRoot, config, settings.NoDecisionModel, cachePath: null),
             indexExecutor ?? ProcessExecutor.WithTimeout(IndexTimeout),
-            Console.Out,
+            standard.Out,
             cancellationToken);
 
         if (result.ClientError is not null)
@@ -52,7 +56,7 @@ public sealed class ReviewSeatsCommand(
         }
 
         if (result.Report is not null)
-            CommandHelpers.Finish(result.Report, settings, "review seats", "Review");
+            CommandHelpers.Finish(ansi, result.Report, settings, "review seats", "Review");
 
         foreach (string line in result.Epilogue ?? [])
             Say(line);
@@ -64,7 +68,7 @@ public sealed class ReviewSeatsCommand(
     internal static string VerdictCommand(string? task) =>
         task is null ? "kyber-weave review verdict ." : $"kyber-weave review verdict . --task {task}";
 
-    private static void Say(string line) => Console.WriteLine(line);
+    private void Say(string line) => standard.Out.WriteLine(line);
 
     private static ReviewSeatsRequest Request(ReviewSeatsSettings settings) => new(
         settings.Path,

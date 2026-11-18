@@ -173,7 +173,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
-        services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp => new FileKyberWeaveConfigRepository(
             sp.GetRequiredService<IRepositoryTreeProbe>(),
             sp.GetRequiredService<IFileSystem>(),
@@ -183,15 +186,25 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(
             sp.GetRequiredService<IProgramRunner>(), sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ITestClassSources>(sp => new FileTestClassSources(
-            sp.GetRequiredService<IFileSystem>(), sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<ICoverageReportSource>(sp => new FileCoverageReportSource(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IContainedFileReader>(sp => new FileContainedFileReader(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICitedSourceFiles>(sp => new FileCitedSourceFiles(
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IContainedFileReader>()));
-        services.TryAddSingleton<ISeverityOverrideSource>(sp => new FileSeverityOverrideSource(sp.GetRequiredService<IFileSystem>()));
-        services.TryAddSingleton<IReviewCycleStore>(sp => new FileReviewCycleStore(sp.GetRequiredService<IWritableFileSystem>()));
+            sp.GetRequiredService<IContainedFileReader>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISeverityOverrideSource>(sp => new FileSeverityOverrideSource(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<IReviewCycleStore>(sp => new FileReviewCycleStore(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();

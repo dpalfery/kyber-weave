@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Data.Review;
@@ -5,15 +6,22 @@ namespace KyberWeave.Data.Review;
 /// <summary>Reads the lines a finding cites from the file system, refusing a path outside the repository, an oversized file and a link.</summary>
 /// <param name="files">The file system every read and metadata probe goes through.</param>
 /// <param name="contained">Decides whether the resolved file is inside the tree and reached without a link.</param>
-public sealed class FileCitedSourceFiles(IFileSystem files, IContainedFileReader contained) : ICitedSourceFiles
+/// <param name="paths">Resolves a root the caller spelled relatively.</param>
+/// <param name="environment">Names the working directory a relative root resolves against.</param>
+public sealed class FileCitedSourceFiles(
+    IFileSystem files,
+    IContainedFileReader contained,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ICitedSourceFiles
 {
     /// <inheritdoc />
     public string? Resolve(string repositoryRoot, string file, long maxBytes)
     {
-        string root = Path.GetFullPath(repositoryRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        string path = Path.GetFullPath(Path.Combine(repositoryRoot, file));
+        string resolvedRoot = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
+        string root = resolvedRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        string path = paths.GetFullPath(Path.Combine(resolvedRoot, file), environment.CurrentDirectory);
         return path.StartsWith(root, StringComparison.Ordinal)
-            && contained.IsContainedFile(repositoryRoot, path[root.Length..])
+            && contained.IsContainedFile(resolvedRoot, path[root.Length..])
             && files.GetLength(path) <= maxBytes
                 ? path
                 : null;
