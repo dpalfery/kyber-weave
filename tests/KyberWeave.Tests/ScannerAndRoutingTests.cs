@@ -180,4 +180,15 @@ public class RoutingTests
 
         Assert.Empty(evalFile.Cases);
     }
+
+    [Fact]
+    public void ACaseWhosePromptIsNullDoesNotAbortTheEval()
+    {
+        RoutingEvalFile evalFile = RoutingEvalFileParser.Parse("cases:\n  - prompt: null\n    expected: null\n");
+
+        RoutingEvalSummary summary = new RoutingEvaluator(new LexicalRoutingStrategy()).Evaluate(evalFile, SampleSet());
+
+        Assert.Equal(1, summary.Total);
+        Assert.Equal(string.Empty, summary.Results[0].Case.Prompt);
+    }
 }

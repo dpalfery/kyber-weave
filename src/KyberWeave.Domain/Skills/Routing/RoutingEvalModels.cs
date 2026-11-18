@@ -9,7 +9,17 @@ namespace KyberWeave.Core.Skills.Routing;
 /// </summary>
 public sealed class RoutingEvalCase
 {
-    [YamlMember(Alias = "prompt")] public string Prompt { get; init; } = string.Empty;
+    private readonly string _prompt = string.Empty;
+
+    // A YAML `prompt: null` deserializes to null, and a null reaches the strategy's text
+    // vectorizer, which throws: one malformed case would abort the whole eval.
+    [YamlMember(Alias = "prompt")]
+    public string Prompt
+    {
+        get => _prompt;
+        init => _prompt = value ?? string.Empty;
+    }
+
     [YamlMember(Alias = "expected")] public string? Expected { get; init; }
 
     [YamlIgnore]
