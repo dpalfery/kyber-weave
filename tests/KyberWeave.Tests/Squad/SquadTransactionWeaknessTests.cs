@@ -339,6 +339,35 @@ public sealed class SquadTransactionWeaknessTests
         }
     }
 
+    [Fact]
+    public void AFileThatAppearsInTheToolFolderWhileTheJournalIsRemovedSurvives()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Install);
+        string userFile = Path.Combine(fixture.Root, ".kyber-weave", "kyber-weave.yml");
+        bool written = false;
+
+        // Another tool (docs init, onboarding) writes into the folder after the transaction decided it was empty.
+        fixture.Files.KillWhen(operation =>
+        {
+            bool removingTheJournal = operation.Path is not null
+                && ((operation.Name == "DeleteFile" && operation.Path.EndsWith("intent.json", StringComparison.Ordinal))
+                    || (operation.Name == "DeleteTreeNoFollow" && operation.Path.EndsWith(".kyber-weave", StringComparison.Ordinal)));
+            if (removingTheJournal && !written)
+            {
+                written = true;
+                fixture.Files.WriteAllText(userFile, "user content");
+            }
+
+            return false;
+        });
+
+        fixture.Transaction().Execute(fixture.Plan(SquadCrashFlow.Install));
+
+        Assert.True(written, "The journal was never removed.");
+        Assert.Equal("user content", fixture.Files.ReadAllText(userFile));
+    }
+
     private static bool IsTransactionDelete(FileSystemOperation operation) =>
         operation.Name.StartsWith("Delete", StringComparison.Ordinal)
         && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);

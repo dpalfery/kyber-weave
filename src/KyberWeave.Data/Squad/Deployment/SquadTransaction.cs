@@ -400,7 +400,14 @@ public sealed class SquadTransaction : ISquadTransaction
         string root = identity.PhysicalPath;
         string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, scope));
         if (!_files.DirectoryExists(journalDirectory))
+        {
+            // A kill between removing the journal folder and the folders above it leaves them empty and unexplained.
+            // They hold nothing, so they go; a folder with anything in it stops the walk.
+            RemoveEmptyDirectoriesUpTo(
+                Path.GetDirectoryName(journalDirectory)!,
+                Physical(_stateStore.ResolveStateAuthorityRoot(root, scope)));
             return;
+        }
 
         string workDirectory = Physical(_stateStore.ResolveFileWorkDirectory(root, scope));
         bool recoveryCompleted = false;
@@ -2275,38 +2282,20 @@ public sealed class SquadTransaction : ISquadTransaction
     }
 
     /// <summary>
-    ///     Removes the journal and the folders this transaction made for it. When the journal is all that is left, the
-    ///     topmost folder it made goes in one step, intent included: a kill then leaves either the whole committed
-    ///     journal or nothing, never a bare folder that nothing explains.
+    ///     Removes the journal, then the folders this transaction made for it, deepest first and only while each is
+    ///     empty. Each removal is a separate step, so a file another tool writes into a folder while this runs keeps
+    ///     its folder; deleting the topmost folder as a tree would destroy it. A kill between the steps leaves empty
+    ///     folders that recovery removes.
     /// </summary>
     private void RemoveJournal(string journalDirectory, IReadOnlyList<string> journalDirectoriesCreated)
     {
         string intentPath = Path.Combine(journalDirectory, IntentFileName);
-        string? top = journalDirectoriesCreated.Count > 0 ? journalDirectoriesCreated[^1] : null;
-        if (top is not null &&
-            (_semantics.AreSame(top, journalDirectory) || _semantics.IsWithin(top, journalDirectory)) &&
-            GetEntryKind(top) == OriginalEntryKind.Directory &&
-            ContainsNothingBut(top, intentPath))
-        {
-            _files.DeleteTreeNoFollow(top);
-            return;
-        }
-
         if (_files.FileExists(intentPath))
             _files.DeleteFile(intentPath);
+
         DeleteEmptyDirectory(journalDirectory);
-    }
-
-    private bool ContainsNothingBut(string directory, string intentPath)
-    {
-        foreach (FileSystemEntry entry in _files.EnumerateEntries(directory))
-            if (entry.IsLink ||
-                (entry.IsDirectory
-                    ? !ContainsNothingBut(entry.Path, intentPath)
-                    : !_semantics.AreSame(entry.Path, intentPath)))
-                return false;
-
-        return true;
+        foreach (string created in journalDirectoriesCreated)
+            DeleteEmptyDirectory(created);
     }
 
     /// <summary>
