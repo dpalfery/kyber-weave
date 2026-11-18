@@ -18,12 +18,10 @@ namespace KyberWeave.Tests.Configuration;
 /// </remarks>
 public static class ConfigFileReader
 {
-    /// <summary>The real adapter, for a test that hands the seam itself to the code under test.</summary>
-    public static IKyberWeaveConfigRepository Repository { get; } =
-        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe());
+    private static readonly FileKyberWeaveConfigRepository Files = new(new FileRepositoryTreeProbe());
 
-    private static readonly FileKyberWeaveConfigRepository Files =
-        new(new FileRepositoryTreeProbe());
+    /// <summary>The real adapter, for a test that hands the seam itself to the code under test.</summary>
+    public static IKyberWeaveConfigRepository Repository => Files;
 
     /// <summary>Reads and parses one config file into its sections, without merging them over defaults.</summary>
     internal static KyberWeaveYamlDocument ParseFile(string yamlPath) => Files.ReadDocument(yamlPath);
