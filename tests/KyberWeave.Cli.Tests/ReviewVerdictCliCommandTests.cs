@@ -1,65 +1,20 @@
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.FileSystem;
 using Spectre.Console.Cli;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Verifies the CLI command registration, help descriptions, and execution for <c>review verdict</c>.
-/// Runs 100% in-process with zero child process spawns.
+/// Verifies the CLI help descriptions and execution for <c>review verdict</c>, in-process over in-memory fakes.
 /// </summary>
-public sealed class ReviewVerdictCliCommandTests
+public sealed class ReviewVerdictCliCommandTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+    private readonly InMemoryReviewServices _services = new();
 
-    /// <summary>
-    /// The <c>review verdict</c> command description registered in <c>Program.cs</c> must not
-    /// cite the retired <c>needs-human</c> verdict option, and must state the binary verdict contract.
-    /// </summary>
-    [Fact]
-    public void ProgramRegistersReviewVerdictWithoutNeedsHumanInDescription()
-    {
-        string program = Corpus.ReadText("src/KyberWeave.Cli/CliApplication.cs");
-
-        int verdictIndex = program.IndexOf("AddCommand<ReviewVerdictCommand>(\"verdict\")", StringComparison.Ordinal);
-        Assert.True(verdictIndex >= 0, "Program.cs must register the review verdict command.");
-
-        int nextCommandIndex = program.IndexOf(".AddCommand", verdictIndex + 1, StringComparison.Ordinal);
-        string verdictRegistration = nextCommandIndex >= 0
-            ? program[verdictIndex..nextCommandIndex]
-            : program[verdictIndex..];
-
-        Assert.DoesNotContain("needs-human", verdictRegistration, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains(
-            ".WithDescription(ReviewVerdictCommand.Description)",
-            verdictRegistration,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("needs-human", ReviewVerdictCommand.Description, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("approve / request-changes", ReviewVerdictCommand.Description, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// The one example the <c>review verdict</c> help shows must use the seat folder. The deprecated <c>--findings</c>
-    /// form is taught by no example, so a reader copies the form the council now uses.
-    /// </summary>
-    [Fact]
-    public void ProgramVerdictExampleShowsTheSeatFolderNotTheDeprecatedFindingsFlag()
-    {
-        string program = Corpus.ReadText("src/KyberWeave.Cli/CliApplication.cs");
-
-        int verdictIndex = program.IndexOf("AddCommand<ReviewVerdictCommand>(\"verdict\")", StringComparison.Ordinal);
-        Assert.True(verdictIndex >= 0, "Program.cs must register the review verdict command.");
-
-        int nextCommandIndex = program.IndexOf(".AddCommand", verdictIndex + 1, StringComparison.Ordinal);
-        string verdictRegistration = nextCommandIndex >= 0
-            ? program[verdictIndex..nextCommandIndex]
-            : program[verdictIndex..];
-
-        Assert.Contains("\"--seats\"", verdictRegistration, StringComparison.Ordinal);
-        Assert.DoesNotContain("\"--findings\"", verdictRegistration, StringComparison.Ordinal);
-    }
+    public void Dispose() => _services.Dispose();
 
     /// <summary>
     /// An undefined verdict must produce a readable summary so the command can finish and return the
@@ -80,9 +35,8 @@ public sealed class ReviewVerdictCliCommandTests
     [Fact]
     public void ReviewVerdictHelpDescriptionDoesNotContainNeedsHuman()
     {
-        CommandApp app = CreateApp();
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => app.Run(["review", "verdict", "--help"]));
+            () => CreateApp().Run(["review", "verdict", "--help"]));
 
         Assert.Equal(0, run.Result);
         Assert.DoesNotContain("needs-human", run.Output, StringComparison.OrdinalIgnoreCase);
@@ -96,9 +50,8 @@ public sealed class ReviewVerdictCliCommandTests
     [Fact]
     public void ReviewBranchHelpDescriptionDoesNotContainNeedsHuman()
     {
-        CommandApp app = CreateApp();
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
-            () => app.Run(["review", "--help"]));
+            () => CreateApp().Run(["review", "--help"]));
 
         Assert.Equal(0, run.Result);
         Assert.DoesNotContain("needs-human", run.Output, StringComparison.OrdinalIgnoreCase);
@@ -113,15 +66,14 @@ public sealed class ReviewVerdictCliCommandTests
     [Fact]
     public void ReviewVerdictCommandApprovesCleanFindingsInProcess()
     {
-        using TempDirectory temp = new();
-        string repoDir = Path.Combine(temp.Path, "repo");
-        Directory.CreateDirectory(Path.Combine(repoDir, ".kyber-weave"));
-        File.WriteAllText(
+        string repoDir = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(Path.Combine(repoDir, ".kyber-weave"));
+        _services.Files.WriteAllText(
             Path.Combine(repoDir, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\nreview:\n  policy:\n    strictness: balanced\n");
 
-        string findingsPath = Path.Combine(temp.Path, "findings.json");
-        File.WriteAllText(findingsPath, """
+        string findingsPath = Path.Combine(_services.Root, "findings.json");
+        _services.Files.WriteAllText(findingsPath, """
             {
               "schema": "kyber-weave.review-findings/v1",
               "findings": [],
@@ -130,11 +82,11 @@ public sealed class ReviewVerdictCliCommandTests
             }
             """);
 
-        string gatesPath = Path.Combine(temp.Path, "gates.json");
+        string gatesPath = Path.Combine(_services.Root, "gates.json");
         GateReport gates = new(
             GateReport.CurrentSchema,
             [new GateResult("build", true, 0, "passed")]);
-        File.WriteAllText(gatesPath, ReviewJson.Write(gates));
+        _services.Files.WriteAllText(gatesPath, ReviewJson.Write(gates));
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
             () => CreateApp().Run(
@@ -152,15 +104,14 @@ public sealed class ReviewVerdictCliCommandTests
     [Fact]
     public void ReviewVerdictCommandRequestsChangesOnCriticalFindingInProcess()
     {
-        using TempDirectory temp = new();
-        string repoDir = Path.Combine(temp.Path, "repo");
-        Directory.CreateDirectory(Path.Combine(repoDir, ".kyber-weave"));
-        File.WriteAllText(
+        string repoDir = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(Path.Combine(repoDir, ".kyber-weave"));
+        _services.Files.WriteAllText(
             Path.Combine(repoDir, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\nreview:\n  policy:\n    strictness: balanced\n");
 
-        string findingsPath = Path.Combine(temp.Path, "findings.json");
-        File.WriteAllText(findingsPath, """
+        string findingsPath = Path.Combine(_services.Root, "findings.json");
+        _services.Files.WriteAllText(findingsPath, """
             {
               "schema": "kyber-weave.review-findings/v1",
               "findings": [
@@ -183,11 +134,11 @@ public sealed class ReviewVerdictCliCommandTests
             }
             """);
 
-        string gatesPath = Path.Combine(temp.Path, "gates.json");
+        string gatesPath = Path.Combine(_services.Root, "gates.json");
         GateReport gates = new(
             GateReport.CurrentSchema,
             [new GateResult("build", true, 0, "passed")]);
-        File.WriteAllText(gatesPath, ReviewJson.Write(gates));
+        _services.Files.WriteAllText(gatesPath, ReviewJson.Write(gates));
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(
             () => CreateApp().Run(
@@ -198,20 +149,5 @@ public sealed class ReviewVerdictCliCommandTests
         Assert.DoesNotContain("needs-human", run.Output, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static CommandApp CreateApp()
-    {
-        CommandApp app = new(ReviewTestServices.Registrar());
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.AddBranch("review", review =>
-            {
-                review.SetDescription("Run the declared review gates and compute the review verdict.");
-                review.AddCommand<ReviewVerdictCommand>("verdict")
-                    .WithDescription(ReviewVerdictCommand.Description)
-                    .WithExample("review", "verdict", ".", "--findings", "findings.json", "--gates", "gates.json");
-            });
-        });
-        return app;
-    }
+    private CommandApp CreateApp() => CliApplication.Create(_services.Register);
 }
