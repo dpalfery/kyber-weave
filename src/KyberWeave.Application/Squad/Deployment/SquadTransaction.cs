@@ -137,6 +137,7 @@ public sealed class SquadTransaction : ISquadTransaction
             journalDirectory,
             workDirectory);
         string intentPath = Path.Combine(journalDirectory, IntentFileName);
+        RecoverUnfinishedBeforeStart(plan, journalDirectory, workDirectory, intentPath, sameTransactionDirectory);
         bool workExisted = _files.DirectoryExists(workDirectory);
         string stateAuthorityRoot = Physical(_stateStore.ResolveStateAuthorityRoot(root, plan.Scope));
         string lockPath = PhysicalLeaf(_stateStore.ResolveLockPath(root, plan.Scope));
@@ -394,6 +395,13 @@ public sealed class SquadTransaction : ISquadTransaction
 
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics);
         using TransactionLease lease = AcquireLease(_stateStore.ResolveLeaseIdentity(identity.PhysicalPath, scope));
+        RecoveryOutcome outcome = RecoverLeased(identity, scope);
+        AddRecoveryNotice(outcome, Physical(_stateStore.ResolveTransactionDirectory(identity.PhysicalPath, scope)));
+    }
+
+    /// <summary>Recovers the root's interrupted transaction, if any; the caller holds the root's lease.</summary>
+    private RecoveryOutcome RecoverLeased(SquadPhysicalRootIdentity identity, SquadDeploymentScope scope)
+    {
         string root = identity.PhysicalPath;
         string journalDirectory = Physical(_stateStore.ResolveTransactionDirectory(root, scope));
         if (!_files.DirectoryExists(journalDirectory))
@@ -404,7 +412,7 @@ public sealed class SquadTransaction : ISquadTransaction
             string toolFolder = Path.GetDirectoryName(journalDirectory)!;
             if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
                 DeleteEmptyDirectory(toolFolder);
-            return;
+            return RecoveryOutcome.None;
         }
 
         string workDirectory = Physical(_stateStore.ResolveFileWorkDirectory(root, scope));
@@ -441,7 +449,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 if (string.Equals(Path.GetFileName(toolFolder), ".kyber-weave", StringComparison.Ordinal))
                     DeleteEmptyDirectory(toolFolder);
                 recoveryCompleted = true;
-                return;
+                return RecoveryOutcome.DiscardedUnstarted;
             }
 
             IntentDocument intent = ReadIntent(
@@ -461,7 +469,7 @@ public sealed class SquadTransaction : ISquadTransaction
                 createdDirectoriesToRemove = intent.CreatedDirectories;
                 CleanupOwnedArtifacts(journalDirectory, workDirectory);
                 recoveryCompleted = true;
-                return;
+                return RecoveryOutcome.FinishedForward;
             }
 
             ResolveActiveClaims(
@@ -481,6 +489,7 @@ public sealed class SquadTransaction : ISquadTransaction
             MarkCleanupOnly(intentPath, intent);
             CleanupOwnedArtifacts(journalDirectory, workDirectory);
             recoveryCompleted = true;
+            return RecoveryOutcome.RolledBack;
         }
         finally
         {
@@ -495,6 +504,71 @@ public sealed class SquadTransaction : ISquadTransaction
             }
         }
     }
+
+    /// <summary>
+    ///     Recovers a transaction an earlier, killed run left for this root, under the lease the caller holds, so a
+    ///     new deployment never starts over an unfinished journal. A recovery that cannot finish refuses the
+    ///     deployment, naming the cause and the journal, and starts nothing.
+    /// </summary>
+    /// <remarks>
+    ///     A recovery that changed the tree also refuses: the plan was read from the tree the killed run left, so
+    ///     it may treat a half-applied file as the host's own edit and skip it, and nothing in it can show that.
+    ///     The next run plans against the recovered tree. The lifecycle recovers before it plans, so a command run
+    ///     through it completes in one go; this refusal covers a journal that appears between that recovery and
+    ///     this lease, and every caller that does not recover first.
+    /// </remarks>
+    private void RecoverUnfinishedBeforeStart(
+        SquadDeploymentPlan plan,
+        string journalDirectory,
+        string workDirectory,
+        string intentPath,
+        bool sameTransactionDirectory)
+    {
+        string toolFolder = Path.GetDirectoryName(journalDirectory)!;
+        if (!_files.DirectoryExists(journalDirectory) &&
+            !_files.DirectoryExists(toolFolder) &&
+            (sameTransactionDirectory || !_files.DirectoryExists(workDirectory)))
+            return;
+
+        RecoveryOutcome outcome;
+        try
+        {
+            outcome = RecoverLeased(
+                new SquadPhysicalRootIdentity(plan.PhysicalRootPath, plan.PhysicalRootKey),
+                plan.Scope);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            string message =
+                $"An unfinished Squad transaction exists at '{intentPath}' and could not be recovered: " +
+                $"{cause.Message} The new deployment was not started. Fix the cause and run the command again.";
+            throw cause is SquadDeploymentConflictException
+                ? new SquadDeploymentConflictException(message, cause)
+                : new InvalidOperationException(message, cause);
+        }
+
+        AddRecoveryNotice(outcome, journalDirectory);
+        if (outcome is RecoveryOutcome.FinishedForward or RecoveryOutcome.RolledBack)
+            throw new SquadDeploymentConflictException(
+                $"Recovered an unfinished Squad transaction at '{journalDirectory}': {DescribeRecovery(outcome)}. " +
+                "This deployment was planned before the recovery, so it was not applied. Run the command again.");
+    }
+
+    private void AddRecoveryNotice(RecoveryOutcome outcome, string journalDirectory)
+    {
+        if (outcome is RecoveryOutcome.None)
+            return;
+
+        _warnings.Add($"Recovered an unfinished Squad transaction at '{journalDirectory}': {DescribeRecovery(outcome)}.");
+    }
+
+    private static string DescribeRecovery(RecoveryOutcome outcome) =>
+        outcome switch
+        {
+            RecoveryOutcome.FinishedForward => "it had already committed, so its cleanup was finished and its changes kept",
+            RecoveryOutcome.RolledBack => "it had not committed, so its changes were rolled back",
+            _ => "it had changed nothing, so its leftover folders were removed"
+        };
 
     private IntentDocument CaptureIntent(
         SquadDeploymentPlan plan,
@@ -3456,6 +3530,14 @@ public sealed class SquadTransaction : ISquadTransaction
         ReadOnlyMemory<byte> Content,
         string ContentSha256,
         string LinkTarget);
+
+    private enum RecoveryOutcome
+    {
+        None,
+        DiscardedUnstarted,
+        FinishedForward,
+        RolledBack
+    }
 
     private enum TransactionPhase
     {

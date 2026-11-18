@@ -38,12 +38,26 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
         nameof(InMemoryFileSystem.CreateDirectoryLink)
     };
 
-    private readonly InMemorySquadState _state = new();
+    // The project registry is a cache written after the commit and rebuilt by a later status run, so a kill between
+    // the commit and that write leaves a whole new tree without it. A kill before the journal exists can leave the
+    // empty state folders its run had made, which hold nothing for a later run to recover. Neither is a difference
+    // in what the deployment installed, so both are left out of every snapshot; the lock and receipt files are not.
+    private const string RegistryKey = "home/.kyber-weave/squad/registry.json";
+    private const string StateFolderPrefix = "home";
+
+    private readonly InMemorySquadState _state;
     private readonly string _root;
     private int _commitOrdinal;
 
-    /// <summary>Creates a workspace with an empty project directory.</summary>
-    public InMemorySquadCrashSafetyFixture() => _root = _state.CreateRoot("crash");
+    /// <summary>
+    /// Creates a workspace with an empty project directory. The state sits inside it, as in the real-disk workspace,
+    /// so every snapshot and restore covers the lock and receipt as well as the project's files.
+    /// </summary>
+    public InMemorySquadCrashSafetyFixture()
+    {
+        _state = new InMemorySquadState(stateRoot: "/kw/projects/crash");
+        _root = _state.CreateRoot("crash");
+    }
 
     /// <inheritdoc />
     public override string Root => _root;
@@ -167,9 +181,26 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
         _state.Transaction().Recover(Root, SquadDeploymentScope.Project);
     }
 
+    private static bool IsLeftOutOfSnapshots(KeyValuePair<string, SquadTreeEntry> entry) =>
+        string.Equals(entry.Key, RegistryKey, StringComparison.Ordinal) ||
+        (entry.Value.Kind == SquadTreeEntryKind.Directory &&
+         (string.Equals(entry.Key, StateFolderPrefix, StringComparison.Ordinal) ||
+          entry.Key.StartsWith(StateFolderPrefix + "/", StringComparison.Ordinal)));
+
+    /// <inheritdoc />
+    public override void ExecuteNext(SquadCrashFlow flow)
+    {
+        if (CreateNextPlan(flow) is { } plan)
+        {
+            _state.Transaction().Execute(plan);
+        }
+    }
+
     /// <inheritdoc />
     public override IReadOnlyDictionary<string, SquadTreeEntry> Capture() =>
-        SquadStateTreeCapture.Capture(_state.Files, Root);
+        SquadStateTreeCapture.Capture(_state.Files, Root)
+            .Where(entry => !IsLeftOutOfSnapshots(entry))
+            .ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.Ordinal);
 
     /// <inheritdoc />
     public override void Restore(IReadOnlyDictionary<string, SquadTreeEntry> tree)

@@ -134,6 +134,7 @@ public abstract class SquadCrashSafetyContractTests
                 continue;
             }
 
+            IReadOnlyDictionary<string, SquadTreeEntry> crashed = fixture.Capture();
             Exception? recoveryProblem = Record.Exception(fixture.Recover);
             if (recoveryProblem is not null)
             {
@@ -152,9 +153,46 @@ public abstract class SquadCrashSafetyContractTests
 
             failures.AddRange(MarkerProblems(fixture, flow, oldTree, recovered)
                 .Select(problem => (current, problem)));
+
+            // The same crashed tree again, this time with no explicit recovery: the next command a user runs.
+            fixture.Restore(crashed);
+            Exception? nextProblem = Record.Exception(() => RunNextOperation(fixture, flow));
+            if (nextProblem is not null)
+            {
+                failures.Add((current, $"the next run threw {nextProblem.GetType().Name}: {nextProblem.Message}"));
+                continue;
+            }
+
+            IReadOnlyDictionary<string, SquadTreeEntry> afterNext = fixture.Capture();
+            string? nextDifference = SquadTreeComparison.Difference(newTree, afterNext);
+            if (nextDifference is not null)
+            {
+                failures.Add((current, $"the next run did not leave the whole new tree: {nextDifference}"));
+                continue;
+            }
+
+            failures.AddRange(MarkerProblems(fixture, flow, oldTree, afterNext)
+                .Select(problem => (current, $"after the next run: {problem}")));
         }
 
         Report(flow, failures);
+    }
+
+    /// <summary>
+    /// The run a user makes after a crash: the next operation, executed with no explicit recovery. Its plan was read
+    /// from the interrupted tree, so the first attempt may be refused as stale once recovery has restored the tree;
+    /// the user then runs the command again, and so does this.
+    /// </summary>
+    private static void RunNextOperation(SquadCrashSafetyFixture fixture, SquadCrashFlow flow)
+    {
+        try
+        {
+            fixture.ExecuteNext(flow);
+        }
+        catch (SquadDeploymentConflictException)
+        {
+            fixture.ExecuteNext(flow);
+        }
     }
 
     private static IEnumerable<string> MarkerProblems(
