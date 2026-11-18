@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Host;
 using KyberWeave.Tests.Host;
@@ -21,7 +22,7 @@ public sealed class PhysicalProcessEnvironmentContractTests : ProcessEnvironment
         UserName: Environment.UserName,
         MachineName: Environment.MachineName,
         OperatingSystem: RunningFamily(),
-        IsFileSystemCaseInsensitive: !OperatingSystem.IsLinux(),
+        IsFileSystemCaseInsensitive: ProbeCaseInsensitivity(),
         IsInputRedirected: Console.IsInputRedirected,
         KnownVariableName: "PATH",
         KnownVariableValue: Environment.GetEnvironmentVariable("PATH"),
@@ -29,22 +30,43 @@ public sealed class PhysicalProcessEnvironmentContractTests : ProcessEnvironment
 
     private static OperatingSystemKind RunningFamily()
     {
-        if (OperatingSystem.IsWindows())
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
         {
             return OperatingSystemKind.Windows;
         }
 
-        if (OperatingSystem.IsMacOS())
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
         {
             return OperatingSystemKind.MacOS;
         }
 
-        if (OperatingSystem.IsLinux())
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
         {
             return OperatingSystemKind.Linux;
         }
 
-        return OperatingSystem.IsFreeBSD() ? OperatingSystemKind.FreeBSD : OperatingSystemKind.Unknown;
+        return RuntimeInformation.IsOSPlatform(OSPlatform.FreeBSD) ? OperatingSystemKind.FreeBSD : OperatingSystemKind.Unknown;
+    }
+
+    /// <summary>Asks the volume directly, with a technique independent of the adapter's.</summary>
+    /// <returns>True when the temporary volume ignores case in names.</returns>
+    private static bool ProbeCaseInsensitivity()
+    {
+        string directory = Path.GetTempPath();
+        string name = "KW-CONTRACT-" + Guid.NewGuid().ToString("N") + "-Aa";
+        string path = Path.Combine(directory, name);
+        try
+        {
+            using (File.Create(path))
+            {
+            }
+
+            return File.Exists(Path.Combine(directory, name.ToUpperInvariant()));
+        }
+        finally
+        {
+            File.Delete(path);
+        }
     }
 }
 
