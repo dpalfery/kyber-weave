@@ -6,9 +6,11 @@ using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Domain.CodeGraph;
+using KyberWeave.Tests;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Graph;
 
 /// <summary>
 /// T05 RED — one immutable DocGraph projection is shared by export, retrieval, and
@@ -16,6 +18,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DocGraphProjectionTests
 {
+    private readonly InMemoryFileSystem _files = new();
+
+    private string OutputDirectory => Path.Combine(_files.Root, "graph-out");
+
     private static readonly string[] TraversedCodeEdgeKinds =
         ["contains", "calls", "references", "instantiates", "extends", "implements"];
 
@@ -193,11 +199,10 @@ public sealed class DocGraphProjectionTests
         NeighborhoodResolver resolver = new NeighborhoodResolver()
             .WithSymbol("BillingService", Node("code:billing", "BillingService"))
             .WithRoute("GET /billing", Node("route:billing", "GET /billing", "route"));
-        using TempDirectory output = new();
 
-        DocGraphExportResult result = RealDocGraphExporter.Create(resolver).Export(FullRelationshipSet(), output.Path);
-        List<JsonElement> nodes = File.ReadAllLines(result.NodesPath).Select(Parse).ToList();
-        List<JsonElement> edges = File.ReadAllLines(result.EdgesPath).Select(Parse).ToList();
+        DocGraphExportResult result = new DocGraphExporter(resolver, _files).Export(FullRelationshipSet(), OutputDirectory);
+        List<JsonElement> nodes = _files.ReadLines(result.NodesPath).Select(Parse).ToList();
+        List<JsonElement> edges = _files.ReadLines(result.EdgesPath).Select(Parse).ToList();
 
         Assert.All(nodes, node => Assert.Equal("node", node.GetProperty("type").GetString()));
         Assert.All(edges, edge => Assert.Equal("edge", edge.GetProperty("type").GetString()));
@@ -223,13 +228,12 @@ public sealed class DocGraphProjectionTests
                     new Dictionary<string, string?>(StringComparer.Ordinal) { ["type"] = "node" }))
         ];
         StubContributor contributor = new([], edges);
-        using TempDirectory output = new();
 
-        DocGraphExportResult result = RealDocGraphExporter.Create(FakeCodeGraphResolver.WithSymbols()).Export(
+        DocGraphExportResult result = new DocGraphExporter(FakeCodeGraphResolver.WithSymbols(), _files).Export(
             new DocumentSet { Documents = [] },
-            output.Path,
+            OutputDirectory,
             [contributor]);
-        JsonElement edge = Parse(File.ReadAllLines(result.EdgesPath).Single());
+        JsonElement edge = Parse(_files.ReadLines(result.EdgesPath).Single());
 
         Assert.Equal("edge", edge.GetProperty("type").GetString());
     }
