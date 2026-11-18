@@ -57,6 +57,18 @@ public sealed class ArbiterStateStoreTests
         Assert.NotNull(read.Unreadable);
     }
 
+    [Theory]
+    [InlineData(0L)]
+    [InlineData(-1L)]
+    public async Task ANonPositiveWindowIsAProgrammingErrorTheLogStoreRefuses(long tailBytes)
+    {
+        await _log.AppendLineAsync("/repo/artifacts/arbiter", InFlightLedger.FileName, "{}", CancellationToken.None);
+        string path = Path.Combine("/repo/artifacts/arbiter", InFlightLedger.FileName);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => _log.ReadTailLines(path, tailBytes, keepUnterminatedFinalLine: false));
+        Assert.Throws<ArgumentOutOfRangeException>(() => _log.ReadTail(path, tailBytes, keepUnterminatedFinalLine: false));
+    }
+
     [Fact]
     public async Task ALogThatRefusesTheAppendReportsTheStoreUnavailableInsteadOfThrowing()
     {
