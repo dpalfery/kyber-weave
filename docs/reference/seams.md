@@ -4,7 +4,7 @@ title: Seams, adapters and the exceptions they keep
 doc-type: reference
 status: current
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 component: CI Pipelines
 ---
 
@@ -19,8 +19,9 @@ implement them, the fake and contract suite that prove each adapter, every class
 resource directly and the task that converts it, and the sealed framework types allowed through
 with a reason.
 
-Read from this branch (`opencode/idt/registers`, commit `de8057b1`) on 2026-11-17. The seams and
-adapters come from the code on this branch, not from the design. The counts come from
+Read from this branch on 2026-11-18, at the end of the interface-driven unit tests work, and
+reconciled then: the counts and the rows below are the same set of classes. The seams and adapters
+come from the code, not from the design. The counts come from
 `git grep -E` over `src/`: a **site** is one non-comment line that calls `System.IO`, a file or
 directory member, `Process`/`ProcessStartInfo`, `Environment`, `Console`, the system clock,
 `Stopwatch`, `Thread.Sleep`, `Task.Delay`, `Guid.NewGuid`, `Random`, `Mutex` or a network client.
@@ -54,8 +55,9 @@ Notes.
   views over the file-system seam, so a class can ask for the write it needs and nothing more.
 - The corpus seam is test infrastructure, not a product seam. It lives in the shared testing library
   so a content test says what it reads instead of walking the tree for the repository root.
-- The configuration row is the one seam without a shared fake and contract suite. Task 2.3 converts
-  its 23 callers and is where both belong.
+- The configuration seam has a shared fake and a contract suite (task 2.3): the fake runs in a unit
+  project and the adapter over the in-memory file system there too, and over the real disk in the
+  integration project.
 - The credential store's integration run skips only when the host has no usable store. A read-only
   probe turns the typed unavailable failures into a skip, and every other failure fails the run. A
   probe that wrote would hide an adapter that writes but reads back wrong, because it would look
@@ -121,6 +123,8 @@ task's list.
 | `SocketArbiterHttpHandlers` | Network | `KyberWeave.Data` | `Arbiter/SocketArbiterHttpHandlers.cs` | The Arbiter's real HTTP handler; the only place that builds it |
 | `LoopbackEmbeddingTransport` | Network | `KyberWeave.Data` | `Docs/Analysis/Embeddings/LoopbackEmbeddingTransport.cs` | Sockets that connect only to loopback (the check repeats at connect time) and system name resolution for the embedding endpoint |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
+| `SquadDeploymentAdapters` | File system, paths, identifiers | `KyberWeave.Data` | `Squad/Deployment/SquadDeploymentAdapters.cs` | Small delegates the deployment code takes where it needs one operation: existence, read, write, temp name, candidate roots |
+| `LocalCheckoutSquadReleaseSource` | Shipped release (tests and `squad pack` from a checkout) | `KyberWeave.Data` | `Squad/Release/LocalCheckoutSquadReleaseSource.cs` | Copies a release from a local checkout into the requested destination; the only release source that reads the disk directly |
 
 The credential seam's interface lives in `KyberWeave.Contracts/Arbiter/ICredentialStore.cs`, under the
 namespace `KyberWeave.Core.Arbiter.Credentials`, which it kept when it left Domain.
@@ -157,72 +161,83 @@ they do it. They are not seams and no test fakes them; a smoke test proves the w
 
 ### Classes still calling a resource directly
 
-Task 1.8 does not convert any of these; it lists them so phase 2, phase 3 and phase 4 have a
-worklist and so a reviewer can tell an adapter from a violation. A task number is the task whose
-file list or folder covers the class. **`unassigned` would mean the approved task list names no task
-for that class.** The register does not invent coverage: the gaps are listed after the tables and
-task 1.8's acceptance criterion is not met for them until `tasks.md` assigns an owner.
+Task 1.8 does not convert any of these; it lists them so a reviewer can tell an adapter from a
+violation. The phases converted the list; what remains is one small group of path and name-resolution
+calls the conversion left, and each row names the todo that owns it. The register does not invent
+coverage: a new gap is recorded here until a todo or a task names it.
 
-Two rows are adapters for another seam whose remaining direct call is the clock. They are counted
-here, with the task that converts it (4.9), because otherwise a test through the adapter still reads the real
-clock and no task would track the fix.
+The rows count only classes that are neither an adapter nor a composition root, and they exclude
+platform checks, which have their own table below.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
-| `KyberWeave.Application` | 74 | 208 | 4.1, 4.2, 4.3, 4.8 |
-| `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 69 | 632 | 3.4, 3.5, 4.4, 4.9 |
-| `KyberWeave.Domain` | 0 | 0 | — |
-| `KyberWeave.Hooks` | 1 | 1 | 4.7 |
-| `KyberWeave.Kernel` | 3 | 22 | 4.9 |
-| `KyberWeave.Mcp` | 4 | 16 | 4.6 |
-| `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
-| **Total** | **200** | **1,059** | |
+| `KyberWeave.Application` | 11 | 18 | [seam-conversion todo](../todo/seam-conversion-leftovers.md) |
+| `KyberWeave.Cli` | 0 | 0 | — (roots and `ProcessStartInfo` data only) |
+| `KyberWeave.Data` | 0 | 0 | — (adapters only) |
+| `KyberWeave.Domain` | 0 | 0 | — (data only) |
+| `KyberWeave.Hooks` | 0 | 0 | — (its `Program` root) |
+| `KyberWeave.Kernel` | 0 | 0 | — (its three adapters) |
+| `KyberWeave.Mcp` | 0 | 0 | — (roots and the console-stream adapter) |
+| `KyberWeave.Arbiter` | 0 | 0 | — (its `Program` root and the console-stream adapter) |
+| **Total** | **11** | **18** | |
 
-The totals before adapters and roots are taken out are 68 classes and 212 sites in Application,
-52 and 183 in Cli, 111 and 955 in Data, 28 and 49 in Domain, 2 and 3 in Hooks, 6 and 47 in Kernel,
-7 and 28 in Mcp, and 2 and 6 in Arbiter. `KyberWeave.Contracts` reports six files and eight sites,
-all of them `ProcessStartInfo` in an interface or a request record; it holds no implementation.
-`Environment.NewLine` sites are excluded from both sets of numbers.
+Reconciled on 2026-11-18. Adapters, composition roots, `ProcessStartInfo` used as data,
+`Task.Delay` and other waits that take an injected `TimeProvider`, and pure `System.IO.Path` string
+work are excluded, as above. The remaining work is 11 classes and 18 sites, all in
+`KyberWeave.Application`, and is tracked by
+[`docs/todo/seam-conversion-leftovers.md`](../todo/seam-conversion-leftovers.md); no other project
+has a class outside its adapter register. `KyberWeave.Contracts` holds no implementation and no
+counted site. `Environment.NewLine` sites are excluded.
 
-#### KyberWeave.Application (74 classes)
+#### Platform checks still read directly (`OperatingSystem.Is*`, `RuntimeInformation`)
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
-| `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
-| `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
-| `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
-| `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
-| `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
-| `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
-| `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
-| `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
-| `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
-| `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths | 2.5 |
-| `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths | 2.5 |
-| `SquadResponseGuidanceSource` (`Squad/Deployment/SquadResponseGuidanceSource.cs`) | file system | 2.5 |
-| `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadModelPresetStore` (`Squad/Presets/SquadModelPresetStore.cs`) | file system | 3.5 |
-| `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
+These are not file, process, console or network calls, but they still read the operating system
+instead of `IProcessEnvironment`, so they are listed rather than hidden. Every one picks a
+`StringComparer`, a path rule or an OS label; none opens a resource. They are part of the same
+todo.
 
-#### KyberWeave.Cli (14 classes)
+| Project | Classes | Sites | Classes |
+|---|---|---|---|
+| `KyberWeave.Application` | 16 | 17 | `CopilotPromptFile`, `CopilotPromptHome`, `ManagedGlossary`, `CodeGraphIndexProvisioner`, `PostCheckoutHookInstaller`, `RepositoryDoctorService` (2), `DocsRootPath`, `PathContainment`, `FileReferenceExtractor`, `FileCoverageReportSource`, `RunStartRunner`, `SquadGlobalRoots`, `SquadTransaction`, `SquadWorkerBaselineFile`, `PlatformRid`, `StatusLineHostService` |
+| `KyberWeave.Data` | 4 | 7 | `PlanPathResolver` (2), `AnalysisCacheSafety` (2), `LaunchCommandResolver` (2), `ReleaseArchiveExtractor` |
+| `KyberWeave.Kernel` | 1 | 1 | `ShellQuote` |
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
-| `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
+The rest are adapters (`ProcessEnvironment`, `PhysicalFileSystem`, `PhysicalPathResolver`,
+`WindowsSquadLinkFileSystem`, `FileGitHookFiles`, `DocsRootWalk`, `FileStatusLineFiles`,
+`ExclusiveFileWriter`, `UnixUpdateFileModes`, `WindowsCredentialStore`, Kernel `ProcessRunner`) or
+the Data composition root (`SquadServiceCollectionExtensions`).
 
-#### KyberWeave.Data (69 classes)
+#### KyberWeave.Application (11 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
-| `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
-| `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
-| `SquadDeploymentAdapters` (`Squad/Deployment/SquadDeploymentAdapters.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadMigrationLedger` (`Squad/Deployment/SquadMigrationLedger.cs`) | file system | 3.5 |
-| `FileSquadPackager` (`Squad/Packaging/FileSquadPackager.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadCanonicalProfileStore` (`Squad/Presets/SquadCanonicalProfileStore.cs`) | file system, identifiers | 3.5 |
-| `LocalCheckoutSquadReleaseSource` (`Squad/Release/LocalCheckoutSquadReleaseSource.cs`) | file system, paths | 3.5 |
+| `SquadTransaction` (`Squad/Deployment/SquadTransaction.cs`) | paths (`Path.GetFullPath` for containment) | One site the transaction's reverse index did not take; papercut, not a correctness risk because the base is explicit where it matters. Tracked in the seam todo |
+| `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | paths (`Path.GetFullPath` four times) | Tracked in the seam todo |
+| `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths (`Path.GetFullPath` twice) | Tracked in the seam todo |
+| `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths (`Path.GetFullPath` twice) | Tracked in the seam todo |
+| `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | paths (`Path.GetFullPath`) | Tracked in the seam todo |
+| `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | paths (`Path.GetFullPath` with an explicit base) | Tracked in the seam todo |
+| `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths (`Path.GetFullPath` with an explicit base) | Tracked in the seam todo |
+| `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths (`Path.GetFullPath` with an explicit base) | Tracked in the seam todo |
+| `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths (`Path.GetFullPath` with an explicit base) | Tracked in the seam todo |
+| `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths (`Path.GetFullPath` with an explicit base) | Tracked in the seam todo |
+| `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network (`Dns.GetHostAddresses`) | Tracked in the seam todo |
+
+#### KyberWeave.Cli (0 classes)
+
+None left outside a composition root. `Program`, `DocsCommandComposition`, `SquadCliServices` and
+`SelfUpdateHostFactory` may read process state while wiring adapters (the roots table above). A
+command that builds a `ProcessStartInfo` hands it to `IProcessRunner` or `IProcessExecutor`; the
+start information is data, as the exceptions register says.
+
+#### KyberWeave.Data (0 classes)
+
+None left outside an adapter. The two classes the phase 3 register called converters are adapters
+and are listed in the adapter register above: `SquadDeploymentAdapters` and
+`LocalCheckoutSquadReleaseSource`. `PresentFile` and `DocsRootWalk` are static helpers of the
+`PhysicalRepositoryFileStore` adapter; `ZipSkillArchiveWriter` is the `ISkillArchiveWriter` adapter;
+`SquadMigrationLedger`, `FileSquadPackager` and `SquadCanonicalProfileStore` now take the file-system,
+path and identifier seams by constructor.
 
 Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 
@@ -267,27 +282,31 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 
 None left. Task 2.5 moved the last three to `KyberWeave.Application` (`Squad/Deployment/`), and the Data classes that named them moved with them.
 
-#### KyberWeave.Hooks (1 class)
+#### KyberWeave.Hooks (0 classes)
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
+None left outside its `Program` composition root.
+
 
 #### KyberWeave.Kernel (3 classes)
 
 None left. `FileReferenceExtractor` moved to `KyberWeave.Application` (`Parsing/FileReferenceExtractor.cs`) and `CodeGraphIndexStaleness` to `KyberWeave.Data` (`CodeGraph/CodeGraphIndexStaleness.cs`), both over the file-system seam (and the path and process seams); `StdioSession` is the interactive process adapter and runs on `TimeProvider`.
 
-#### KyberWeave.Mcp (4 classes)
+#### KyberWeave.Mcp (0 classes)
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
+None left outside its `Program` and `DocsToolsComposition` roots and the `DrainingStreamServerTransport`
+adapter.
+
 
 ## Gaps in the task list
 
-The gaps this register found on 2026-11-17 were closed by amending the task list: the 12
-`Application` classes without a folder task are task 4.8; the two `Kernel` classes and the clock
-inside `FileCodeGraphIndexWorkspace` and `StdioSession` are task 4.9; the native credential store
-becomes the adapter of a new credential seam in task 4.10; and the shared configuration fake and
-its contract suite are part of task 2.3. A new gap is recorded here until the task list names it.
+The gaps this register found on 2026-11-17 were closed by the task list: the 12 `Application`
+classes without a folder task became task 4.8, the two `Kernel` classes and the clock inside
+`FileCodeGraphIndexWorkspace` and `StdioSession` became task 4.9, the native credential store
+became the adapter of a new credential seam in task 4.10, and the shared configuration fake and
+its contract suite became part of task 2.3. The one group phase 4 left — path and name resolution
+in `Application` — is in
+[`docs/todo/seam-conversion-leftovers.md`](../todo/seam-conversion-leftovers.md). A new gap is
+recorded here until a todo names it.
 
 ## The exceptions register
 
@@ -297,29 +316,24 @@ the behaviour: where a test observes the value, the seam still wraps it.
 
 | Type | Why it stays | Where the code uses it | What a test controls |
 |---|---|---|---|
-| `JsonDocument` | Parses a string or byte payload the caller already holds. It opens no resource and holds no state a test needs to replace | 32 files, 53 sites; most in `Application/Docs/Mcp` and `Data/Squad` | The input text or bytes; the parse result is deterministic |
-| `ZipArchive` | A sealed reader and writer over a stream. The stream is the resource, not the archive | 3 files, 8 sites: `Application/Squad/Release/GitHubSquadReleaseSource.cs`, `Application/Squad/Packaging/SquadPacker.cs`, `Data/Skills/ZipSkillArchiveWriter.cs` | The stream: a `MemoryStream` holding a fixture archive |
-| `SHA256` | A pure hash over bytes. Two calls on the same bytes return the same digest, so a test never needs to replace it | 40 files, 51 sites, from `Arbiter` through `Squad` to `SelfUpdater` | The bytes hashed; the digest is asserted directly |
-| `ProcessStartInfo` | A sealed data transfer object handed to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a delegate. It starts nothing by itself; the runner does | 39 files, 66 sites; production process starts remain in `Kernel/Processes/ProcessRunner.cs` and `StdioSession` | A scripted fake asserts the program, arguments, working directory and environment it receives |
-| `HttpClient` | A sealed network client. The transport is the seam: an injected `HttpMessageHandler` or `IArbiterHttpHandlers`, or a named network adapter | 9 files, 16 sites: the four network adapters (`SystemOneClient`, `GitHubReleaseClient`, `GitHubSquadReleaseSource`, `OpenAiCompatibleEmbeddingGenerator`), `OllamaProbe` over `IArbiterHttpHandlers`, `SelfUpdater` over an injected handler, and two factories that pass the handler on | The handler or the network adapter; no test opens a socket |
-| `FileStream` | The stream type at the bottom of the file-system adapter. It is an exception only **inside** an adapter, where it is the adapter's whole job | 27 files, 37 sites. Adapter uses: `PhysicalFileSystem`, `PhysicalDoctorFileSystem`, `ExclusiveFileWriter`, `FileBoundedFileReader`, `FileCodeGraphIndexWorkspace` (lease) and Kernel `BoundedFileReader`; `TransactionLease` now holds its journal through the seam's `OpenGuarded` | The file-system seam: `InMemoryFileSystem`, proven by the file-system contract suite |
+| `JsonDocument` | Parses a string or byte payload the caller already holds. It opens no resource and holds no state a test needs to replace | 31 files, 44 sites; most in `Application/Docs/Mcp` and `Data/Squad` | The input text or bytes; the parse result is deterministic |
+| `ZipArchive` | A sealed reader and writer over a stream. The stream is the resource, not the archive | 5 files, 6 sites, including `Application/Squad/Release/GitHubSquadReleaseSource.cs`, `Application/Squad/Packaging/SquadPacker.cs` and `Data/Skills/ZipSkillArchiveWriter.cs` | The stream: a `MemoryStream` holding a fixture archive |
+| `SHA256` | A pure hash over bytes. Two calls on the same bytes return the same digest, so a test never needs to replace it | 39 files, 45 sites, from `Arbiter` through `Squad` to `SelfUpdater` | The bytes hashed; the digest is asserted directly |
+| `ProcessStartInfo` | A sealed data transfer object handed to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a delegate. It starts nothing by itself; the runner does | 41 files, 64 sites; production process starts remain in `Kernel/Processes/ProcessRunner.cs` and `StdioSession` | A scripted fake asserts the program, arguments, working directory and environment it receives |
+| `HttpClient` | A sealed network client. The transport is the seam: an injected `HttpMessageHandler` or an `IArbiterHttpHandlers` adapter | 5 files, 9 sites: the four network adapters (`SystemOneClient`, `GitHubReleaseClient`, `GitHubSquadReleaseSource`, `OpenAiCompatibleEmbeddingGenerator`) and their two factories that pass the handler on | The handler or the network adapter; no test opens a socket |
+| `FileStream` | The stream type at the bottom of the file-system adapter. It is an exception only **inside** an adapter, where it is the adapter's whole job | 9 files, 17 sites: `PhysicalFileSystem`, `ArbiterLogFiles`, `PhysicalDoctorFileSystem`, `ExclusiveFileWriter`, `FileBoundedFileReader`, `FileCodeGraphIndexWorkspace` (lease) and Kernel `BoundedFileReader` and `AtomicFile`; `SquadTransaction` holds its journal through the seam's `OpenGuarded` | The file-system seam: `InMemoryFileSystem`, proven by the file-system contract suite |
 
-`FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
-does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
-`Application/Update/SelfUpdater.cs`,
-`Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
-`SquadModelPresetSelectionStore.cs`,
-`Application/Squad/Rendering/CopilotMcpServerProbe.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
-above; `FileStream` is not a licence to bypass the seam.
+`FileStream` needs a caveat: no non-adapter class opens one. `SquadTransaction` tests
+`stream is FileStream` once, to flush a real disk stream durably; that is a type test, not an open,
+and it is excluded from the count above.
 
 Two more framework members are used directly but are not in the exception list because a seam
-already covers them and must replace them:
+already covers them:
 
-- `Mutex` appears in `MutexLease` (the lease adapter) and in `TransactionLease`, which task 3.4
-  moves onto `ILease`.
+- `Mutex` appears only in `MutexLease`, the lease adapter. `TransactionLease` now takes `ILease`.
 - `OperatingSystem.Is*` and `Environment.*` belong to `IProcessEnvironment`; a class outside the
-  environment adapter that calls them is on the task list above. `Environment.NewLine` is a
-  platform constant, not process state, and is not a seam violation.
+  environment adapter that calls them is listed above. `Environment.NewLine` is a platform
+  constant, not process state, and is not a seam violation.
 
 ## Keeping this register current
 
