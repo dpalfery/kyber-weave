@@ -310,7 +310,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | file system, paths, clock | 4.4 |
 | `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
 | `CodeGraphResolverAdapter` (`CodeGraph/CodeGraphResolverAdapter.cs`) | file system, paths | 4.4 |
-| `FileUserHostConfigStore` (`Configuration/FileUserHostConfigStore.cs`) | file system | 4.4 |
 | `OpenAiCompatibleEmbeddingGenerator` (`Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs`) | environment, network | 4.4 |
 | `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
