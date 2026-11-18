@@ -406,14 +406,17 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
     ///     plan is built from the recovered tree rather than a half-applied one. A dry run changes nothing and plans from
     ///     the tree as it stands.
     /// </summary>
-    /// <returns>The notices recovery raised; empty when nothing was left.</returns>
+    /// <returns>
+    ///     The notices recovery raised; empty when nothing was left. A dry run reports that an unfinished transaction is
+    ///     waiting, because its plan was read from the tree that transaction left.
+    /// </returns>
     private IReadOnlyList<string> RecoverUnfinishedTransaction(
         string targetRoot,
         SquadDeploymentScope scope,
         bool dryRun)
     {
         if (dryRun)
-            return [];
+            return DescribePendingTransaction(targetRoot, scope);
 
         ISquadTransaction transaction = _transactions.Create(null);
         try
@@ -431,6 +434,24 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         }
 
         return [.. transaction.Warnings];
+    }
+
+    /// <summary>
+    ///     Names an unfinished transaction a dry run left in place. The plan it reports was read from the tree that
+    ///     transaction left, so the operator must not read it as the plan a real run would apply.
+    /// </summary>
+    /// <param name="targetRoot">The root's physical path.</param>
+    /// <param name="scope">The deployment scope the transaction belongs to.</param>
+    /// <returns>The notice, or nothing when no unfinished transaction is waiting.</returns>
+    private IReadOnlyList<string> DescribePendingTransaction(string targetRoot, SquadDeploymentScope scope)
+    {
+        string journal = _stateStore.ResolveTransactionDirectory(targetRoot, scope);
+        return _files.DirectoryExists(journal)
+            ? [
+                $"An unfinished Squad transaction is waiting at '{journal}'. This dry run changed nothing and planned " +
+                "from the files as they stand; run the command again without --dry-run to recover it first."
+            ]
+            : [];
     }
 
     /// <summary>
