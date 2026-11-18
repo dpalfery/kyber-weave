@@ -38,6 +38,9 @@ internal sealed class FakeCredentialStore : ICredentialStore
     /// <summary>Gets the keys the host holds, so a test can assert what was stored.</summary>
     public IReadOnlyDictionary<string, string> Entries => _host.Entries;
 
+    /// <summary>Gets or sets the failure <see cref="Read"/> raises instead of answering; null answers normally.</summary>
+    public Exception? ReadFailure { get; set; }
+
     /// <summary>Stores a key without recording a write, for a test arranging what the store already holds.</summary>
     /// <param name="origin">The endpoint origin.</param>
     /// <param name="key">The key.</param>
@@ -53,6 +56,11 @@ internal sealed class FakeCredentialStore : ICredentialStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         Reads.Add(origin);
+        if (ReadFailure is { } failure)
+        {
+            throw failure;
+        }
+
         return _host.Entries.TryGetValue(origin, out string? key) ? key : null;
     }
 

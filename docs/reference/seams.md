@@ -55,6 +55,10 @@ Notes.
   so a content test says what it reads instead of walking the tree for the repository root.
 - The configuration row is the one seam without a shared fake and contract suite. Task 2.3 converts
   its 23 callers and is where both belong.
+- The credential store's integration run skips only when the host has no usable store. A read-only
+  probe turns the typed unavailable failures into a skip, and every other failure fails the run. A
+  probe that wrote would hide an adapter that writes but reads back wrong, because it would look
+  unavailable and every contract test would skip.
 - An adapter is thin: it translates the call and holds no decision the logic should make. Where an
   adapter does hold policy (the file-system adapter's skip list, the process adapter's missing-
   executable mapping), that is noted below rather than hidden.
