@@ -217,7 +217,9 @@ public sealed partial class StandardsFolderMigration
                     // reshape over it would replace that standard with the legacy text.
                     if (reshapedText is null || skippedRenames.Contains(change.To)) break;
 
-                    AtomicFile.WriteAllText(RequireWritable(change.To), reshapedText);
+                    string reshapeTarget = RequireWritable(change.To);
+                    AtomicFile.WriteAllText(reshapeTarget, reshapedText);
+                    VerifyStillWritable(reshapeTarget);
                     applied.Add(change);
                     break;
             }
@@ -440,14 +442,17 @@ public sealed partial class StandardsFolderMigration
     }
 
     /// <summary>
-    /// Checks again where a file that was just created actually resolved, removing it if the path
+    /// Checks again where a file that was just written actually resolved, removing it if the path
     /// stopped being inside the repository while it was written.
     /// </summary>
     /// <remarks>
-    /// The pre-write check and the write cannot be one operation in .NET, so the guarantee cannot
-    /// rest on the check's timing. It rests on this: the write's result is inspected, and a path
-    /// that now resolves outside the root — a directory replaced by a link in between — costs the
-    /// file, not the repository's boundary.
+    /// Every write here ends with this call — a created stub or standard, a rename's destination,
+    /// a reshaped standard — because the pre-write check and the write cannot be one operation in
+    /// .NET, so the guarantee cannot rest on the check's timing. It rests on this: the write's
+    /// result is inspected, and a path that now resolves outside the root — a directory replaced by
+    /// a link in between — costs the file, not the repository's boundary. A replace loses the
+    /// content it wrote, which is the price of not leaving a document outside the root; the file it
+    /// replaced was outside the root too, since the path only resolves there now.
     /// </remarks>
     private void VerifyStillWritable(string path)
     {
