@@ -168,7 +168,7 @@ clock and no task would track the fix.
 |---|---|---|---|
 | `KyberWeave.Application` | 68 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 73 | 663 | 3.3, 3.4, 3.5, 4.4, 4.9 |
+| `KyberWeave.Data` | 72 | 632 | 3.4, 3.5, 4.4, 4.9 |
 | `KyberWeave.Domain` | 24 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 3 | 22 | 4.9 |
@@ -258,7 +258,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
 | `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
 | `SquadDeploymentAdapters` (`Squad/Deployment/SquadDeploymentAdapters.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadDeploymentPlanner` (`Squad/Deployment/SquadDeploymentPlanner.cs`) | file system, paths | 3.3 |
 | `SquadHookJsonFile` (`Squad/Deployment/SquadHookJsonFile.cs`) | file system, paths | 3.5 |
 | `SquadMigrationLedger` (`Squad/Deployment/SquadMigrationLedger.cs`) | file system | 3.5 |
 | `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
