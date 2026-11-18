@@ -32,9 +32,9 @@ public sealed class DeveloperTierSelectionTests
     /// </summary>
     private static DocFixture Ready(KyberWeaveConfig config, string? difficulty = "easy")
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown(difficulty));
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, config, DocsPorts.Files)
+        DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(PlanMarkdown(difficulty));
+        _ = fixture.EnsureDirectory(".git");
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, config, fixture.Store)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(
             outcome.Report.HasErrors,
@@ -141,7 +141,7 @@ public sealed class DeveloperTierSelectionTests
 
     private static TaskPromptService Service(DocFixture fixture, KyberWeaveConfig config)
     {
-        IServiceProvider provider = DocsTestCommands.Services();
+        IServiceProvider provider = DocsMemoryServicesD.Services(fixture);
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
@@ -197,10 +197,10 @@ public sealed class DeveloperTierSelectionTests
     [Fact]
     public void TheTaskFileRecordsEachTierTheArchitectRatedWithNoDecisionModel()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus(ThreeTiersPlan());
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(ThreeTiersPlan());
+        _ = fixture.EnsureDirectory(".git");
 
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files)
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store)
             .Run(Plan, PlanTaskFileMode.Write);
 
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
@@ -325,13 +325,13 @@ public sealed class DeveloperTierSelectionTests
     [Fact]
     public void AConfidentPickRecordsTheTierTheRatingGives()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(PlanMarkdown("easy"));
+        _ = fixture.EnsureDirectory(".git");
         StubProvider provider = new("dev-medium");
         using PlanTaskAgentPick picker = new(
             provider, PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
 
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, picker)
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
             .Run(Plan, PlanTaskFileMode.Write);
 
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
@@ -349,19 +349,19 @@ public sealed class DeveloperTierSelectionTests
     public void ARewriteOfAStaleTaskFileRepicksEveryAgentForTheOneRoster()
     {
         using DocFixture fixture = Ready(Tiered, "easy");
-        string path = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath);
-        PlanTaskFile stale = PlanTaskFileFormat.Deserialize(path, File.ReadAllText(path))!;
+        string path = PlanTaskFileProbe.TaskFilePath;
+        PlanTaskFile stale = PlanTaskFileFormat.Deserialize(path, fixture.ReadText(path))!;
         PlanTaskFile previousRoster = stale with
         {
             WorkerRoster = WorkerRosters.Technology,
             Tasks = [.. stale.Tasks!.Select(task => task.Id == "T1" ? task with { Agent = "csharp-dev" } : task)]
         };
-        File.WriteAllText(path, PlanTaskFileFormat.Serialize(previousRoster));
+        _ = fixture.Write(path, PlanTaskFileFormat.Serialize(previousRoster));
 
         using PlanTaskAgentPick picker = new(
             new StubProvider("dev-medium"),
             PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
-        PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, picker)
+        PlanTaskFileOutcome second = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
             .Run(Plan, PlanTaskFileMode.Write);
 
         Assert.False(second.Report.HasErrors, string.Join("; ", second.Report.Items.Select(item => item.Message)));
@@ -376,12 +376,12 @@ public sealed class DeveloperTierSelectionTests
     [Fact]
     public void AnUnknownAgentNameIsReplacedByTheTierAndReportedByCheck()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown("easy"));
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(PlanMarkdown("easy"));
+        _ = fixture.EnsureDirectory(".git");
         using PlanTaskAgentPick picker = new(
             new StubProvider("dev-medium"),
             PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
-        PlanTaskFileOutcome written = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, picker)
+        PlanTaskFileOutcome written = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, picker)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(written.Report.HasErrors, string.Join("; ", written.Report.Items.Select(item => item.Message)));
 
@@ -390,12 +390,12 @@ public sealed class DeveloperTierSelectionTests
         Assert.True(dispatched.Built, dispatched.Refusal);
         Assert.Equal("dev-easy", dispatched.Agent);
 
-        string taskPath = Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar));
-        File.WriteAllText(
+        string taskPath = PlanTaskFileProbe.TaskFilePath;
+        _ = fixture.Write(
             taskPath,
-            File.ReadAllText(taskPath).Replace("agent: dev-easy", "agent: my-wrapper", StringComparison.Ordinal));
+            fixture.ReadText(taskPath).Replace("agent: dev-easy", "agent: my-wrapper", StringComparison.Ordinal));
 
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files)
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store)
             .Run(Plan, PlanTaskFileMode.Check);
         Assert.Contains(
             check.Report.Items,
@@ -410,7 +410,7 @@ public sealed class DeveloperTierSelectionTests
         using PlanTaskAgentPick repick = new(
             new StubProvider("dev-medium"),
             PlanTaskAgentPick.ImplementationAgents(WorkerRosters.Tiered));
-        PlanTaskFileOutcome rewritten = new PlanTaskFileGenerator(fixture.Root, Tiered, DocsPorts.Files, repick)
+        PlanTaskFileOutcome rewritten = new PlanTaskFileGenerator(fixture.Root, Tiered, fixture.Store, repick)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(rewritten.Report.HasErrors, string.Join("; ", rewritten.Report.Items.Select(item => item.Message)));
         Assert.Equal("dev-easy", rewritten.File!.Tasks![0].Agent);
