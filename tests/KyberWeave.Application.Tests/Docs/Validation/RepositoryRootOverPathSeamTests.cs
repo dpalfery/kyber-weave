@@ -1,7 +1,9 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Review;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -106,5 +108,70 @@ public sealed class RepositoryRootOverPathSeamTests
             .Run(RelativeRoot, config, "docs/plans/2026-01-01-widget.md", PlanTaskFileMode.Preview);
 
         Assert.DoesNotContain(outcome.Report.Items, item => item.Code == PlanTaskFileGenerator.PlanNotReadable);
+    }
+
+    [Fact]
+    public void TheSchemaGateChecksOneCheckoutWhenTheRootIsRelative()
+    {
+        _disk.CreateDirectory($"{WorkingDirectory}/{RelativeRoot}/docs/plans");
+        _disk.WriteAllText(
+            $"{WorkingDirectory}/{RelativeRoot}/docs/plans/widget.md.tasks.yml.new",
+            "{\"execution-digest\":\"abc\"}");
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product
+            .WithOntology(new OntologyConfig { DocsRoots = ["docs"] });
+        RecordingSeverityOverrides severity = new();
+
+        DiagnosticReport report = new DocsSchemaGate(
+            _store,
+            new NoGitChanges(),
+            severity,
+            TimeProvider.System,
+            _paths,
+            _environment).Validate(
+            RelativeRoot,
+            config,
+            new DocumentSet { Documents = [] },
+            () => throw new InvalidOperationException("no closeout loader in this test"),
+            mergeReady: false);
+
+        Assert.Contains(report.Items, item => item.Code == PlanTaskFileRules.SidecarTaskFile);
+        Assert.Equal($"{WorkingDirectory}/{RelativeRoot}", severity.Root);
+    }
+
+    private sealed class RecordingSeverityOverrides : ISeverityOverrideSource
+    {
+        public string? Root { get; private set; }
+
+        public string? GuidancePath(string root, ConfigRegConfig configReg) => null;
+
+        public SeverityOverrides Load(string root, ConfigRegConfig configReg) => SeverityOverrides.None;
+
+        public DiagnosticReport Validate(string root, ConfigRegConfig configReg)
+        {
+            Root = root;
+            return new DiagnosticReport();
+        }
+    }
+
+    private sealed class NoGitChanges : IGitChangeReader
+    {
+        public IReadOnlyList<string> Resolve(string workingDirectory, string baseRef) => [];
+
+        public string CurrentBranch(string workingDirectory) => string.Empty;
+
+        public string HeadCommit(string workingDirectory) => string.Empty;
+
+        public string MergeBaseCommit(string workingDirectory, string baseRef) => string.Empty;
+
+        public bool IsAncestorOfHead(string workingDirectory, string commit) => false;
+
+        public IReadOnlyList<string> ResolveSince(string workingDirectory, string commit) => [];
+
+        public IReadOnlyList<ChangedPath> ResolveSinceMergeBase(string workingDirectory, string baseRef) => [];
+
+        public (string MergeBase, string Patch) DiffSinceMergeBase(string workingDirectory, string baseRef) =>
+            (string.Empty, string.Empty);
+
+        public string DiffSince(string workingDirectory, string commit) => string.Empty;
     }
 }

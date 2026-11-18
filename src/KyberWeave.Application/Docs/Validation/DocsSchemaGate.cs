@@ -47,20 +47,23 @@ public sealed class DocsSchemaGate(
         ArgumentNullException.ThrowIfNull(corpus);
         ArgumentNullException.ThrowIfNull(closeoutLoaderFactory);
 
+        // One checkout for the whole run: every validator below reads the same root, so a caller that passes a
+        // relative spelling cannot have half the gate check one tree and half another.
+        string root = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         DiagnosticReport report = new();
         OntologyConfig ontology = config.Ontology;
 
-        report.AddRange(new DocSpecValidator(repoRoot, ontology, files, paths, environment).Validate(corpus).Items);
-        report.AddRange(new ConfigRegValidator(repoRoot, config, files, paths, environment).Validate().Items);
-        report.AddRange(severityOverrides.Validate(repoRoot, config.ConfigReg).Items);
+        report.AddRange(new DocSpecValidator(root, ontology, files, paths, environment).Validate(corpus).Items);
+        report.AddRange(new ConfigRegValidator(root, config, files, paths, environment).Validate().Items);
+        report.AddRange(severityOverrides.Validate(root, config.ConfigReg).Items);
         report.AddRange(new PlanInventoryValidator(config).Validate(corpus).Items);
         report.AddRange(new TodoInventoryValidator(config).Validate(corpus).Items);
-        report.AddRange(new PlanTaskFileValidator(repoRoot, config, files).Validate(corpus).Items);
+        report.AddRange(new PlanTaskFileValidator(root, config, files).Validate(corpus).Items);
 
         try
         {
             report.AddRange(new ManagedGlossary(
-                repoRoot,
+                root,
                 config,
                 timeProvider,
                 files).Validate().Items);
@@ -77,8 +80,8 @@ public sealed class DocsSchemaGate(
 
         if (mergeReady)
         {
-            report.AddRange(new OpenWorkValidator(config, files, repoRoot).Validate(corpus).Items);
-            report.AddRange(ValidateCloseout(repoRoot, config, corpus, closeoutLoaderFactory, gitBase).Items);
+            report.AddRange(new OpenWorkValidator(config, files, root).Validate(corpus).Items);
+            report.AddRange(ValidateCloseout(root, config, corpus, closeoutLoaderFactory, gitBase).Items);
         }
 
         return report;
