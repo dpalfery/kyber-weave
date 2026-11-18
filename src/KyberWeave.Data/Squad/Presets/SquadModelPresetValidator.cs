@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Validation;
 
 namespace KyberWeave.Core.Squad.Model;
@@ -5,7 +6,8 @@ namespace KyberWeave.Core.Squad.Model;
 /// <summary>
 ///     Cross-validates a Squad model preset against bundled model profiles.
 /// </summary>
-public static class SquadModelPresetValidator
+/// <param name="files">Reads the preset file to point at the offending line.</param>
+public sealed class SquadModelPresetValidator(IFileSystem files) : ISquadModelPresetValidator
 {
     /// <summary>
     ///     Validates that all profile categories referenced by <paramref name="preset" /> exist in <paramref name="bundled" />
@@ -16,7 +18,7 @@ public static class SquadModelPresetValidator
     /// <exception cref="SquadSourceValidationException">
     ///     Thrown when <paramref name="preset" /> references a profile category not declared in <paramref name="bundled" />.
     /// </exception>
-    public static void Validate(SquadModelPreset preset, SquadModelProfiles bundled)
+    public void Validate(SquadModelPreset preset, SquadModelProfiles bundled)
     {
         ArgumentNullException.ThrowIfNull(preset);
         ArgumentNullException.ThrowIfNull(bundled);
@@ -25,9 +27,9 @@ public static class SquadModelPresetValidator
             if (!bundled.Profiles.ContainsKey(category))
             {
                 int startLine = 1;
-                if (File.Exists(preset.SourcePath))
+                if (files.FileExists(preset.SourcePath))
                 {
-                    string[] lines = File.ReadAllLines(preset.SourcePath);
+                    string[] lines = [.. files.ReadLines(preset.SourcePath)];
                     for (int i = 0; i < lines.Length; i++)
                         if (lines[i].Contains(category, StringComparison.Ordinal))
                         {
@@ -53,7 +55,7 @@ public static class SquadModelPresetValidator
     /// <exception cref="SquadSourceValidationException">
     ///     Thrown when <paramref name="preset" /> references a profile category not declared in <paramref name="source" />.
     /// </exception>
-    public static void Validate(SquadModelPreset preset, SquadSource source)
+    public void Validate(SquadModelPreset preset, SquadSource source)
     {
         ArgumentNullException.ThrowIfNull(preset);
         ArgumentNullException.ThrowIfNull(source);

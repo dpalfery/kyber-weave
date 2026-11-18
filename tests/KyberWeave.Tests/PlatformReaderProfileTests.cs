@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -17,7 +18,7 @@ public sealed class PlatformReaderProfileTests
     private static readonly string ProductRoot =
         Path.Combine(Corpus.Root, "products", "kyber-squad");
 
-    private static readonly Lazy<SquadSource> Source = new(() => SquadSourceLoader.Load(ProductRoot));
+    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
 
     [Fact]
     public void TheProfileAllowsReadingSearchNetworkingAndCommandExecution()

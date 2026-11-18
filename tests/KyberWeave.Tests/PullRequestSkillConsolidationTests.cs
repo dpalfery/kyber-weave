@@ -132,7 +132,7 @@ public sealed class PullRequestSkillConsolidationTests
     [Fact]
     public void CreatePullRequestGithubIsNotCanonicalAndShipsInNoPackage()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == RetiredSkill);
         Assert.DoesNotContain(source.Bundle.SkillNames, name => name == RetiredSkill);
@@ -169,7 +169,7 @@ public sealed class PullRequestSkillConsolidationTests
     [InlineData(ReviewSkill)]
     public void ProviderSkillsDeliverEveryFileOnDiskThroughTheirClosure(string skillName)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         SquadSkill skill = Assert.Single(source.Skills, candidate => candidate.Name == skillName);
         string skillDirectory = $"{ProductRootRelativePath}/skills/{skillName}";
 
@@ -245,7 +245,7 @@ public sealed class PullRequestSkillConsolidationTests
     [InlineData(ReviewSkill)]
     public void ProviderSelectionMatchesPrReviewFixCommentsAndLinksBothProviders(string skillName)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         SquadSkill skill = Assert.Single(source.Skills, candidate => candidate.Name == skillName);
         Section selection = Assert.Single(
             H2Sections(skill.InstructionBody),
@@ -280,7 +280,7 @@ public sealed class PullRequestSkillConsolidationTests
     [Fact]
     public void CreatePullRequestResolvesEachConventionOnceInTheNeutralLayer()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         string body = Assert.Single(source.Skills, candidate => candidate.Name == CombinedSkill).InstructionBody;
         Section[] sections = H2Sections(body);
 

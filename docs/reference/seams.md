@@ -101,7 +101,7 @@ task's list.
 | `KernelBoundedProcessExecutor` | Process | `KyberWeave.Data` | `Docs/FileSystem/KernelBoundedProcessExecutor.cs` | The `IBoundedProcessExecutor` role view |
 | `ProcessGitCommandRunner` | Process | `KyberWeave.Data` | `RunStart/ProcessGitCommandRunner.cs` | Git with standard output and error kept apart |
 | `ProcessRunnerCredentialProcessRunner` | Process | `KyberWeave.Data` | `Arbiter/Credentials/ProcessRunnerCredentialProcessRunner.cs` | The credential process runner over `IProcessRunner` |
-| `ProcessSquadHarnessLauncher` | Process | `KyberWeave.Data` | `Squad/Instances/ProcessSquadHarnessLauncher.cs` | Starts the interactive harness; builds its start information through the static `SquadHarnessLauncher` |
+| `ProcessSquadHarnessLauncher` | Process | `KyberWeave.Data` | `Squad/Instances/ProcessSquadHarnessLauncher.cs` | Starts the interactive harness; builds its start information through the `SquadHarnessLauncher` instance it is given |
 | `ProcessExecutor` | Process | `KyberWeave.Cli` | `Commands/Squad/Infrastructure/IProcessExecutor.cs` | The CLI's `IProcessExecutor` role view |
 | `MacKeychainCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security` through `ICredentialProcessRunner`, so it reaches the process seam too. `Write` refuses a non-ASCII key: `security` prints such a password as hex, so it would not read back |
 | `SecretServiceCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool` through `ICredentialProcessRunner`, so it reaches the process seam too |
@@ -192,9 +192,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | Class (file) | Calls directly | Task |
 |---|---|---|
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
-| `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
-| `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system | 4.2 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
@@ -230,19 +228,11 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadWorktreeMcp` (`Squad/Deployment/SquadWorktreeMcp.cs`) | file system, paths | 3.5 |
 | `TransactionLease` (`Squad/Deployment/TransactionLease.cs`) | file system, lease | 3.4 |
 | `ZCodeMcpConfiguration` (`Squad/Deployment/ZCodeMcpConfiguration.cs`) | paths | 3.5 |
-| `SquadHarnessLauncher` (`Squad/Instances/SquadHarnessLauncher.cs`) | file system, environment | 3.5 |
-| `SquadInstanceLinkSync` (`Squad/Instances/SquadInstanceLinkSync.cs`) | file system, paths, identifiers, lease | 3.5 |
 | `FileSquadPackager` (`Squad/Packaging/FileSquadPackager.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadCompanionSkills` (`Squad/Packaging/SquadCompanionSkills.cs`) | file system, paths | 3.5 |
-| `SquadPackSourceLocator` (`Squad/Packaging/SquadPackSourceLocator.cs`) | file system, paths | 3.5 |
-| `SquadSourceLoader` (`Squad/Parsing/SquadSourceLoader.cs`) | file system, paths | 3.5 |
 | `SquadCanonicalProfileStore` (`Squad/Presets/SquadCanonicalProfileStore.cs`) | file system, identifiers | 3.5 |
 | `SquadModelPresetStore` (`Squad/Presets/SquadModelPresetStore.cs`) | file system | 3.5 |
-| `SquadModelPresetValidator` (`Squad/Presets/SquadModelPresetValidator.cs`) | file system | 3.5 |
 | `LocalCheckoutSquadReleaseSource` (`Squad/Release/LocalCheckoutSquadReleaseSource.cs`) | file system, paths | 3.5 |
-| `CopilotMcpServerProbe` (`Squad/Rendering/CopilotMcpServerProbe.cs`) | file system | 3.5 |
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
-| `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
 
 Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 
@@ -326,8 +316,7 @@ the behaviour: where a test observes the value, the seam still wraps it.
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
 `Application/Update/SelfUpdater.cs`,
-`Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
-`Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
+`Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,
 `Data/Squad/Rendering/CopilotMcpServerProbe.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.

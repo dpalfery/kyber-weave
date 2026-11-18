@@ -583,7 +583,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         TaskPromptService service = new(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IWritableFileSystem>(),
             index.StandardsFor,
             provider.GetRequiredService<IProcessEnvironment>());
 

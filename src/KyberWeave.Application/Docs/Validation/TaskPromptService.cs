@@ -20,7 +20,7 @@ namespace KyberWeave.Core.Docs.Validation;
 /// </summary>
 /// <param name="tasks">Reads and checks the task file the prompt comes from.</param>
 /// <param name="hostFacts">Builds the host facts part, with the task's gates resolved by technology.</param>
-/// <param name="files">Reads the prior-results file a retry names.</param>
+/// <param name="files">Reads the prior-results file a retry names and writes the fallback harness's prompt file.</param>
 /// <param name="standardsFor">
 /// The one standards lookup the docs tool also answers from: a technology to its shared rules, parent rules and
 /// skills, rules, skills and standard, or null when the host has no folder for it.
@@ -29,7 +29,7 @@ namespace KyberWeave.Core.Docs.Validation;
 public sealed class TaskPromptService(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
-    IFileSystem files,
+    IWritableFileSystem files,
     Func<string, StandardsBundle?> standardsFor,
     IProcessEnvironment environment) : ITaskPromptService
 {
@@ -258,7 +258,7 @@ public sealed class TaskPromptService(
         string? slugSource = taskId ?? technology;
         if (slugSource is not null && harness is not null && !DispatchPromptInsertion.CanRewriteDispatch(harness))
         {
-            TaskPromptResult? unwritten = WritePromptFile(root, slugSource, prompt, out promptFile);
+            TaskPromptResult? unwritten = WritePromptFile(files, root, slugSource, prompt, out promptFile);
             if (unwritten is not null)
             {
                 return unwritten;
@@ -343,6 +343,7 @@ public sealed class TaskPromptService(
     /// refusal naming what to check, not a prompt the conductor dispatches without.
     /// </remarks>
     private static TaskPromptResult? WritePromptFile(
+        IWritableFileSystem files,
         string root,
         string taskId,
         string prompt,
@@ -364,10 +365,10 @@ public sealed class TaskPromptService(
             string? directory = Path.GetDirectoryName(path);
             if (directory is not null)
             {
-                _ = Directory.CreateDirectory(directory);
+                files.CreateDirectory(directory);
             }
 
-            File.WriteAllText(path, prompt);
+            files.WriteAllText(path, prompt);
             relativePath = relative;
             return null;
         }

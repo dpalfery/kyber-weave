@@ -8,6 +8,14 @@ namespace KyberWeave.Contracts.Repositories;
 /// </remarks>
 public interface ISquadCompanionSkills
 {
+    /// <summary>Finds the <c>.apm/skills</c> directory of the repository that holds a Squad source root.</summary>
+    /// <param name="squadSourceRoot">The Squad source root, shaped <c>&lt;repo&gt;/products/kyber-squad</c>.</param>
+    /// <returns>The companion skills directory, or null when the root has no such shape or the directory is absent.</returns>
+    /// <exception cref="Core.Squad.Validation.SquadSourceValidationException">
+    /// <c>.apm</c> or <c>.apm/skills</c> is a symbolic link.
+    /// </exception>
+    string? ResolveRoot(string squadSourceRoot);
+
     /// <summary>Lists every file of every companion skill.</summary>
     /// <param name="squadSourceRoot">The <c>products/kyber-squad</c> directory.</param>
     /// <param name="companionSkillsRoot">The companion skills root, or null.</param>

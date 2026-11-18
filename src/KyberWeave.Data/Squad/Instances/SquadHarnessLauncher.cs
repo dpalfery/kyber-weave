@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -11,7 +12,9 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///     validating arguments against injection attacks, locating shims and binaries on PATH,
 ///     and wrapping Windows batch scripts in %ComSpec% command invocations.
 /// </remarks>
-public static class SquadHarnessLauncher
+/// <param name="files">Probes the path for the harness executable.</param>
+/// <param name="environment">Supplies the variables, the path and the operating system.</param>
+public sealed class SquadHarnessLauncher(IFileSystem files, IProcessEnvironment environment) : ISquadHarnessStartInfoBuilder
 {
     private static readonly SearchValues<char>
         DangerousCharacters = SearchValues.Create('"', '%', '!', '^', '\r', '\n', '&', '|', '<', '>', ';', '$', '`', '(', ')');
@@ -34,7 +37,7 @@ public static class SquadHarnessLauncher
     /// <exception cref="ArgumentNullException">Thrown when required parameters are null.</exception>
     /// <exception cref="ArgumentException">Thrown when arguments contain dangerous injection characters.</exception>
     /// <exception cref="FileNotFoundException">Thrown when the harness executable cannot be located on PATH.</exception>
-    public static ProcessStartInfo BuildStartInfo(
+    public ProcessStartInfo PrepareLaunch(
         SquadInstanceRow row,
         string instanceRoot,
         IReadOnlyList<string> args,
@@ -117,18 +120,18 @@ public static class SquadHarnessLauncher
     /// <param name="instanceRoot">The directory containing isolated instance configuration.</param>
     /// <param name="args">Arguments to forward to the harness executable.</param>
     /// <returns>A configured <see cref="ProcessStartInfo" /> ready to launch.</returns>
-    public static ProcessStartInfo BuildStartInfo(
+    public ProcessStartInfo PrepareLaunch(
         SquadInstanceRow row,
         string instanceRoot,
         IReadOnlyList<string> args)
     {
-        return BuildStartInfo(
+        return PrepareLaunch(
             row,
             instanceRoot,
             args,
-            Environment.GetEnvironmentVariable,
+            environment.GetVariable,
             name => FindOnPath(name),
-            OperatingSystem.IsWindows());
+            environment.OperatingSystem == OperatingSystemKind.Windows);
     }
 
     /// <summary>
@@ -137,13 +140,13 @@ public static class SquadHarnessLauncher
     /// <param name="executableName">The name or relative path of the executable.</param>
     /// <param name="getEnv">Optional environment variable accessor. Defaults to system environment variables.</param>
     /// <returns>The fully qualified path to the executable, or <c>null</c> if not found.</returns>
-    public static string? FindOnPath(string executableName, Func<string, string?>? getEnv = null)
+    public string? FindOnPath(string executableName, Func<string, string?>? getEnv = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executableName);
 
-        if (Path.IsPathRooted(executableName) && File.Exists(executableName)) return executableName;
+        if (Path.IsPathRooted(executableName) && files.FileExists(executableName)) return executableName;
 
-        Func<string, string?> env = getEnv ?? Environment.GetEnvironmentVariable;
+        Func<string, string?> env = getEnv ?? environment.GetVariable;
         string? pathVar = env("PATH");
         if (string.IsNullOrEmpty(pathVar)) return null;
 
@@ -153,7 +156,7 @@ public static class SquadHarnessLauncher
             try
             {
                 string candidate = Path.Combine(directory, executableName);
-                if (File.Exists(candidate)) return candidate;
+                if (files.FileExists(candidate)) return candidate;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {

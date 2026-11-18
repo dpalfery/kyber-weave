@@ -27,6 +27,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
     private readonly IFileSystem _files;
     private readonly SquadConsole _output;
     private readonly TimeProvider _time;
+    private readonly ISquadModelPresetValidator _validator;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -41,6 +42,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
     /// <param name="files">Reads the deployed files the rewrite starts from.</param>
     /// <param name="output">Where the diff rows and the refusals are written.</param>
     /// <param name="time">Stamps the deployment plan.</param>
+    /// <param name="validator">Checks the preset against the canonical model profiles.</param>
     public SquadPresetUseCommand(
         ISquadStateStore stateStore,
         ISquadGlobalRootResolver globalRoots,
@@ -53,7 +55,8 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         SquadCommandRoots roots,
         IFileSystem files,
         SquadConsole output,
-        TimeProvider time)
+        TimeProvider time,
+        ISquadModelPresetValidator validator)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(globalRoots);
@@ -67,6 +70,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(validator);
         _stateStore = stateStore;
         _globalRoots = globalRoots;
         _presetStore = presetStore;
@@ -79,6 +83,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         _files = files;
         _output = output;
         _time = time;
+        _validator = validator;
     }
 
     /// <inheritdoc />
@@ -296,7 +301,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
 
         try
         {
-            SquadModelPresetValidator.Validate(preset, canonical.Profiles);
+            _validator.Validate(preset, canonical.Profiles);
         }
         catch (SquadSourceValidationException ex)
         {

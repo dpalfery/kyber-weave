@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -23,7 +24,7 @@ public sealed class DevHardModelUpgradeTests
     private static readonly string ProductRoot =
         Path.Combine(Corpus.Root, "products", "kyber-squad");
 
-    private static readonly Lazy<SquadSource> Source = new(() => SquadSourceLoader.Load(ProductRoot));
+    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
 
     /// <summary>
     /// The harnesses where both developer tiers resolve to the same value because the matrix offers

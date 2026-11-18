@@ -1,23 +1,27 @@
 using System.IO.Compression;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Squad.Parsing;
 
 namespace KyberWeave.Core.Squad.Packaging;
 
 /// <summary>Writes the Squad archives through <see cref="ISquadArchiveWriter"/>, and checks the composed tree in a scratch folder.</summary>
 /// <param name="archives">Writes the archives from the canonical source.</param>
-public sealed class FileSquadPackager(ISquadArchiveWriter archives) : ISquadPackager
+/// <param name="loader">Loads and validates the source trees.</param>
+/// <param name="companions">Finds the companion skills beside the source.</param>
+public sealed class FileSquadPackager(
+    ISquadArchiveWriter archives,
+    ISquadSourceLoader loader,
+    ISquadCompanionSkills companions) : ISquadPackager
 {
     /// <inheritdoc />
     public void ValidateSource(string sourcePath)
     {
         // The real Squad tree is loaded before anything is composed or written. The loader's symbolic-link guards
         // run only on the files it reads, so loading the staged copy alone would never see a link out of the source.
-        _ = SquadSourceLoader.Load(sourcePath);
+        _ = loader.Load(sourcePath);
     }
 
     /// <inheritdoc />
-    public string? ResolveCompanionSkillsRoot(string sourcePath) => SquadCompanionSkills.ResolveRoot(sourcePath);
+    public string? ResolveCompanionSkillsRoot(string sourcePath) => companions.ResolveRoot(sourcePath);
 
     /// <inheritdoc />
     public void ValidateComposedTree(string sourcePath, string? companionSkillsRoot, string version, Action<string> warn)
@@ -30,7 +34,7 @@ public sealed class FileSquadPackager(ISquadArchiveWriter archives) : ISquadPack
             string archive = archives.PackApm(sourcePath, scratch, version, companionSkillsRoot);
             string tree = Path.Combine(scratch, "tree");
             ZipFile.ExtractToDirectory(archive, tree);
-            _ = SquadSourceLoader.Load(tree);
+            _ = loader.Load(tree);
         }
         finally
         {

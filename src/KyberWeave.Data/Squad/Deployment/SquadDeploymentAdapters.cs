@@ -6,13 +6,6 @@ using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
-/// <summary>Loads canonical Squad source from disk.</summary>
-public sealed class FileSquadSourceLoader : ISquadSourceLoader
-{
-    /// <inheritdoc />
-    public SquadSource Load(string root) => SquadSourceLoader.Load(root);
-}
-
 /// <summary>Creates deployment transactions over the state store.</summary>
 /// <param name="stateStore">The state store the transactions journal in.</param>
 public sealed class SquadTransactionFactory(ISquadStateStore stateStore) : ISquadTransactionFactory
@@ -104,14 +97,6 @@ public sealed class PhysicalSquadFileAccess : ISquadFileAccess
 
         return null;
     }
-}
-
-/// <summary>Validates model presets, reading the preset file to point at the offending line.</summary>
-public sealed class FileSquadModelPresetValidator : ISquadModelPresetValidator
-{
-    /// <inheritdoc />
-    public void Validate(SquadModelPreset preset, SquadModelProfiles bundled) =>
-        SquadModelPresetValidator.Validate(preset, bundled);
 }
 
 /// <summary>Resolves canonical profiles from the checkout the binary runs from, then from the home snapshots.</summary>

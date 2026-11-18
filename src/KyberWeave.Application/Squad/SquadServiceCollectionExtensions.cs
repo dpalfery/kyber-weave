@@ -44,7 +44,7 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadInstanceReleaseSource>(sp => new InstanceReleaseSource(
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
-                ? new LocalCheckoutSquadReleaseSource(local)
+                ? new LocalCheckoutSquadReleaseSource(local, sp.GetRequiredService<ISquadCompanionSkills>())
                 : sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadStateStore>(sp => new SquadStateStore(
             sp.GetRequiredService<ISquadUserPaths>(),

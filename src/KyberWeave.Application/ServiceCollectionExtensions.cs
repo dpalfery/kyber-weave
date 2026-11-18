@@ -85,7 +85,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ITaskPromptServiceFactory>(sp => new TaskPromptServiceFactory(
             sp.GetRequiredService<IPlanTaskService>(),
             sp.GetRequiredService<IPacketHostFacts>(),
-            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<ICodeGraphPortsFactory>(),
             sp.GetRequiredService<IDocumentSourceFactory>(),
             sp.GetRequiredService<IPathResolver>(),

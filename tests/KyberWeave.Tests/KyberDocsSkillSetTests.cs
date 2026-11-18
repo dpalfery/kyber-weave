@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -72,7 +73,7 @@ public sealed class KyberDocsSkillSetTests
     [Fact]
     public void SecondBrainIsGoneFromSquadSource()
     {
-        SquadSource source = SquadSourceLoader.Load(Path.Combine(Corpus.Root, ProductRoot));
+        SquadSource source = RealSquadServices.Load(Path.Combine(Corpus.Root, ProductRoot));
 
         Assert.False(
             Corpus.DirectoryExists($"{ProductRoot}/skills/second-brain"),
@@ -90,7 +91,7 @@ public sealed class KyberDocsSkillSetTests
     [Fact]
     public void NoKyberDocsSkillLivesInSquad()
     {
-        SquadSource source = SquadSourceLoader.Load(Path.Combine(Corpus.Root, ProductRoot));
+        SquadSource source = RealSquadServices.Load(Path.Combine(Corpus.Root, ProductRoot));
         string[] kyberDocsDirs = Corpus.EnumerateDirectories($"{ProductRoot}/skills")
             .Where(directory => Path.GetFileName(directory).StartsWith("kyber-docs-", StringComparison.Ordinal))
             .ToArray();
