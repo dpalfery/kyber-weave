@@ -12,7 +12,7 @@ public sealed class FileDispatchClaimStoreTests
 {
     private const string Project = "/project";
 
-    private readonly FakeTimeProvider _time = new();
+    private readonly ParkObservingTimeProvider _time = new();
     private readonly InMemoryFileSystem _files;
     private readonly FileDispatchClaimStore _store;
 
@@ -97,22 +97,10 @@ public sealed class FileDispatchClaimStoreTests
         Assert.True(claimed);
     }
 
-    private bool RunWaitAdvancingTime(DispatchClaimKey key, Func<bool>? beforeClaim)
-    {
-        Task<bool> wait = Task.Run(() => _store.WaitForClaim(Project, key));
-        int polls = 0;
-        while (!wait.IsCompleted)
-        {
-            Thread.Sleep(1);
-            _time.Advance(TimeSpan.FromMilliseconds(50));
-            if (++polls == 3)
-            {
-                _ = beforeClaim?.Invoke();
-            }
-
-            Assert.True(polls < 200, "the wait did not finish");
-        }
-
-        return wait.GetAwaiter().GetResult();
-    }
+    private bool RunWaitAdvancingTime(DispatchClaimKey key, Func<bool>? beforeClaim) =>
+        _time.RunAdvancingOnParks(
+            () => _store.WaitForClaim(Project, key),
+            TimeSpan.FromMilliseconds(50),
+            parkNumber: 3,
+            atPark: beforeClaim is null ? null : () => _ = beforeClaim());
 }
