@@ -234,15 +234,16 @@ internal static class SquadTestCommands
         InMemorySquadState state,
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
-        SquadConsole? output = null)
+        SquadConsole? output = null,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadInstallCommand(
-            InMemoryLifecycle(state, releaseSource, renderer),
+            InMemoryLifecycle(state, releaseSource, renderer, globalRoots),
             state.Store,
             state.Migration,
             new SquadTargetResolver(state.Files, state.Semantics, state.Environment),
-            new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
+            globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
             new SquadConsoleOptions(false, null),
             console,
             new SquadTargetRootConfirmation(console),
@@ -257,16 +258,17 @@ internal static class SquadTestCommands
         InMemorySquadState state,
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
-        SquadConsole? output = null)
+        SquadConsole? output = null,
+        ISquadGlobalRootResolver? globalRoots = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadUpdateCommand(
-            InMemoryLifecycle(state, releaseSource, renderer),
+            InMemoryLifecycle(state, releaseSource, renderer, globalRoots),
             new FuncInstanceService((_, _) => throw new NotSupportedException("The test reached the instance ensure.")),
             state.Store,
             state.Migration,
             new SquadTargetResolver(state.Files, state.Semantics, state.Environment),
-            new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
+            globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
             new InMemorySquadFileAccess(state.Files),
             new SquadConsoleOptions(false, null),
             console,
@@ -276,6 +278,49 @@ internal static class SquadTestCommands
             new FakeKyberWeaveConfigRepository(),
             null,
             null);
+    }
+
+    /// <summary><c>squad status</c> over the in-memory state, file system and environment of <paramref name="state"/>.</summary>
+    public static SquadStatusCommand InMemoryStatus(
+        InMemorySquadState state,
+        ISquadGlobalRootResolver? globalRoots = null,
+        SquadConsole? output = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        SquadConsole console = output ?? CapturedSquadConsole();
+        return new SquadStatusCommand(
+            state.Store,
+            state.Migration,
+            globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
+            new SquadModelPresetStore(state.UserPaths, state.Files),
+            state.Semantics,
+            console,
+            state.Files,
+            state.Environment,
+            new SquadCommandRoots(state.Files, state.Paths, state.Environment, console));
+    }
+
+    /// <summary><c>squad uninstall</c> over the in-memory lifecycle of <paramref name="state"/>, never interactive.</summary>
+    public static SquadUninstallCommand InMemoryUninstall(
+        InMemorySquadState state,
+        ISquadReleaseSource releaseSource,
+        ISquadRenderer renderer,
+        ISquadGlobalRootResolver? globalRoots = null,
+        SquadConsole? output = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        SquadConsole console = output ?? CapturedSquadConsole();
+        ISquadGlobalRootResolver roots = globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory);
+        return new SquadUninstallCommand(
+            InMemoryLifecycle(state, releaseSource, renderer, globalRoots),
+            state.Store,
+            state.Migration,
+            roots,
+            new SquadConsoleOptions(false, null),
+            console,
+            new SquadTargetRootConfirmation(console),
+            state.Environment,
+            new SquadCommandRoots(state.Files, state.Paths, state.Environment, console));
     }
 
     private sealed class InMemoryTransactions(InMemorySquadState state) : ISquadTransactionFactory

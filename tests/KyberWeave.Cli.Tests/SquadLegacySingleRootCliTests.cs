@@ -9,7 +9,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins the CLI contract for a pre-#91 single-root global deployment. The first run after upgrade migrates
@@ -20,9 +20,9 @@ namespace KyberWeave.Integration.Tests;
 /// The legacy receipt's files live beneath one recorded root, not beneath a target's global root, so a run
 /// anchored anywhere else verifies or removes the wrong files. The run's directory is supplied through the
 /// path argument, which is the anchor a bare run takes from the process directory. Every fake home, application
-/// data directory and global root is beneath the temp directory, and the process working directory is never changed.
+/// data directory and global root is in the in-memory file system, and the process working directory is never changed.
 /// </remarks>
-public sealed class SquadLegacySingleRootCliTests : IDisposable
+public sealed class SquadLegacySingleRootCliTests
 {
     private const string OwnedRelativePath = ".codex/agents/alpha.toml";
     private const string LegacyVersion = "1.2.3";
@@ -31,10 +31,6 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
     private static readonly DateTimeOffset InstalledAt = new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
     private static readonly byte[] OwnedBytes = Encoding.UTF8.GetBytes("alpha\n");
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
-
     /// <summary>
     /// The first status run after upgrade and a later one, both launched from a directory that is not the bound
     /// root, must verify the owned file beneath the bound root and must write nothing beneath the launch directory.
@@ -42,9 +38,9 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
     [Fact]
     public void StatusFromAnotherDirectoryVerifiesTheLegacyFileBeneathItsBindingRootOnEveryRun()
     {
-        using Fixture f = Arrange("status");
+        Fixture f = Arrange();
         string elsewhere = f.MakeDirectory("elsewhere");
-        TreeSnapshot elsewhereBefore = DirectoryTreeSnapshot.SnapshotTree(elsewhere);
+        IReadOnlyDictionary<string, SquadTreeEntry> elsewhereBefore = f.Capture(elsewhere);
 
         CommandExecution firstRun = Capture(() =>
             f.Status().Execute(null!, new SquadStatusSettings { Path = elsewhere, Global = true }));
@@ -56,8 +52,8 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
         Assert.Contains("ok", LineContaining(firstRun.Output, OwnedRelativePath), StringComparison.Ordinal);
         Assert.Contains("ok", LineContaining(laterRun.Output, OwnedRelativePath), StringComparison.Ordinal);
         Assert.DoesNotContain("Drift or missing files detected", firstRun.Output, StringComparison.Ordinal);
-        DirectoryTreeSnapshot.AssertTreeUnchanged(elsewhere, elsewhereBefore);
-        Assert.Equal(OwnedBytes, File.ReadAllBytes(OwnedPath(f.Binding)));
+        Assert.Null(SquadTreeComparison.Difference(elsewhereBefore, f.Capture(elsewhere)));
+        Assert.Equal(OwnedBytes, f.State.Files.ReadAllBytes(OwnedPath(f.Binding)));
     }
 
     /// <summary>
@@ -67,17 +63,17 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
     [Fact]
     public void UninstallFromAnotherDirectoryRemovesTheLegacyFileBeneathItsBindingRoot()
     {
-        using Fixture f = Arrange("uninstall");
+        Fixture f = Arrange();
         string elsewhere = f.MakeDirectory("elsewhere");
-        TreeSnapshot elsewhereBefore = DirectoryTreeSnapshot.SnapshotTree(elsewhere);
+        IReadOnlyDictionary<string, SquadTreeEntry> elsewhereBefore = f.Capture(elsewhere);
 
         CommandExecution execution = Capture(() =>
             f.Uninstall().Execute(null!, new SquadUninstallSettings { PathOption = elsewhere, Global = true, Yes = true }));
 
         AssertExit(execution, 0);
-        Assert.False(File.Exists(OwnedPath(f.Binding)), "The legacy file beneath its binding root must be removed.");
-        Assert.False(File.Exists(HomeGlobalReceiptPath(f)), "The migrated global receipt must be removed with it.");
-        DirectoryTreeSnapshot.AssertTreeUnchanged(elsewhere, elsewhereBefore);
+        Assert.False(f.State.Files.FileExists(OwnedPath(f.Binding)), "The legacy file beneath its binding root must be removed.");
+        Assert.False(f.State.Files.FileExists(HomeGlobalReceiptPath(f)), "The migrated global receipt must be removed with it.");
+        Assert.Null(SquadTreeComparison.Difference(elsewhereBefore, f.Capture(elsewhere)));
     }
 
     /// <summary>
@@ -87,9 +83,9 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
     [Fact]
     public void UpdateFromAnotherDirectoryRefusesTheLegacyReceiptAndWritesNothing()
     {
-        using Fixture f = Arrange("update");
+        Fixture f = Arrange();
         string elsewhere = f.MakeDirectory("elsewhere");
-        TreeSnapshot elsewhereBefore = DirectoryTreeSnapshot.SnapshotTree(elsewhere);
+        IReadOnlyDictionary<string, SquadTreeEntry> elsewhereBefore = f.Capture(elsewhere);
 
         CommandExecution execution = Capture(() =>
             f.Update().Execute(null!, new SquadUpdateSettings
@@ -102,8 +98,8 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
 
         AssertExit(execution, 1);
         Assert.Contains("legacy single-root layout", execution.Output, StringComparison.Ordinal);
-        Assert.Equal(OwnedBytes, File.ReadAllBytes(OwnedPath(f.Binding)));
-        DirectoryTreeSnapshot.AssertTreeUnchanged(elsewhere, elsewhereBefore);
+        Assert.Equal(OwnedBytes, f.State.Files.ReadAllBytes(OwnedPath(f.Binding)));
+        Assert.Null(SquadTreeComparison.Difference(elsewhereBefore, f.Capture(elsewhere)));
     }
 
     #region Fixtures
@@ -114,25 +110,16 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
     /// migration bind the legacy receipt to that root by key. The receipt keeps the relative target root the
     /// store wrote before #91, so the binding is not supplied by the receipt itself.
     /// </summary>
-    private Fixture Arrange(string name)
+    private static Fixture Arrange()
     {
-        Fixture f = new(Path.Combine(_temp.Path, name));
+        Fixture f = new();
         string binding = f.MakeDirectory("legacy-target");
         f.Binding = binding;
-        f.Store.RegisterProject(binding, ["codex"], InstalledAt);
+        f.State.Store.RegisterProject(binding, ["codex"], InstalledAt);
+        f.State.Layout.WriteLegacyGlobal(binding, LegacyReceipt(), LegacyLock());
 
-        string legacyDirectory = Path.Combine(
-            f.ApplicationData,
-            "KyberWeave",
-            "squad",
-            "roots",
-            SquadPhysicalRootIdentities.Resolve(binding, SquadFileSystemPathSemantics.Instance).Key);
-        Directory.CreateDirectory(legacyDirectory);
-        WriteText(Path.Combine(legacyDirectory, "squad.receipt.json"), f.Store.SerializeReceipt(LegacyReceipt()));
-        WriteText(Path.Combine(legacyDirectory, "squad.lock.yml"), f.Store.SerializeLock(LegacyLock()));
-
-        Directory.CreateDirectory(Path.GetDirectoryName(OwnedPath(binding))!);
-        File.WriteAllBytes(OwnedPath(binding), OwnedBytes);
+        f.State.Files.CreateDirectory(Path.GetDirectoryName(OwnedPath(binding))!);
+        f.State.Files.WriteAllBytes(OwnedPath(binding), OwnedBytes);
         return f;
     }
 
@@ -165,10 +152,7 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
         Path.Combine(binding, ".codex", "agents", "alpha.toml");
 
     private static string HomeGlobalReceiptPath(Fixture f) =>
-        Path.Combine(f.Home, ".kyber-weave", "squad", "global", "squad.receipt.json");
-
-    private static void WriteText(string path, string text) =>
-        File.WriteAllText(path, text, new UTF8Encoding(false));
+        Path.Combine(f.State.Layout.HomeGlobalDirectory(), "squad.receipt.json");
 
     private static string LineContaining(string output, string text)
     {
@@ -193,36 +177,22 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
-    private sealed class Fixture : IDisposable
+    private sealed class Fixture
     {
-        public Fixture(string root)
+        public Fixture()
         {
-            Root = root;
-            ApplicationData = Path.Combine(root, "app-data");
-            Home = Path.Combine(root, "home");
-            GlobalRootsDirectory = Path.Combine(root, "global-roots");
-            Directory.CreateDirectory(ApplicationData);
-            Directory.CreateDirectory(Home);
-            Directory.CreateDirectory(GlobalRootsDirectory);
-            UserPaths = FakeSquadUserPaths.UnderTemp(ApplicationData, Home);
-            Store = RealSquadState.Store(UserPaths);
+            State = new InMemorySquadState();
+            Root = Path.Combine(State.Files.Root, "legacy-cli");
+            State.Files.CreateDirectory(Root);
             ReleaseSource = new FakeSquadReleaseSource();
-            GlobalRoots = new TempGlobalRoots(GlobalRootsDirectory);
+            GlobalRoots = new TempGlobalRoots(Path.Combine(Root, "global-roots"));
         }
+
+        public InMemorySquadState State { get; }
 
         public string Root { get; }
 
-        public string Home { get; }
-
-        public string ApplicationData { get; }
-
-        public string GlobalRootsDirectory { get; }
-
         public string Binding { get; set; } = string.Empty;
-
-        public FakeSquadUserPaths UserPaths { get; }
-
-        public SquadStateStore Store { get; }
 
         public FakeSquadReleaseSource ReleaseSource { get; }
 
@@ -231,31 +201,21 @@ public sealed class SquadLegacySingleRootCliTests : IDisposable
         public string MakeDirectory(string name)
         {
             string path = Path.Combine(Root, name);
-            Directory.CreateDirectory(path);
+            State.Files.CreateDirectory(path);
             return path;
         }
 
+        public IReadOnlyDictionary<string, SquadTreeEntry> Capture(string directory) =>
+            SquadStateTreeCapture.Capture(State.Files, directory);
+
         public SquadStatusCommand Status() =>
-            SquadTestCommands.Status(userPaths: UserPaths, stateStore: Store, globalRoots: GlobalRoots);
+            SquadTestCommands.InMemoryStatus(State, GlobalRoots);
 
-        public SquadUninstallCommand Uninstall() => SquadTestCommands.Uninstall(
-            userPaths: UserPaths,
-            stateStore: Store,
-            lifecycleService: SquadHostDefaults.CreateLifecycleService(ReleaseSource, FakeSquadRenderer.Empty(), Store, globalRoots: GlobalRoots),
-            isInteractive: false,
-            readAnswer: null,
-            globalRoots: GlobalRoots);
+        public SquadUninstallCommand Uninstall() =>
+            SquadTestCommands.InMemoryUninstall(State, ReleaseSource, FakeSquadRenderer.Empty(), GlobalRoots);
 
-        public SquadUpdateCommand Update() => SquadTestCommands.Update(
-            userPaths: UserPaths,
-            stateStore: Store,
-            releaseSource: ReleaseSource,
-            renderer: FakeSquadRenderer.Empty(),
-            isInteractive: false,
-            readAnswer: _ => true,
-            globalRoots: GlobalRoots);
-
-        public void Dispose() => ReleaseSource.Dispose();
+        public SquadUpdateCommand Update() =>
+            SquadTestCommands.InMemoryUpdate(State, ReleaseSource, FakeSquadRenderer.Empty(), globalRoots: GlobalRoots);
     }
 
     private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver
