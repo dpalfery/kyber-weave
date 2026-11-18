@@ -54,6 +54,9 @@ public sealed class InMemorySquadCrashSafetyFixture : SquadCrashSafetyFixture
     /// <inheritdoc />
     public override SquadDeploymentScope Scope => SquadDeploymentScope.Project;
 
+    /// <summary>Gets the simulated machine whose lease table the transactions contend in.</summary>
+    public KyberWeave.Tests.Fakes.InProcessLeaseHost LeaseHost => _state.LeaseHost;
+
     /// <summary>Gets the file system, so a test can plant a file or add a fault of its own.</summary>
     public InMemoryFileSystem Files => _state.Files;
 

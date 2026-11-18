@@ -30,6 +30,8 @@ public sealed class SquadTransaction : ISquadTransaction
     private const string IntentSchema = "kyber-squad.transaction/v1";
     private static readonly JsonSerializerOptions IntentJsonOptions = CreateIntentJsonOptions();
 
+    private static readonly TimeSpan RegistryLeaseTimeout = TimeSpan.FromSeconds(10);
+
     private const string LeaseBusyMessage =
         "A Squad transaction is active for this deployment root. Wait for it to finish before retrying.";
 
@@ -3154,21 +3156,33 @@ public sealed class SquadTransaction : ISquadTransaction
 
         try
         {
-            if (plan.ReceiptMutation == SquadStateMutation.Delete)
+            // The registry is shared by every project of this user, so the project lease the transaction holds does
+            // not protect it: two projects committing at once would each read the old registry and the later write
+            // would drop the earlier entry. A lease of its own makes the read-modify-write one step.
+            using (_lease.Acquire(
+                       SquadLeaseNames.ForRegistry(_stateStore.ResolveHomeStateDirectory()),
+                       RegistryLeaseTimeout))
             {
-                _stateStore.UnregisterProject(plan.PhysicalRootPath);
-                DeleteEmptyDirectory(stateDirectory);
-                return;
+                if (plan.ReceiptMutation == SquadStateMutation.Delete)
+                {
+                    _stateStore.UnregisterProject(plan.PhysicalRootPath);
+                }
+                else
+                {
+                    _stateStore.RegisterProject(
+                        plan.PhysicalRootPath,
+                        plan.Receipt.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal)
+                            .Order(StringComparer.Ordinal).ToArray(),
+                        plan.Receipt.InstalledAtUtc);
+                }
             }
 
-            _stateStore.RegisterProject(
-                plan.PhysicalRootPath,
-                plan.Receipt.Files.Select(file => file.Target).Distinct(StringComparer.Ordinal)
-                    .Order(StringComparer.Ordinal).ToArray(),
-                plan.Receipt.InstalledAtUtc);
+            if (plan.ReceiptMutation == SquadStateMutation.Delete)
+                DeleteEmptyDirectory(stateDirectory);
         }
         catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException)
+            exception is IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException
+                or LeaseTimeoutException)
         {
             _warnings.Add(
                 $"The Squad project registry was not updated for '{plan.PhysicalRootPath}' " +

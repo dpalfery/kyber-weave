@@ -1,4 +1,6 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Testing.Squad;
 using Xunit;
 
@@ -34,6 +36,24 @@ public sealed class SquadTransactionWeaknessTests
         fixture.Recover();
 
         Assert.Null(SquadTreeComparison.Difference(oldTree, fixture.Capture()));
+    }
+
+    [Fact]
+    public void TheProjectRegistryIsUpdatedUnderALeaseOfItsOwnSoTwoProjectsCannotLoseEachOthersEntry()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Install);
+        SquadDeploymentPlan plan = fixture.Plan(SquadCrashFlow.Install);
+        string registryLease = SquadLeaseNames.ForRegistry(fixture.StateStore.ResolveHomeStateDirectory());
+        ILease other = new InProcessLease(fixture.LeaseHost);
+
+        SquadTransaction transaction = fixture.Transaction();
+        using (other.Acquire(registryLease, TimeSpan.Zero))
+        {
+            transaction.Execute(plan);
+        }
+
+        Assert.Contains(transaction.Warnings, warning => warning.Contains("registry was not updated", StringComparison.Ordinal));
     }
 
     private sealed class FailOnFirstAppliedFile(Action armRollbackFault) : ISquadTransactionObserver
