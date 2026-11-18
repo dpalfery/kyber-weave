@@ -54,6 +54,7 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     private readonly IMcpWiringService _wiring;
     private readonly IPathResolver _paths;
     private readonly IProcessEnvironment _environment;
+    private readonly IAnsiConsole _console;
 
     /// <summary>
     /// Creates the command over the MCP wiring service the container resolves, and the path and environment seams
@@ -63,14 +64,17 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
     /// <param name="paths">Canonicalizes the root and the operator's home before they are compared.</param>
     /// <param name="environment">Names the operator's home directory and the platform's case rule.</param>
+    /// <param name="console">Receives everything the operator reads.</param>
     public DocsMcpMigrateCommand(
         IMcpWiringService wiring,
         IPathResolver paths,
-        IProcessEnvironment environment)
+        IProcessEnvironment environment,
+        IAnsiConsole console)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
     /// <inheritdoc />
@@ -82,9 +86,9 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        if (!DocsMcpWireCommand.TryRoot(settings.Path, report, out string root))
+        if (!DocsMcpWireCommand.TryRoot(_paths, _environment, settings.Path, report, out string root))
         {
-            DocsMcpWireCommand.PrintDiagnostics(report);
+            DocsMcpWireCommand.PrintDiagnostics(_console, report);
             return 1;
         }
 
@@ -92,7 +96,7 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
         // catalog path a user-scope file, which is the thing this verb promises never to touch.
         if (IsOperatorHome(root))
         {
-            CommandHelpers.WriteUnfolded(() => PrintHomeRefusal(root));
+            CommandHelpers.WriteUnfolded(_console, () => PrintHomeRefusal(_console, root));
             return 1;
         }
 
@@ -102,18 +106,18 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
             ? _wiring.Scan(root, null)
             : _wiring.Migrate(root, targets, settings.DryRun);
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
-            PrintHeader(root, preview, settings.DryRun);
+            PrintHeader(_console, root, preview, settings.DryRun);
 
             foreach (McpRenameChange change in changes)
-                PrintChange(change, settings.DryRun);
+                PrintChange(_console, change, settings.DryRun);
 
             if (changes.Count == 0)
-                AnsiConsole.MarkupLine("  [green]nothing to do[/] no retired MCP server key was found");
+                _console.MarkupLine("  [green]nothing to do[/] no retired MCP server key was found");
 
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine(preview
+            _console.WriteLine();
+            _console.MarkupLine(preview
                 ? $"[grey]Nothing was written. Name the targets to migrate: {Markup.Escape(McpServerRenamer.MigrateCommand)} "
                     + $"<{Markup.Escape(TargetList)}>. Add --dry-run to see what a write would change.[/]"
                 : "[grey]A user-scope file is still yours to edit: Kyber-Weave reads and writes repository-scope files only.[/]");
@@ -130,27 +134,29 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     /// Prints the rename table and the user-scope pointer every run carries, so an operator reading a
     /// preview learns both what the old keys are and which files this command will never touch.
     /// </summary>
-    private static void PrintHeader(string root, bool preview, bool dryRun)
+    private static void PrintHeader(IAnsiConsole console, string root, bool preview, bool dryRun)
     {
+        ArgumentNullException.ThrowIfNull(console);
+
         string run = preview ? "no --target named, so nothing will be written" : dryRun ? "dry run, so nothing will be written" : "writing the named targets";
 
-        AnsiConsole.MarkupLine($"[bold]MCP server key migration[/] for {Markup.Escape(root)}: {Markup.Escape(run)}.");
-        AnsiConsole.WriteLine();
+        console.MarkupLine($"[bold]MCP server key migration[/] for {Markup.Escape(root)}: {Markup.Escape(run)}.");
+        console.WriteLine();
 
         foreach (McpRenameRule rule in McpServerRenamer.Rules)
         {
             string launch = rule.NextArgument is null ? rule.Binary : $"{rule.Binary} {rule.NextArgument}";
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"  [bold]{Markup.Escape(rule.OldKey)}[/] [grey]→[/] [bold]{Markup.Escape(rule.NewKey)}[/] "
                 + $"[grey](a launch of {Markup.Escape(launch)} proves the entry ours)[/]");
         }
 
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine(
+        console.WriteLine();
+        console.MarkupLine(
             "[grey]User-scope files are never read or written: ~/.claude.json, ~/.cursor/mcp.json, ~/.codex/config.toml, "
             + "~/.config/opencode/opencode.json, ~/.factory/mcp.json, ~/.copilot/mcp-config.json, and Kilo's and ZCode's "
             + "user tiers. Rename a key there by hand.[/]");
-        AnsiConsole.WriteLine();
+        console.WriteLine();
     }
 
     /// <summary>
@@ -231,14 +237,16 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     /// The whole report for a root that is the home directory: one refusal naming the reason, and no
     /// table, because there is nothing this run may look at.
     /// </summary>
-    private static void PrintHomeRefusal(string root)
+    private static void PrintHomeRefusal(IAnsiConsole console, string root)
     {
-        AnsiConsole.MarkupLine(
+        ArgumentNullException.ThrowIfNull(console);
+
+        console.MarkupLine(
             $"  [red]{Markup.Escape(McpServerRenamer.RefusedCode)}[/] root "
             + $"[grey]({Markup.Escape(TerminalText.Line(root))})[/]: the root is the operator's home directory, "
             + "whose files this command never reads or writes, so nothing was read and nothing was written");
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine(
+        console.WriteLine();
+        console.MarkupLine(
             "    [grey]→ Name the repository that holds your MCP configuration: every path in this command's "
             + "catalog is repository-relative, so a home directory here means user scope. Edit a user-scope "
             + "file by hand.[/]");
@@ -250,8 +258,9 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     /// sees it, and the markup escaping is a second, separate concern: one stops a bracket being read
     /// as a tag, the other stops a control character moving the operator's cursor.
     /// </remarks>
-    private static void PrintChange(McpRenameChange change, bool dryRun)
+    private static void PrintChange(IAnsiConsole console, McpRenameChange change, bool dryRun)
     {
+        ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(change);
 
         string target = change.Path is null
@@ -260,7 +269,7 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
 
         if (change.Outcome == McpRenameOutcome.NothingToDo)
         {
-            AnsiConsole.MarkupLine($"  [green]nothing to do[/] {target}: no retired key was found");
+            console.MarkupLine($"  [green]nothing to do[/] {target}: no retired key was found");
             return;
         }
 
@@ -268,10 +277,10 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
 
         if (change.Outcome == McpRenameOutcome.Refused)
         {
-            AnsiConsole.MarkupLine($"  [red]{code}[/] {target}");
-            PrintDetail(change.Message);
-            PrintHint(change.Hint);
-            PrintSnippet(change.Snippet);
+            console.MarkupLine($"  [red]{code}[/] {target}");
+            PrintDetail(console, change.Message);
+            PrintHint(console, change.Hint);
+            PrintSnippet(console, change.Snippet);
             return;
         }
 
@@ -280,32 +289,32 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
             ? " [grey](dry run; nothing written)[/]"
             : string.Empty;
 
-        AnsiConsole.MarkupLine($"  [{style}]{code}[/] {target}: {Markup.Escape(TerminalText.Line(change.Message))}{note}");
-        PrintHint(change.Hint);
-        PrintSnippet(change.Snippet);
+        console.MarkupLine($"  [{style}]{code}[/] {target}: {Markup.Escape(TerminalText.Line(change.Message))}{note}");
+        PrintHint(console, change.Hint);
+        PrintSnippet(console, change.Snippet);
     }
 
-    private static void PrintDetail(string? message)
+    private static void PrintDetail(IAnsiConsole console, string? message)
     {
         if (!string.IsNullOrEmpty(message))
-            AnsiConsole.MarkupLine($"    {Markup.Escape(TerminalText.Line(message))}");
+            console.MarkupLine($"    {Markup.Escape(TerminalText.Line(message))}");
     }
 
-    private static void PrintHint(string? hint)
+    private static void PrintHint(IAnsiConsole console, string? hint)
     {
         if (!string.IsNullOrEmpty(hint))
-            AnsiConsole.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(hint))}[/]");
+            console.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(hint))}[/]");
     }
 
-    private static void PrintSnippet(string? snippet)
+    private static void PrintSnippet(IAnsiConsole console, string? snippet)
     {
         if (string.IsNullOrEmpty(snippet))
             return;
 
-        AnsiConsole.MarkupLine("    [grey]Paste this into that file instead:[/]");
+        console.MarkupLine("    [grey]Paste this into that file instead:[/]");
 
         // Written raw: a snippet is TOML or JSON, and Spectre markup would read its brackets as tags
         // and drop them. The control characters go before the brackets are allowed through.
-        AnsiConsole.WriteLine(TerminalText.Block(snippet));
+        console.WriteLine(TerminalText.Block(snippet));
     }
 }

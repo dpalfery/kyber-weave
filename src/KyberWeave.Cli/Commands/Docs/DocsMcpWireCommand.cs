@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -43,14 +44,32 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
     private readonly IMcpWiringService _wiring;
     private readonly IKyberWeaveConfigRepository _configs;
+    private readonly IFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+    private readonly IAnsiConsole _console;
 
     /// <summary>Creates the command over the MCP wiring service the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
     /// <param name="configs">Reads the repository's declared MCP servers.</param>
-    public DocsMcpWireCommand(IMcpWiringService wiring, IKyberWeaveConfigRepository configs)
+    /// <param name="files">Answers whether a harness marker or configuration file exists.</param>
+    /// <param name="paths">Turns the operator's spelling of the repository root into a full path.</param>
+    /// <param name="environment">Names the directory a relative root is resolved against.</param>
+    /// <param name="console">Receives everything the operator reads.</param>
+    public DocsMcpWireCommand(
+        IMcpWiringService wiring,
+        IKyberWeaveConfigRepository configs,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IAnsiConsole console)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _configs = configs ?? throw new ArgumentNullException(nameof(configs));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
     /// <inheritdoc />
@@ -62,10 +81,10 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        if (!TryRoot(settings.Path, report, out string root) ||
+        if (!TryRoot(_paths, _environment, settings.Path, report, out string root) ||
             !CommandHelpers.TryLoadConfig(_configs, root, configPath: null, report, out KyberWeaveConfig config))
         {
-            PrintDiagnostics(report);
+            PrintDiagnostics(_console, report);
             return 1;
         }
 
@@ -75,8 +94,8 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         // of them is the dereference this command would otherwise throw before it printed anything.
         if (config.Mcp?.RequiredServers is not { Count: > 0 })
         {
-            AnsiConsole.MarkupLine("[yellow]No MCP servers are declared[/], so there is nothing to wire.");
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine("[yellow]No MCP servers are declared[/], so there is nothing to wire.");
+            _console.MarkupLine(
                 "[grey]Declare them under mcp.required-servers in .kyber-weave/kyber-weave.yml, then run this "
                 + "command again.[/]");
 
@@ -103,16 +122,30 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         Execute(context, settings, CancellationToken.None);
 
     /// <summary>
-    /// Resolves the repository root, reporting an unresolvable path through the configuration
-    /// failure code rather than letting <see cref="Path.GetFullPath(string)"/> escape.
+    /// Resolves the repository root through the path and environment seams, reporting an unresolvable
+    /// path through the configuration failure code rather than letting the seam's exception escape.
     /// </summary>
-    internal static bool TryRoot(string path, DiagnosticReport report, out string root)
+    /// <param name="paths">Turns the spelling into a full path.</param>
+    /// <param name="environment">Names the directory a relative spelling is resolved against.</param>
+    /// <param name="path">The operator's spelling of the repository root.</param>
+    /// <param name="report">Receives the diagnostic a failure produces.</param>
+    /// <param name="root">The full repository root, or the empty string when resolution failed.</param>
+    internal static bool TryRoot(
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        string path,
+        DiagnosticReport report,
+        out string root)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(report);
 
         try
         {
-            root = Path.GetFullPath(path);
+            // The base is named rather than read from the process: the seam never falls back to the
+            // working directory, so the answer is the same wherever the command was run.
+            root = paths.GetFullPath(path, environment.CurrentDirectory);
             return true;
         }
         catch (Exception exception) when (exception is
@@ -164,19 +197,20 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// console wraps the rule id across several lines — which is the one token the operator has to
     /// search the corpus for.
     /// </remarks>
-    internal static void PrintDiagnostics(DiagnosticReport report)
+    internal static void PrintDiagnostics(IAnsiConsole console, DiagnosticReport report)
     {
+        ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(report);
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(console, () =>
         {
             foreach (Diagnostic diagnostic in report.Items)
             {
-                AnsiConsole.MarkupLine(
+                console.MarkupLine(
                     $"[red]{Markup.Escape(diagnostic.Code)}[/] {Markup.Escape(diagnostic.Message)}");
 
                 if (!string.IsNullOrEmpty(diagnostic.Hint))
-                    AnsiConsole.MarkupLine($"  [grey]→ {Markup.Escape(diagnostic.Hint)}[/]");
+                    console.MarkupLine($"  [grey]→ {Markup.Escape(diagnostic.Hint)}[/]");
             }
         });
     }
@@ -199,8 +233,9 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// sanitiser for everything this branch writes to a terminal.
     /// </para>
     /// </remarks>
-    internal static void PrintChange(McpWiringFileChange change, bool dryRun)
+    internal static void PrintChange(IAnsiConsole console, McpWiringFileChange change, bool dryRun)
     {
+        ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(change);
 
         string harness = Markup.Escape(TerminalText.Line(change.Harness));
@@ -210,32 +245,32 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
         if (change.Outcome == McpWiringChangeOutcome.Refused)
         {
-            AnsiConsole.MarkupLine($"  [red]{Markup.Escape(change.Code ?? "refused")}[/] [bold]{harness}[/] {file}");
+            console.MarkupLine($"  [red]{Markup.Escape(change.Code ?? "refused")}[/] [bold]{harness}[/] {file}");
 
             if (!string.IsNullOrEmpty(change.Message))
-                AnsiConsole.MarkupLine($"    {Markup.Escape(TerminalText.Line(change.Message))}");
+                console.MarkupLine($"    {Markup.Escape(TerminalText.Line(change.Message))}");
 
             if (!string.IsNullOrEmpty(change.Hint))
-                AnsiConsole.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(change.Hint))}[/]");
+                console.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(change.Hint))}[/]");
 
             if (!string.IsNullOrEmpty(change.Snippet))
             {
-                AnsiConsole.MarkupLine("    [grey]Paste this into that file instead:[/]");
+                console.MarkupLine("    [grey]Paste this into that file instead:[/]");
 
                 // Written raw: a snippet is TOML or JSON, and Spectre markup would read its
                 // brackets as tags and drop them. That leaves the terminal as the only thing
                 // parsing it, and a server name inside the snippet is a name somebody else wrote —
                 // so the control characters go before the brackets are allowed through.
-                AnsiConsole.WriteLine(TerminalText.Block(change.Snippet));
+                console.WriteLine(TerminalText.Block(change.Snippet));
             }
 
             return;
         }
 
-        AnsiConsole.MarkupLine($"  {Verb(change.Outcome, dryRun)} [bold]{file}[/] [grey]({harness})[/]{Servers(change)}");
+        console.MarkupLine($"  {Verb(change.Outcome, dryRun)} [bold]{file}[/] [grey]({harness})[/]{Servers(change)}");
 
         if (!string.IsNullOrEmpty(change.Message))
-            AnsiConsole.MarkupLine($"    [grey]{Markup.Escape(TerminalText.Line(change.Message))}[/]");
+            console.MarkupLine($"    [grey]{Markup.Escape(TerminalText.Line(change.Message))}[/]");
     }
 
     /// <summary>
@@ -283,41 +318,41 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
                 row.Fixability == McpWiringFixability.Fixable && !InPlay(root, row))
         ];
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"[bold]MCP wiring preview[/] for {Markup.Escape(root)}: no --target named, so nothing will be written.");
-            AnsiConsole.WriteLine();
+            _console.WriteLine();
 
             if (inspection.Findings.Count == 0)
             {
-                AnsiConsole.MarkupLine("[green]Every harness in play holds the declared servers.[/]");
+                _console.MarkupLine("[green]Every harness in play holds the declared servers.[/]");
             }
             else
             {
-                AnsiConsole.MarkupLine("[bold]Harnesses in play, and the gaps found:[/]");
+                _console.MarkupLine("[bold]Harnesses in play, and the gaps found:[/]");
                 foreach (McpWiringFinding finding in inspection.Findings)
-                    PrintFinding(finding);
+                    PrintFinding(_console, finding);
             }
 
-            AnsiConsole.WriteLine();
+            _console.WriteLine();
 
             if (undetectable.Count > 0)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     "[bold]Writable harnesses no marker can detect in this tree:[/] naming one is the only way to write it.");
                 foreach (HarnessMcpEntry row in undetectable)
                 {
-                    AnsiConsole.MarkupLine(
+                    _console.MarkupLine(
                         $"  [bold]{Markup.Escape(row.Harness)}[/] [grey](nothing named '{Markup.Escape(row.InPlaySignal)}' was found)[/]: {Markup.Escape(WireCommand)} {Markup.Escape(row.Harness)}");
                 }
 
-                AnsiConsole.WriteLine();
+                _console.WriteLine();
             }
 
             ReportRenameNotices(root);
 
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"[grey]Nothing was written. Wire a harness with: {Markup.Escape(WireCommand + " " + TargetPlaceholder)}. Add --dry-run to preview the write.[/]");
         });
 
@@ -348,13 +383,13 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         if (leftovers.Count == 0)
             return;
 
-        AnsiConsole.MarkupLine("[bold]Retired MCP server keys found:[/]");
+        _console.MarkupLine("[bold]Retired MCP server keys found:[/]");
 
         foreach (McpRenameChange leftover in leftovers)
         {
             string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
 
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [yellow]{Markup.Escape(leftover.Code ?? McpServerRenamer.RenameCode)}[/] {file}: "
                 + Markup.Escape(TerminalText.Line(leftover.Message)));
 
@@ -366,11 +401,11 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
             if (!string.IsNullOrWhiteSpace(remedy))
             {
-                AnsiConsole.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(remedy))}[/]");
+                _console.MarkupLine($"    [grey]→ {Markup.Escape(TerminalText.Line(remedy))}[/]");
             }
         }
 
-        AnsiConsole.WriteLine();
+        _console.WriteLine();
     }
 
     /// <summary>
@@ -400,13 +435,13 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             ? []
             : [.. _wiring.Repair(root, config, resolver, toRepair, dryRun).Files];
 
-        CommandHelpers.WriteUnfolded(() =>
+        CommandHelpers.WriteUnfolded(_console, () =>
         {
             foreach (McpWiringFileChange change in changes)
-                PrintChange(change, dryRun);
+                PrintChange(_console, change, dryRun);
 
             foreach (string harness in satisfied)
-                PrintSatisfied(harness, config);
+                PrintSatisfied(_console, harness, config);
         });
 
         // A refusal is an error outcome of the operation the operator asked for, so it decides the
@@ -441,7 +476,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
         // File absent is the "not in play" condition for Claude Code and opencode, and creation is
         // the answer there (R5.4, D19), never "nothing to do".
-        if (!row.Paths.Any(candidate => File.Exists(FullPath(root, candidate))))
+        if (!row.Paths.Any(candidate => _files.FileExists(FullPath(root, candidate))))
             return false;
 
         // A file still holding a proven retired key is not satisfied: the entry the repair would add
@@ -470,12 +505,12 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         return true;
     }
 
-    private static void PrintSatisfied(string harness, McpConfig config)
+    private static void PrintSatisfied(IAnsiConsole console, string harness, McpConfig config)
     {
         HarnessMcpEntry? row = HarnessMcpCatalog.Find(harness);
         string file = row is not null && row.Paths.Count > 0 ? row.Paths[0] : "its configuration file";
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"  [green]nothing to write[/] [bold]{Markup.Escape(harness)}[/] [grey]({Markup.Escape(file)} already holds {Markup.Escape(TerminalText.Line(Declared(config)))})[/]");
     }
 
@@ -488,8 +523,10 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// to the harness. <see cref="TerminalText"/> removes the control characters before either one
     /// reaches the terminal.
     /// </remarks>
-    private static void PrintFinding(McpWiringFinding finding)
+    private static void PrintFinding(IAnsiConsole console, McpWiringFinding finding)
     {
+        ArgumentNullException.ThrowIfNull(console);
+
         string style = finding.Severity switch
         {
             Severity.Critical or Severity.Error => "red",
@@ -501,9 +538,9 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
             ? Markup.Escape(finding.Harness)
             : $"{Markup.Escape(finding.Harness)} [grey]({Markup.Escape(TerminalText.Line(finding.Server))})[/]";
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"  [grey]{Markup.Escape(finding.Code)}[/] {about}: {Markup.Escape(TerminalText.Line(finding.Message))}");
-        AnsiConsole.MarkupLine($"    [{style}]→ {Markup.Escape(TerminalText.Line(finding.Hint))}[/]");
+        console.MarkupLine($"    [{style}]→ {Markup.Escape(TerminalText.Line(finding.Hint))}[/]");
     }
 
     private static string Verb(McpWiringChangeOutcome outcome, bool dryRun) => outcome switch
@@ -519,9 +556,9 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     /// Whether a harness is in play in this tree: a marker directory exists, or one of the files
     /// the catalog names does. Absence of both is what the preview has to speak for.
     /// </summary>
-    private static bool InPlay(string root, HarnessMcpEntry row) =>
-        row.MarkerDirectories.Any(marker => Directory.Exists(Path.Combine(root, marker))) ||
-        row.Paths.Any(path => File.Exists(FullPath(root, path)));
+    private bool InPlay(string root, HarnessMcpEntry row) =>
+        row.MarkerDirectories.Any(marker => _files.DirectoryExists(Path.Combine(root, marker))) ||
+        row.Paths.Any(path => _files.FileExists(FullPath(root, path)));
 
     /// <summary>The declared server names, in the order findings and receipts name them.</summary>
     private static string Declared(McpConfig config) =>
