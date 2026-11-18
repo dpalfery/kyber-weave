@@ -151,10 +151,10 @@ clock and no task would track the fix.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
-| `KyberWeave.Application` | 64 | 208 | 4.1, 4.2, 4.3, 4.8 |
+| `KyberWeave.Application` | 68 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
 | `KyberWeave.Data` | 81 | 714 | 3.2, 3.3, 3.4, 3.5, 4.4, 4.9 |
-| `KyberWeave.Domain` | 26 | 46 | 2.5 |
+| `KyberWeave.Domain` | 24 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 3 | 22 | 4.9 |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
@@ -167,7 +167,7 @@ The totals before adapters and roots are taken out are 68 classes and 212 sites 
 all of them `ProcessStartInfo` in an interface or a request record; it holds no implementation.
 `Environment.NewLine` sites are excluded from both sets of numbers.
 
-#### KyberWeave.Application (64 classes)
+#### KyberWeave.Application (68 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -362,7 +362,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotPromptRefresher` (`Update/CopilotPromptRefresher.cs`) | file system | 4.4 |
 | `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
 
-#### KyberWeave.Domain (26 classes)
+#### KyberWeave.Domain (24 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
