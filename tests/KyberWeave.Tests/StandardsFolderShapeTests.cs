@@ -270,6 +270,33 @@ public class StandardsFolderShapeTests
             && i.Message.Contains("dotnet.rules.md", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A standards folder that is itself a symbolic link is not in the corpus either: the loader
+    /// never follows a link. Skipping the folder would leave a host with a linked standard and no
+    /// finding at all, so the check names the folder and the link instead.
+    /// </summary>
+    [Fact]
+    public void AStandardsFolderBehindASymlinkIsReportedRatherThanSkipped()
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("outside/dotnet/dotnet.standards.md", Standard("dotnet"))
+            .Write("outside/dotnet/dotnet.rules.md", Rules("dotnet"))
+            .Write("outside/dotnet/dotnet.skills.md", Skills("dotnet"))
+            .Write("outside/dotnet/dotnet.arbiter-rules.yml", "rules: []\n");
+        Directory.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards"));
+        Directory.CreateSymbolicLink(
+            Path.Combine(fixture.Root, "6-Docs", "standards", "dotnet"),
+            Path.Combine(fixture.Root, "outside", "dotnet"));
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.MissingFolderFile
+            && i.Severity == Severity.Error
+            && i.Message.Contains("'dotnet'", StringComparison.Ordinal)
+            && i.Message.Contains("symbolic link", StringComparison.Ordinal));
+    }
+
     private static string RoleRules(string scope) => Rules(scope).Replace(
         "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
 
