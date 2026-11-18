@@ -2022,7 +2022,7 @@ receiver child spawns ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-
   residuals are recorded at
   [the archived spawn-guard residuals todo](../archive/todo/kyberdash-spawn-guard-residuals.md).
 
-**.NET side of the audit.** The .NET project runs the same kind of audit over `tests/KyberWeave.Tests`,
+**.NET side of the audit.** The .NET project runs the same kind of audit over the `tests/` projects,
 `dash/server.tests`, `src/`, and `dash/server/`, and its product process starts carry their own timeouts. The bounds and the one
 deliberate exception (`ProcessRunner.RunInteractive`, unbounded by design) are in the
 [test standard](../standards/test/test.standards.md#tests-that-start-processes).

@@ -20,7 +20,7 @@ kyber-weave review gates . --council    # the council's command, not a dev agent
 
 ## What CI runs
 
-- The `test` gate runs the full product suite; `test-policy` runs the repository-policy suite.
+- The `test` gate runs every unit, content, policy and architecture project; `test-policy` runs the repository-policy suite.
 - The KyberDash and tray gates are `npm --prefix dash …` and `cargo --manifest-path
   dash/tray/src-tauri/Cargo.toml …`. CI and the council run them; a dev agent runs the
   targeted subset.

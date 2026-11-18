@@ -16,7 +16,7 @@ Build once, then run the classes that cover the change. No dev agent runs the fu
 
 ```bash
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build \
+dotnet test tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release --no-build \
   --filter "FullyQualifiedName~<Class>"
 dotnet format KyberWeave.sln whitespace --verify-no-changes --include <changed files>
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn --include <changed files>
