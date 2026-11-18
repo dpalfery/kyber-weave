@@ -69,7 +69,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
             "claude/feat/widget",
             "main",
             new RunStartPlace(
-                new GitFacts().GetCommonDirectory(_repo.Path) ?? throw new InvalidOperationException("no git dir"),
+                RealGitFacts.Create().GetCommonDirectory(_repo.Path) ?? throw new InvalidOperationException("no git dir"),
                 _repo.Path,
                 DateTimeOffset.UtcNow));
     }

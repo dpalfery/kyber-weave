@@ -192,7 +192,7 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
-    public Stream OpenRead(string path) => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+    public Stream OpenRead(string path) => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
 
     /// <inheritdoc />
     public long GetLength(string path) => new FileInfo(path).Length;

@@ -8,7 +8,9 @@ namespace KyberWeave.Tests.Fakes;
 /// <summary>
 /// Scripted process seam: every run is answered from a table keyed by program and arguments, and every call is
 /// recorded. Nothing is started, so a unit test controls the result, the timeout and the failure exactly.
-/// A run with no matching script fails instead of reporting success, so a typo in the code under test cannot pass.
+/// A run with no matching script fails with <see cref="UnscriptedProcessCallException"/> instead of reporting
+/// success, so a typo in the code under test cannot pass — and production code that treats an absent resource as an
+/// absent fact cannot swallow the failure, because no product catch names that type.
 /// </summary>
 public sealed class ScriptedProcessRunner : IProcessRunner
 {
@@ -132,7 +134,7 @@ public sealed class ScriptedProcessRunner : IProcessRunner
         }
 
         Answer script = _scripts.Find(candidate => candidate.Matches(request))
-                        ?? throw new InvalidOperationException(
+                        ?? throw new UnscriptedProcessCallException(
                             $"No process result is scripted for '{request.Program}' with arguments [{string.Join(", ", request.Arguments)}]. " +
                             "Script it with Script, ScriptTimeout or Throws.");
 

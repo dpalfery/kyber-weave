@@ -36,7 +36,7 @@ public sealed class RunStartPlannerTests : IDisposable
 {
     private static readonly KyberWeave.Contracts.Services.IRunStartEvidence Evidence =
         new KyberWeave.Application.RunStart.RunStartEvidenceService(
-            new KyberWeave.Core.Arbiter.Facts.GitFacts(),
+            RealGitFacts.Create(),
             new KyberWeave.Data.RunStart.FileRunStateStore(
                 new KyberWeave.Data.Hooks.PhysicalFileSystem(),
                 new KyberWeave.Data.RunStart.GitCheckedOutBranchReader(

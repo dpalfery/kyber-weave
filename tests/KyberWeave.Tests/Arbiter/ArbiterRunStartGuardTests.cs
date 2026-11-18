@@ -328,7 +328,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     private void Record(string worktree) =>
         _runState.Write(_home.Path, Branch, "origin/main", new RunStartPlace(CommonDir(), worktree, DateTimeOffset.UtcNow));
 
-    private string CommonDir() => new GitFacts().GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir");
+    private string CommonDir() => RealGitFacts.Create().GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir");
 
     private static void Git(string workingDirectory, params string[] args)
     {

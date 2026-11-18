@@ -24,7 +24,6 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
         services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(sp.GetRequiredService<IArbiterUserSettings>()));
         services.TryAddSingleton<IArbiterStateFactory, FileArbiterStateFactory>();
-        services.TryAddSingleton<IGitRepositoryFacts, GitFacts>();
         services.TryAddSingleton<IGateReportFacts, GateReportFacts>();
         services.TryAddSingleton<IFileTextFacts, FileTextFacts>();
         services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();

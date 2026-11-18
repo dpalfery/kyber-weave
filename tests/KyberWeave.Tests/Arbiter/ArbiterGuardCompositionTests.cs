@@ -34,4 +34,14 @@ public sealed class ArbiterGuardCompositionTests
         Assert.NotNull(services.GetRequiredService<IConductorGuard>());
         Assert.NotNull(services.GetRequiredService<IWorkerGuard>());
     }
+
+    [Fact]
+    public void TheGuardsContainerResolvesTheGitFactsThroughTheProcessAndFileSystemSeams()
+    {
+        using ServiceProvider services = (ServiceProvider)ArbiterContainer.CreateGuards();
+
+        IGitRepositoryFacts facts = services.GetRequiredService<IGitRepositoryFacts>();
+
+        Assert.NotNull(facts);
+    }
 }

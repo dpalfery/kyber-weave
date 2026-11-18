@@ -363,7 +363,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             Branch,
             "origin/main",
             new RunStartPlace(
-                new GitFacts().GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir"),
+                RealGitFacts.Create().GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir"),
                 worktree,
                 DateTimeOffset.UtcNow));
 

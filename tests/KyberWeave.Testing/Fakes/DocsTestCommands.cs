@@ -77,6 +77,7 @@ internal static class DocsTestCommands
             provider.GetRequiredService<ITaskGateSelectionService>(),
             provider.GetRequiredService<ICodeGraphPortsFactory>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
+            provider.GetRequiredService<IGitRepositoryFacts>(),
             provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 

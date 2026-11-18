@@ -41,7 +41,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IDocumentSourceFactory>(_ => new DocumentLoaderFactory());
         services.TryAddSingleton<IGitWorktreeIdentity>(_ => new GitWorktreeIdentity());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
-        services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));
@@ -91,6 +90,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IWritableFileSystem>(_ => new PhysicalFileSystem());
         services.TryAddSingleton<IFileSystem>(sp => sp.GetRequiredService<IWritableFileSystem>());
         services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
+        services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));

@@ -631,7 +631,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     public void PerTaskCommitsDoNotHideScopeDrift()
     {
         using RunStartProbe probe = RunStartProbe.Create();
-        GitSnapshot? snapshot = new GitFacts().CaptureSnapshot(probe.Root);
+        GitSnapshot? snapshot = RealGitFacts.Create().CaptureSnapshot(probe.Root);
         Assert.NotNull(snapshot);
 
         probe.Git("switch", "-c", "claude/feat/one-task", "origin/main");
@@ -642,7 +642,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         probe.Git("commit", "-m", "test(squad): one task, one commit");
         Assert.Equal(string.Empty, probe.GitOutput("status", "--porcelain").Trim());
 
-        IReadOnlySet<string> changed = new GitFacts().GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
+        IReadOnlySet<string> changed = RealGitFacts.Create().GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
 
         Assert.Contains("src/OneTask.cs", changed);
     }

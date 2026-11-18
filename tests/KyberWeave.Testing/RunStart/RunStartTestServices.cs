@@ -2,6 +2,7 @@ using KyberWeave.Application.RunStart;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.RunStart;
 
@@ -18,7 +19,7 @@ internal static class RunStartTestServices
                 new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout)));
 
     /// <summary>The run-start evidence over the real adapters.</summary>
-    internal static IRunStartEvidence Evidence() => new RunStartEvidenceService(new GitFacts(), RunStateStore());
+    internal static IRunStartEvidence Evidence() => new RunStartEvidenceService(RealGitFacts.Create(), RunStateStore());
 
     /// <summary>The path with every symbolic link on the way resolved, as the checkout guard reports it.</summary>
     internal static string RealPath(string path) =>

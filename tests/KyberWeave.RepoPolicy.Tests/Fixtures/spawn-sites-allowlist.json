@@ -1010,18 +1010,6 @@
       "bound": "Started by ProcessRunner.Run in the store with its timeout; secret-tool self-exits."
     },
     {
-      "file": "src/KyberWeave.Data/Arbiter/Facts/GitFacts.cs",
-      "text": "ProcessStartInfo startInfo = new(gitExecutable)",
-      "count": 1,
-      "bound": "Started by the ProcessRunner.Run at line 250 with its timeout; git argv only, self-exiting."
-    },
-    {
-      "file": "src/KyberWeave.Data/Arbiter/Facts/GitFacts.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, standardInput);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with the fact-builder timeout kills the child tree; git argv only, self-exiting."
-    },
-    {
       "file": "src/KyberWeave.Application/Doctor/PostCheckoutHookInstaller.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,

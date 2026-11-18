@@ -76,7 +76,7 @@ public sealed class ScriptedProcessRunnerRequestTests
     {
         ScriptedProcessRunner runner = new();
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<UnscriptedProcessCallException>(() =>
             runner.RunAsync(new ProcessRunRequest { Program = "not-scripted" }, CancellationToken.None));
     }
 
