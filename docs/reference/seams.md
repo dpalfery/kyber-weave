@@ -171,7 +171,7 @@ platform checks, which have their own table below.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
-| `KyberWeave.Application` | 11 | 18 | [seam-conversion todo](../todo/seam-conversion-leftovers.md) |
+| `KyberWeave.Application` | 10 | 15 | [seam-conversion todo](../todo/seam-conversion-leftovers.md) |
 | `KyberWeave.Cli` | 0 | 0 | — (roots and `ProcessStartInfo` data only) |
 | `KyberWeave.Data` | 0 | 0 | — (adapters only) |
 | `KyberWeave.Domain` | 0 | 0 | — (data only) |
@@ -179,11 +179,11 @@ platform checks, which have their own table below.
 | `KyberWeave.Kernel` | 0 | 0 | — (its three adapters) |
 | `KyberWeave.Mcp` | 0 | 0 | — (roots and the console-stream adapter) |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its `Program` root and the console-stream adapter) |
-| **Total** | **11** | **18** | |
+| **Total** | **10** | **15** | |
 
 Reconciled on 2026-11-18. Adapters, composition roots, `ProcessStartInfo` used as data,
 `Task.Delay` and other waits that take an injected `TimeProvider`, and pure `System.IO.Path` string
-work are excluded, as above. The remaining work is 11 classes and 18 sites, all in
+work are excluded, as above. The remaining work is 10 classes and 15 sites, all in
 `KyberWeave.Application`, and is tracked by
 [`docs/todo/seam-conversion-leftovers.md`](../todo/seam-conversion-leftovers.md); no other project
 has a class outside its adapter register. `KyberWeave.Contracts` holds no implementation and no
@@ -207,11 +207,10 @@ The rest are adapters (`ProcessEnvironment`, `PhysicalFileSystem`, `PhysicalPath
 `ExclusiveFileWriter`, `UnixUpdateFileModes`, `WindowsCredentialStore`, Kernel `ProcessRunner`) or
 the Data composition root (`SquadServiceCollectionExtensions`).
 
-#### KyberWeave.Application (11 classes)
+#### KyberWeave.Application (10 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `SquadTransaction` (`Squad/Deployment/SquadTransaction.cs`) | paths (`Path.GetFullPath` for containment) | One site the transaction's reverse index did not take; papercut, not a correctness risk because the base is explicit where it matters. Tracked in the seam todo |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | paths (`Path.GetFullPath` four times) | Tracked in the seam todo |
 | `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths (`Path.GetFullPath` twice) | Tracked in the seam todo |
 | `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths (`Path.GetFullPath` twice) | Tracked in the seam todo |

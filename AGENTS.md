@@ -108,7 +108,9 @@ No build check or architecture test enforces these rules, and none is to be adde
 guidance and review do ([ADR 0089](docs/adr/0089-every-behaviour-is-testable-through-a-seam.md)).
 The one mechanical check is the repository-policy scan that keeps ambient I/O out of
 `KyberWeave.Domain`; it is deliberately narrower than the rule and does not check the seam rule
-elsewhere. The test rules themselves are in
+elsewhere. A class that has not caught up is debt, not a licence: the seam register lists every
+remaining one and the follow-up todos name the work that removes it. New code follows the rule.
+The test rules themselves are in
 [the test standard](docs/standards/test/test.standards.md#three-kinds-of-test).
 
 ### Before opening a PR

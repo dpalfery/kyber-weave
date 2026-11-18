@@ -12,15 +12,14 @@ last-reviewed: 2026-11-18
 
 ## The finding
 
-[The seam register](../reference/seams.md#classes-still-calling-a-resource-directly) lists eleven
-`KyberWeave.Application` classes and eighteen sites that still reach a resource without its seam, and
+[The seam register](../reference/seams.md#classes-still-calling-a-resource-directly) lists ten
+`KyberWeave.Application` classes and fifteen sites that still reach a resource without its seam, and
 a second table of platform checks: 21 classes and 25 sites across `Application`, `Data` and `Kernel`
 that call `OperatingSystem.Is*` or `RuntimeInformation` instead of `IProcessEnvironment`. They are
 the residue of phase 4, not a new design question. Each is small:
 
 | Class | Call | What to do |
 |---|---|---|
-| `SquadTransaction` | `Path.GetFullPath` three times | Take `IPathResolver`. One call has an explicit base, two do not; the containment check must not depend on the process working directory |
 | `TaskPromptService` | `Path.GetFullPath` four times | Take `IPathResolver` and pass the base it already holds |
 | `SquadPathPolicy` | `Path.GetFullPath` twice | Take `IPathResolver` |
 | `SquadGlobalRoots` | `Path.GetFullPath` twice | Take `IPathResolver` |
