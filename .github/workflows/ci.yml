@@ -228,28 +228,13 @@ jobs:
           bun-version: "1.3.14"
 
       # The whole unit side of the suite in one step, run at the same time: the unit test projects
-      # (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data), the catch-all KyberWeave.Tests project,
-      # the content tests (the agents, skills and documents we ship, read through the corpus seam),
-      # the repository-policy tests (scripts, workflows, gate configuration, docs and source scans)
-      # and the architecture test that pins the layering. They are independent of each other, so they
-      # share the runner instead of queueing; each writes its own TRX, and one failure still fails the
-      # step. KyberWeave.Integration.Tests is not here: it is the "Integration tests" job below.
-      #
-      # KyberWeave.Tests is the old catch-all project and is being emptied into the per-project unit
-      # projects (interface-driven-unit-tests task 5.2). Remove its line here once it has no tests.
-      #
-      # ProseRuleGradingTests (in KyberWeave.Tests) asks Jev whether the shipped prose states each
-      # catalog rule (docs/standards/test/README.md#prose-rules). It runs only when the secret is
-      # set: a fork's pull request gets no secrets, so KW_PROSE_GRADE is empty and the test skips with
-      # its reason. A grader outage is a skip with a warning, and so is an answer that points the right
-      # way but lands below the confidence floor (it is listed in the report); a confident wrong
-      # answer, or a wrong-way answer below the floor, fails.
+      # (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data), the content tests (the agents, skills
+      # and documents we ship, read through the corpus seam), the repository-policy tests (scripts,
+      # workflows, gate configuration, docs and source scans) and the architecture test that pins
+      # the layering. They are independent of each other, so they share the runner instead of
+      # queueing; each writes its own TRX, and one failure still fails the step.
+      # KyberWeave.Integration.Tests is not here: it is the "Integration tests" job below.
       - name: Test (unit, content, policy)
-        env:
-          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
-          KW_PROSE_GRADE: ${{ secrets.TYPESAFE_API_KEY != '' && '1' || '' }}
-          KW_PROSE_GRADE_ENDPOINT: https://openrouter.ai/api/v1
-          KW_PROSE_GRADE_MODEL: typesafe/jev-1.14
         run: |
           set -uo pipefail
           status=0
@@ -260,7 +245,6 @@ jobs:
             dotnet test "$1" -c "${CONFIGURATION}" --no-build \
               --report-trx --report-trx-filename "$2" --results-directory TestResults
           }
-          run tests/KyberWeave.Tests/KyberWeave.Tests.csproj kyber-weave.trx & pids+=($!)
           run tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj repo-policy.trx & pids+=($!)
           run tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj content.trx & pids+=($!)
           run tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj layers-Application.trx & pids+=($!)
@@ -341,7 +325,18 @@ jobs:
       - name: Build
         run: dotnet build KyberWeave.sln -c ${{ env.CONFIGURATION }} --no-restore
 
+      # ProseRuleGradingTests asks Jev whether the shipped prose states each catalog rule
+      # (docs/standards/test/README.md#prose-rules). It runs only when the secret is set: a fork's
+      # pull request gets no secrets, so KW_PROSE_GRADE is empty and the test skips with its reason.
+      # A grader outage is a skip with a warning, and so is an answer that points the right way but
+      # lands below the confidence floor (it is listed in the report); a confident wrong answer, or
+      # a wrong-way answer below the floor, fails.
       - name: Test (integration)
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+          KW_PROSE_GRADE: ${{ secrets.TYPESAFE_API_KEY != '' && '1' || '' }}
+          KW_PROSE_GRADE_ENDPOINT: https://openrouter.ai/api/v1
+          KW_PROSE_GRADE_MODEL: typesafe/jev-1.14
         run: >
           dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
           -c ${{ env.CONFIGURATION }}

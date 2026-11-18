@@ -10,6 +10,9 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 internal sealed class FakeGitRepositoryFacts : IGitRepositoryFacts
 {
+    /// <summary>The common git directory every working directory reports; null when git names no repository.</summary>
+    public string? CommonDirectory { get; set; }
+
     /// <summary>The worktrees each working directory reports, by working directory; empty when not named.</summary>
     public Dictionary<string, IReadOnlyList<string>> Worktrees { get; init; } = new(StringComparer.Ordinal);
 
@@ -21,7 +24,7 @@ internal sealed class FakeGitRepositoryFacts : IGitRepositoryFacts
         Worktrees.TryGetValue(workingDirectory, out IReadOnlyList<string>? worktrees) ? worktrees : [];
 
     /// <inheritdoc />
-    public string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git") => null;
+    public string? GetCommonDirectory(string workingDirectory, string gitExecutable = "git") => CommonDirectory;
 
     /// <inheritdoc />
     public string? GetCurrentBranch(string workingDirectory, string gitExecutable = "git") => null;

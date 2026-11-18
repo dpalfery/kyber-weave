@@ -13,6 +13,7 @@ namespace KyberWeave.Integration.Tests;
 ///     Pins how <c>squad update</c> retires the <c>response-format</c> skill from installs that already hold it.
 ///     The skill is no longer part of the product, so an update must delete the copies the operator never
 ///     edited, keep an edited copy and the receipt claim on it, and leave the home response guidance alone.
+///     Unit twin: <c>SquadResponseFormatRetirementUnitTests</c>.
 /// </summary>
 /// <remarks>
 ///     The prior release is seeded rather than installed from the product tree. The product no longer

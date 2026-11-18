@@ -18,6 +18,7 @@ namespace KyberWeave.Integration.Tests.Squad;
 /// <c>squad pack</c> fills every conductor and bug-crusher carrier with the shipped default so a
 /// packed archive is self-contained and deterministic. Without this, an archive ships the canonical
 /// placeholder line and the operator's home file leaks into a distributable artifact.
+/// Unit twin: <c>SquadPackResponsePreferencesUnitTests</c>.
 /// </summary>
 public sealed class SquadPackResponsePreferencesTests : IDisposable
 {

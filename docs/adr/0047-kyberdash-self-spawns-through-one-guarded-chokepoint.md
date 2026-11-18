@@ -85,8 +85,8 @@ argv in every doc, and a second enforcement path for the full-suite rule that `r
    `cargo … --manifest-path dash/tray/src-tauri/Cargo.toml …` from the repository root, and `.NET`
    commands run as `dotnet …`. The retired `scripts/proc-guard.sh` wrapper is gone. Full-suite runs
    are still reserved for the review council and CI, enforced by `kyber-weave review gates`
-   (`full-suite: true`, `KW-REVIEW-033`) and `scripts/fast-loop.sh` (`--full`, `--scoped`,
-   `--regenerate`, exit 89); see [ADR 0059](0059-full-test-runs-are-reserved-for-the-council-and-ci.md).
+   (`full-suite: true`, `KW-REVIEW-033`) and `scripts/fast-loop.sh` (`--full` and `--scoped`,
+   exit 89); see [ADR 0059](0059-full-test-runs-are-reserved-for-the-council-and-ci.md).
 5. **Isolated Playwright boots.** Isolated E2E runs use
    `dash/playwright.isolated.config.ts` (`harness-collection.spec.ts`, `workers: 1`), and the spec
    boots and tears down its own C# `kyberdash` instance. The per-run process ledger was retired with
@@ -128,8 +128,8 @@ argv in every doc, and a second enforcement path for the full-suite rule that `r
   or by the tool's own timeout, and `review gates` still bounds each gate at its `timeout-seconds`.
   This ADR's remaining bounds are the allow-list and the per-call timeouts on each listed site.
 - **Full-suite refusal no longer has a wrapper layer.** `review gates` refuses a `full-suite: true`
-  gate with `KW-REVIEW-033` (blocking, exit 1, nothing started), and `fast-loop.sh --full`,
-  `--scoped` and `--regenerate` exit 89 from a non-interactive shell; see
+  gate with `KW-REVIEW-033` (blocking, exit 1, nothing started), and `fast-loop.sh --full`
+  and `--scoped` exit 89 from a non-interactive shell; see
   [ADR 0059](0059-full-test-runs-are-reserved-for-the-council-and-ci.md).
 - **Windows gets the same bound as every other platform.** The retired watchdog was POSIX-only, so
   Windows lacked its cap. The static audit runs on every platform, so the bound it gives is the same

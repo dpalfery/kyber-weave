@@ -12,7 +12,7 @@ public sealed class InMemoryGovernanceReaders
     public InMemoryGovernanceReaders(InMemoryFileSystem? files = null)
     {
         Files = files ?? new InMemoryFileSystem();
-        Root = Path.Combine(Files.RootPath, "work");
+        Root = Path.Combine(Files.Root, "work");
         FakePathResolver paths = new(Files);
         FakeProcessEnvironment environment = new(currentDirectory: Root);
         Skills = new SkillFileReader(Files, paths, environment);

@@ -117,13 +117,35 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// As the physical store does: no component below a configured documentation root may be a link, but the
+    /// root's own path is the host's choice, so a link in it is allowed.
+    /// </remarks>
     public bool IsContainedFile(string repoRoot, string relativePath, IEnumerable<string> relativeRoots)
     {
-        string current = repoRoot;
-        foreach (string segment in relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries))
+        string[] segments = Segments(relativePath);
+        if (segments.Length == 0)
         {
-            current = Path.Combine(current, segment);
-            if (_fs.GetLinkTarget(current) is not null)
+            return false;
+        }
+
+        int boundaryDepth = 0;
+        foreach (string root in relativeRoots)
+        {
+            string[] rootSegments = Segments(root);
+            if (rootSegments.Length > boundaryDepth
+                && rootSegments.Length < segments.Length
+                && rootSegments.SequenceEqual(segments.Take(rootSegments.Length), _fs.CaseSensitive ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase))
+            {
+                boundaryDepth = rootSegments.Length;
+            }
+        }
+
+        string current = repoRoot;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            current = Path.Combine(current, segments[i]);
+            if (i >= boundaryDepth && _fs.GetLinkTarget(current) is not null)
             {
                 return false;
             }
@@ -131,6 +153,9 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
 
         return _fs.FileExists(current);
     }
+
+    private static string[] Segments(string relativePath) =>
+        [.. relativePath.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries).Where(segment => segment != ".")];
 
     /// <inheritdoc />
     public bool IsReparsePoint(string path) => (_fs.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;

@@ -108,7 +108,7 @@ public sealed class ArbiterHookRefresherTests
         Assert.Equal((0, 0), (result.Refreshed, result.Failed));
     }
 
-    private sealed class NoUserConfig : IUserHostConfigStore
+    internal sealed class NoUserConfig : IUserHostConfigStore
     {
         public string EnsureUserConfig(string home) => string.Empty;
 

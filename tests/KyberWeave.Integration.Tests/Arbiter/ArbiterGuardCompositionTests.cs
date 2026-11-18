@@ -18,6 +18,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// through. The host-config adapter reads the configuration repository: a missing registration does not fail the
 /// build, it fails at resolve time inside the guard's catch-all, which denies every conductor call and allows every
 /// worker call.
+/// Unit twin: <c>ArbiterGuardCompositionUnitTests</c>, which registers in-memory seams ahead of the container's <c>TryAdd</c> defaults.
 /// </summary>
 public sealed class ArbiterGuardCompositionTests
 {

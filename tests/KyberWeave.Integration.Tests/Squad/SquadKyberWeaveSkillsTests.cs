@@ -172,6 +172,7 @@ public sealed record SquadPackRun(int ExitCode, string Output, string OutDirecto
 /// level as the Squad skills. Cases (a) to (g) fail on the base because the six are absent from the archives, the
 /// loaded source, the render targets, the user-level install, and the checkout release source. Case (h) is a
 /// declared characterization that passes by design.
+/// Unit twin: <c>SquadKyberWeaveSkillsUnitTests</c> (the logic cases, not the real-repository pack).
 /// </summary>
 /// <remarks>
 /// Contract: <c>docs/plans/2026-10-31-kyber-skills-user-level-deploy.md</c>, "Test contract (test-first)". The pinned names

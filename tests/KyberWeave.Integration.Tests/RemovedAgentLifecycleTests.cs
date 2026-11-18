@@ -12,6 +12,7 @@ namespace KyberWeave.Tests;
 /// A Squad update removes a retired agent's rendered file only when the lock records that the Squad wrote it and
 /// the host left it unedited; an edited file is kept and reported. This runs a whole install and update on the real
 /// disk, so it is the end-to-end proof beside the planner's in-memory cases.
+/// Unit twin: <c>RemovedAgentLifecycleUnitTests</c>.
 /// </summary>
 public sealed class RemovedAgentLifecycleTests
 {
