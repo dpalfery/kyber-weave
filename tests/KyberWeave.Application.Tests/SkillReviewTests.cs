@@ -4,6 +4,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Review;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -13,10 +14,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SkillReviewTests
 {
+    private static readonly InMemoryGovernanceReaders Governance = new();
+
     private static Skill MakeSkill(string name, string description, string dir = "/tmp/skills")
     {
         string content = $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\nBody instructions.";
-        return GovernanceTestFiles.Skills.Read(content, $"{dir}/{name}/SKILL.md", $"{dir}/{name}");
+        return Governance.Skills.Read(content, $"{dir}/{name}/SKILL.md", $"{dir}/{name}");
     }
 
     private static AgentModel MakeAgent(string roleName, string description, HarnessKind harness = HarnessKind.Claude)

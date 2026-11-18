@@ -1,11 +1,14 @@
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 public class SkillParserTests
 {
+    private readonly InMemoryGovernanceReaders _governance = new();
+
     private static readonly string[] ExpectedAllowedTools = ["search", "fetch"];
 
     private const string Valid = """
@@ -29,7 +32,7 @@ See scripts/run.py for details.
     [Fact]
     public void ParsesFrontmatterFields()
     {
-        Skill skill = GovernanceTestFiles.Skills.Read(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
+        Skill skill = _governance.Skills.Read(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
         Assert.Equal("my-skill", skill.Frontmatter.Name);
         Assert.StartsWith("Use to do a thing", skill.Frontmatter.Description, StringComparison.Ordinal);
         Assert.Equal("MIT", skill.Frontmatter.License);
@@ -40,7 +43,7 @@ See scripts/run.py for details.
     [Fact]
     public void SeparatesBodyFromFrontmatter()
     {
-        Skill skill = GovernanceTestFiles.Skills.Read(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
+        Skill skill = _governance.Skills.Read(Valid, "/tmp/my-skill/SKILL.md", "/tmp/my-skill");
         Assert.Contains("ALWAYS verify first.", skill.InstructionsBody, StringComparison.Ordinal);
         Assert.DoesNotContain("name: my-skill", skill.InstructionsBody, StringComparison.Ordinal);
     }
@@ -48,7 +51,7 @@ See scripts/run.py for details.
     [Fact]
     public void ExtractsReferenceLinks()
     {
-        Skill skill = GovernanceTestFiles.Skills.Read(Valid, "/tmp/my-skill/SKILL.md", "/tmp/nonexistent-dir");
+        Skill skill = _governance.Skills.Read(Valid, "/tmp/my-skill/SKILL.md", "/tmp/nonexistent-dir");
         Assert.Contains(skill.ReferenceLinks, l => l.Target.Contains("scripts/run.py", StringComparison.Ordinal));
         // directory does not exist, so it should not resolve
         Assert.All(skill.ReferenceLinks, l => Assert.False(l.Resolves));
@@ -58,7 +61,7 @@ See scripts/run.py for details.
     public void CapturesUnknownKeys()
     {
         string content = "---\nname: x\ndescription: d\nmystery: 42\n---\n\nbody";
-        Skill skill = GovernanceTestFiles.Skills.Read(content, "/tmp/x/SKILL.md", "/tmp/x");
+        Skill skill = _governance.Skills.Read(content, "/tmp/x/SKILL.md", "/tmp/x");
         Assert.True(skill.Frontmatter.UnknownKeys.ContainsKey("mystery"));
     }
 
@@ -66,16 +69,14 @@ See scripts/run.py for details.
     public void ThrowsOnMissingFrontmatter()
     {
         Assert.Throws<SkillParseException>(() =>
-            GovernanceTestFiles.Skills.Read("# Just a heading\nno frontmatter", "/tmp/x/SKILL.md", "/tmp/x"));
+            _governance.Skills.Read("# Just a heading\nno frontmatter", "/tmp/x/SKILL.md", "/tmp/x"));
     }
 
     [Fact]
     public void ReferenceWithFragmentAnchorResolvesWhenTargetFileExists()
     {
-        using TempDirectory tempDir = new TempDirectory();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide\n\n## Overview");
+        string referencesDir = Path.Combine(_governance.Root, "references");
+        _governance.Write(Path.Combine(referencesDir, "guide.md"), "# Guide\n\n## Overview");
 
         string content = """
 ---
@@ -88,7 +89,7 @@ description: Tests fragment anchor resolution.
 See [Guide](references/guide.md#overview) for details.
 """;
 
-        Skill skill = GovernanceTestFiles.Skills.Read(content, Path.Combine(tempDir.Path, "SKILL.md"), tempDir.Path);
+        Skill skill = _governance.Skills.Read(content, Path.Combine(_governance.Root, "SKILL.md"), _governance.Root);
         SkillReferenceLink link = Assert.Single(skill.ReferenceLinks);
         Assert.Equal("references/guide.md", link.Target);
         Assert.True(link.Resolves);
@@ -97,7 +98,6 @@ See [Guide](references/guide.md#overview) for details.
     [Fact]
     public void ConfigRegTokensAreSkippedAsNonFileReferences()
     {
-        using TempDirectory tempDir = new TempDirectory();
         string content = """
 ---
 name: token-skill
@@ -109,14 +109,13 @@ description: Tests config reg token skipping.
 Consult [Docs Root](<docs-root>) and [Plan Index](<plan-index>).
 """;
 
-        Skill skill = GovernanceTestFiles.Skills.Read(content, Path.Combine(tempDir.Path, "SKILL.md"), tempDir.Path);
+        Skill skill = _governance.Skills.Read(content, Path.Combine(_governance.Root, "SKILL.md"), _governance.Root);
         Assert.Empty(skill.ReferenceLinks);
     }
 
     [Fact]
     public void ForeignAbsolutePathsAreSkipped()
     {
-        using TempDirectory tempDir = new TempDirectory();
         string content = """
 ---
 name: absolute-skill
@@ -128,7 +127,7 @@ description: Tests foreign absolute path skipping.
 See [drive](C:/foo/bar.md), [posix](/etc/bar.md), [unc](\\share\path\file.md), and [unc-slash](//unc/path/file.md).
 """;
 
-        Skill skill = GovernanceTestFiles.Skills.Read(content, Path.Combine(tempDir.Path, "SKILL.md"), tempDir.Path);
+        Skill skill = _governance.Skills.Read(content, Path.Combine(_governance.Root, "SKILL.md"), _governance.Root);
         Assert.Empty(skill.ReferenceLinks);
     }
 }

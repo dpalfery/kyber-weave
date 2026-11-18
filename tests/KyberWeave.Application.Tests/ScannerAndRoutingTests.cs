@@ -13,11 +13,13 @@ namespace KyberWeave.Tests;
 
 public class SkillScannerTests
 {
+    private static readonly InMemoryGovernanceReaders Governance = new();
+
     private static IEnumerable<Diagnostic> Scan(Skill skill) =>
-        new SkillScanner().Scan(skill, script => File.ReadAllText(script.AbsolutePath));
+        new SkillScanner().Scan(skill, script => Governance.Files.ReadAllText(script.AbsolutePath));
 
     private static Skill Make(string body, string dir = "/tmp/scan-x") =>
-        GovernanceTestFiles.Skills.Read($"---\nname: scan-x\ndescription: Use to X. Use when Y. Do NOT use for Z.\n---\n\n{body}", $"{dir}/SKILL.md", dir);
+        Governance.Skills.Read($"---\nname: scan-x\ndescription: Use to X. Use when Y. Do NOT use for Z.\n---\n\n{body}", $"{dir}/SKILL.md", dir);
 
     [Fact]
     public void FlagsPromptInjection()
@@ -125,8 +127,10 @@ public class SkillScannerTests
 
 public class RoutingTests
 {
+    private static readonly InMemoryGovernanceReaders Governance = new();
+
     private static Skill Make(string name, string description, string dir) =>
-        GovernanceTestFiles.Skills.Read($"---\nname: {name}\ndescription: {description}\n---\n\nbody", $"{dir}/SKILL.md", dir);
+        Governance.Skills.Read($"---\nname: {name}\ndescription: {description}\n---\n\nbody", $"{dir}/SKILL.md", dir);
 
     private static SkillSet SampleSet() => new(
     [
@@ -221,9 +225,11 @@ public class RoutingTests
 
 public class SkillEvalGovernanceTests
 {
+    private static readonly InMemoryGovernanceReaders Governance = new();
+
     private static SkillSet SampleSet() => new(
     [
-        GovernanceTestFiles.Skills.Read(
+        Governance.Skills.Read(
             "---\nname: password-reset\ndescription: Use to reset a corporate password.\n---\n\nbody",
             "/tmp/pr/SKILL.md",
             "/tmp/pr")

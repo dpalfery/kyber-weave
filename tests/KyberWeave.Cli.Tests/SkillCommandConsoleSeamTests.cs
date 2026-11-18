@@ -21,8 +21,10 @@ public sealed class SkillCommandConsoleSeamTests
 
     public SkillCommandConsoleSeamTests() => _ansi.Profile.Width = 200;
 
+    private static readonly InMemoryGovernanceReaders Governance = new();
+
     private static Skill SkillNamed(string name, string description) =>
-        GovernanceTestFiles.Skills.Read(
+        Governance.Skills.Read(
             $"---\nname: {name}\ndescription: {description}\n---\n\n# {name}\nBody instructions.",
             $"/kw/skills/{name}/SKILL.md",
             $"/kw/skills/{name}");
