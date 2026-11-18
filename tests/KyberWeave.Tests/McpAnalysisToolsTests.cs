@@ -269,6 +269,9 @@ public sealed class McpAnalysisToolsTests : IDisposable
             _temp.Path,
             () => FakeCodeGraphResolver.WithSymbols(),
             () => new DocumentSet { Documents = [] },
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             "docs");
         return DocsToolsComposition.Create(host, reader);
     }

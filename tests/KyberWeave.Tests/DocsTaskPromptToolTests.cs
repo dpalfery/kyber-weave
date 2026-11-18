@@ -91,6 +91,9 @@ public sealed class DocsTaskPromptToolTests
         fixture.Root,
         () => FakeCodeGraphResolver.WithSymbols(),
         () => RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(),
+        DocsPorts.Files,
+        DocsPorts.Paths,
+        DocsPorts.Environment,
         config.Ontology.DocsRoots,
         config.Ontology.ResolvedCatalogPath);
 

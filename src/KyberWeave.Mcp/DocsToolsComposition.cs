@@ -53,6 +53,9 @@ internal static class DocsToolsComposition
                 repositoryRoot,
                 () => provider.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repositoryRoot).Resolver,
                 () => provider.GetRequiredService<IDocumentSourceFactory>().Create(repositoryRoot, ontology).Load(),
+                provider.GetRequiredService<IRepositoryFileStore>(),
+                provider.GetRequiredService<IPathResolver>(),
+                provider.GetRequiredService<IProcessEnvironment>(),
                 ontology.DocsRoots,
                 ontology.ResolvedCatalogPath);
         });

@@ -195,7 +195,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 4.2 |
-| `DocumentIndexHost` (`Docs/Search/DocumentIndexHost.cs`) | file system, paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
@@ -210,7 +209,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
-| `ReviewConfigParser` (`Configuration/ReviewConfigParser.cs`) | paths | 2.5 |
 
 #### KyberWeave.Cli (14 classes)
 
@@ -284,9 +282,8 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 - `SystemOneClient`, `SocketArbiterHttpHandlers`, `SystemOneProviderFactory` and
   `OpenAiCompatibleEmbeddingGenerator` reach the network; no network seam exists yet.
 - `PresentFile` and `DocsRootWalk` are static helpers of the adapter `PhysicalRepositoryFileStore`
-  (the bounded one-step read and the link-refusing walk). `DocsRootWalk` is also called as a static by
-  `Application/Docs/Delivery/PullRequestDescription.cs` and `Application/Docs/Search/DocumentIndexHost.cs`,
-  so converting it edits `Application/Docs`, which another task owns.
+  (the bounded one-step read and the link-refusing walk). Only that adapter calls them: application code
+  reaches the walk through `IRepositoryFileStore.EnumerateContainedFiles` and `IsContainedFile`.
 - `FileCoverageReportSource` lives in `Application/Review`, which another task owns.
 - `ZipSkillArchiveWriter` is the adapter of `ISkillArchiveWriter`. `ZipFile.CreateEntryFromFile` records the
   source file's Unix permission bits in the archive; the file-system seam has no member that reads them, so
