@@ -277,6 +277,36 @@ public sealed class TaskGateSelectionTests
         Assert.Contains("no test class covers", skip.Reason, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void AValidatedPathIsRefusedOnlyUnderTheRootItsLinkEscapes()
+    {
+        // The same repository-relative path escapes one root and not another. A probe that answers by path alone
+        // would refuse it under both, hiding a root-confusion regression that lets an escaping path reach argv.
+        FakeRepositoryTreeProbe probe = new() { EscapingPaths = [("/repo/a", "link/outside.cs")] };
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources());
+
+        Assert.NotNull(selection.ValidatePath("/repo/a", "link/outside.cs"));
+        Assert.Null(selection.ValidatePath("/repo/b", "link/outside.cs"));
+    }
+
+    [Fact]
+    public void TheServiceRefusesThePlanWhenTheRootIsNotAccessible()
+    {
+        FakeRepositoryTreeProbe probe = new()
+        {
+            Roots = new Dictionary<string, RepositoryRootAccess>(StringComparer.Ordinal)
+            {
+                ["/repo"] = new RepositoryRootAccess(true, "permission denied"),
+            },
+        };
+        ITaskGateSelectionService selection = new TaskGateSelectionService(probe, new FakeTestClassSources());
+
+        TaskGatePlan plan = selection.Plan([FormatGate()], Changed, null, "unix", "/repo");
+
+        Assert.Contains("/repo", Assert.Single(plan.Refusals), StringComparison.Ordinal);
+        Assert.Empty(plan.Gates);
+    }
+
     private static ReviewTaskGate TestsGate()
     {
         return new ReviewTaskGate(

@@ -16,8 +16,8 @@ internal sealed class FakeRepositoryTreeProbe : IRepositoryTreeProbe
     /// <summary>The roots and the access each one has; a root not named here does not exist.</summary>
     public Dictionary<string, RepositoryRootAccess> Roots { get; init; } = new(StringComparer.Ordinal);
 
-    /// <summary>The repository-relative paths that pass through a symbolic link leading outside the root.</summary>
-    public HashSet<string> EscapingPaths { get; init; } = new(StringComparer.Ordinal);
+    /// <summary>The root and repository-relative path of each link that leads outside that root.</summary>
+    public HashSet<(string Root, string Path)> EscapingPaths { get; init; } = [];
 
     /// <inheritdoc />
     public RepositoryRootAccess ProbeRoot(string root) =>
@@ -27,5 +27,5 @@ internal sealed class FakeRepositoryTreeProbe : IRepositoryTreeProbe
     public bool DirectoryExists(string path) => Directories.Contains(path);
 
     /// <inheritdoc />
-    public bool LeadsOutsideThroughSymlink(string root, string path) => EscapingPaths.Contains(path);
+    public bool LeadsOutsideThroughSymlink(string root, string path) => EscapingPaths.Contains((root, path));
 }
