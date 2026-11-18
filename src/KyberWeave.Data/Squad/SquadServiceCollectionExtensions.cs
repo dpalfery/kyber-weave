@@ -101,7 +101,6 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadHookJsonFile>(sp => new SquadHookJsonFile(
             sp.GetRequiredService<IWritableFileSystem>(),
-            sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadHarnessStartInfoBuilder>(sp => new SquadHarnessLauncher(
             sp.GetRequiredService<IFileSystem>(),
