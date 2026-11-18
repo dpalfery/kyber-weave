@@ -19,11 +19,12 @@ public sealed class FileReviewCycleStore(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewFolder);
 
-        if (!files.DirectoryExists(reviewFolder))
+        string resolved = Resolve(reviewFolder);
+        if (!files.DirectoryExists(resolved))
             return [];
 
         List<ReviewCycleRecord> cycles = [];
-        foreach (string folder in files.EnumerateDirectories(reviewFolder))
+        foreach (string folder in files.EnumerateDirectories(resolved))
         {
             if (ReviewCyclePlanning.TryNumber(Path.GetFileName(folder)) is not { } number
                 || !files.FileExists(Path.Combine(folder, ReviewCyclePlanning.FindingsFile)))
@@ -40,7 +41,7 @@ public sealed class FileReviewCycleStore(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(priorFolder);
 
-        string full = paths.GetFullPath(priorFolder, environment.CurrentDirectory);
+        string full = Resolve(priorFolder);
         if (ReviewCyclePlanning.TryNumber(Path.GetFileName(full)) is not { } number)
             return files.DirectoryExists(full) ? [Read(0, full)] : [];
 
@@ -54,27 +55,37 @@ public sealed class FileReviewCycleStore(
         ArgumentException.ThrowIfNullOrWhiteSpace(cycleFolder);
         ArgumentNullException.ThrowIfNull(identity);
 
-        files.CreateDirectory(cycleFolder);
+        string resolved = Resolve(cycleFolder);
+        files.CreateDirectory(resolved);
         files.WriteAllText(
-            Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile),
+            Path.Combine(resolved, ReviewCyclePlanning.IdentityFile),
             ReviewCyclePlanning.SerializeIdentity(identity));
     }
 
     /// <inheritdoc />
     public ReviewCycleIdentity? ReadRecordedIdentity(string cycleFolder) =>
-        ReviewCyclePlanning.ReadRecordedIdentity(ReadText(Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile)));
+        ReviewCyclePlanning.ReadRecordedIdentity(
+            ReadText(Path.Combine(Resolve(cycleFolder), ReviewCyclePlanning.IdentityFile)));
 
     /// <inheritdoc />
-    public bool HasIdentity(string cycleFolder) => files.FileExists(Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile));
+    public bool HasIdentity(string cycleFolder) =>
+        files.FileExists(Path.Combine(Resolve(cycleFolder), ReviewCyclePlanning.IdentityFile));
 
     /// <inheritdoc />
     public IReadOnlyList<string> TaskFolders(string scratchpad) =>
-        files.DirectoryExists(scratchpad)
-            ? [.. files.EnumerateDirectories(scratchpad)
+        files.DirectoryExists(Resolve(scratchpad))
+            ? [.. files.EnumerateDirectories(Resolve(scratchpad))
                 .Where(dir => files.DirectoryExists(Path.Combine(dir, "review")))
                 .Select(dir => Path.GetFileName(dir))
                 .Order(StringComparer.Ordinal)]
             : [];
+
+    /// <summary>
+    /// The folder as the file system names it: a caller may spell it relative to the working directory, and the seam
+    /// resolves it the same way for every member. An empty folder names nothing to resolve and passes through.
+    /// </summary>
+    private string Resolve(string folder) =>
+        string.IsNullOrWhiteSpace(folder) ? folder : paths.GetFullPath(folder, environment.CurrentDirectory);
 
     private ReviewCycleRecord Read(int number, string folder) =>
         ReviewCyclePlanning.Record(
