@@ -2372,8 +2372,35 @@ public sealed class SquadTransaction : ISquadTransaction
     private static bool IsOwnedJournalEntry(string name) =>
         string.Equals(name, IntentFileName, StringComparison.Ordinal) ||
         IsIntentTemporary(name) ||
-        name.StartsWith("claimed-", StringComparison.Ordinal) ||
+        IsClaimFile(name) ||
         name is "backups" or "staging" or "links" or "state-originals" or "state-original-links" or "state-staging";
+
+    /// <summary>
+    ///     Whether a name is a claim file this transaction generates, <c>claimed-&lt;transaction id&gt;-&lt;digest&gt;</c>.
+    ///     Another tool's file that merely starts with <c>claimed-</c> is not one, so a committed journal holding it is
+    ///     refused rather than deleted.
+    /// </summary>
+    /// <param name="name">The journal folder entry's name.</param>
+    /// <returns>True for a claim file this transaction wrote.</returns>
+    private static bool IsClaimFile(string name)
+    {
+        const string prefix = "claimed-";
+        const int transactionIdLength = 32;
+        const int digestLength = 64;
+        if (!name.StartsWith(prefix, StringComparison.Ordinal))
+            return false;
+
+        string remainder = name[prefix.Length..];
+        return remainder.Length == transactionIdLength + 1 + digestLength &&
+               remainder[transactionIdLength] == '-' &&
+               IsLowerHex(remainder[..transactionIdLength], transactionIdLength) &&
+               IsLowerHex(remainder[(transactionIdLength + 1)..], digestLength);
+    }
+
+    private static bool IsLowerHex(string? value, int length) =>
+        value is { } text &&
+        text.Length == length &&
+        text.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 
     private void CleanupOwnedArtifacts(
         string journalDirectory,
@@ -3343,12 +3370,7 @@ public sealed class SquadTransaction : ISquadTransaction
         }
     }
 
-    private bool IsTransactionId(string? value)
-    {
-        return value is { Length: 32 } &&
-               value.All(character =>
-                   character is >= '0' and <= '9' or >= 'a' and <= 'f');
-    }
+    private static bool IsTransactionId(string? value) => IsLowerHex(value, 32);
 
     private string ResolveArtifactNode(string areaRoot, string relativePath)
     {
@@ -3374,12 +3396,7 @@ public sealed class SquadTransaction : ISquadTransaction
                    .Any(path => Path.GetFileName(path).Contains("tmp", StringComparison.OrdinalIgnoreCase));
     }
 
-    private bool IsDigest(string? digest)
-    {
-        return digest is { Length: 64 } &&
-               digest.All(character =>
-                   character is >= '0' and <= '9' or >= 'a' and <= 'f');
-    }
+    private static bool IsDigest(string? digest) => IsLowerHex(digest, 64);
 
     private string StateOriginalPath(string workDirectory, string name)
     {

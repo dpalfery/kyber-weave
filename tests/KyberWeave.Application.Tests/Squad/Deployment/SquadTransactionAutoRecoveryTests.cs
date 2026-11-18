@@ -128,6 +128,23 @@ public sealed class SquadTransactionAutoRecoveryTests
     }
 
     [Fact]
+    public void ACommittedJournalHoldingAClaimLikeNameItDidNotGenerateRefusesAndKeepsIt()
+    {
+        using Crashed crashed = Crashed.Start(SquadCrashFlow.Install, points => points[^3]);
+        string journal = Path.GetDirectoryName(crashed.IntentPath)!;
+        string claimLike = Path.Combine(journal, "claimed-notes.txt");
+        crashed.Fixture.Files.WriteAllText(claimLike, "another tool's claim");
+        IReadOnlyDictionary<string, SquadTreeEntry> crashedTree = crashed.Fixture.Capture();
+
+        InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() =>
+            crashed.Fixture.Transaction().Execute(crashed.Fixture.Plan(SquadCrashFlow.Install)));
+
+        Assert.Contains(journal, refused.Message, StringComparison.Ordinal);
+        Assert.Equal("another tool's claim", crashed.Fixture.Files.ReadAllText(claimLike));
+        Assert.Null(SquadTreeComparison.Difference(crashedTree, crashed.Fixture.Capture()));
+    }
+
+    [Fact]
     public void AJournalFolderWithNoIntentRefusesNamingTheFolderNotAMissingIntentFile()
     {
         using Crashed crashed = Crashed.Start(SquadCrashFlow.Install, points => points[points.Count / 2]);
