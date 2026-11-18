@@ -1,3 +1,4 @@
+using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -106,6 +107,38 @@ public sealed class PreparedSquadInstallsTests : IDisposable
         Assert.False(Directory.Exists(path));
         Assert.Equal(0, PreparedSquadInstalls.BuildsOf(key));
     }
+
+    /// <summary>
+    /// A preset's body is an input the prepared install consumes, so two recipes that name the same
+    /// presets but write different bodies must not share one install: the update under test reads the
+    /// preset the install recorded, and a shared install would hand it the other recipe's bytes.
+    /// </summary>
+    [Fact]
+    public void APresetRecipeWithADifferentPresetBodyGetsItsOwnInstall()
+    {
+        string first = SquadInstalledPresetProjectTemplate.RecipeKey(
+            "preset-body",
+            [SquadTarget.Copilot],
+            PresetNames,
+            [("fast", "schema: kyber-squad.model-preset/v1\nmodels:\n  general: one\n")]);
+        string second = SquadInstalledPresetProjectTemplate.RecipeKey(
+            "preset-body",
+            [SquadTarget.Copilot],
+            PresetNames,
+            [("fast", "schema: kyber-squad.model-preset/v1\nmodels:\n  general: two\n")]);
+
+        Assert.NotEqual(first, second);
+
+        string same = SquadInstalledPresetProjectTemplate.RecipeKey(
+            "preset-body",
+            [SquadTarget.Copilot],
+            PresetNames,
+            [("fast", "schema: kyber-squad.model-preset/v1\nmodels:\n  general: one\n")]);
+        Assert.Equal(first, same);
+    }
+
+    private static readonly IReadOnlyDictionary<SquadTarget, string> PresetNames =
+        new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" };
 
     private string NewKey(string purpose)
     {

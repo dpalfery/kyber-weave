@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 
@@ -83,7 +85,8 @@ public sealed class SquadInstalledPresetProjectTemplate
         SquadInstallCopy.ReRoot(userPaths.HomeDirectory, templateRoot, copyRoot);
     }
 
-    private static string RecipeKey(
+    /// <summary>Formats the provider key for this recipe, from every input the install consumes.</summary>
+    internal static string RecipeKey(
         string recipe,
         SquadTarget[] targets,
         IReadOnlyDictionary<SquadTarget, string> presetNames,
@@ -94,7 +97,17 @@ public sealed class SquadInstalledPresetProjectTemplate
             recipe,
             string.Join(",", targets.Select(SquadTargetCatalog.GetToken).Order(StringComparer.Ordinal)),
             string.Join(",", presetNames.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}={pair.Value}")),
-            string.Join(",", presets.Select(preset => preset.Name).Order(StringComparer.Ordinal)));
+            string.Join(",", presets
+                .OrderBy(preset => preset.Name, StringComparer.Ordinal)
+                .Select(preset => $"{preset.Name}={PresetBodyDigest(preset.Yaml)}")));
+
+    /// <summary>
+    /// The digest of one preset body. The body is written into the install's home and the update reads it
+    /// back, so two bodies are two installs: a key made of the preset names alone would hand the second
+    /// recipe the first recipe's bytes.
+    /// </summary>
+    private static string PresetBodyDigest(string yaml) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(yaml)));
 
     private static Install Build(
         string key,
