@@ -169,6 +169,34 @@ internal static class SquadTestCommands
             new PhysicalPathResolver(new PhysicalFileSystem()));
     }
 
+    /// <summary>
+    /// Builds <c>squad run</c> over an in-memory Squad state: its file system, path rules, environment and home, so a run
+    /// test touches no disk or real process. A test that reaches the instance ensure supplies <paramref name="ensureOverride"/>;
+    /// without one the ensure throws, so a row that was meant to stop earlier fails loudly.
+    /// </summary>
+    public static SquadRunCommand InMemoryRun(
+        InMemorySquadState state,
+        ISquadModelPresetSelectionStore selectionStore,
+        Func<ProcessStartInfo, int>? runner = null,
+        Func<string, string?>? getEnv = null,
+        Func<string, string?>? findOnPath = null,
+        string? workingDirectory = null,
+        Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? ensureOverride = null,
+        SquadConsole? output = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(selectionStore);
+        return new SquadRunCommand(
+            new FuncInstanceService(ensureOverride ?? ((_, _) => throw new NotSupportedException("The test reached the instance ensure without supplying one."))),
+            selectionStore,
+            ensureOverride is not null ? new AnyPresetStore() : new SquadModelPresetStore(state.UserPaths, state.Files),
+            new ProcessSquadHarnessLauncher(new SquadHarnessLauncher(state.Files, state.Environment)),
+            state.Environment,
+            new SquadRunOptions(runner, getEnv, findOnPath, workingDirectory),
+            output ?? CapturedSquadConsole(),
+            state.Paths);
+    }
+
     public static SquadStatusCommand Status(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,

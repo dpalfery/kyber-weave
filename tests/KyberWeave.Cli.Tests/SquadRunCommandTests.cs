@@ -1,43 +1,35 @@
 using System.Diagnostics;
-using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 ///     Unit tests for <see cref="SquadRunCommand" /> (<c>squad run &lt;harness&gt; [-- &lt;args&gt;]</c>).
 ///     Acceptance criteria covered:
 ///     - 7.1: Concurrent instance execution with isolated roots.
-///     - 7.2: Zero files written into project tree.
 ///     - 7.6: Harness-neutral command syntax (<c>squad run &lt;harness&gt;</c>).
 ///     - 7.7: Fails cleanly naming unsupported harness.
 /// </summary>
-public sealed class SquadRunCommandTests : IDisposable
+public sealed class SquadRunCommandTests
 {
+    private readonly InMemorySquadState _state = new();
     private readonly string _home;
     private readonly string _projectDir;
     private readonly SquadModelPresetSelectionStore _selectionStore;
-    private readonly TempDirectory _temp = new();
     private readonly FakeSquadUserPaths _userPaths;
 
     public SquadRunCommandTests()
     {
-        _home = Path.Combine(_temp.Path, "user-home");
-        Directory.CreateDirectory(_home);
-        _projectDir = Path.Combine(_temp.Path, "project");
-        Directory.CreateDirectory(_projectDir);
-        _userPaths = new FakeSquadUserPaths(_home);
-        Directory.CreateDirectory(_userPaths.HomeDirectory);
-        _selectionStore = RealSquadSelectionStore.Create(_userPaths);
-    }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
+        _home = _state.UserPaths.HomeDirectory;
+        _projectDir = _state.CreateRoot("project");
+        _userPaths = _state.UserPaths;
+        _selectionStore = new SquadModelPresetSelectionStore(_userPaths, _state.Files, _state.Semantics);
     }
 
     #region Successful Execution and Exit Code Pass-through
@@ -82,39 +74,6 @@ public sealed class SquadRunCommandTests : IDisposable
         Assert.Contains("--model", capturedStartInfo.ArgumentList);
         Assert.Contains("custom-model", capturedStartInfo.ArgumentList);
         Assert.Equal(expectedExitCode, execution.Result);
-    }
-
-    #endregion
-
-    #region Acceptance Criterion 7.2: Zero Files Written Into Project Tree
-
-    [Fact]
-    public void SuccessfulRunLeavesProjectSourceTreeCompletelyUnmodified()
-    {
-        // The class's one row that runs the real instance ensure end to end, so the zero-files guarantee is proven
-        // against a real deployment rather than a stand-in.
-        string sourceFile = Path.Combine(_projectDir, "Program.cs");
-        File.WriteAllText(sourceFile, "// Original content", Encoding.UTF8);
-        string[] entriesBefore = Directory.GetFileSystemEntries(_projectDir, "*", SearchOption.AllDirectories);
-
-        WritePreset("fast");
-        _selectionStore.Set(_projectDir, SquadTarget.Claude, "fast");
-        SquadRunCommand command = CreateCommand(
-            _ => 0,
-            name => $"/usr/bin/{name}");
-
-        SquadRunSettings settings = new()
-        {
-            Harness = "claude",
-            Args = ["run"]
-        };
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(null!, settings));
-
-        Assert.Equal(0, execution.Result);
-        string[] entriesAfter = Directory.GetFileSystemEntries(_projectDir, "*", SearchOption.AllDirectories);
-        Assert.Equal(entriesBefore, entriesAfter);
-        Assert.Equal("// Original content", File.ReadAllText(sourceFile, Encoding.UTF8));
     }
 
     #endregion
@@ -238,7 +197,7 @@ public sealed class SquadRunCommandTests : IDisposable
 
         string presetPath = Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "presets",
             "missing-preset.yml");
-        Assert.False(File.Exists(presetPath),
+        Assert.False(_state.Files.FileExists(presetPath),
             "Synthetic preset stub must not be created on disk when preset is missing.");
     }
 
@@ -344,30 +303,12 @@ public sealed class SquadRunCommandTests : IDisposable
     ///     A stand-in for the real <c>squad instance ensure</c>: the instance root a preset instance would live in,
     ///     without installing one. A real ensure renders and commits a whole bundle, which takes seconds, and the rows
     ///     that use this assert what <c>squad run</c> does with the root it is given, not that the install works.
-    ///     <see cref="SuccessfulRunLeavesProjectSourceTreeCompletelyUnmodified" /> runs the real ensure end to end.
+    ///     <c>SquadRunCommandRealEnsureTests</c> runs the real ensure end to end.
     /// </summary>
     private Task<SquadInstanceEnsureResult> EnsuredInstance(SquadTarget target, string preset) =>
         Task.FromResult(new SquadInstanceEnsureResult(
             Path.Combine(_home, ".kyber-weave", "squad", "instances", SquadTargetCatalog.GetToken(target), preset),
             []));
-
-    private void WritePreset(string name, string? yaml = null)
-    {
-        string presetsDir = Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
-        string presetPath = Path.Combine(presetsDir, $"{name}.yml");
-        string content = yaml ?? """
-                                 schema: kyber-squad.model-preset/v1
-                                 profiles:
-                                   general:
-                                     default: gpt-4o-mini
-                                     claude: gpt-4o-mini
-                                     codex: gpt-4o-mini
-                                     copilot: gpt-4o-mini
-                                     pi: gpt-4o-mini
-                                 """;
-        File.WriteAllText(presetPath, content, Encoding.UTF8);
-    }
 
     private SquadRunCommand CreateCommand(
         Func<ProcessStartInfo, int>? runner = null,
@@ -375,8 +316,8 @@ public sealed class SquadRunCommandTests : IDisposable
         Func<string, string?>? getEnv = null,
         Func<SquadTarget, string, Task<SquadInstanceEnsureResult>>? ensureOverride = null)
     {
-        return SquadTestCommands.Run(
-            _userPaths,
+        return SquadTestCommands.InMemoryRun(
+            _state,
             _selectionStore,
             runner ?? (_ => 0),
             getEnv ?? (_ => null),
