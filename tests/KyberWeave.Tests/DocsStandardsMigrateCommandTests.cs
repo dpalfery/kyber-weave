@@ -344,9 +344,9 @@ public class DocsStandardsMigrateCommandTests
 
     /// <summary>
     /// Writing the temporary is this tool's own I/O, not another actor's file appearing, so a
-    /// failure there is reported even when a file already sits at the target. The temporary's
-    /// name adds a dot, a GUID and <c>.tmp</c>, so a target name near the platform's limit makes
-    /// the temporary's name too long while the target's own name is fine.
+    /// failure there is reported and never answered with a skip. The temporary's name adds a dot, a
+    /// GUID and <c>.tmp</c>, so a target name near the platform's limit makes the temporary's name
+    /// too long while the target's own name is fine.
     /// </summary>
     [Fact]
     public void ATemporaryWriteFailureIsReportedRatherThanTreatedAsARace()
@@ -356,7 +356,6 @@ public class DocsStandardsMigrateCommandTests
         string folder = Path.Combine(repo.Path, "6-Docs", "standards", scope);
         Directory.CreateDirectory(folder);
         string target = $"{scope}.rules.md";
-        File.WriteAllText(Path.Combine(folder, target), "written by someone else");
 
         Assert.ThrowsAny<IOException>(() => new StandardsFolderMigration(repo.Path, Declared).Apply(
             [
@@ -367,7 +366,44 @@ public class DocsStandardsMigrateCommandTests
             null,
             null));
 
-        Assert.Equal("written by someone else", File.ReadAllText(Path.Combine(folder, target)));
+        Assert.False(File.Exists(Path.Combine(folder, target)));
+    }
+
+    /// <summary>
+    /// A target that already holds a file makes the change a no-op before anything is written, so
+    /// the outcome does not depend on what a write attempt would have done: no temporary is created,
+    /// and a directory the process may not write to is never touched. That is also what keeps the
+    /// move's own failure readable: with the target absent beforehand, a failure while a file exists
+    /// afterwards means the file appeared in between, not that an I/O error was masked as a race.
+    /// </summary>
+    [Fact]
+    public void AnAddWhoseTargetAlreadyExistsIsSkippedBeforeAnyWrite()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string rules = Path.Combine(folder, "csharp.rules.md");
+        File.WriteAllText(rules, "theirs");
+        UnixFileMode folderMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        if (!TrySetMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute))
+            Assert.Skip("A read-only directory needs a POSIX mode, so this case cannot be arranged here.");
+
+        List<StandardsFolderChange> applied;
+        try
+        {
+            applied = new StandardsFolderMigration(repo.Path, Declared).Apply(
+                [new StandardsFolderChange(StandardsFolderChangeKind.Add, string.Empty, "6-Docs/standards/csharp/csharp.rules.md")],
+                "csharp",
+                null,
+                null);
+        }
+        finally
+        {
+            TrySetMode(folder, folderMode);
+        }
+
+        Assert.Empty(applied);
+        Assert.Equal("theirs", File.ReadAllText(rules));
     }
 
     /// <summary>

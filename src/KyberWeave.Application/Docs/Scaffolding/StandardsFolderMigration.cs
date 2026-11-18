@@ -267,10 +267,15 @@ public sealed partial class StandardsFolderMigration
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Only the final move can be a skip, because only the move fails for the reason a skip
-    /// means: a second actor created the target in the meantime. Writing the temporary is this
-    /// tool's own I/O, and a failure there — a full disk, a name the platform refuses — is an
-    /// error the operator has to see, never a silent "someone else created it".
+    /// A target that already holds a file is answered before a temporary is written: the change is
+    /// a no-op, not an attempt. That keeps the move's own failure readable — with the target absent
+    /// at this point, a move that fails while a file exists afterwards is the file appearing in
+    /// between, and nothing else.
+    /// </para>
+    /// <para>
+    /// Writing the temporary is this tool's own I/O, and a failure there — a full disk, a name the
+    /// platform refuses — is an error the operator has to see, never a silent "someone else created
+    /// it", so it is outside the filter entirely.
     /// </para>
     /// <para>
     /// The containment check ran before this call and cannot be atomic with it, so the created
@@ -282,6 +287,8 @@ public sealed partial class StandardsFolderMigration
     /// </remarks>
     private bool TryCreateNew(string path, byte[] content)
     {
+        if (File.Exists(path)) return false;
+
         string directory = Path.GetDirectoryName(path)!;
         string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
 
