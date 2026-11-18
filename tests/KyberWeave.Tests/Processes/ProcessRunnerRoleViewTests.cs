@@ -68,6 +68,7 @@ public sealed class ProcessRunnerRoleViewTests
         Assert.Equal(["hello"], call.Arguments);
         Assert.Equal("work", call.WorkingDirectory);
         Assert.Equal("input text", call.StandardInput);
+        Assert.Equal(ProcessRunRequest.DefaultMaxOutputBytes, call.MaxOutputBytes);
     }
 
     [Fact]

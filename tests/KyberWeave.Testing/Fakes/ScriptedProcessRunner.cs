@@ -1,4 +1,7 @@
+using System.Globalization;
+using System.Text;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -114,12 +117,21 @@ public sealed class ScriptedProcessRunner : IProcessRunner
             throw exception;
         }
 
-        if (script.Result is { TimedOut: true })
+        ProcessRunResult result = script.Result!;
+        if (request.MaxOutputBytes is { } maxOutputBytes &&
+            (Encoding.UTF8.GetByteCount(result.StandardOutput) > maxOutputBytes ||
+             Encoding.UTF8.GetByteCount(result.StandardError) > maxOutputBytes))
+        {
+            throw new OutputLimitExceededException(
+                $"The process output exceeded the limit of {maxOutputBytes.ToString(CultureInfo.InvariantCulture)} bytes.");
+        }
+
+        if (result.TimedOut)
         {
             _timedOutCalls.Add(request);
         }
 
-        return Task.FromResult(script.Result!);
+        return Task.FromResult(result);
     }
 
     /// <inheritdoc />

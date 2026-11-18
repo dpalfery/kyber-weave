@@ -54,7 +54,9 @@ public sealed record ProcessRunRequest
             WorkingDirectory = string.IsNullOrEmpty(startInfo.WorkingDirectory) ? null : startInfo.WorkingDirectory,
             Environment = environment,
             Timeout = timeout,
-            StandardInput = standardInput
+            StandardInput = standardInput,
+            // The role views never name a limit, so a chatty child could otherwise buffer without bound.
+            MaxOutputBytes = DefaultMaxOutputBytes
         };
     }
 }

@@ -15,6 +15,7 @@ public sealed class ScriptedProcessRunnerContractTests : ProcessRunnerContractTe
         ScriptedProcessRunner runner = new();
         _ = runner
             .Script(ProcessProbeProgram.FakeProgram, Success("hello"), ProcessProbeProgram.Echo, "hello")
+            .Script(ProcessProbeProgram.FakeProgram, Success(new string('x', 200)), ProcessProbeProgram.Echo, new string('x', 200))
             .Script(ProcessProbeProgram.FakeProgram, new ProcessRunResult(0, "outerr", false) { StandardOutput = "out", StandardError = "err" }, ProcessProbeProgram.Both)
             .Script(ProcessProbeProgram.FakeProgram, new ProcessRunResult(7, "bad", false) { StandardOutput = string.Empty, StandardError = "bad" }, ProcessProbeProgram.Fail, "7", "bad")
             .Script(ProcessProbeProgram.FakeProgram, Success("piped text"), ProcessProbeProgram.Cat)
@@ -33,14 +34,16 @@ public sealed class ScriptedProcessRunnerContractTests : ProcessRunnerContractTe
         string[] arguments,
         string? standardInput = null,
         TimeSpan? timeout = null,
-        string? workingDirectory = null) =>
+        string? workingDirectory = null,
+        long? maxOutputBytes = null) =>
         new()
         {
             Program = ProcessProbeProgram.FakeProgram,
             Arguments = arguments,
             WorkingDirectory = workingDirectory ?? WorkingDirectory,
             StandardInput = standardInput,
-            Timeout = timeout
+            Timeout = timeout,
+            MaxOutputBytes = maxOutputBytes
         };
 
     /// <inheritdoc />

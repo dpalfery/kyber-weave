@@ -38,13 +38,15 @@ public static class ProcessProbeProgram
     /// <param name="standardInput">The text written to the probe, if any.</param>
     /// <param name="timeout">The longest the probe may run, if bounded.</param>
     /// <param name="environment">The complete environment for the probe.</param>
+    /// <param name="maxOutputBytes">The most bytes each stream may produce, if bounded.</param>
     /// <returns>A request the seam can run.</returns>
     public static ProcessRunRequest Request(
         string[] arguments,
         string workingDirectory,
         string? standardInput = null,
         TimeSpan? timeout = null,
-        IReadOnlyDictionary<string, string?>? environment = null) =>
+        IReadOnlyDictionary<string, string?>? environment = null,
+        long? maxOutputBytes = null) =>
         new()
         {
             Program = "dotnet",
@@ -52,6 +54,7 @@ public static class ProcessProbeProgram
             WorkingDirectory = workingDirectory,
             StandardInput = standardInput,
             Timeout = timeout,
-            Environment = environment
+            Environment = environment,
+            MaxOutputBytes = maxOutputBytes
         };
 }

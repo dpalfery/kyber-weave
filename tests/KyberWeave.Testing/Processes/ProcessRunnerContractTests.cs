@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Processes;
 using Xunit;
 
 namespace KyberWeave.Tests.Processes;
@@ -38,12 +39,14 @@ public abstract class ProcessRunnerContractTests : IDisposable
     /// <param name="standardInput">The text written to the probe, if any.</param>
     /// <param name="timeout">The longest the probe may run, if bounded.</param>
     /// <param name="workingDirectory">The directory to start in; null uses <see cref="WorkingDirectory"/>.</param>
+    /// <param name="maxOutputBytes">The most bytes each stream may produce, if bounded.</param>
     /// <returns>The request.</returns>
     protected abstract ProcessRunRequest Probe(
         string[] arguments,
         string? standardInput = null,
         TimeSpan? timeout = null,
-        string? workingDirectory = null);
+        string? workingDirectory = null,
+        long? maxOutputBytes = null);
 
     /// <summary>The directory the probe starts in by default.</summary>
     protected abstract string WorkingDirectory { get; }
@@ -110,6 +113,15 @@ public abstract class ProcessRunnerContractTests : IDisposable
 
         Assert.Equal(0, result.ExitCode);
         Assert.Equal("piped text", result.StandardOutput);
+    }
+
+    [Fact]
+    public async Task ReportsWhenAStreamExceedsTheOutputLimit()
+    {
+        string verbose = new('x', 200);
+
+        await Assert.ThrowsAsync<OutputLimitExceededException>(() =>
+            CreateRunner().RunAsync(Probe([ProcessProbeProgram.Echo, verbose], maxOutputBytes: 10), CancellationToken.None));
     }
 
     [Fact]

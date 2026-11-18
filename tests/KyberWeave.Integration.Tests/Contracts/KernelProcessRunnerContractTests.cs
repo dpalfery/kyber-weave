@@ -18,13 +18,15 @@ public sealed class KernelProcessRunnerContractTests : ProcessRunnerContractTest
         string[] arguments,
         string? standardInput = null,
         TimeSpan? timeout = null,
-        string? workingDirectory = null) =>
+        string? workingDirectory = null,
+        long? maxOutputBytes = null) =>
         ProcessProbeProgram.Request(
             arguments,
             workingDirectory ?? WorkingDirectory,
             standardInput,
             timeout,
-            MarkerEnvironment());
+            MarkerEnvironment(),
+            maxOutputBytes);
 
     /// <inheritdoc />
     protected override string WorkingDirectory => _workingDirectory;
