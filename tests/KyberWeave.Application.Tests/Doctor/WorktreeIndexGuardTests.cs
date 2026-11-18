@@ -1,8 +1,12 @@
 using System.Diagnostics;
+using KyberWeave.Application.Doctor;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Doctor;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -12,30 +16,26 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 ///     A worktree has no index of its own, and nothing else builds one, so the guard is the only thing standing
-///     between a worker and an unindexed tree. Each case is a repository on disk and a scripted CodeGraph child; no
+///     between a worker and an unindexed tree. Each case is a repository in memory and a scripted CodeGraph child; no
 ///     real <c>codegraph</c> runs.
 /// </remarks>
-public sealed class WorktreeIndexGuardTests : IDisposable
+public sealed class WorktreeIndexGuardTests
 {
     private const string Governed = "onboarding: done\n";
     private const string StopOff = "stop-on-tool-failure: false\nonboarding: done\n";
     private const string IndexCheckId = "codegraph.index";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _memory = new();
+    private readonly FakeKyberWeaveConfigRepository _config = new();
     private readonly string _root;
     private readonly string _locks;
 
     public WorktreeIndexGuardTests()
     {
-        _root = Path.Combine(_temp.Path, "tree");
-        _locks = Path.Combine(_temp.Path, "locks");
-        Directory.CreateDirectory(_root);
-        Directory.CreateDirectory(_locks);
-    }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
+        _root = Path.Combine(_memory.Root, "kw", "tree");
+        _locks = Path.Combine(_memory.Root, "kw", "locks");
+        _memory.CreateDirectory(_root);
+        _memory.CreateDirectory(_locks);
     }
 
     [Fact]
@@ -59,7 +59,7 @@ public sealed class WorktreeIndexGuardTests : IDisposable
     public void AnExistingIndexIsSyncedAndIsReadyButNotCreated()
     {
         Govern(Governed);
-        Directory.CreateDirectory(Path.Combine(_root, ".codegraph"));
+        _memory.CreateDirectory(Path.Combine(_root, ".codegraph"));
         ScriptedProcessExecutor executor = Codegraph();
 
         WorktreeIndexOutcome outcome = Ensure(executor);
@@ -78,7 +78,7 @@ public sealed class WorktreeIndexGuardTests : IDisposable
     public void AFolderCodeGraphSaysIsNotInitialisedFallsBackToInitAndIsReady()
     {
         Govern(Governed);
-        Directory.CreateDirectory(Path.Combine(_root, ".codegraph"));
+        _memory.CreateDirectory(Path.Combine(_root, ".codegraph"));
         ScriptedProcessExecutor executor = new(startInfo => startInfo.FileName switch
         {
             "git" => DoctorHarness.Ok(),
@@ -100,31 +100,16 @@ public sealed class WorktreeIndexGuardTests : IDisposable
     [Fact]
     public void AnUnreadableConfigurationIsAFailedIndexNotACrash()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("The test removes read permission with a Unix file mode.");
-            return;
-        }
-
         Govern(Governed);
         string config = Path.Combine(_root, ".kyber-weave", "kyber-weave.yml");
-        File.SetUnixFileMode(config, UnixFileMode.None);
-        try
-        {
-            if (CanStillRead(config))
-            {
-                Assert.Skip("File permissions are not enforced for this user, as when the suite runs as root.");
-            }
+        _memory.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.ReadAllBytes) && operation.Path == config,
+            new UnauthorizedAccessException("Access to the path is denied."));
 
-            WorktreeIndexOutcome outcome = Ensure(Codegraph());
+        WorktreeIndexOutcome outcome = Ensure(Codegraph());
 
-            Assert.Equal(WorktreeIndexStatus.Failed, outcome.Status);
-            Assert.Contains(outcome.Checks, check => !check.Passed);
-        }
-        finally
-        {
-            File.SetUnixFileMode(config, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
+        Assert.Equal(WorktreeIndexStatus.Failed, outcome.Status);
+        Assert.Contains(outcome.Checks, check => !check.Passed);
     }
 
     [Fact]
@@ -197,7 +182,7 @@ public sealed class WorktreeIndexGuardTests : IDisposable
     [Fact]
     public void ARepositoryWithoutTheHostConfigurationIsNotGovernedAndStartsNoCodeGraphChild()
     {
-        Directory.CreateDirectory(Path.Combine(_root, "docs"));
+        _memory.CreateDirectory(Path.Combine(_root, "docs"));
         ScriptedProcessExecutor executor = Codegraph();
 
         WorktreeIndexOutcome outcome = Ensure(executor);
@@ -220,30 +205,28 @@ public sealed class WorktreeIndexGuardTests : IDisposable
         Assert.Empty(executor.CallsTo("codegraph"));
     }
 
-    private static bool CanStillRead(string path)
-    {
-        try
-        {
-            _ = File.ReadAllText(path);
-            return true;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return false;
-        }
-    }
-
     private void Govern(string yaml, bool createDocs = true)
     {
         string directory = Path.Combine(_root, ".kyber-weave");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml);
+        _memory.CreateDirectory(directory);
+        _memory.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml);
+        _config.WriteRepositoryConfig(_root, yaml);
         if (createDocs)
-            Directory.CreateDirectory(Path.Combine(_root, "docs"));
+            _memory.CreateDirectory(Path.Combine(_root, "docs"));
     }
 
-    private WorktreeIndexOutcome Ensure(ScriptedProcessExecutor executor) =>
-        DoctorTestServices.WorktreeIndex.Ensure(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
+    private WorktreeIndexOutcome Ensure(ScriptedProcessExecutor executor)
+    {
+        InMemoryDoctorFileSystem files = new(_memory);
+        CodeGraphIndexProvisioner provisioner = new(
+            files,
+            new FakeCodeGraphIndexWorkspace(),
+            new FakePathResolver(_memory),
+            new FakeProcessEnvironment(currentDirectory: Path.Combine(_memory.Root, "kw", "work")),
+            new FakeTimeProvider());
+        WorktreeIndexEnsurer ensurer = new(provisioner, files, new ConfigFileToolSettings(_config));
+        return ensurer.Ensure(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
+    }
 
     /// <summary>A CodeGraph that answers every verb healthily, except that each named verb exits 1.</summary>
     private static ScriptedProcessExecutor Codegraph(params string[] failingVerbs) =>

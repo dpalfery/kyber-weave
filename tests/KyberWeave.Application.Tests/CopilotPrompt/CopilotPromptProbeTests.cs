@@ -1,10 +1,10 @@
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Paths;
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.CopilotPrompt;
@@ -14,22 +14,19 @@ namespace KyberWeave.Tests.CopilotPrompt;
 /// the stable build's settings point at it, and the newest AgentHost log shows the override in use.
 /// </summary>
 /// <remarks>
-/// The probe reads a real directory tree under a temp home. Log lines are fixtures; the probe never runs VS Code.
+/// The probe reads an in-memory directory tree under a fake home. Log lines are fixtures; the probe never runs VS Code.
 /// </remarks>
-public sealed class CopilotPromptProbeTests : IDisposable
+public sealed class CopilotPromptProbeTests
 {
     private const string ValidPrompt = "systemPrompt: |\n  Probe fixture prompt.\n";
     private const string FixCommand = "kyber-weave squad copilot-prompt install";
     private const string ReplaceLine = "[Copilot:abc] Resolved system message: mode=replace (content length 120)";
     private const string AppendLine = "[Copilot:abc] Resolved system message: mode=append (content length 120)";
 
-    private readonly TempDirectory _home = new();
+    private static readonly string Home = Path.Combine(new InMemoryFileSystem().Root, "home");
 
-    public void Dispose() => _home.Dispose();
-
-    private static PhysicalPathResolver RealPaths { get; } = new(new PhysicalFileSystem());
-
-    private string Home => _home.Path;
+    private readonly FakeDoctorFileSystem _files = new();
+    private readonly FakePathResolver _paths = FakePathResolver.OverEmptyFileSystem();
 
     private string PromptPath => CopilotPromptFile.InstalledPath(Home);
 
@@ -38,29 +35,27 @@ public sealed class CopilotPromptProbeTests : IDisposable
     private string UserDataDirectory => VsCodeUserSettingsPaths.UserDataDirectory(VsCodeFlavour.Stable, Home, null, OSPlatform.OSX);
 
     private IReadOnlyList<DoctorCheck> Run(DoctorMode mode = DoctorMode.Check) =>
-        CopilotPromptProbe.Run(mode, Home, null, OSPlatform.OSX, DoctorTestServices.Files, RealPaths, Home);
+        CopilotPromptProbe.Run(mode, Home, null, OSPlatform.OSX, _files, _paths, Home);
 
     private void WritePrompt(string text)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(PromptPath)!);
-        File.WriteAllText(PromptPath, text);
+        _files.WithFile(PromptPath, text);
     }
 
     /// <summary>Writes the stable build's settings so its <c>*</c> override entry points at the installed prompt file.</summary>
     private void PointSettingsAtPrompt()
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
         string file = JsonSerializer.Serialize(PromptPath);
         string json = "{ \"chat.agentHost.copilot.modelCapabilityOverrides\": { \"*\": { \"promptOverrideFile\": " + file + " } } }";
-        File.WriteAllText(SettingsPath, json);
+        _files.WithFile(SettingsPath, json);
     }
 
     /// <summary>Writes one AgentHost log under a timestamp folder of the stable build's user data.</summary>
     private void WriteLog(string timestamp, params string[] lines)
     {
         string directory = Path.Combine(UserDataDirectory, "logs", timestamp);
-        Directory.CreateDirectory(directory);
-        File.WriteAllLines(Path.Combine(directory, "agenthost.log"), lines);
+        _ = _files.WithDirectory(Path.Combine(UserDataDirectory, "logs")).WithDirectory(directory);
+        _files.WithFile(Path.Combine(directory, "agenthost.log"), string.Concat(lines.Select(line => line + "\n")));
     }
 
     /// <summary>A fully installed override: a valid prompt file and settings that point at it.</summary>
@@ -131,8 +126,8 @@ public sealed class CopilotPromptProbeTests : IDisposable
         byte[] before = System.Text.Encoding.UTF8.GetBytes(new string('x', 99) + "\n");
         byte[] after = System.Text.Encoding.UTF8.GetBytes(new string('y', tailBytes - replace.Length - 1) + "\n");
         string directory = Path.Combine(UserDataDirectory, "logs", "2026-11-10T09-00-00");
-        Directory.CreateDirectory(directory);
-        File.WriteAllBytes(Path.Combine(directory, "agenthost.log"), [.. before, .. replace, .. after]);
+        _ = _files.WithDirectory(Path.Combine(UserDataDirectory, "logs")).WithDirectory(directory);
+        _files.WithFile(Path.Combine(directory, "agenthost.log"), [.. before, .. replace, .. after]);
 
         IReadOnlyList<DoctorCheck> checks = Run();
 
@@ -189,7 +184,7 @@ public sealed class CopilotPromptProbeTests : IDisposable
         Assert.Equal(failures, lenient.Count(check => check.Reason?.StartsWith("warning:", StringComparison.Ordinal) == true));
     }
 
-    /// <summary>Tokens stand for host-absolute paths under the temp home: "{a}" and "{b}" are two different directories.</summary>
+    /// <summary>Tokens stand for host-absolute paths under the fake home: "{a}" and "{b}" are two different directories.</summary>
     [Theory]
     [InlineData("{a}", "{b}", "{a}")]
     [InlineData(null, "{b}", "{b}")]
@@ -231,11 +226,10 @@ public sealed class CopilotPromptProbeTests : IDisposable
         WritePrompt(ValidPrompt);
         string xdgConfigHome = Path.Combine(Home, "xdg-config");
         string settings = VsCodeUserSettingsPaths.SettingsFile(VsCodeFlavour.Stable, Home, null, OSPlatform.Linux, xdgConfigHome);
-        Directory.CreateDirectory(Path.GetDirectoryName(settings)!);
         string file = JsonSerializer.Serialize(PromptPath);
-        File.WriteAllText(settings, "{ \"chat.agentHost.copilot.modelCapabilityOverrides\": { \"*\": { \"promptOverrideFile\": " + file + " } } }");
+        _files.WithFile(settings, "{ \"chat.agentHost.copilot.modelCapabilityOverrides\": { \"*\": { \"promptOverrideFile\": " + file + " } } }");
 
-        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, DoctorTestServices.Files, RealPaths, Home, xdgConfigHome);
+        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, _files, _paths, Home, xdgConfigHome);
 
         Assert.Contains(checks, check => check.Id == "copilot.prompt.stable.setting" && check.Passed);
     }
