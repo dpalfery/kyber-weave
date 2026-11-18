@@ -27,6 +27,7 @@ public sealed class SquadDoctorSeamTests
     private readonly InMemoryFileSystem _files = new();
     private readonly RecordingMigration _migration = new();
     private readonly RecordingSourceLocator _locator = new();
+    private readonly StubDevinOverlap _devinOverlap = new();
 
     /// <summary>A workspace with no Devin marker in the injected file system is reported as not checked.</summary>
     [Fact]
@@ -53,15 +54,12 @@ public sealed class SquadDoctorSeamTests
         Assert.DoesNotContain("not checked (no '.devin/'", output, StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// The Devin check reads its configuration through the injected file system: a switch that exists only there is
-    /// what the inspector sees, and the warning follows.
-    /// </summary>
+    /// <summary>The Devin check reports what the inspector finds: the file reading lives behind that port.</summary>
     [Fact]
-    public void Execute_DevinConfigurationInTheInjectedFileSystem_IsReadThroughTheSeam()
+    public void Execute_DevinInspectorReportsAnOverlap_WarnsAboutIt()
     {
         _files.CreateDirectory($"{Workspace}/.devin");
-        _files.WriteAllText($"{Workspace}/.devin/config.json", "read_config_from");
+        _devinOverlap.Report = new([new DevinImportOverlapEntry(".claude/skills", "skill", "claude", ["review"])]);
 
         _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
 
@@ -197,7 +195,7 @@ public sealed class SquadDoctorSeamTests
             _locator,
             new UnusedSourceLoader(),
             new NoShadowing(),
-            new ReadingDevinOverlap(),
+            _devinOverlap,
             new NoZCodeMcp(),
             new SquadDoctorOptions(executor, WorkingDirectory: null),
             SquadFileSystemPathSemantics.Instance,
@@ -372,19 +370,11 @@ public sealed class SquadDoctorSeamTests
             IReadOnlySet<string> managedPaths) => [];
     }
 
-    /// <summary>Reports one overlap when the caller's reader returns the import switch, so the test proves the read.</summary>
-    private sealed class ReadingDevinOverlap : IDevinImportOverlapInspector
+    private sealed class StubDevinOverlap : IDevinImportOverlapInspector
     {
-        public DevinImportOverlapReport Inspect(
-            string workingDirectory,
-            string? devinUserRoot,
-            Func<string, string?> readFileText)
-        {
-            string? importSetting = readFileText($"{workingDirectory}/.devin/config.json");
-            return importSetting is null
-                ? new([])
-                : new([new DevinImportOverlapEntry(".claude/skills", "skill", importSetting, ["review"])]);
-        }
+        public DevinImportOverlapReport Report { get; set; } = new([]);
+
+        public DevinImportOverlapReport Inspect(string workingDirectory, string? devinUserRoot) => Report;
     }
 
     private sealed class NoZCodeMcp : IZCodeMcpInspector
@@ -392,8 +382,7 @@ public sealed class SquadDoctorSeamTests
         public ZCodeMcpConfigurationReport Inspect(
             IReadOnlyCollection<string> requiredServers,
             string zcodeStorageRoot,
-            string workingDirectory,
-            Func<string, string?> readFileText) => new([], [], []);
+            string workingDirectory) => new([], [], []);
     }
 
     private static NotSupportedException Unused() => new("this collaborator is not reached by the test's workspace");

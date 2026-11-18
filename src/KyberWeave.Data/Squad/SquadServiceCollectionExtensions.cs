@@ -75,8 +75,14 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<IDevinImportOverlapInspector, FileDevinImportOverlapInspector>();
-        services.TryAddSingleton<IZCodeMcpInspector, FileZCodeMcpInspector>();
+        services.TryAddSingleton<IDevinImportOverlapInspector>(sp => new DevinImportOverlap(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<IZCodeMcpInspector>(sp => new ZCodeMcpConfiguration(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadHookJsonFile, FileSquadHookJsonFile>();
         services.TryAddSingleton<ISquadHarnessStartInfoBuilder>(sp => new SquadHarnessLauncher(
             sp.GetRequiredService<IFileSystem>(),

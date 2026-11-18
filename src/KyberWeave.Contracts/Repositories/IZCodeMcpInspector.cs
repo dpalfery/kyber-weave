@@ -9,11 +9,9 @@ public interface IZCodeMcpInspector
     /// <param name="requiredServers">Server names the canonical toolchain declares.</param>
     /// <param name="zcodeStorageRoot">The resolved ZCode storage root.</param>
     /// <param name="workingDirectory">The directory a ZCode session would start in.</param>
-    /// <param name="readFileText">Reads a file's text, or null when absent or unreadable.</param>
     /// <returns>The configured and missing servers.</returns>
     ZCodeMcpConfigurationReport Inspect(
         IReadOnlyCollection<string> requiredServers,
         string zcodeStorageRoot,
-        string workingDirectory,
-        Func<string, string?> readFileText);
+        string workingDirectory);
 }
