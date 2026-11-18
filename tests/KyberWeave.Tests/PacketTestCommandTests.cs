@@ -21,7 +21,7 @@ public sealed class PacketTestCommandTests
 
     private static readonly IServiceProvider Services = DocsTestCommands.Services();
 
-    private const string Source = "src/KyberWeave.Core/Review/TaskGateSelection.cs";
+    private const string Source = "src/KyberWeave.Application/Review/TaskGateSelectionService.cs";
 
     /// <summary>The section <c>docs packet</c> prints, over the same services the command takes from the container.</summary>
     private static string? Render(
@@ -44,6 +44,9 @@ public sealed class PacketTestCommandTests
 
     private static KyberWeaveConfig Config() => KyberWeaveConfigLoader.LoadFromYaml("""
         review:
+          test-map:
+            "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
+              - KyberWeave.Tests.TaskGateSelectionTests
           task-gates:
             csharp-dev:
               - id: tests
