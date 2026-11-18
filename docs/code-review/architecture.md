@@ -605,7 +605,7 @@ review:
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 
 Both `run` and `fix` are argv for the same reason `review.gates` is. Three tokens expand, and only
-in `TaskGateSelection`: `{changed}` must be an entire list element and becomes one argument per
+in `TaskGateSelectionService`: `{changed}` must be an entire list element and becomes one argument per
 changed file the gate's `include` matches; `{task}` is the `--task` slug and may sit inside an
 argument; `{tests}` is the fully qualified test classes that cover the change, described under
 [the tests a task gate runs](#the-tests-a-task-gate-runs). The program, the first element of

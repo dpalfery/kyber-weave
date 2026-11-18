@@ -19,6 +19,7 @@ public sealed class DeletedLocatorNamesInDocsTests
     /// <summary>The document never names the deleted locator on its own; the surviving type carries the name.</summary>
     [Theory]
     [InlineData("docs/code-review/architecture.md", "GateCatalogue", "GateCatalogueRenderer")]
+    [InlineData("docs/code-review/architecture.md", "TaskGateSelection", "TaskGateSelectionService")]
     public void TheDocumentNamesTheSurvivingType(string document, string deleted, string surviving)
     {
         string text = Corpus.ReadText(document);
