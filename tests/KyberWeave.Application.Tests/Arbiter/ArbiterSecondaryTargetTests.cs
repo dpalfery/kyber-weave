@@ -9,14 +9,15 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review-round contract for secondary derivation on a multi-dispatch event: <c>delegate.model</c> is derived
 /// for each dispatch by that dispatch's own target, not by the event's top-level target.
 /// </summary>
-public sealed class ArbiterSecondaryTargetTests : IDisposable
+public sealed class ArbiterSecondaryTargetTests
 {
     private const string ScopeRule = "KW-ARB-SCOPE-002";
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
@@ -24,11 +25,7 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
     private const string NonImplementation = "code-reviewer";
     private const string Implementation = "dev-medium";
 
-    private readonly TempDirectory _repo = new();
-
-    public void Dispose() => _repo.Dispose();
-
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     private sealed class PlanFacts : IArbiterPlanReader
     {
@@ -55,17 +52,11 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
-    private ArbiterEvaluator Evaluator() => new(
-        FakeArbiterProvider.AnsweringByRule((ScopeRule, "within-task")),
-        _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
-        new NoGitFacts(),
-        new PlanFacts(),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-        TimeProvider.System, new FakeIdGenerator());
+    private ArbiterEvaluator Evaluator() =>
+        _arbiter.Evaluator(
+            FakeArbiterProvider.AnsweringByRule((ScopeRule, "within-task")),
+            planReader: new PlanFacts(),
+            gitFacts: new NoGitFacts());
 
     /// <summary>A multi-dispatch event. The event's own target is left unset: each dispatch names its own.</summary>
     private ArbiterEvent MultiDispatch(string first, string second) => new()
@@ -75,7 +66,7 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
-        Cwd = _repo.Path,
+        Cwd = "/repo",
         IsDispatch = true,
         Dispatches =
         [

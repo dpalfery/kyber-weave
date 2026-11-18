@@ -9,8 +9,9 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for the shadow state of a primary rule: a shadow rule is log-only, whichever trigger it
@@ -22,7 +23,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// Secondary rules already behave this way (see <c>ArbiterSecondaryTriggerTests</c>). The primary
 /// path does not read <c>Shadow</c> at all, so both tests below fail on their outcome assertions.
 /// </remarks>
-public sealed class ArbiterPrimaryShadowTests : IDisposable
+public sealed class ArbiterPrimaryShadowTests
 {
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
     private const string LensPrompt = "KYBER-ARBITER: true\nLENS: correctness\n\nApply the lens to the change.";
@@ -30,14 +31,7 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
     private const string ChoiceRuleId = "KW-ARB-ASK-001";
     private const string LensRuleId = "KW-ARB-LENS-002";
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
-
-    private string ArbiterDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     /// <summary>Adds the review facts a git read would add to a lens spawn: a Markdown-only change.</summary>
     private sealed class MarkdownOnlyGitFacts : IArbiterGitFacts
@@ -70,18 +64,18 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
         return new ArbiterEvaluator(
             provider,
             _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
+            _arbiter.LedgerStore,
+            _arbiter.DecisionLog,
             gitFacts,
             new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+            new FileArbiterModelTargetsReader(_arbiter.Files),
+            _arbiter.GateReports(),
+            _arbiter.State,
             new FixedClock(fixedNow),
             new FakeIdGenerator());
     }
 
-    private IReadOnlyList<ArbiterDecisionRecord> Records() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Records() => _arbiter.Records;
 
     private static KyberWeaveConfig ConfigWith(IReadOnlyList<ArbiterRule> rules) =>
         new()

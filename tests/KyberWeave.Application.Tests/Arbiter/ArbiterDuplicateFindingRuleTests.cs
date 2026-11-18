@@ -11,8 +11,9 @@ using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using Microsoft.Extensions.Time.Testing;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 3.5: duplicate findings. <c>REVIEW_RUN</c> names the review a dispatch belongs to,
@@ -37,7 +38,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// <c>ArbiterRunStore</c> (task 3.1), one stored item per finding.
 /// </para>
 /// </remarks>
-public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
+public sealed class ArbiterDuplicateFindingRuleTests
 {
     private const string DuplicateRule = "KW-ARB-DUP-001";
     private const string SameDefect = "same-defect";
@@ -53,18 +54,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\nREFUTE: " + RefuteValue + "\n\n" +
         "id: " + Refuted + "\nfile: src/Widget.cs\nline: 12\nclaim: naming";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-duplicate-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
@@ -160,17 +150,17 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             Session = "session-1",
         };
 
-    private static ArbiterEvaluator Evaluator(string arbiterDirectory, IArbiterProvider provider) =>
+    private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
         new(
             provider,
             _ => null,
-            RealArbiterState.Ledger(arbiterDirectory),
-            RealArbiterState.Decisions(arbiterDirectory),
+            _arbiter.LedgerStore,
+            _arbiter.DecisionLog,
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+            new FileArbiterModelTargetsReader(_arbiter.Files),
+            _arbiter.GateReports(),
+            _arbiter.State,
             new FixedClock(Now),
             new FakeIdGenerator(),
             (_, _) => []);
@@ -181,7 +171,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
     private async Task SeedAsync(string reviewRun, params string[] findings)
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
+        ArbiterRunStore store = _arbiter.RunStore(clock: new FakeTimeProvider(Now));
         foreach (string finding in findings)
         {
             ArbiterStoreStatus status = await store.AppendFindingAsync(reviewRun, finding);
@@ -191,7 +181,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
     private async Task<ArbiterEvaluationResult> RefuteAsync(IArbiterProvider provider, string runHeader = "KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n")
     {
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
         return await evaluator.EvaluateAsync(Refute(runHeader), ConfigWith([Enforced(DuplicateRule)]));
     }
 
@@ -318,7 +308,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             Prior("prior-old", "src/Widget.cs", 10),
             Prior("prior-new", "src/Widget.cs", 11));
         BatchDuplicateProvider provider = new(_ => SameDefect);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
@@ -327,7 +317,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
         Assert.Equal(
             [Prior("prior-old", "src/Widget.cs", 10), Prior("prior-new", "src/Widget.cs", 11)],
             provider.Asked);
-        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
+        ArbiterDecisionRecord record = Assert.Single(_arbiter.Records);
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
         Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-old decision={record.Id}", DuplicateLineOf(record));
     }
@@ -344,13 +334,13 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             Prior("prior-a", "src/Widget.cs", 10),
             Prior("prior-b", "src/Widget.cs", 11));
         BatchDuplicateProvider provider = new(text => text.Contains("prior-b", StringComparison.Ordinal) ? SameDefect : DifferentDefect);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
 
         Assert.Equal(1, provider.CallCount);
-        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
+        ArbiterDecisionRecord record = Assert.Single(_arbiter.Records);
         Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-b decision={record.Id}", DuplicateLineOf(record));
     }
 
@@ -399,7 +389,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
         BatchDuplicateProvider provider = new(_ => SameDefect);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new ScoredProvider(provider, 0.5));
+        ArbiterEvaluator evaluator = Evaluator(new ScoredProvider(provider, 0.5));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
@@ -416,7 +406,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
         BatchDuplicateProvider provider = new(_ => SameDefect);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Shipped(DuplicateRule)]));
@@ -432,13 +422,13 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     {
         await SeedAsync(ThisRun, Prior("prior-1", "src/Widget.cs", 10));
         BatchDuplicateProvider provider = new(_ => SameDefect);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new ScoredProvider(provider, 0.95));
+        ArbiterEvaluator evaluator = Evaluator(new ScoredProvider(provider, 0.95));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Refute("KYBER-ARBITER: true\nREVIEW_RUN: " + ThisRun + "\n"), ConfigWith([Enforced(DuplicateRule)]));
 
         Assert.Equal(RuleEffects.Duplicate, Assert.Single(result.Dispatches).Outcome);
-        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
+        ArbiterDecisionRecord record = Assert.Single(_arbiter.Records);
         Assert.Equal($"ARBITER_DUPLICATE: {Refuted} of prior-1 decision={record.Id}", DuplicateLineOf(record));
     }
 
@@ -452,7 +442,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     [Fact]
     public async Task EachRefuterReturnRecordsItsOutcomeAgainstItsFindingIdInTheStore()
     {
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, new BatchDuplicateProvider(_ => DifferentDefect));
+        ArbiterEvaluator evaluator = Evaluator(new BatchDuplicateProvider(_ => DifferentDefect));
         ArbiterEvent returned = new()
         {
             Harness = "claude",
@@ -467,7 +457,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(returned, ConfigWith([Enforced(DuplicateRule)]));
 
-        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFindings(ThisRun);
+        IReadOnlyList<string> stored = _arbiter.RunStore(clock: new FakeTimeProvider(Now)).ReadFindings(ThisRun);
         string item = Assert.Single(stored);
         Assert.Contains(Refuted, item, StringComparison.Ordinal);
     }
@@ -510,7 +500,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             "id: correctness/nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept",
             "id: correctness/nit-2\nfile: src/Widget.cs\nline: 12\nclaim: naming\nstatus: kept");
         BatchDuplicateProvider provider = new(_ => DifferentDefect);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
         ArbiterEvent refute = new()
         {
             Harness = "claude",

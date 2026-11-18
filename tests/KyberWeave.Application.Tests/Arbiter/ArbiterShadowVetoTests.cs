@@ -4,30 +4,22 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using static KyberWeave.Tests.Arbiter.ArbiterEvaluatorFixtures;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review finding 589-7: a shadow rule is log-only, so it must not change the outcome. A shadow rule's
 /// neutral effect used to join the combination, where it vetoed a real answer in a family that needs
 /// every rule to agree (shortcut, advice, gate). Shadow entries now stay out of the combination.
 /// </summary>
-public sealed class ArbiterShadowVetoTests : IDisposable
+public sealed class ArbiterShadowVetoTests
 {
     private const string Answer = "answer";
     private const string Applies = "applies";
     private const string Skip = "skip";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-shadow-veto-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
+    private readonly InMemoryArbiterState _arbiter = new();
 
     public static TheoryData<string, string> SecondaryTriggerAndRealEffect => new()
     {
@@ -45,8 +37,7 @@ public sealed class ArbiterShadowVetoTests : IDisposable
             AskRule("KW-ARB-SHADOW-907", secondary, Answer, realEffect, shadow: true),
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(
-            _root,
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
             provider,
             (trigger, ev) => string.Equals(trigger, "delegate", StringComparison.Ordinal) ? [secondary] : [])
             .EvaluateAsync(DelegateEvent(), config);
@@ -71,7 +62,8 @@ public sealed class ArbiterShadowVetoTests : IDisposable
             AskRule("KW-ARB-GATE-SHADOW-907", "gate.select", Applies, RuleEffects.Applies, shadow: true),
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(_root, provider)
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
+            provider)
             .EvaluateAsync(DelegateEvent(target: "gate"), config);
 
         Assert.Equal(RuleEffects.NotApplicable, result.Dispatches[0].Outcome);
@@ -91,7 +83,8 @@ public sealed class ArbiterShadowVetoTests : IDisposable
             AskRule("KW-ARB-GATE-ONLY-907", "gate.select", Applies, RuleEffects.Applies, shadow: true),
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(_root, provider)
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
+            provider)
             .EvaluateAsync(DelegateEvent(target: "gate"), config);
 
         Assert.Equal(ArbiterTriggerFamilies.NeutralEffect(ArbiterTriggerFamily.Gate), result.Dispatches[0].Outcome);
@@ -111,8 +104,7 @@ public sealed class ArbiterShadowVetoTests : IDisposable
         ArbiterRule shadow = real with { Id = "KW-ARB-SHORT-SHADOW-907", Shadow = true };
         KyberWeaveConfig config = ConfigWith([real, shadow]);
 
-        ArbiterEvaluationResult result = await Evaluator(
-            _root,
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
             provider,
             (trigger, ev) => string.Equals(trigger, "delegate", StringComparison.Ordinal) ? ["shortcut"] : [])
             .EvaluateAsync(DelegateEvent(), config);

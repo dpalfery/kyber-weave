@@ -10,8 +10,9 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 2.3: the two shipped model-targeting rules on <c>delegate.model</c>.
@@ -24,7 +25,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// assert on the <c>delegate.model</c> decision record the evaluator writes. The ladder profile
 /// precedence (item 3) is observed on the record's <c>model</c> block, which task 2.5 writes.
 /// </remarks>
-public sealed class ArbiterModelTargetRulesTests : IDisposable
+public sealed class ArbiterModelTargetRulesTests
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string LadderRule = "KW-ARB-LADDER-001";
@@ -35,11 +36,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
 
     private static readonly DateTimeOffset At = new(2026, 11, 10, 9, 0, 0, TimeSpan.Zero);
 
-    private readonly TempDirectory _repo = new();
-
-    public void Dispose() => _repo.Dispose();
-
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     /// <summary>Answers the rules it is told about, with optional scores; a rule it is not told about gets no answer.</summary>
     private sealed class ScriptedProvider : IArbiterProvider
@@ -147,13 +144,13 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
+        _arbiter.LedgerStore,
+        _arbiter.DecisionLog,
         new NoGitFacts(),
         new PlanFacts(_recordedDifficulty),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+        new FileArbiterModelTargetsReader(_arbiter.Files),
+            _arbiter.GateReports(),
+            _arbiter.State,
         TimeProvider.System, new FakeIdGenerator(),
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? [Trigger]
@@ -167,7 +164,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
-        Cwd = _repo.Path,
+        Cwd = InMemoryArbiterState.Directory,
         ObservesReturns = observesReturns,
         IsDispatch = true,
     };
@@ -180,7 +177,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
         await Evaluator(provider).EvaluateAsync(
             Dispatch(observesReturns), Config(mode), null, TestContext.Current.CancellationToken);
 
-        IReadOnlyList<ArbiterDecisionRecord> records = RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+        IReadOnlyList<ArbiterDecisionRecord> records = _arbiter.Records;
         ArbiterDecisionRecord primary = Assert.Single(records, record => record.Trigger == "delegate");
         string blockers = string.Join(", ", primary.Rules.Where(rule => rule.Effect != "allow").Select(rule => $"{rule.Id}={rule.Answer}"));
         Assert.True(primary.Outcome == "allow", $"fixture precondition: primary outcome {primary.Outcome}: {blockers}");
@@ -192,7 +189,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
 
     private async Task SeedAttemptAsync(string profile, string result, bool recordProfile = true)
     {
-        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        InFlightLedger ledger = _arbiter.LedgerStore;
         await ledger.AppendAsync(new ArbiterLedgerEvent("pre-1", At, "hook", "claude", null, ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
@@ -210,7 +207,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
 
     private void WriteModelTargetsTable()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
+        _arbiter.Files.CreateDirectory(InMemoryArbiterState.Directory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             "claude",
@@ -226,8 +223,8 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
             {
                 ["dev-medium"] = new("general", "t-general"),
             });
-        File.WriteAllText(
-            Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
+        _arbiter.Files.WriteAllText(
+            Path.Combine(InMemoryArbiterState.Directory, "model-targets.claude.json"),
             System.Text.Json.JsonSerializer.Serialize(table));
     }
 
@@ -385,7 +382,7 @@ public sealed class ArbiterModelTargetRulesTests : IDisposable
 
         await Evaluator(provider).EvaluateAsync(Dispatch(), Config("off"), null, TestContext.Current.CancellationToken);
 
-        IReadOnlyList<ArbiterDecisionRecord> records = RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+        IReadOnlyList<ArbiterDecisionRecord> records = _arbiter.Records;
         string[] ruleIds = [DifficultyRule, LadderRule];
         Assert.DoesNotContain(records.SelectMany(record => record.Rules), rule => ruleIds.Contains(rule.Id));
     }
