@@ -1,5 +1,6 @@
 using KyberWeave.Application;
 using KyberWeave.Application.Doctor;
+using KyberWeave.Kernel.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace KyberWeave.Tests;
@@ -11,4 +12,7 @@ internal static class DoctorTestServices
 
     /// <summary>Installs and inspects the git post-checkout hook.</summary>
     public static PostCheckoutHookInstaller PostCheckout { get; } = Provider.GetRequiredService<PostCheckoutHookInstaller>();
+
+    /// <summary>The file-system seam the container registers, for a test that runs against the real disk.</summary>
+    public static IDoctorFileSystem Files { get; } = Provider.GetRequiredService<IDoctorFileSystem>();
 }

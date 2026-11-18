@@ -3,9 +3,9 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Docs.Mcp;
-using KyberWeave.Core.Doctor;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Domain.CopilotPrompt;
+using KyberWeave.Kernel.FileSystem;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -48,16 +48,19 @@ internal sealed record CopilotPromptEnvironment(
 public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
 {
     private readonly CopilotPromptEnvironment? _environment;
+    private readonly IDoctorFileSystem _files;
 
-    /// <summary>Creates the command for the real environment.</summary>
-    public CopilotPromptInstallCommand()
+    /// <summary>Creates the command over the file-system seam the container resolves.</summary>
+    public CopilotPromptInstallCommand(IDoctorFileSystem files)
     {
+        _files = files;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
-    internal CopilotPromptInstallCommand(CopilotPromptEnvironment environment)
+    internal CopilotPromptInstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
     {
         _environment = environment;
+        _files = files;
     }
 
     /// <inheritdoc />
@@ -100,7 +103,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         foreach (VsCodeFlavour flavour in targets)
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsFileRead read = DoctorFileSystem.ReadSettingsFile(file);
+            SettingsFileRead read = CopilotPromptCommandSupport.ReadSettingsFile(_files, file);
             if (read.Error is not null)
             {
                 refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
@@ -189,16 +192,19 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
 public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSettings>
 {
     private readonly CopilotPromptEnvironment? _environment;
+    private readonly IDoctorFileSystem _files;
 
-    /// <summary>Creates the command for the real environment.</summary>
-    public CopilotPromptUninstallCommand()
+    /// <summary>Creates the command over the file-system seam the container resolves.</summary>
+    public CopilotPromptUninstallCommand(IDoctorFileSystem files)
     {
+        _files = files;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
-    internal CopilotPromptUninstallCommand(CopilotPromptEnvironment environment)
+    internal CopilotPromptUninstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
     {
         _environment = environment;
+        _files = files;
     }
 
     /// <inheritdoc />
@@ -232,7 +238,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         foreach (VsCodeFlavour flavour in CopilotPromptCommandSupport.DetectedTargets(environment, requested))
         {
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsFileRead read = DoctorFileSystem.ReadSettingsFile(file);
+            SettingsFileRead read = CopilotPromptCommandSupport.ReadSettingsFile(_files, file);
             if (read.Error is not null)
             {
                 refusals.Add($"{file} could not be read, so it was left unchanged: {read.Error}");
@@ -328,16 +334,19 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
 public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
 {
     private readonly CopilotPromptEnvironment? _environment;
+    private readonly IDoctorFileSystem _files;
 
-    /// <summary>Creates the command for the real environment.</summary>
-    public CopilotPromptStatusCommand()
+    /// <summary>Creates the command over the file-system seam the container resolves.</summary>
+    public CopilotPromptStatusCommand(IDoctorFileSystem files)
     {
+        _files = files;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
-    internal CopilotPromptStatusCommand(CopilotPromptEnvironment environment)
+    internal CopilotPromptStatusCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
     {
         _environment = environment;
+        _files = files;
     }
 
     /// <inheritdoc />
@@ -374,7 +383,7 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
             }
 
             string file = CopilotPromptCommandSupport.SettingsFileOf(flavour, environment);
-            SettingsFileRead read = DoctorFileSystem.ReadSettingsFile(file);
+            SettingsFileRead read = CopilotPromptCommandSupport.ReadSettingsFile(_files, file);
             if (read.Error is not null)
             {
                 CopilotPromptCommandSupport.Say($"{label}: {Markup.Escape(file)} could not be read: {Markup.Escape(read.Error)}");
@@ -506,6 +515,14 @@ internal static class CopilotPromptCommandSupport
     internal static bool PointsAtPrompt(CopilotOverrideState? state, string promptPath) =>
         state?.StarPromptFile is not null
         && CopilotPromptFile.SamePath(state.StarPromptFile, promptPath);
+
+    /// <summary>Reads one VS Code settings file through the file-system seam, as doctor does.</summary>
+    internal static SettingsFileRead ReadSettingsFile(IDoctorFileSystem files, string settingsFile) =>
+        CopilotOverrideSettings.ReadFile(
+            settingsFile,
+            files.DirectoryExists,
+            files.IsPresentFile,
+            files.ReadAllBytes);
 
     /// <summary>Writes one line of console output. Callers escape any value from a file or the operator.</summary>
     internal static void Say(string markup) =>

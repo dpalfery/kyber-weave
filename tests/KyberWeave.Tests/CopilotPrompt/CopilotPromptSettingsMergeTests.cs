@@ -61,13 +61,40 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
 
     private CapturedConsoleExecution<int> Install(CopilotPromptSettings settings, bool interactive = true)
     {
-        CopilotPromptInstallCommand command = new(NewEnvironment(interactive));
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files);
         return ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
+    }
+
+    /// <summary>
+    /// The settings document is read through the injected file-system seam, not the process disk: the fake holds a
+    /// foreign entry and the real settings file does not exist, so only the injected read can refuse the install.
+    /// </summary>
+    [Fact]
+    public void TheSettingsFileIsReadThroughTheInjectedFileSystemSeam()
+    {
+        DetectFlavour(VsCodeFlavour.Stable);
+        FakeDoctorFileSystem files = new();
+        files.WithFile(
+            SettingsPath(VsCodeFlavour.Stable),
+            $$"""
+            {
+              "{{ModelOverridesSetting}}": {
+                "*": { "promptOverrideFile": "/someone/elses/prompt.md" }
+              }
+            }
+            """);
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive: true), files);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
+            () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains("not Kyber-Weave's", execution.Output, StringComparison.Ordinal);
     }
 
     private CapturedConsoleExecution<int> Uninstall(CopilotPromptSettings settings, bool interactive = true)
     {
-        CopilotPromptUninstallCommand command = new(NewEnvironment(interactive));
+        CopilotPromptUninstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files);
         return ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
     }
 
@@ -454,7 +481,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_NoHomeDirectory_RefusesAndWritesNothing()
     {
         DetectFlavour(VsCodeFlavour.Stable);
-        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false));
+        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false), DoctorTestServices.Files);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));

@@ -34,7 +34,7 @@ public sealed class CopilotPromptProbeTests : IDisposable
     private string UserDataDirectory => VsCodeUserSettingsPaths.UserDataDirectory(VsCodeFlavour.Stable, Home, null, OSPlatform.OSX);
 
     private IReadOnlyList<DoctorCheck> Run(DoctorMode mode = DoctorMode.Check) =>
-        CopilotPromptProbe.Run(mode, Home, null, OSPlatform.OSX, DoctorFileSystem.Default);
+        CopilotPromptProbe.Run(mode, Home, null, OSPlatform.OSX, DoctorTestServices.Files);
 
     private void WritePrompt(string text)
     {
@@ -231,7 +231,7 @@ public sealed class CopilotPromptProbeTests : IDisposable
         string file = JsonSerializer.Serialize(PromptPath);
         File.WriteAllText(settings, "{ \"chat.agentHost.copilot.modelCapabilityOverrides\": { \"*\": { \"promptOverrideFile\": " + file + " } } }");
 
-        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, DoctorFileSystem.Default, xdgConfigHome);
+        IReadOnlyList<DoctorCheck> checks = CopilotPromptProbe.Run(DoctorMode.Check, Home, null, OSPlatform.Linux, DoctorTestServices.Files, xdgConfigHome);
 
         Assert.Contains(checks, check => check.Id == "copilot.prompt.stable.setting" && check.Passed);
     }
