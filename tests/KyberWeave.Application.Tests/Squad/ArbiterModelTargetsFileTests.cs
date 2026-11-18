@@ -1,5 +1,6 @@
 using KyberWeave.Data.Arbiter;
-using KyberWeave.Data.Hooks;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -19,19 +20,17 @@ namespace KyberWeave.Tests;
 /// <see cref="ArbiterModelTargets.TryRead"/>. With the Arbiter disabled the render is byte-identical.
 /// RED: no model-targets table is emitted yet, so every table assertion fails.
 /// </summary>
-public sealed class ArbiterModelTargetsFileTests : IDisposable
+public sealed class ArbiterModelTargetsFileTests
 {
     private const string ProjectTableFile = "artifacts/arbiter/model-targets.claude.json";
     private const string ProjectOpenCodeTableFile = "artifacts/arbiter/model-targets.opencode.json";
     private const string GlobalTableSuffix = ".kyber-weave/arbiter/model-targets.claude.json";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new();
 
-    public void Dispose() => _temp.Dispose();
+    private static string ProjectRoot => ArbiterTestRoots.Under("project");
 
-    private string ProjectRoot => Path.Combine(_temp.Path, "project");
-
-    private string Home => Path.Combine(_temp.Path, "home");
+    private static string Home => ArbiterTestRoots.Under("home");
 
     private static SquadSource Canonical => TestSquadCorpus.CanonicalSource;
 
@@ -88,11 +87,11 @@ public sealed class ArbiterModelTargetsFileTests : IDisposable
                      file.RelativePath.StartsWith("artifacts/arbiter/", StringComparison.Ordinal)))
         {
             string path = Path.Combine(ProjectRoot, file.RelativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, file.Content.ToArray());
+            _files.CreateDirectory(Path.GetDirectoryName(path)!);
+            _files.WriteAllBytes(path, file.Content.ToArray());
         }
 
-        return new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(Path.Combine(ProjectRoot, "artifacts", "arbiter"), "claude");
+        return new FileArbiterModelTargetsReader(_files).TryRead(Path.Combine(ProjectRoot, "artifacts", "arbiter"), "claude");
     }
 
     [Fact]

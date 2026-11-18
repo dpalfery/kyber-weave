@@ -1,9 +1,8 @@
-using KyberWeave.Tests.Arbiter;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary><c>arbiter audit --plan</c> resolves its argument through the shared plan resolver, so any natural spelling selects the events carrying that plan.</summary>
 public sealed class ArbiterAuditPlanArgumentTests : IDisposable
@@ -14,9 +13,9 @@ public sealed class ArbiterAuditPlanArgumentTests : IDisposable
     private const string OnPlanBySlug = "0000000000000002-aaaaaaaa";
     private const string OffPlan = "0000000000000003-aaaaaaaa";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _host.Dispose();
 
     [Theory]
     [InlineData("job-status-cards", ".")]
@@ -27,7 +26,7 @@ public sealed class ArbiterAuditPlanArgumentTests : IDisposable
     {
         string root = Host();
 
-        CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => ArbiterTestServices.Command<ArbiterAuditCommand>().Execute(
+        ArbiterCommandRun run = _host.Run(() => _host.Command<ArbiterAuditCommand>().Execute(
             null!,
             new ArbiterSettings
             {
@@ -43,18 +42,16 @@ public sealed class ArbiterAuditPlanArgumentTests : IDisposable
 
     private string Host()
     {
-        string root = Path.Combine(_temp.Path, "host");
-        Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
-        File.WriteAllText(Path.Combine(root, ".kyber-weave", "kyber-weave.yml"), "ontology:\n  docs-root: handbook\n");
-        Directory.CreateDirectory(Path.Combine(root, "handbook", "plans"));
+        string root = _host.InWork("host");
+        _ = _host.Write(Path.Combine(root, ".kyber-weave", "kyber-weave.yml"), "ontology:\n  docs-root: handbook\n");
         foreach (string name in new[] { "2026-11-13-job-status-cards.md", "2026-11-12-other.md" })
         {
-            File.WriteAllText(
+            _ = _host.Write(
                 Path.Combine(root, "handbook", "plans", name),
                 $"---\nid: plans/{name[..^3]}\ntitle: Plan\ndoc-type: plan\nstatus: current\n---\n\n# Plan\n\n**Status: Ready.**\n");
         }
 
-        InFlightLedger ledger = RealArbiterState.Ledger(Path.Combine(root, "artifacts", "arbiter"));
+        InFlightLedger ledger = _host.State.Ledger(Path.Combine(root, "artifacts", "arbiter"));
         Append(ledger, OnPlan, Plan);
         Append(ledger, OnPlanBySlug, "job-status-cards");
         Append(ledger, OffPlan, OtherPlan);

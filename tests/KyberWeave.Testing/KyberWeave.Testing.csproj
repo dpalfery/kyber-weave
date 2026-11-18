@@ -15,6 +15,11 @@
   <!-- The helpers keep the KyberWeave.Tests.* namespaces they had, so the test classes that
        use them need no new usings. Each test assembly that references this one can read its
        internal members. -->
+  <!-- The Factory hook payloads and transcript are compiled in, so a unit test reads them without touching the disk. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fixtures\arbiter-hooks\factory\*" Exclude="Fixtures\arbiter-hooks\factory\README.md" LogicalName="arbiter-hooks/factory/%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <InternalsVisibleTo Include="KyberWeave.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Application.Tests" />

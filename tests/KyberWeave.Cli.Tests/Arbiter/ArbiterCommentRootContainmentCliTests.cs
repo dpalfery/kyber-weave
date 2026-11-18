@@ -1,13 +1,7 @@
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Tests.Arbiter;
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Core.Arbiter.Plans;
-using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// The containment check on <c>arbiter comment</c> uses the same root as the read. With <c>--root</c> set to a
@@ -16,23 +10,22 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _host.Dispose();
 
     [Fact]
     public void ACitedFileOutsideTheRootIsRefusedEvenInsideTheGitRepository()
     {
         // A git repository whose --root is a subdirectory. The cited file is an absolute path inside the repository,
         // outside that root, so the check against the git root passes it while the read under --root cannot.
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".git"));
-        string subRoot = Path.Combine(_temp.Path, "sub");
-        Directory.CreateDirectory(subRoot);
-        string cited = Path.Combine(_temp.Path, "secret.md");
-        File.WriteAllText(cited, "# Secret\nText.\n");
+        _host.Files.CreateDirectory(_host.InWork(".git"));
+        string subRoot = _host.InWork("sub");
+        _host.Files.CreateDirectory(subRoot);
+        string cited = _host.Write(_host.InWork("secret.md"), "# Secret\nText.\n");
 
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings
             {
@@ -42,7 +35,7 @@ public sealed class ArbiterCommentRootContainmentCliTests : IDisposable
                 Body = "Shorten this heading.",
             }));
 
-        Assert.Equal(1, execution.Result);
+        Assert.Equal(1, execution.ExitCode);
         ConsoleOutputAssert.ContainsUnwrapped("was not found under the repository root.", execution.Output);
         Assert.DoesNotContain("decision", execution.Output, StringComparison.OrdinalIgnoreCase);
     }

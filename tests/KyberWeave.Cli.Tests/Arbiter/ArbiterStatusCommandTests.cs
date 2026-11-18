@@ -1,15 +1,10 @@
-using KyberWeave.Tests.Configuration;
-using KyberWeave.Data.Configuration;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Tests.Arbiter;
-using KyberWeave.Tests.Fakes;
-using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract: <c>arbiter status</c> reports both global and project scope, brands the
@@ -17,27 +12,14 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterStatusCommandTests : IDisposable
 {
-    private readonly TempDirectory _home = new();
-    private readonly TempDirectory _repo = new();
-    private readonly ArbiterTestHost _host;
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public ArbiterStatusCommandTests()
-    {
-        _host = ArbiterTestHost.Create(services =>
-            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(() => _home.Path)));
-    }
-
-    public void Dispose()
-    {
-        _host.Dispose();
-        _home.Dispose();
-        _repo.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     [Fact]
     public void Status_ReportsGlobalAndProjectScope_WithProjectOverride()
     {
-        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["warp", "opencode", "pi", "copilot"]);
+        _host.Get<IUserHostConfigStore>().WriteGlobalTargets(_host.HomeDirectory, ["warp", "opencode", "pi", "copilot"]);
         WriteProjectConfig(
             """
             arbiter:
@@ -49,9 +31,9 @@ public sealed class ArbiterStatusCommandTests : IDisposable
                 kind: none
             """);
 
-        CommandExecution execution = Capture(() => _host.Command<ArbiterStatusCommand>().Execute(
+        ArbiterCommandRun execution = _host.Run(() => _host.Command<ArbiterStatusCommand>().Execute(
             null!,
-            new ArbiterSettings { Path = _repo.Path }));
+            new ArbiterSettings { Path = _host.WorkingDirectory }));
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("GLOBAL scope", execution.Output, StringComparison.OrdinalIgnoreCase);
@@ -83,16 +65,6 @@ public sealed class ArbiterStatusCommandTests : IDisposable
 
     private void WriteProjectConfig(string yaml)
     {
-        string dir = Path.Combine(_repo.Path, ".kyber-weave");
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(Path.Combine(dir, "kyber-weave.yml"), yaml);
+        _ = _host.Write(_host.InWork(".kyber-weave", "kyber-weave.yml"), yaml);
     }
-
-    private static CommandExecution Capture(Func<int> execute)
-    {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 }

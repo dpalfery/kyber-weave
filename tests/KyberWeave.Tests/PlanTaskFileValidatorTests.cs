@@ -809,7 +809,7 @@ public sealed class PlanTaskFileValidatorTests
     public void ADigestReportedByArbiterPlanPassesKWDOCTASKS003()
     {
         using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        string reported = ArbiterCliCommandTests.ReportedDigestOf(
+        string reported = ArbiterReportedDigest.Of(
             Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar)));
         fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(digest: reported));
 

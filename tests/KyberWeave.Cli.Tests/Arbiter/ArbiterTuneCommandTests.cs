@@ -1,9 +1,10 @@
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Cli.Commands.Arbiter;
+using Spectre.Console.Cli;
 using Xunit;
-using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 1.17: <c>kyber-weave arbiter tune</c> scores the step-1 answers in the
@@ -17,7 +18,7 @@ namespace KyberWeave.Tests;
 /// The logs are written through the production <see cref="DecisionLog" /> and
 /// <see cref="InFlightLedger" /> writers, so a field the command reads under a different name
 /// fails here rather than in a hand-written fixture. The command is driven through a real
-/// <see cref="Spectre.Console.Cli.CommandApp" /> built by <see cref="CommandAppFixture" />, so the
+/// <see cref="Spectre.Console.Cli.CommandApp" /> built by the in-memory host, so the
 /// argument surface is the one a user types.
 /// </para>
 /// <para>
@@ -47,11 +48,11 @@ public sealed class ArbiterTuneCommandTests : IDisposable
 
     private static readonly DateTimeOffset At = new(2026, 11, 10, 9, 0, 0, TimeSpan.Zero);
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _repo.Dispose();
+    public void Dispose() => _host.Dispose();
 
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => Path.Combine(_host.WorkingDirectory, "artifacts", "arbiter");
 
     /// <summary>
     /// Writes five step-1 LENS-001 answers (three shadow, two enforced), one step-1 QUOTE-001
@@ -60,8 +61,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     /// </summary>
     private async Task WriteStandardFixtureAsync()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
+        DecisionLog decisions = _host.State.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(Decision("d-1", "ledger-1", LensRule, 1, 0.45, shadow: true));
         await decisions.AppendAsync(Decision("d-2", "ledger-2", LensRule, 1, 0.65, shadow: true));
         await decisions.AppendAsync(Decision("d-3", "ledger-3", LensRule, 1, 0.66, shadow: true));
@@ -70,7 +70,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
         await decisions.AppendAsync(Decision("d-6", "ledger-6", QuoteRule, 1, 0.9, shadow: false));
         await decisions.AppendAsync(Decision("d-7", "ledger-7", ScopeRule, 0, null, shadow: false));
 
-        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        InFlightLedger ledger = _host.State.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent(
             "post-1", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
         {
@@ -126,12 +126,12 @@ public sealed class ArbiterTuneCommandTests : IDisposable
             5);
     }
 
-    private static CommandExecution RunTune(string repo, params string[] extra)
+    private ArbiterCommandRun RunTune(string repo, params string[] extra)
     {
         string[] arguments = ["arbiter", "tune", repo, .. extra];
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            CommandAppFixture.ArbiterTune().Run(arguments));
-        return new CommandExecution(execution.Result, execution.Output);
+        CommandApp app = _host.App(config =>
+            config.AddBranch("arbiter", arbiter => arbiter.AddCommand<ArbiterTuneCommand>("tune")));
+        return _host.Run(() => app.Run(arguments));
     }
 
     private static JsonElement RuleWithId(JsonElement report, string id)
@@ -156,7 +156,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     {
         await WriteStandardFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path, "--thresholds", Thresholds, "--json");
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory, "--thresholds", Thresholds, "--json");
 
         Assert.Equal(0, execution.ExitCode);
         using JsonDocument document = JsonDocument.Parse(execution.Output);
@@ -184,7 +184,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     {
         await WriteStandardFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path, "--json");
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory, "--json");
 
         Assert.Equal(0, execution.ExitCode);
         using JsonDocument document = JsonDocument.Parse(execution.Output);
@@ -201,7 +201,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     {
         await WriteStandardFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path, "--rule", LensRule, "--json");
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory, "--rule", LensRule, "--json");
 
         Assert.Equal(0, execution.ExitCode);
         using JsonDocument document = JsonDocument.Parse(execution.Output);
@@ -216,7 +216,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     {
         await WriteStandardFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path);
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory);
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains(LensRule, execution.Output, StringComparison.Ordinal);
@@ -231,14 +231,13 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     /// </summary>
     private async Task WriteDelegateModelFixtureAsync()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
+        DecisionLog decisions = _host.State.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(DelegateModelDecision(
             "d-shadow", "ledger-shadow", shadow: true, delivered: false, reason: "shadow"));
         await decisions.AppendAsync(DelegateModelDecision(
             "d-enforced", "ledger-enforced", shadow: false, delivered: true, reason: null));
 
-        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        InFlightLedger ledger = _host.State.Ledger(ArbiterDirectory);
         await ledger.AppendAsync(new ArbiterLedgerEvent(
             "post-shadow", At, "hook", "claude", null, ArbiterLedgerPhases.Post)
         {
@@ -312,7 +311,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     {
         await WriteDelegateModelFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path);
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory);
 
         Assert.Equal(0, execution.ExitCode);
         string[] lines = execution.Output.Split('\n');
@@ -333,7 +332,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     {
         await WriteDelegateModelFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path, "--json");
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory, "--json");
 
         Assert.Equal(0, execution.ExitCode);
         JsonElement rule = RuleWithId(JsonDocument.Parse(execution.Output).RootElement, "KW-ARB-DIFFICULTY-001");
@@ -358,7 +357,7 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     [Fact]
     public void Tune_WithNoLogsSaysNoScoredAnswersOnOneLineAndExitsZero()
     {
-        CommandExecution execution = RunTune(_repo.Path);
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory);
 
         Assert.Equal(0, execution.ExitCode);
         string[] lines = execution.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -371,11 +370,10 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     [Fact]
     public async Task Tune_WithOnlyStepZeroAnswersSaysNoScoredAnswersOnOneLine()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
+        DecisionLog decisions = _host.State.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(Decision("d-7", "ledger-7", ScopeRule, 0, null, shadow: false));
 
-        CommandExecution execution = RunTune(_repo.Path);
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory);
 
         Assert.Equal(0, execution.ExitCode);
         string[] lines = execution.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
@@ -384,51 +382,32 @@ public sealed class ArbiterTuneCommandTests : IDisposable
     }
 
     /// <summary>
-    /// Tune only reads. Every existing log keeps its bytes and its modification time, and no file
-    /// appears beside them. The ledger's <c>.lock</c> is excluded because a read may take it.
+    /// Tune only reads. Every log keeps its lines, nothing is appended, and no file or directory appears in the file
+    /// system beside them.
     /// </summary>
     [Fact]
     public async Task Tune_WritesNothing()
     {
         await WriteStandardFixtureAsync();
-        DateTime fixedTime = new(2001, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        foreach (string file in Directory.GetFiles(ArbiterDirectory))
-        {
-            File.SetLastWriteTimeUtc(file, fixedTime);
-        }
+        string[] logs = ["decisions.jsonl", "ledger.jsonl"];
+        List<IReadOnlyList<string>> before = [.. logs.Select(name => _host.State.Log.LinesOf(ArbiterDirectory, name))];
+        int appends = _host.State.Log.AppendCount;
+        int entries = _host.Files.EnumerateEntries(_host.WorkingDirectory).Count();
 
-        Dictionary<string, (byte[] Bytes, DateTime Written)> before = Snapshot();
-
-        CommandExecution text = RunTune(_repo.Path);
-        CommandExecution json = RunTune(_repo.Path, "--json");
+        ArbiterCommandRun text = RunTune(_host.WorkingDirectory);
+        ArbiterCommandRun json = RunTune(_host.WorkingDirectory, "--json");
 
         Assert.Equal(0, text.ExitCode);
         Assert.Equal(0, json.ExitCode);
-        Dictionary<string, (byte[] Bytes, DateTime Written)> after = Snapshot();
-        Assert.Equal(before.Keys.OrderBy(name => name, StringComparer.Ordinal), after.Keys.OrderBy(name => name, StringComparer.Ordinal));
-        foreach ((string name, (byte[] bytes, DateTime written)) in before)
+        Assert.NotEmpty(before[0]);
+        Assert.NotEmpty(before[1]);
+        Assert.Equal(appends, _host.State.Log.AppendCount);
+        for (int index = 0; index < logs.Length; index++)
         {
-            Assert.Equal(bytes, after[name].Bytes);
-            Assert.Equal(written, after[name].Written);
-        }
-    }
-
-    private Dictionary<string, (byte[] Bytes, DateTime Written)> Snapshot()
-    {
-        Dictionary<string, (byte[] Bytes, DateTime Written)> files = new(StringComparer.Ordinal);
-        foreach (string file in Directory.GetFiles(ArbiterDirectory))
-        {
-            string name = Path.GetFileName(file);
-            if (string.Equals(name, ".lock", StringComparison.Ordinal))
-            {
-                continue;
-            }
-
-            files[name] = (File.ReadAllBytes(file), File.GetLastWriteTimeUtc(file));
+            Assert.Equal(before[index], _host.State.Log.LinesOf(ArbiterDirectory, logs[index]));
         }
 
-        return files;
+        Assert.Equal(entries, _host.Files.EnumerateEntries(_host.WorkingDirectory).Count());
+        Assert.False(_host.Files.DirectoryExists(ArbiterDirectory), "tune must not create the arbiter directory.");
     }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 }

@@ -1,14 +1,7 @@
-using KyberWeave.Contracts.Repositories;
-using KyberWeave.Contracts.Services;
-using KyberWeave.Tests.Arbiter;
-using KyberWeave.Data.Arbiter;
-using KyberWeave.Core.Arbiter.Plans;
-using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Cli.Commands.Arbiter;
-using KyberWeave.Tests.Corpus;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// The two Arbiter CLI surfaces added for tasks 3.11 and 3.13: <c>kyber-weave arbiter sections --path &lt;doc&gt; --task
@@ -17,59 +10,36 @@ namespace KyberWeave.Tests;
 /// error, and every value that came from the operator escaped before it reaches the console.
 /// </summary>
 /// <remarks>
-/// <c>arbiter sections</c> contains its path under the repository root it finds from the process's working directory,
-/// so a document the test reads from the successful path must sit under that root. The test process runs inside the
-/// checkout, so the fixture is written under the repository's gitignored scratch folder, in a directory unique to the
-/// test, and removed afterwards. A document outside the root must be refused, which the companion test pins.
+/// <c>arbiter sections</c> contains its path under the repository root it finds from the working directory, so a
+/// document the test reads from the successful path must sit under that root, and one outside it must be refused,
+/// which the companion test pins.
 /// </remarks>
 public sealed class ArbiterTriageCliCommandTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
-    private readonly string _inRepoScratch = Path.Combine(
-        CheckoutCorpusSource.Checkout.Root, ".agent_scratchpad", "arbiter-triage-cli", Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-        if (Directory.Exists(_inRepoScratch))
-        {
-            Directory.Delete(_inRepoScratch, recursive: true);
-        }
-    }
-
     private const string GuideText = "# Guide\nIntro.\n## Install\nSteps.\n";
+
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
+
+    public void Dispose() => _host.Dispose();
 
     /// <summary>A document under the root the command resolves, so the containment check admits it.</summary>
     private string WriteDocumentUnderRoot()
     {
-        string path = Path.Combine(_inRepoScratch, "docs", "guide.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, GuideText);
-        return path;
+        _host.Files.CreateDirectory(_host.InWork(".git"));
+        return _host.Write(_host.InWork("docs", "guide.md"), GuideText);
     }
 
-    /// <summary>A document in a temp folder, outside the checkout the command resolves its root from.</summary>
-    private string WriteDocumentOutsideRoot()
-    {
-        string path = Path.Combine(_temp.Path, "docs", "guide.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, GuideText);
-        return path;
-    }
+    /// <summary>A document in a folder beside the working directory, outside the root the command resolves.</summary>
+    private string WriteDocumentOutsideRoot() =>
+        _host.Write(ArbiterTestRoots.Under("elsewhere", "docs", "guide.md"), GuideText);
 
-    private string WriteDocument()
-    {
-        string path = Path.Combine(_temp.Path, "docs", "guide.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "# Guide\nIntro.\n## Install\nSteps.\n");
-        return path;
-    }
+    private string WriteDocument() => _host.Write(_host.InWork("docs", "guide.md"), GuideText);
 
     [Fact]
     public void Sections_PrintsEachSectionIdAndItsLineRange()
     {
-        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterSectionsCommand command = _host.Command<ArbiterSectionsCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSectionsSettings { Path = WriteDocumentUnderRoot(), Task = "Change the install steps." }));
 
@@ -82,8 +52,8 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     [Fact]
     public void Sections_PathOutsideTheRoot_ExitsNonZeroWithAMessageAndPrintsNoSections()
     {
-        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterSectionsCommand command = _host.Command<ArbiterSectionsCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSectionsSettings { Path = WriteDocumentOutsideRoot(), Task = "Change the install steps." }));
 
@@ -95,10 +65,10 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     [Fact]
     public void Sections_MissingDocument_ExitsOne()
     {
-        ArbiterSectionsCommand command = ArbiterTestServices.Command<ArbiterSectionsCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterSectionsCommand command = _host.Command<ArbiterSectionsCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
-            new ArbiterSectionsSettings { Path = Path.Combine(_temp.Path, "absent.md"), Task = "Anything." }));
+            new ArbiterSectionsSettings { Path = _host.InWork("absent.md"), Task = "Anything." }));
 
         Assert.Equal(1, execution.ExitCode);
     }
@@ -108,12 +78,12 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     public void Comment_NoProvider_PrintsRealAndTheDecisionId()
     {
         WriteDocument();
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings
             {
-                Root = _temp.Path,
+                Root = _host.WorkingDirectory,
                 Path = "docs/guide.md",
                 Line = 2,
                 Body = "Shorten this heading.",
@@ -132,12 +102,12 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
     public void Comment_BodyWithMarkupCharacters_DoesNotThrow()
     {
         WriteDocument();
-        ArbiterCommentCommand command = ArbiterTestServices.Command<ArbiterCommentCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterCommentCommand command = _host.Command<ArbiterCommentCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterCommentSettings
             {
-                Root = _temp.Path,
+                Root = _host.WorkingDirectory,
                 Path = "docs/guide.md",
                 Line = 2,
                 Body = "Use [red]this[/] and [bogus",
@@ -146,12 +116,4 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("decision", execution.Output, StringComparison.Ordinal);
     }
-
-    private static CommandExecution Capture(Func<int> execute)
-    {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 }
