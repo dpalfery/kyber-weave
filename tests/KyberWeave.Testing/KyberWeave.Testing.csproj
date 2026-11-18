@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Test helpers that both test assemblies use. A library rather than source files linked
+    into each project: one copy of the temp-root, durability, prepared-install and console
+    helpers, so a fix lands in every suite at once. It holds no tests.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- The helpers keep the KyberWeave.Tests.* namespaces they had, so the test classes that
+       use them need no new usings. Each test assembly that references this one can read its
+       internal members. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.RepoPolicy.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.PromptContent.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Architecture.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
+    <PackageReference Include="xunit.v3.assert" Version="4.0.3" />
+    <PackageReference Include="xunit.v3.extensibility.core" Version="4.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\KyberWeave.Arbiter\KyberWeave.Arbiter.csproj" />
+    <ProjectReference Include="..\..\src\KyberWeave.Cli\KyberWeave.Cli.csproj" />
+    <ProjectReference Include="..\..\src\KyberWeave.Core\KyberWeave.Core.csproj" />
+    <ProjectReference Include="..\..\src\KyberWeave.Core.Docs\KyberWeave.Core.Docs.csproj" />
+    <ProjectReference Include="..\..\src\KyberWeave.Core.Squad\KyberWeave.Core.Squad.csproj" />
+    <ProjectReference Include="..\..\src\KyberWeave.Mcp\KyberWeave.Mcp.csproj" />
+  </ItemGroup>
+
+</Project>

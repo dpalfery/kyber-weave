@@ -82,7 +82,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void ATodoLeftInTheTodoFolderWhenItsIndexListsNoneIsKWDOCLIFECYCLE002()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(TodoIndex, Index("None."))
             .Write("6-Docs/todo/spike-cleanup.md", Todo("todo/spike-cleanup"));
 
@@ -98,7 +98,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void ATodoItsIndexLinksIsListed()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(TodoIndex, Index("- [Spike: cleanup](spike-cleanup.md)"))
             .Write("6-Docs/todo/spike-cleanup.md", Todo("todo/spike-cleanup"));
 
@@ -110,7 +110,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void TheTodoIndexItselfIsNeverUnlisted()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(TodoIndex, Index("None."));
 
         DiagnosticReport report = Validate(fixture);
@@ -121,7 +121,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void ATodoUnderTheArchiveSegmentIsNotUnlisted()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(TodoIndex, Index("None."))
             .Write("6-Docs/archive/todo/closed-spike.md", Todo("todo/closed-spike"));
 
@@ -138,7 +138,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void ATodoUnderTheArchiveSegmentIsNotUnlistedWhenTheIndexSitsAboveTheArchiveSubtree()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/README.md", Index("None.", "docs/index"))
             .Write("6-Docs/archive/todo/closed-spike.md", Todo("todo/closed-spike"));
 
@@ -157,7 +157,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void AnActiveTodoLinkedOnlyFromAnArchivedDocumentIsStillUnlisted()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/README.md", Index("- [Closed spike](archive/todo/closed-spike.md)", "docs/index"))
             .Write(
                 "6-Docs/archive/todo/closed-spike.md",
@@ -175,7 +175,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void ACorpusWithoutATodoIndexIsSilent()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/todo/spike-cleanup.md", Todo("todo/spike-cleanup"));
 
         DiagnosticReport report = Validate(fixture);
@@ -190,7 +190,7 @@ public sealed class TodoInventoryValidatorTests
     [Fact]
     public void DocsValidateReportsAnUnlistedTodoUnderKWDOCLIFECYCLE002()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(TodoIndex, Index("None."))
             .Write("6-Docs/todo/spike-cleanup.md", Todo("todo/spike-cleanup"));
         DocsValidateSettings settings = new DocsValidateSettings { Path = fixture.Root, Format = "json" };

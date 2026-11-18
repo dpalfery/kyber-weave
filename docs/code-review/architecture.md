@@ -931,19 +931,19 @@ partitioned by ecosystem:
 #### Test and build gates run their commands directly
 
 Every gate declares its argv as the command itself — no process wrapper. The `.NET` gates (`build`,
-`test`, `test-policy`) and the format checks run `dotnet` directly so Roslyn/MSBuild build servers
+`test`, `integration-test`, `test-policy`) and the format checks run `dotnet` directly so Roslyn/MSBuild build servers
 stay warm, and the KyberDash `ts-test` gate (`npm --prefix dash run test`) runs `npm` directly. The
 retired watchdog (`scripts/proc-guard.sh`) used to wrap `ts-test` and reap its process tree; it went
 away with the Node engine, which no longer spawns recursive children
 ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md)). A gate that runs
 away is stopped by its own `timeout-seconds`, and the council reports it as any other non-zero exit.
-`test` and `ts-test` keep `full-suite: true` so `kyber-weave review gates` still refuses dev agents
-unless `--council` is passed.
+`test`, `integration-test`, `ts-test` and `cargo-test` keep `full-suite: true` so `kyber-weave review gates` still refuses dev
+agents unless `--council` is passed; the integration suite is CI's safety net, not a developer agent's run.
 
 Gates run one after another unless marked `concurrent`, and `review.parallelism` bounds the ones
 that do. There is no machine-wide slot: a gate that must not overlap another is ordered after it.
 
-`ReviewGateFullSuiteConfigTests` pins the `full-suite` keys on the `test`, `ts-test` and
+`ReviewGateFullSuiteConfigTests` pins the `full-suite` keys on the `test`, `integration-test`, `ts-test` and
 `cargo-test` gates, so a change to those entries has to change the test
 with it. The
 local commands and what a gate failure means are in the

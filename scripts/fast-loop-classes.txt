@@ -105,13 +105,11 @@ KyberWeave.Tests.McpAnalysisToolsTests
 KyberWeave.Tests.DocumentationReviewExchangeTests
 KyberWeave.Tests.GateRunnerOutcomeTests
 KyberWeave.Tests.McpRepositoryRootTests
-KyberWeave.Tests.SquadHotshotLifecycleTests
 KyberWeave.Tests.SquadRenderingContractTests
 KyberWeave.Tests.SquadModelPresetMergeTests
 KyberWeave.Tests.SquadDocsHarvestContractTests
 KyberWeave.Tests.SbomTests
 KyberWeave.Tests.McpDocsProvenanceTests
-KyberWeave.Tests.SquadInstanceScopeTests
 KyberWeave.Tests.ManagedGlossaryTests
 KyberWeave.Tests.WarpRendererContractTests
 KyberWeave.Tests.DocsInitCommandTests
@@ -120,12 +118,10 @@ KyberWeave.Tests.OpenWorkValidatorTests
 KyberWeave.Tests.ProjectRootDetectorTests
 KyberWeave.Tests.CommandCodeRendererContractTests
 KyberWeave.Tests.UtilitiesStatusLineDeploymentTests
-KyberWeave.Tests.SquadHomeStateStoreTests
 KyberWeave.Tests.TodoInventoryValidatorTests
 KyberWeave.Tests.DocsGraphCliCommandTests
 KyberWeave.Tests.ReleaseNotesTests
 KyberWeave.Tests.DocsScaffolderTests
-KyberWeave.Tests.SquadModelPresetSelectionTests
 KyberWeave.Tests.CodexRendererContractTests
 KyberWeave.Tests.UpdateCommandTests
 KyberWeave.Tests.SquadRootWrapperAgentTests

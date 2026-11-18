@@ -26,7 +26,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionKeywordsAndCodeRefsRollUpToTheDocumentView()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -83,7 +83,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void LeadNamingMissingSlugIsSPEC008WithNearestSlugHint()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 "lead: almost-detail",
                 """
@@ -106,7 +106,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionsKeyNamingMissingSlugIsSPEC008WithNearestSlugHint()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -135,7 +135,7 @@ public sealed class SectionFrontmatterValidationTests
     public void LeadLeafLongerThan24000CharactersIsSPEC009()
     {
         string huge = Repeat('x', ExploreAnswer.AnswerCharCap + 1);
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 "lead: huge-leaf",
                 $"""
@@ -158,7 +158,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionKeywordWithNoWordsInThatSectionIsSPEC010Warning()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -185,7 +185,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void EmptySectionKeywordEntryIsSPEC002()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -211,7 +211,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void EmptySectionCodeRefEntryIsSPEC002()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -237,7 +237,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void UnresolvedSectionCodeRefIsDRIFT001()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -266,7 +266,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionsDeclaredAsScalarSurfacesInvalidVocabulary()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -292,7 +292,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void NullSectionEntryDoesNotThrowOnLoad()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -313,7 +313,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionValueThatIsASequenceNamesTheMappingRequirement()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -340,7 +340,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void OneBrokenYamlBlockReportsASingleParseError()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 "sections: [",
                 """
@@ -361,7 +361,7 @@ public sealed class SectionFrontmatterValidationTests
 
     private static DocFixture BuildLeadFixture(string? leadYaml)
     {
-        DocFixture fixture = new DocFixture().WithCatalog();
+        DocFixture fixture = DocFixture.Create().WithCatalog();
         string extra = leadYaml is null ? string.Empty : leadYaml + Environment.NewLine;
         fixture.Write(SubjectPath, ReferenceBody(extra, $"""
                                                          {PreambleMarker}

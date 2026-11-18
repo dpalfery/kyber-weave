@@ -301,6 +301,63 @@ jobs:
         if: always()
         run: dotnet build-server shutdown
 
+  integration-test:
+    # The safety net, in its own job and its own project: real Squad deployments, real child
+    # programs, and file-system work beyond a test's own scratch folder. It is separated from
+    # "Build and test" so the unit project there stays inside its 120-second budget; the unit
+    # job still proves the in-memory behaviour, and this job proves it again through the real
+    # disk and the real programs. Developer agents do not run it; the review council's
+    # integration-test gate and this job do.
+    name: Integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      # A cold restore downloads every package on each run; the cache turns that into a
+      # version check. The key follows the project files, which is what pins a version.
+      - name: Cache NuGet packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('**/*.csproj', '**/Directory.Build.props', '**/Directory.Packages.props', '**/NuGet.config') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Restore
+        run: dotnet restore KyberWeave.sln
+
+      # The same build the unit job runs, so the integration project and every project it
+      # references are the binaries the tests execute. --no-build on the test step depends on it.
+      - name: Build
+        run: dotnet build KyberWeave.sln -c ${{ env.CONFIGURATION }} --no-restore
+
+      - name: Test (integration)
+        run: >
+          dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
+          -c ${{ env.CONFIGURATION }}
+          --no-build
+          --report-trx
+          --report-trx-filename integration.trx
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: integration-test-results
+          path: TestResults/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Shut down .NET build servers
+        if: always()
+        run: dotnet build-server shutdown
+
   sbom:
     # The release workflow attaches a CycloneDX SBOM to every GitHub Release. This
     # job proves the generator works and that its output is schema-valid, without
@@ -414,10 +471,10 @@ jobs:
 
       - name: Run Squad filesystem contract
         run: >
-          dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+          dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
           -c ${{ env.CONFIGURATION }}
           --no-restore
-          --filter FullyQualifiedName~SquadDeploymentStateTests
+          --filter FullyQualifiedName~SquadDeploymentState
 
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
@@ -1225,6 +1282,7 @@ jobs:
       - changes
       - pr-naming
       - build-test
+      - integration-test
       - trivy
       - semgrep
       - gitleaks
@@ -1248,6 +1306,7 @@ jobs:
           echo "| Detect changed areas | ${{ needs.changes.result }} |" >> results.md
           echo "| Pull request name | ${{ needs.pr-naming.result }} |" >> results.md
           echo "| Build and test | ${{ needs.build-test.result }} |" >> results.md
+          echo "| Integration tests | ${{ needs.integration-test.result }} |" >> results.md
           echo "| SBOM (CycloneDX 1.6) | ${{ needs.sbom.result }} |" >> results.md
           echo "| Publish smoke | ${{ needs.publish-smoke.result }} |" >> results.md
           echo "| Update loop | ${{ needs.update-loop.result }} |" >> results.md
@@ -1267,6 +1326,7 @@ jobs:
             "${{ needs.changes.result }}" \
             "${{ needs.pr-naming.result }}" \
             "${{ needs.build-test.result }}" \
+            "${{ needs.integration-test.result }}" \
             "${{ needs.sbom.result }}" \
             "${{ needs.publish-smoke.result }}" \
             "${{ needs.update-loop.result }}" \

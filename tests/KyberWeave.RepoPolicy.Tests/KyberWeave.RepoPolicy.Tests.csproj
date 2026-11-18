@@ -28,14 +28,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Shared with KyberWeave.Tests rather than copied: the repository-root locator, the
-         disposable temp directory, and the per-process temp root the module initializer sets. -->
-    <Compile Include="..\KyberWeave.Tests\KyberWeaveTestPaths.cs" Link="Shared\KyberWeaveTestPaths.cs" />
-    <Compile Include="..\KyberWeave.Tests\TempDirectory.cs" Link="Shared\TempDirectory.cs" />
-    <Compile Include="..\KyberWeave.Tests\TestTempRoot.cs" Link="Shared\TestTempRoot.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
+    <!-- The repository-root locator, the disposable temp directory and the per-process temp
+         root all live in the shared test library now, so this project references the one copy
+         instead of compiling source files from another test project. -->
+    <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Core\KyberWeave.Core.csproj" />
   </ItemGroup>
 

@@ -47,6 +47,30 @@ public sealed class FastLoopScriptTests
     }
 
     /// <summary>
+    /// A developer loop never runs the integration project: <c>--touched</c> runs the touched
+    /// unit classes, says that CI runs the touched integration classes, and does not start them.
+    /// </summary>
+    [Fact]
+    public void TouchedNeverRunsIntegrationClassesAndSaysCiRunsThem()
+    {
+        SkipIfBashUnavailable();
+        using FastLoopFixture fixture = new();
+
+        fixture.WriteProductSource();
+        fixture.WriteUnitTestClass("TouchedUnitTests");
+        fixture.WriteIntegrationTestClasses(21);
+
+        ProcessResult result = fixture.RunFastLoop("--touched");
+        string log = fixture.GetCallLog();
+
+        Assert.DoesNotContain("running the fast tier instead", result.StandardOutput + result.StandardError, StringComparison.Ordinal);
+        Assert.Contains("integration classes touched", result.StandardError, StringComparison.Ordinal);
+        Assert.DoesNotContain("integration tests (touched)", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("KyberWeave.Tests.TouchedUnitTests", log, StringComparison.Ordinal);
+        Assert.DoesNotContain("KyberWeave.Integration.Tests.TouchedCase", log, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Editing markdown inside <c>dash/tray/ui/</c> must trigger documentation validation.
     /// </summary>
     [Fact]
@@ -327,7 +351,9 @@ public sealed class FastLoopScriptTests
             InitializeRepo();
         }
 
-        public ProcessResult RunFastLoop()
+        public ProcessResult RunFastLoop() => RunFastLoop([]);
+
+        public ProcessResult RunFastLoop(params string[] arguments)
         {
             ProcessStartInfo startInfo = new("/bin/bash")
             {
@@ -339,6 +365,9 @@ public sealed class FastLoopScriptTests
                 CreateNoWindow = true
             };
             startInfo.ArgumentList.Add("scripts/fast-loop.sh");
+
+            foreach (string argument in arguments)
+                startInfo.ArgumentList.Add(argument);
 
             foreach (DictionaryEntry entry in Environment.GetEnvironmentVariables())
             {
@@ -361,6 +390,28 @@ public sealed class FastLoopScriptTests
             string source = Path.Combine(Root, "src", "KyberWeave.Core", "Example.cs");
             Directory.CreateDirectory(Path.GetDirectoryName(source)!);
             File.WriteAllText(source, "namespace Example;\n");
+        }
+
+        /// <summary>Writes one changed unit-test file declaring <paramref name="className"/>.</summary>
+        public void WriteUnitTestClass(string className)
+        {
+            WriteChangedTestClass("KyberWeave.Tests", className);
+        }
+
+        /// <summary>Writes <paramref name="count"/> changed integration-test files, one class each.</summary>
+        public void WriteIntegrationTestClasses(int count)
+        {
+            for (int index = 1; index <= count; index++)
+                WriteChangedTestClass("KyberWeave.Integration.Tests", $"TouchedCase{index:00}Tests");
+        }
+
+        private void WriteChangedTestClass(string project, string className)
+        {
+            string path = Path.Combine(Root, "tests", project, className + ".cs");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(
+                path,
+                $"namespace {project};\n\npublic sealed class {className}\n{{\n}}\n");
         }
 
         /// <summary>Replaces the <c>dotnet</c> stub, for a test that needs a different runner reply.</summary>

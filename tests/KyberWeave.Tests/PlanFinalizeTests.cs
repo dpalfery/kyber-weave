@@ -10,6 +10,8 @@ using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
+using static KyberWeave.Tests.PlanFinalizeFixture;
+
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -19,40 +21,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class PlanFinalizeTests
 {
-    private const string Date = "2026-11-13";
-    private const string Approval = "AUTONOMOUS_APPROVAL: approve-and-execute";
-    private const string PlanIndexTable = """
-        ---
-        id: plans/index
-        title: Plans
-        doc-type: index
-        status: current
-        owner: Maintainers
-        last-reviewed: 2026-11-07
-        ---
-
-        # Plans
-
-        ## Active Plans
-
-        | Plan | Status |
-        |---|---|
-        | [Ready tasks](2026-11-07-ready-tasks.md) | Draft |
-        """;
-
     /// <summary>The probe plan as an autonomous Draft awaiting approval.</summary>
-    internal static string DraftPlan(bool autonomous = true) => PlanTaskFileProbe.PlanMarkdown()
-        .Replace("status: current", "status: draft", StringComparison.Ordinal)
-        .Replace("development-mode: test-first", autonomous ? "development-mode: test-first\nautonomy: autonomous" : "development-mode: test-first\nautonomy: supervised", StringComparison.Ordinal)
-        .Replace("**Status: Ready.** This plan is approved for execution.", "**Status: Draft.** Awaiting approve and execute.", StringComparison.Ordinal);
-
-    internal static DocFixture Repository(string? plan = null)
-    {
-        DocFixture fixture = PlanTaskFileProbe.Corpus(plan ?? DraftPlan()).Write(PlanTaskFileProbe.PlanIndexPath, PlanIndexTable);
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        return fixture;
-    }
-
     private static (int Exit, string Output) Run(DocFixture fixture, string mode = "autonomous", string? approval = Approval, string path = PlanTaskFileProbe.PlanPath)
     {
         DocsFinalizeSettings settings = new()

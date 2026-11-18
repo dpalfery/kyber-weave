@@ -12,8 +12,9 @@ namespace KyberWeave.Tests;
 /// <para>
 /// A gate with <c>full-suite: true</c> is one that runs the whole product suite, so <c>kyber-weave review gates</c>
 /// refuses it unless the caller passes <c>--council</c> (or the terminal is interactive). The key is set on exactly
-/// <c>test</c>, <c>ts-test</c> and <c>cargo-test</c>. Every one of them declares its command directly — <c>test</c> runs
-/// <c>dotnet test</c> and <c>ts-test</c> runs <c>npm run --prefix dash test</c>, with no process wrapper in between — so
+/// <c>test</c>, <c>integration-test</c>, <c>ts-test</c> and <c>cargo-test</c>. Every one of them declares its command
+/// directly — <c>test</c> and <c>integration-test</c> run <c>dotnet test</c> over their own project and <c>ts-test</c>
+/// runs <c>npm run --prefix dash test</c>, with no process wrapper in between — so
 /// the gate-level <c>full-suite: true</c> key is the whole refusal. The CI template passes <c>--council</c> to
 /// <c>review gates</c>, because CI is the other caller allowed to run the full suite.
 /// </para>
@@ -30,14 +31,15 @@ public sealed class ReviewGateFullSuiteConfigTests
 {
     private const string CouncilFlagText = "--council";
 
-    private static readonly string[] FullSuiteGates = ["test", "ts-test", "cargo-test"];
+    private static readonly string[] FullSuiteGates = ["test", "integration-test", "ts-test", "cargo-test"];
 
-    /// <summary>The three gates that run the whole product suite each carry the <c>full-suite</c> key set to true.</summary>
+    /// <summary>Every gate that runs a whole product suite carries the <c>full-suite</c> key set to true.</summary>
     /// <remarks>
     /// Without the key the refusal does not apply, and a dev agent could start the full suite through the review gate.
     /// </remarks>
     [Theory]
     [InlineData("test")]
+    [InlineData("integration-test")]
     [InlineData("ts-test")]
     [InlineData("cargo-test")]
     public void FullSuiteGateCarriesTheFullSuiteKeySetToTrue(string gateId)
@@ -46,14 +48,15 @@ public sealed class ReviewGateFullSuiteConfigTests
     }
 
     /// <summary>
-    /// No gate other than <c>test</c>, <c>ts-test</c> and <c>cargo-test</c> carries <c>full-suite: true</c>.
+    /// No gate other than <c>test</c>, <c>integration-test</c>, <c>ts-test</c> and <c>cargo-test</c> carries
+    /// <c>full-suite: true</c>.
     /// </summary>
     /// <remarks>
     /// A targeted gate marked full-suite would be refused by the review even though it runs one filtered check, and a
     /// missing key on a full gate would let it run unguarded. Both are caught by comparing the whole set.
     /// </remarks>
     [Fact]
-    public void OnlyTheThreeFullSuiteGatesCarryTheKeySetToTrue()
+    public void OnlyTheWholeSuiteGatesCarryTheKeySetToTrue()
     {
         List<string> keyed = [];
         foreach (YamlMappingNode gate in ReviewGates())
