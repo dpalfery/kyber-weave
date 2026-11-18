@@ -112,6 +112,7 @@ task's list.
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Mcp` | `DrainingStreamServerTransport.cs` | Opens the standard streams for the MCP server |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
+| `ConsoleArbiterKeyInput` | Console | `KyberWeave.Cli` | `Commands/Arbiter/ConsoleArbiterKeyInput.cs` | The `IArbiterKeyInput` adapter: the only code that reads a key from standard input or from a masked Spectre prompt, and it reaches both through the `IConsole` and `IAnsiConsole` seams it is given |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
@@ -197,11 +198,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
 | `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
 | `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
-| `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths, identifiers | 4.3 |
+| `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths | 4.3 |
 | `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
 | `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
-| `HookCommand` (`Arbiter/Hooks/HookCommand.cs`) | identifiers | 4.3 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
 | `ArbiterRootResolver` (`Arbiter/Mcp/ArbiterRootResolver.cs`) | paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
@@ -211,14 +211,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PlanFinalize` (`Docs/Closeout/PlanFinalize.cs`) | paths | 4.2 |
 | `PullRequestDescription` (`Docs/Delivery/PullRequestDescription.cs`) | file system | 4.2 |
 | `RunDelivery` (`Docs/Delivery/RunDelivery.cs`) | paths | 4.2 |
-| `CorpusProvenanceService` (`Docs/Mcp/CorpusProvenanceService.cs`) | paths | 4.2 |
-| `McpServerRenamer` (`Docs/Mcp/McpServerRenamer.cs`) | paths, clock | 4.2 |
-| `McpWiringFixes` (`Docs/Mcp/McpWiringFixes.cs`) | paths | 4.2 |
-| `McpWiringInspector` (`Docs/Mcp/McpWiringInspector.cs`) | paths | 4.2 |
-| `McpWiringRepairer` (`Docs/Mcp/McpWiringRepairer.cs`) | paths, clock | 4.2 |
-| `RepositoryDocsAnalysisReader` (`Docs/Mcp/RepositoryDocsAnalysisReader.cs`) | paths | 4.2 |
-| `McpRepositoryPath` (`Docs/Mcp/McpRepositoryPath.cs`) | paths | 4.2 |
-| `McpWiringReceipt` (`Docs/Mcp/McpWiringReceipt.cs`) | file system | 4.2 |
 | `DocsScaffolder` (`Docs/Scaffolding/DocsScaffolder.cs`) | file system, paths | 4.2 |
 | `StandardsFolderMigration` (`Docs/Scaffolding/StandardsFolderMigration.cs`) | file system, paths, identifiers | 4.2 |
 | `StandardsTemplateDiff` (`Docs/Scaffolding/StandardsTemplateDiff.cs`) | file system, paths | 4.2 |
@@ -268,7 +260,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepoRoot` (`Commands/Arbiter/ArbiterRepoRoot.cs`) | file system, paths | 4.5 |
 | `ArbiterSectionsCommand` (`Commands/Arbiter/ArbiterSectionsCommand.cs`) | file system, paths | 4.5 |
 | `ArbiterUninstallCommand` (`Commands/Arbiter/ArbiterUninstallCommand.cs`) | paths | 4.5 |
-| `ConsoleArbiterKeyInput` (`Commands/Arbiter/ConsoleArbiterKeyInput.cs`) | console | 4.5 |
 | `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
 | `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
 | `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
@@ -295,16 +286,11 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
 | `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
 | `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |
-| `SquadTargetRootConfirmation` (`Commands/Squad/Infrastructure/SquadTargetRootConfirmation.cs`) | console | 4.5 |
 | `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | file system, paths, console | 4.5 |
-| `SquadHostDefaults` (`Commands/Squad/SquadHostDefaults.cs`) | file system, environment | 4.5 |
-| `SquadInstallCommand` (`Commands/Squad/SquadInstallCommand.cs`) | environment, console | 4.5 |
 | `SquadPresetClearCommand` (`Commands/Squad/SquadPresetClearCommand.cs`) | file system | 4.5 |
 | `SquadPresetListCommand` (`Commands/Squad/SquadPresetListCommand.cs`) | file system | 4.5 |
 | `SquadPresetUseCommand` (`Commands/Squad/SquadPresetUseCommand.cs`) | file system | 4.5 |
 | `SquadStatusCommand` (`Commands/Squad/SquadStatusCommand.cs`) | file system, environment | 4.5 |
-| `SquadUninstallCommand` (`Commands/Squad/SquadUninstallCommand.cs`) | environment | 4.5 |
-| `SquadUpdateCommand` (`Commands/Squad/SquadUpdateCommand.cs`) | environment | 4.5 |
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 

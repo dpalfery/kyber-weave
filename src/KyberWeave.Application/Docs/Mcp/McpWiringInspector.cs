@@ -25,8 +25,9 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// refuses, or an entry naming a binary that does not resolve, is a gap rather than a pass.
 /// </para>
 /// </remarks>
-public sealed class McpWiringInspector(IMcpConfigFiles files)
+public sealed class McpWiringInspector(IMcpConfigFiles files, McpRepositoryPath repositoryPath)
 {
+    private readonly McpRepositoryPath _repositoryPath = repositoryPath ?? throw new ArgumentNullException(nameof(repositoryPath));
     private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
 
     /// <summary>A declared server is not wired for an in-play harness.</summary>
@@ -66,7 +67,7 @@ public sealed class McpWiringInspector(IMcpConfigFiles files)
         if (config.RequiredServers.Count == 0)
             return new McpWiringReport([]);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
 
         List<RequiredMcpServer> declared =
         [
@@ -864,7 +865,7 @@ public sealed class McpWiringInspector(IMcpConfigFiles files)
 
         foreach (string relativePath in entry.Paths)
         {
-            if (McpRepositoryPath.Contained(root, relativePath) is not { } path)
+            if (_repositoryPath.Contained(root, relativePath) is not { } path)
                 continue;
 
             // The guard is asked before the existence check, which follows it, and it answers three
@@ -917,11 +918,11 @@ public sealed class McpWiringInspector(IMcpConfigFiles files)
     /// beginning with those two characters, including the ordinary <c>..foo/mcp.json</c> a real
     /// directory inside the tree produces.
     /// </remarks>
-    private static string NamedPath(string root, HarnessMcpEntry entry, IReadOnlyList<ConfiguredFile> files)
+    private string NamedPath(string root, HarnessMcpEntry entry, IReadOnlyList<ConfiguredFile> files)
     {
         foreach (ConfiguredFile file in files)
         {
-            if (McpRepositoryPath.Contained(root, file.RelativePath) is not null)
+            if (_repositoryPath.Contained(root, file.RelativePath) is not null)
                 return file.RelativePath;
         }
 

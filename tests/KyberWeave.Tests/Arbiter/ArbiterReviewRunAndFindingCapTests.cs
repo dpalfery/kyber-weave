@@ -10,6 +10,7 @@ using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -183,7 +184,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         await evaluator.EvaluateAsync(LensReturnWithRun(ReviewRun, MinorFinding), Config());
         await evaluator.EvaluateAsync(LensReturnWithRun(ReviewRun, MinorFinding), Config());
 
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
         Assert.Equal(2, store.ReadFindings(ReviewRun).Count);
         Assert.Empty(store.ReadFindings(OtherRun));
     }
@@ -194,7 +195,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
 
         await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(reviewRun, MinorFinding), Config());
 
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
         IReadOnlyList<string> stored = store.ReadFindings(reviewRun);
         string item = Assert.Single(stored);
         Assert.Contains("nit-1", item, StringComparison.Ordinal);
@@ -218,7 +219,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(ReviewRun, findings), Config());
 
         Assert.Equal(StateBudget.MaxQuestions, provider.CallCount);
-        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFindings(ReviewRun);
+        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFindings(ReviewRun);
         Assert.Equal(total, stored.Count);
         Assert.EndsWith("status: dropped", stored[0], StringComparison.Ordinal);
         for (int index = StateBudget.MaxQuestions; index < total; index++)

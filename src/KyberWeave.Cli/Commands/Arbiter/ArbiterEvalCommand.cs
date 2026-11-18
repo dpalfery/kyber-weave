@@ -17,7 +17,8 @@ public sealed class ArbiterEvalCommand(
     IArbiterConfigResolver configs,
     IArbiterRepositoryLocator locator,
     IArbiterDryRunService dryRun,
-    IFileSystem files) : Command<ArbiterSettings>
+    IFileSystem files,
+    IAnsiConsole console) : Command<ArbiterSettings>
 {
     private static readonly JsonSerializerOptions EventJson = new()
     {
@@ -37,7 +38,7 @@ public sealed class ArbiterEvalCommand(
         DiagnosticReport report = new();
         if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
-            CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
+            CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
             return 1;
         }
 
@@ -54,7 +55,7 @@ public sealed class ArbiterEvalCommand(
                     Severity.Error,
                     exception.Message,
                     "--trigger"));
-                CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
+                CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
                 return 1;
             }
         }
@@ -69,7 +70,7 @@ public sealed class ArbiterEvalCommand(
                     : $"Event file '{settings.Event}' does not exist.",
                 "--event",
                 Hint: "Pass a recorded event, for example 'arbiter eval --trigger delegate --event ./event.json --provider none'."));
-            CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
+            CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
             return 1;
         }
 
@@ -87,7 +88,7 @@ public sealed class ArbiterEvalCommand(
                 Severity.Error,
                 $"Event file '{settings.Event}' could not be read as an ArbiterEvent: {exception.Message}",
                 "--event"));
-            CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
+            CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
             return 1;
         }
 
@@ -96,7 +97,7 @@ public sealed class ArbiterEvalCommand(
             config, repositoryRoot, settings.Provider, report);
         if (session is null)
         {
-            CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
+            CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
             return 1;
         }
 
@@ -120,14 +121,14 @@ public sealed class ArbiterEvalCommand(
                 Severity.Error,
                 $"The dry-run evaluation failed closed: {exception.Message}",
                 "--event"));
-            CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
+            CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
             return 1;
         }
 
-        AnsiConsole.MarkupLine($"[bold]Outcome:[/] {Markup.Escape(result.Outcome)}");
+        console.MarkupLine($"[bold]Outcome:[/] {Markup.Escape(result.Outcome)}");
         foreach (ArbiterDispatchEvaluation dispatch in result.Dispatches)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]Trigger {Markup.Escape(dispatch.Trigger ?? "—")}: {Markup.Escape(dispatch.Outcome)}.[/]");
         }
 
@@ -153,7 +154,7 @@ public sealed class ArbiterEvalCommand(
                 "--event"));
         }
 
-        CommandHelpers.Finish(report, settings, "arbiter eval", "Dispatch");
+        CommandHelpers.Finish(console, report, settings, "arbiter eval", "Dispatch");
         return report.HasErrors ? 1 : 0;
     }
 

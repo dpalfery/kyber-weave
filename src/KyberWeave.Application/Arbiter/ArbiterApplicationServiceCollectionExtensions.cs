@@ -101,6 +101,7 @@ public static class ArbiterApplicationServiceCollectionExtensions
                 sp.GetRequiredService<IDispatchClaimStore>(),
                 sp.GetRequiredService<IClaudeHookCoverage>(),
                 sp.GetRequiredService<IProcessEnvironment>(),
+                ids,
                 () => ids.NewSortableId(clock.GetUtcNow()),
                 sp.GetRequiredService<ITaskPromptServiceFactory>());
         });

@@ -19,7 +19,7 @@ public sealed class GitCheckoutProbeTests
     private readonly InMemoryFileSystem _files = new();
     private readonly ScriptedProcessRunner _git = new();
 
-    private GitCheckoutProbe Probe() => new(_files, _git);
+    private GitCheckoutProbe Probe() => new(_files, _git, new FakePathResolver(_files));
 
     private void Write(string path, string text)
     {
@@ -124,7 +124,7 @@ public sealed class GitCheckoutProbeTests
         Assert.Equal("unknown", failed.Dirty);
 
         ScriptedProcessRunner none = new ScriptedProcessRunner().WithMissingProgram("git");
-        GitCheckoutRevision missing = new GitCheckoutProbe(_files, none).ReadRevision(Root);
+        GitCheckoutRevision missing = new GitCheckoutProbe(_files, none, new FakePathResolver(_files)).ReadRevision(Root);
 
         Assert.Equal("unavailable", missing.Revision);
         Assert.Equal("unknown", missing.Dirty);

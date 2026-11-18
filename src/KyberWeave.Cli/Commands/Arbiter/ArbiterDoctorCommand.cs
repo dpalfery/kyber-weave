@@ -17,7 +17,9 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// post-dispatch advisory limitation as information (no diagnostic id: nothing is
 /// wrong, so there is nothing to suppress or baseline).
 /// </remarks>
-public sealed class ArbiterDoctorCommand(IArbiterDoctorService doctor) : Command<ArbiterSettings>
+public sealed class ArbiterDoctorCommand(
+    IArbiterDoctorService doctor,
+    IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary><c>artifacts/arbiter/</c> is not ignored by git.</summary>
     public const string LogNotIgnored = IArbiterDoctorService.LogNotIgnored;
@@ -57,9 +59,9 @@ public sealed class ArbiterDoctorCommand(IArbiterDoctorService doctor) : Command
         ArgumentNullException.ThrowIfNull(settings);
         DiagnosticReport report = new();
         ArbiterDoctorReport inspected = doctor.Inspect(settings.Path, settings.Config, report);
-        CommandHelpers.WriteUnfolded(() => Print(inspected));
+        CommandHelpers.WriteUnfolded(console, () => Print(inspected));
 
-        CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
+        CommandHelpers.Finish(console, report, settings, "arbiter doctor", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 
@@ -67,35 +69,35 @@ public sealed class ArbiterDoctorCommand(IArbiterDoctorService doctor) : Command
     public int Execute(CommandContext context, ArbiterSettings settings) =>
         Execute(context, settings, CancellationToken.None);
 
-    private static void Print(ArbiterDoctorReport inspected)
+    private void Print(ArbiterDoctorReport inspected)
     {
-        AnsiConsole.MarkupLine("[bold]Kyber-Arbiter Doctor[/]");
-        AnsiConsole.WriteLine();
+        console.MarkupLine("[bold]Kyber-Arbiter Doctor[/]");
+        console.WriteLine();
 
-        AnsiConsole.MarkupLine("[bold]GLOBAL scope[/]");
+        console.MarkupLine("[bold]GLOBAL scope[/]");
         if (inspected.GlobalTargets.Count == 0)
         {
-            AnsiConsole.MarkupLine("  [grey]no global targets configured.[/]");
+            console.MarkupLine("  [grey]no global targets configured.[/]");
         }
         else
         {
             foreach (ArbiterDoctorScopeTarget target in inspected.GlobalTargets)
             {
-                AnsiConsole.MarkupLine($"  {Markup.Escape(target.Label)}: {Markup.Escape(target.Reason)}");
+                console.MarkupLine($"  {Markup.Escape(target.Label)}: {Markup.Escape(target.Reason)}");
             }
         }
 
-        AnsiConsole.MarkupLine("[bold]PROJECT scope[/]");
+        console.MarkupLine("[bold]PROJECT scope[/]");
         if (inspected.ArbiterEnabled)
         {
-            AnsiConsole.MarkupLine("  arbiter.enabled: true");
+            console.MarkupLine("  arbiter.enabled: true");
         }
 
-        ArbiterGatingConsole.WriteRows(inspected.Gating, ArbiterDoctorService.TargetDisplayName);
+        ArbiterGatingConsole.WriteRows(console, inspected.Gating, ArbiterDoctorService.TargetDisplayName);
 
         foreach (ArbiterDoctorLine line in inspected.Lines)
         {
-            AnsiConsole.MarkupLine(Format(line));
+            console.MarkupLine(Format(line));
         }
     }
 

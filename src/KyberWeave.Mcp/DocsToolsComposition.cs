@@ -153,7 +153,9 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IDocsHostConfiguration>(),
             provider.GetRequiredService<ICodeGraphPortsFactory>(),
             provider.GetRequiredService<IManagedGlossaryFactory>(),
-            provider.GetRequiredService<IDocumentSourceFactory>());
+            provider.GetRequiredService<IDocumentSourceFactory>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     /// <summary>The tools over <paramref name="host"/>.</summary>
