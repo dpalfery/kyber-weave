@@ -22,7 +22,13 @@ public enum SquadLinkSyncFlow
     DifferingSplitKept,
 
     /// <summary>A sync of an instance that holds the person's own file where a link would go: the file is kept.</summary>
-    UnmanagedCopyKept
+    UnmanagedCopyKept,
+
+    /// <summary>A later sync after a recorded folder link was replaced by a real folder holding the person's files: the folder is kept.</summary>
+    ReplacedFolderKept,
+
+    /// <summary>A later sync after a harness rewrote a linked file and its main home source was removed: the only copy is kept.</summary>
+    RewrittenFileWithoutSourceKept
 }
 
 /// <summary>
@@ -78,6 +84,14 @@ public abstract class SquadInstanceLinkSyncCrashSafetyContractTests
     [Fact]
     public void UnmanagedCopyIsNeverChangedAtAnyStop() => Run(SquadLinkSyncFlow.UnmanagedCopyKept, changesTree: true);
 
+    /// <summary>A recorded folder link replaced by a real folder of the person's files is never deleted, at any stop.</summary>
+    [Fact]
+    public void ReplacedFolderIsNeverDeletedAtAnyStop() => Run(SquadLinkSyncFlow.ReplacedFolderKept, changesTree: true);
+
+    /// <summary>A rewritten linked file whose main home source is gone is never deleted, at any stop.</summary>
+    [Fact]
+    public void RewrittenFileWithoutSourceIsNeverDeletedAtAnyStop() => Run(SquadLinkSyncFlow.RewrittenFileWithoutSourceKept, changesTree: true);
+
     private static void Seed(SquadLinkSyncCrashWorkspace workspace, SquadLinkSyncFlow flow)
     {
         IWritableFileSystem disk = workspace.Disk;
@@ -112,6 +126,17 @@ public abstract class SquadInstanceLinkSyncCrashSafetyContractTests
             case SquadLinkSyncFlow.DifferingSplitKept:
                 disk.DeleteFile(instanceSettings);
                 disk.WriteAllText(instanceSettings, "{\"theme\":\"light\"}");
+                break;
+            case SquadLinkSyncFlow.ReplacedFolderKept:
+                disk.DeleteTreeNoFollow(Path.Combine(workspace.InstanceRoot, "logs"));
+                disk.CreateDirectory(Path.Combine(workspace.InstanceRoot, "logs"));
+                disk.WriteAllText(Path.Combine(workspace.InstanceRoot, "logs", "mine.txt"), "my notes");
+                break;
+            case SquadLinkSyncFlow.RewrittenFileWithoutSourceKept:
+                string history = Path.Combine(workspace.InstanceRoot, "history.sqlite");
+                disk.DeleteFile(history);
+                disk.WriteAllText(history, "only copy");
+                disk.DeleteFile(Path.Combine(workspace.MainHome, "history.sqlite"));
                 break;
         }
     }

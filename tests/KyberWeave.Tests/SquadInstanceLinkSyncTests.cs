@@ -644,7 +644,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         Directory.CreateDirectory(lockedDir);
 
         string staleFile = Path.Combine(lockedDir, "stale.txt");
-        File.WriteAllText(staleFile, "stale", Encoding.UTF8);
+        File.CreateSymbolicLink(staleFile, "/nonexistent/target");
 
         string linksJsonPath = Path.Combine(stateDirectory, "links.json");
         string json = """

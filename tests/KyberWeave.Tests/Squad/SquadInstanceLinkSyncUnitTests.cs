@@ -202,6 +202,131 @@ public sealed class SquadInstanceLinkSyncUnitTests
     }
 
     [Fact]
+    public void FolderTheInstanceCannotListIsSkippedAndTheSyncStillCompletes()
+    {
+        _files.CreateDirectory(Instance + "/private");
+        _files.WriteAllText(Instance + "/private/mine.txt", "mine");
+        _files.DenyListing(Instance + "/private");
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Contains(result.Links, link => link.RelativePath == "settings.json");
+        Assert.Equal("mine", _files.ReadAllText(Instance + "/private/mine.txt"));
+    }
+
+    [Fact]
+    public void FolderTheMainHomeCannotListIsSkippedAndTheSyncStillCompletes()
+    {
+        _files.CreateDirectory(Main + "/sealed");
+        _files.DenyListing(Main + "/sealed");
+
+        SquadInstanceLinkSyncResult result = Sync(new HashSet<string> { "sealed/rendered.md" });
+
+        Assert.Contains(result.Links, link => link.RelativePath == "settings.json");
+    }
+
+    [Fact]
+    public void PlannedLinksFileWithAnEscapingPathIsTreatedAsAbsent()
+    {
+        _files.WriteAllText(
+            State + "/links.pending.json",
+            "[{\"relativePath\":\"../x\",\"kind\":\"file\",\"targetPath\":\"/kw/main/settings.json\"}]");
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Contains(result.Links, link => link.RelativePath == "settings.json");
+        Assert.False(_files.FileExists(State + "/links.pending.json"));
+    }
+
+    [Fact]
+    public void PlannedLinksFileWithACorruptBodyIsTreatedAsAbsent()
+    {
+        _files.WriteAllText(State + "/links.pending.json", "not json");
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Contains(result.Links, link => link.RelativePath == "settings.json");
+    }
+
+    [Fact]
+    public void PlannedLinksFileWithANullEntryIsTreatedAsAbsent()
+    {
+        _files.WriteAllText(State + "/links.pending.json", "[null]");
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Contains(result.Links, link => link.RelativePath == "settings.json");
+    }
+
+    [Fact]
+    public void RecordedFolderLinkReplacedByARealFolderIsKeptAndDroppedFromTheRecord()
+    {
+        _ = Sync();
+        _links.DeleteTreeNoFollow(Instance + "/logs");
+        _files.CreateDirectory(Instance + "/logs");
+        _files.WriteAllText(Instance + "/logs/mine.txt", "mine");
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Equal("mine", _files.ReadAllText(Instance + "/logs/mine.txt"));
+        Assert.DoesNotContain(result.Links, link => link.RelativePath == "logs");
+        Assert.NotEmpty(result.Warnings);
+    }
+
+    [Fact]
+    public void RewrittenLinkedFileWhoseMainHomeSourceIsGoneIsKeptAndDroppedFromTheRecord()
+    {
+        _ = Sync();
+        _files.DeleteFile(Instance + "/settings.json");
+        _files.WriteAllText(Instance + "/settings.json", "mine");
+        _files.DeleteFile(Main + "/settings.json");
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Equal("mine", _files.ReadAllText(Instance + "/settings.json"));
+        Assert.DoesNotContain(result.Links, link => link.RelativePath == "settings.json");
+        Assert.NotEmpty(result.Warnings);
+    }
+
+    [Fact]
+    public async Task TwoSyncObjectsOnOneRootInOneProcessQueueInsteadOfFailing()
+    {
+        SquadInstanceLinkSync other = new(
+            _files,
+            new FakePathResolver(_files),
+            new InProcessLease(_leases),
+            new FakeProcessEnvironment(currentDirectory: "/kw/work"));
+
+        for (int round = 0; round < 20; round++)
+        {
+            using ManualResetEventSlim start = new();
+            Task[] runs =
+            [
+                Task.Run(() => { start.Wait(); _ = Sync(); }),
+                Task.Run(() => { start.Wait(); _ = other.Sync(Instance, Main, Row, FrozenSet<string>.Empty, _links, State); })
+            ];
+            start.Set();
+            await Task.WhenAll(runs);
+        }
+
+        Assert.Equal(Main + "/settings.json", _files.GetLinkTarget(Instance + "/settings.json"));
+    }
+
+    [Fact]
+    public void SyncRefusedByAHeldLeaseThrowsAndTheNextSyncStillRuns()
+    {
+        InProcessLease holder = new(_leases);
+        using (holder.Hold(_sync.GetMutexName(Instance)))
+        {
+            _ = Assert.Throws<KyberWeave.Contracts.Host.LeaseTimeoutException>(() => Sync());
+        }
+
+        Assert.Empty(_files.EnumerateEntries(Instance));
+        SquadInstanceLinkSyncResult result = Sync();
+        Assert.Contains(result.Links, link => link.RelativePath == "settings.json");
+    }
+
+    [Fact]
     public void LinkNameIsTheSameForARootWhateverItsSpelling()
     {
         Assert.Equal(_sync.GetMutexName(Instance), _sync.GetMutexName(Instance + "/"));

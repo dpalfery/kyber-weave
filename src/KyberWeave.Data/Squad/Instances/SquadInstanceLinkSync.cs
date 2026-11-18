@@ -37,9 +37,9 @@ public sealed class SquadInstanceLinkSync(
 
     private static readonly TimeSpan LeaseTimeout = TimeSpan.FromMinutes(5);
 
-    // The lease refuses a second request from the process that holds the name, so concurrent callers in this
-    // process queue here first and one at a time reach the cross-process lease.
-    private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.Ordinal);
+    // The lease refuses a second request from the process that holds the name, so every concurrent caller in this
+    // process, through any sync object, queues here first and one at a time reaches the cross-process lease.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -88,7 +88,7 @@ public sealed class SquadInstanceLinkSync(
         if (row.Kind != SquadInstanceKind.HomeReplace) return new SquadInstanceLinkSyncResult([], []);
 
         string leaseName = GetMutexName(instanceRoot);
-        SemaphoreSlim gate = _gates.GetOrAdd(leaseName, static _ => new SemaphoreSlim(1, 1));
+        SemaphoreSlim gate = Gates.GetOrAdd(leaseName, static _ => new SemaphoreSlim(1, 1));
         gate.Wait();
         try
         {
@@ -138,15 +138,17 @@ public sealed class SquadInstanceLinkSync(
             string linkPath = Path.Combine(instanceRoot, remove.Record.RelativePath);
             try
             {
-                if (remove.Record.Kind == SquadLinkKind.Directory)
+                if (fileSystem.IsLink(linkPath))
                 {
-                    if (files.DirectoryExists(linkPath) || fileSystem.IsLink(linkPath))
+                    if (remove.Record.Kind == SquadLinkKind.Directory)
                         fileSystem.DeleteTreeNoFollow(linkPath);
-                }
-                else
-                {
-                    if (files.FileExists(linkPath) || fileSystem.IsLink(linkPath))
+                    else
                         files.DeleteFile(linkPath);
+                }
+                else if (files.FileExists(linkPath) || files.DirectoryExists(linkPath))
+                {
+                    // The harness or the person replaced the link with a real copy; it may be the only one.
+                    warnings.Add($"Recorded link '{remove.Record.RelativePath}' is now the instance's own copy and was kept.");
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -208,7 +210,9 @@ public sealed class SquadInstanceLinkSync(
                 .Where(record =>
                     !differingSplitPaths.Contains(NormalizeRelativePath(record.RelativePath)) &&
                     !keptPaths.Contains(NormalizeRelativePath(record.RelativePath)) &&
-                    !fileSystem.IsLinkTo(Path.Combine(instanceRoot, record.RelativePath), record.TargetPath))]);
+                    !fileSystem.IsLinkTo(Path.Combine(instanceRoot, record.RelativePath), record.TargetPath) &&
+                    (fileSystem.IsLink(Path.Combine(instanceRoot, record.RelativePath)) ||
+                     !PathHoldsRealCopy(Path.Combine(instanceRoot, record.RelativePath), fileSystem)))]);
 
         foreach (SquadLinkAction.Add add in actions.OfType<SquadLinkAction.Add>())
         {
@@ -231,8 +235,9 @@ public sealed class SquadInstanceLinkSync(
             if (record.Kind == SquadLinkKind.Directory)
                 try
                 {
-                    if (files.DirectoryExists(linkPath) || fileSystem.IsLink(linkPath))
-                        fileSystem.DeleteTreeNoFollow(linkPath);
+                    if (KeepRealCopy(linkPath, fileSystem, record, warnings)) continue;
+
+                    if (fileSystem.IsLink(linkPath)) fileSystem.DeleteTreeNoFollow(linkPath);
 
                     EnsureDirectoryExists(Path.GetDirectoryName(linkPath));
                     fileSystem.CreateFolderLink(linkPath, targetPath);
@@ -245,7 +250,9 @@ public sealed class SquadInstanceLinkSync(
             else
                 try
                 {
-                    if (files.FileExists(linkPath) || fileSystem.IsLink(linkPath)) files.DeleteFile(linkPath);
+                    if (KeepRealCopy(linkPath, fileSystem, record, warnings)) continue;
+
+                    if (fileSystem.IsLink(linkPath)) files.DeleteFile(linkPath);
 
                     EnsureDirectoryExists(Path.GetDirectoryName(linkPath));
                     fileSystem.CreateFileLink(linkPath, targetPath);
@@ -267,6 +274,21 @@ public sealed class SquadInstanceLinkSync(
         DeletePlannedLinks(instanceStateDirectory);
 
         return new SquadInstanceLinkSyncResult(sortedLinks, warnings);
+    }
+
+    private bool PathHoldsRealCopy(string path, ISquadLinkFileSystem fileSystem) =>
+        !fileSystem.IsLink(path) && (files.FileExists(path) || files.DirectoryExists(path));
+
+    /// <summary>
+    /// A path that is still a link may be replaced; anything else there is a real copy the sync did not make, so it is kept,
+    /// reported, and left out of the recorded links.
+    /// </summary>
+    private bool KeepRealCopy(string linkPath, ISquadLinkFileSystem fileSystem, SquadLinkRecord record, List<string> warnings)
+    {
+        if (!PathHoldsRealCopy(linkPath, fileSystem)) return false;
+
+        warnings.Add($"Instance copy kept for '{record.RelativePath}': a real copy replaced the recorded link.");
+        return true;
     }
 
     private string PlannedLinksPath(string instanceStateDirectory) =>
@@ -325,11 +347,19 @@ public sealed class SquadInstanceLinkSync(
             return;
         }
 
-        if (planned is null) return;
+        if (planned is null || planned.Any(r => r is null || r.RelativePath is null || r.TargetPath is null)) return;
 
         HashSet<string> known = new(recordedLinks.Select(r => NormalizeRelativePath(r.RelativePath)), StringComparer.Ordinal);
         List<SquadLinkRecord> candidates = [.. planned.Where(r => !string.IsNullOrWhiteSpace(r.RelativePath))];
-        ValidateRecordedLinks(instanceRoot, candidates);
+        try
+        {
+            ValidateRecordedLinks(instanceRoot, candidates);
+        }
+        catch (InvalidDataException)
+        {
+            return;
+        }
+
         foreach (SquadLinkRecord record in candidates)
         {
             if (known.Contains(NormalizeRelativePath(record.RelativePath))) continue;
@@ -428,10 +458,10 @@ public sealed class SquadInstanceLinkSync(
         while (queue.Count > 0)
         {
             (string current, int depth) = queue.Dequeue();
-            IEnumerable<FileSystemEntry> entries;
+            IReadOnlyList<FileSystemEntry> entries;
             try
             {
-                entries = files.EnumerateEntries(current);
+                entries = [.. files.EnumerateEntries(current)];
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -474,10 +504,10 @@ public sealed class SquadInstanceLinkSync(
         while (queue.Count > 0)
         {
             (string current, int depth) = queue.Dequeue();
-            IEnumerable<FileSystemEntry> entries;
+            IReadOnlyList<FileSystemEntry> entries;
             try
             {
-                entries = files.EnumerateEntries(current);
+                entries = [.. files.EnumerateEntries(current)];
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {

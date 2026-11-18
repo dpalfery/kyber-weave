@@ -97,6 +97,13 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         IsKilled = false;
     }
 
+    /// <summary>
+    /// Makes listing one directory throw <see cref="UnauthorizedAccessException"/> while the listing is read, as an
+    /// unreadable folder does on disk, where the failure shows when the enumeration is walked and not when it is opened.
+    /// </summary>
+    /// <param name="directory">The absolute path of the directory that cannot be listed.</param>
+    public void DenyListing(string directory) => _deniedListings.Add(Full(directory));
+
     /// <summary>Sets a path's attributes, so a test can make a file read-only.</summary>
     /// <param name="path">The absolute path.</param>
     /// <param name="attributes">The new attributes.</param>
@@ -576,6 +583,8 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         }
     }
 
+    private readonly HashSet<string> _deniedListings = new(StringComparer.Ordinal);
+
     private string Full(string path) => Path.GetFullPath(path, _rootPath);
 
     private string CanonicalPath(Node node)
@@ -1021,6 +1030,11 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         }
 
         string currentPath = Full(directory);
+        if (_deniedListings.Contains(currentPath))
+        {
+            throw new UnauthorizedAccessException($"Access to the path '{currentPath}' is denied.");
+        }
+
         foreach (Node child in Ordered(resolved))
         {
             yield return new FileSystemEntry(Path.Combine(currentPath, child.Name), IsDirectoryEntry(child), child.LinkTarget is not null);
