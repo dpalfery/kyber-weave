@@ -171,15 +171,15 @@ clock and no task would track the fix.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
-| `KyberWeave.Application` | 68 | 208 | 4.1, 4.2, 4.3, 4.8 |
+| `KyberWeave.Application` | 74 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 72 | 632 | 3.4, 3.5, 4.4, 4.9 |
-| `KyberWeave.Domain` | 24 | 46 | 2.5 |
+| `KyberWeave.Data` | 69 | 632 | 3.4, 3.5, 4.4, 4.9 |
+| `KyberWeave.Domain` | 0 | 0 | — |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 3 | 22 | 4.9 |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
-| **Total** | **220** | **1,136** | |
+| **Total** | **200** | **1,059** | |
 
 The totals before adapters and roots are taken out are 68 classes and 212 sites in Application,
 52 and 183 in Cli, 111 and 955 in Data, 28 and 49 in Domain, 2 and 3 in Hooks, 6 and 47 in Kernel,
@@ -187,7 +187,7 @@ The totals before adapters and roots are taken out are 68 classes and 212 sites 
 all of them `ProcessStartInfo` in an interface or a request record; it holds no implementation.
 `Environment.NewLine` sites are excluded from both sets of numbers.
 
-#### KyberWeave.Application (68 classes)
+#### KyberWeave.Application (74 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -200,6 +200,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
+| `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths | 2.5 |
+| `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths | 2.5 |
+| `SquadResponseGuidanceSource` (`Squad/Deployment/SquadResponseGuidanceSource.cs`) | file system | 2.5 |
+| `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
+| `SquadModelPresetStore` (`Squad/Presets/SquadModelPresetStore.cs`) | file system | 3.5 |
+| `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 
 #### KyberWeave.Cli (14 classes)
 
@@ -207,7 +213,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 |---|---|---|
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 
-#### KyberWeave.Data (72 classes)
+#### KyberWeave.Data (69 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -216,12 +222,9 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `SquadDeploymentAdapters` (`Squad/Deployment/SquadDeploymentAdapters.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadMigrationLedger` (`Squad/Deployment/SquadMigrationLedger.cs`) | file system | 3.5 |
-| `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
 | `FileSquadPackager` (`Squad/Packaging/FileSquadPackager.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadCanonicalProfileStore` (`Squad/Presets/SquadCanonicalProfileStore.cs`) | file system, identifiers | 3.5 |
-| `SquadModelPresetStore` (`Squad/Presets/SquadModelPresetStore.cs`) | file system | 3.5 |
 | `LocalCheckoutSquadReleaseSource` (`Squad/Release/LocalCheckoutSquadReleaseSource.cs`) | file system, paths | 3.5 |
-| `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 
 Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 
@@ -262,13 +265,9 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   source file's Unix permission bits in the archive; the file-system seam has no member that reads them, so
   reading entries through `OpenRead` would change the archive's contents.
 
-#### KyberWeave.Domain (24 classes)
+#### KyberWeave.Domain (0 classes)
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
-| `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths | 2.5 |
-| `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths | 2.5 |
-| `SquadResponseGuidanceSource` (`Squad/Deployment/SquadResponseGuidanceSource.cs`) | file system | 2.5 |
+None left. Task 2.5 moved the last three to `KyberWeave.Application` (`Squad/Deployment/`), and the Data classes that named them moved with them.
 
 #### KyberWeave.Hooks (1 class)
 
@@ -312,7 +311,7 @@ does not yet meet that: 15 non-adapter classes open a `FileStream` directly. The
 `Application/Update/SelfUpdater.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,
-`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
+`Application/Squad/Rendering/CopilotMcpServerProbe.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.
 
 Two more framework members are used directly but are not in the exception list because a seam
