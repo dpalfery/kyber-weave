@@ -185,19 +185,7 @@ public sealed partial class StandardsFolderMigration
             switch (change.Kind)
             {
                 case StandardsFolderChangeKind.Rename:
-                    string renameFrom = RequireWritable(change.From);
-                    string renameTo = RequireWritable(change.To);
-                    if (File.Exists(renameTo))
-                    {
-                        skippedRenames.Add(change.To);
-                        break;
-                    }
-
-                    try
-                    {
-                        File.Move(renameFrom, renameTo);
-                    }
-                    catch (IOException) when (File.Exists(renameTo))
+                    if (!TryRenameNew(change.From, change.To))
                     {
                         skippedRenames.Add(change.To);
                         break;
@@ -239,17 +227,50 @@ public sealed partial class StandardsFolderMigration
     }
 
     /// <summary>
+    /// Gives the file <paramref name="from"/> the name <paramref name="to"/>, answering false when
+    /// something already sits at <paramref name="to"/>.
+    /// </summary>
+    /// <remarks>
+    /// The destination is created before the source is removed. Creation is one call that refuses
+    /// an existing path instead of replacing it, so what is at the destination is decided by the
+    /// write itself rather than by a check a later write could contradict: the same "create, never
+    /// replace" rule every other write here follows, applied to a rename. Copying rather than
+    /// moving keeps the bytes identical and leaves the source in place if the create fails, so a
+    /// refused rename loses nothing; the cost is that a crash between the two calls leaves both
+    /// names holding the standard, which the next run reports rather than resolves.
+    /// </remarks>
+    private bool TryRenameNew(string from, string to)
+    {
+        string source = RequireWritable(from);
+        string target = RequireWritable(to);
+        byte[] content = File.ReadAllBytes(source);
+        if (!TryCreateNew(target, content)) return false;
+
+        File.Delete(source);
+        return true;
+    }
+
+    /// <summary>
     /// Writes a new file and never replaces one, reporting whether the file was created. A
     /// target that appeared since the folder was planned makes the change a no-op, so a second
     /// actor's file is left byte-for-byte intact.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Only the final move can be a skip, because only the move fails for the reason a skip
     /// means: a second actor created the target in the meantime. Writing the temporary is this
     /// tool's own I/O, and a failure there — a full disk, a name the platform refuses — is an
     /// error the operator has to see, never a silent "someone else created it".
+    /// </para>
+    /// <para>
+    /// The containment check ran before this call and cannot be atomic with it, so the created
+    /// file's own location is what the guarantee rests on: a path that started resolving outside
+    /// the root in between shows up in the re-check, and the file is removed instead of left
+    /// there. <see cref="RequireWritable(string)"/> has already refused a link at the target; the
+    /// re-check is what covers a directory replaced by one after that refusal.
+    /// </para>
     /// </remarks>
-    private static bool TryCreateNew(string path, byte[] content)
+    private bool TryCreateNew(string path, byte[] content)
     {
         string directory = Path.GetDirectoryName(path)!;
         string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
@@ -264,23 +285,18 @@ public sealed partial class StandardsFolderMigration
             try
             {
                 File.Move(temporary, path, overwrite: false);
-                return true;
             }
             catch (IOException) when (File.Exists(path))
             {
                 return false;
             }
+
+            VerifyStillWritable(path);
+            return true;
         }
         finally
         {
-            try
-            {
-                File.Delete(temporary);
-            }
-            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-            {
-                // Best effort: the write or the move already decided the outcome.
-            }
+            Discard(temporary);
         }
     }
 
@@ -381,14 +397,19 @@ public sealed partial class StandardsFolderMigration
     /// and the folder is reported instead. Refusing every link rather than only those that leave
     /// the root also keeps the rule one sentence long, which is what makes it predictable.
     /// </remarks>
-    private string RequireWritable(string relativePath)
+    private string RequireWritable(string relativePath) => RequireWritable(Absolute(relativePath), relativePath);
+
+    /// <inheritdoc cref="RequireWritable(string)" path="/summary"/>
+    /// <param name="fullPath">The absolute path to check.</param>
+    /// <param name="named">How a refusal names the path: the repository-relative path the caller asked for.</param>
+    private string RequireWritable(string fullPath, string named)
     {
         string boundary = _repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        string full = Path.GetFullPath(Absolute(relativePath));
+        string full = Path.GetFullPath(fullPath);
         if (!full.StartsWith(boundary, StringComparison.Ordinal))
         {
             throw new IOException(
-                $"Refusing to write '{relativePath}': it resolves outside the repository root, so nothing was written.");
+                $"Refusing to write '{named}': it resolves outside the repository root, so nothing was written.");
         }
 
         string current = _repoRoot.TrimEnd(Path.DirectorySeparatorChar);
@@ -402,12 +423,51 @@ public sealed partial class StandardsFolderMigration
             if (entry.LinkTarget is null) continue;
 
             throw new IOException(
-                $"Refusing to write '{relativePath}': '{current}' is the symbolic link " +
+                $"Refusing to write '{named}': '{current}' is the symbolic link " +
                 $"'{entry.LinkTarget}', and a migration does not write through or replace a link, " +
                 "so nothing was written.");
         }
 
         return full;
+    }
+
+    /// <summary>
+    /// Checks again where a file that was just created actually resolved, removing it if the path
+    /// stopped being inside the repository while it was written.
+    /// </summary>
+    /// <remarks>
+    /// The pre-write check and the write cannot be one operation in .NET, so the guarantee cannot
+    /// rest on the check's timing. It rests on this: the write's result is inspected, and a path
+    /// that now resolves outside the root — a directory replaced by a link in between — costs the
+    /// file, not the repository's boundary.
+    /// </remarks>
+    private void VerifyStillWritable(string path)
+    {
+        try
+        {
+            RequireWritable(path, path);
+        }
+        catch (IOException exception)
+        {
+            Discard(path);
+            throw new IOException(
+                $"Refusing to keep '{path}': it stopped resolving inside the repository root while it was " +
+                "written, so the file it was written to was removed.",
+                exception);
+        }
+    }
+
+    /// <summary>Deletes a file, swallowing a cleanup failure that would take the real error's place.</summary>
+    private static void Discard(string path)
+    {
+        try
+        {
+            File.Delete(path);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Best effort: the refusal this supports is the failure the caller has to see.
+        }
     }
 
     [GeneratedRegex(@"^owner:\s*(?<owner>\S.*)$", RegexOptions.Multiline)]
