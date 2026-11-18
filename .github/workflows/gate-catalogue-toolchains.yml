@@ -18,7 +18,7 @@ name: gate-catalogue-toolchains
       - src/KyberWeave.Core/Review/**
       - src/KyberWeave.Core.Docs/Scaffolding/**
       - tests/fixtures/gate-catalogue/**
-      - tests/KyberWeave.Tests/GateCatalogueToolchainTests.cs
+      - tests/KyberWeave.Integration.Tests/GateCatalogueToolchainTests.cs
       - .github/workflows/gate-catalogue-toolchains.yml
   workflow_dispatch:
 
@@ -78,9 +78,9 @@ jobs:
         env:
           KW_GATE_TOOLCHAIN: "1"
         run: >
-          dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj
+          dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
           -c ${{ env.CONFIGURATION }}
-          --filter-class KyberWeave.Tests.GateCatalogueToolchainTests
+          --filter-class KyberWeave.Integration.Tests.GateCatalogueToolchainTests
 
       - name: Setup Go 1.25
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -94,6 +94,6 @@ jobs:
           KW_GATE_TOOLCHAIN: "1"
         run: |
           go version
-          dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
+          dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj \
             -c ${{ env.CONFIGURATION }} \
-            --filter-class KyberWeave.Tests.GateCatalogueToolchainTests
+            --filter-class KyberWeave.Integration.Tests.GateCatalogueToolchainTests
