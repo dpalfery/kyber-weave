@@ -380,7 +380,12 @@ public class FileSystemPathResolver : IPathResolver
     private bool HasPathPrefix(string root, string candidate)
     {
         string prefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
-        return candidate.StartsWith(prefix, _nameComparison);
+
+        // Exact comparison, because every caller compares spellings the walk already resolved: each existing
+        // segment carries the name its directory reported, and a directory that holds two names differing only in
+        // case reports both, so folding them together here would place one sibling inside the other. A spelling the
+        // volume does fold reaches this point as the entry's own name through Canonicalize.
+        return candidate.StartsWith(prefix, StringComparison.Ordinal);
     }
 
     private static string[] Segments(string fullPath, string filesystemRoot) =>
