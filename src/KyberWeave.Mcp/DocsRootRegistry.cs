@@ -116,6 +116,9 @@ public sealed class DocsRootRegistry
             repoRoot,
             () => codeGraph.ForRepository(repoRoot).Resolver,
             () => documents.Create(repoRoot, ontology).Load(),
+            provider.GetRequiredService<IRepositoryFileStore>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
             ontology.DocsRoots,
             ontology.ResolvedCatalogPath);
         return DocsToolsComposition.Create(

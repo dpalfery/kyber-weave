@@ -5,7 +5,6 @@ using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
-using KyberWeave.Core.FileSystem;
 using Spectre.Console;
 using Spectre.Console.Cli;
 
@@ -23,23 +22,27 @@ public interface IDocsAnalysisCommandService
 public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
+    private readonly IAnsiConsole _console;
 
-    public DocsIntegrityCheckCommand(IDocsAnalysisCommandService service) =>
+    public DocsIntegrityCheckCommand(IDocsAnalysisCommandService service, IAnsiConsole console)
+    {
         _service = service ?? throw new ArgumentNullException(nameof(service));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
+    }
 
     public override int Execute(CommandContext context, DocsIntegrityCheckSettings settings, CancellationToken cancellationToken)
     {
         try
         {
             DocumentationAnalysisResult result = _service.Analyze(settings);
-            CommandHelpers.Finish(result.Diagnostics, settings, "docs integrity-check", "Claim");
+            CommandHelpers.Finish(_console, result.Diagnostics, settings, "docs integrity-check", "Claim");
             if (HasOperationalErrors(result.Diagnostics)) return 1;
             return FindingExitCode(result.Diagnostics, settings.FailOn);
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
             DiagnosticReport report = DocsAnalysisCommandErrors.Report(exception, DocumentationAnalyzer.IgnoreMarkupRuleCode);
-            CommandHelpers.Finish(report, settings, "docs integrity-check", "Claim");
+            CommandHelpers.Finish(_console, report, settings, "docs integrity-check", "Claim");
             return 1;
         }
     }
@@ -68,9 +71,15 @@ public sealed class DocsIntegrityCheckCommand : Command<DocsIntegrityCheckSettin
 public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
+    private readonly IWritableFileSystem _files;
+    private readonly IAnsiConsole _console;
 
-    public DocsReviewExportCommand(IDocsAnalysisCommandService service) =>
+    public DocsReviewExportCommand(IDocsAnalysisCommandService service, IWritableFileSystem files, IAnsiConsole console)
+    {
         _service = service ?? throw new ArgumentNullException(nameof(service));
+        _files = files ?? throw new ArgumentNullException(nameof(files));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
+    }
 
     public override int Execute(CommandContext context, DocsReviewExportSettings settings, CancellationToken cancellationToken)
     {
@@ -78,15 +87,15 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.OutputPath);
             ReviewExportResult result = _service.ExportReview(settings);
-            AtomicFile.WriteAllText(settings.OutputPath, result.Json);
+            _files.WriteAllTextAtomic(settings.OutputPath, result.Json);
             DiagnosticReport report = result.Diagnostics;
             report.AddMetric("exportedReviewCharacters", result.ExportedExcerptCharacters);
             report.AddMetric("reviewCandidates", result.Bundle.Candidates.Count);
             report.AddMetric("truncated", result.Truncated);
-            CommandHelpers.Finish(report, settings, "docs review export", "Candidate");
-            if (ReportRenderer.IsHuman(settings.ParsedFormat))
+            CommandHelpers.Finish(_console, report, settings, "docs review export", "Candidate");
+            if (ReportRenderer.IsHuman(settings.FormatFor(_console)))
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"[green]Exported[/] {result.Bundle.Candidates.Count} review candidates to " +
                     $"[grey]{Markup.Escape(settings.OutputPath)}[/].");
             }
@@ -94,7 +103,7 @@ public sealed class DocsReviewExportCommand : Command<DocsReviewExportSettings>
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
-            DocsAnalysisCommandErrors.Render(exception, settings, "docs review export");
+            DocsAnalysisCommandErrors.Render(_console, exception, settings, "docs review export");
             return 1;
         }
     }
@@ -106,11 +115,13 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
 {
     private readonly IDocsAnalysisCommandService _service;
     private readonly IFileSystem _files;
+    private readonly IAnsiConsole _console;
 
-    public DocsReviewImportCommand(IDocsAnalysisCommandService service, IFileSystem files)
+    public DocsReviewImportCommand(IDocsAnalysisCommandService service, IFileSystem files, IAnsiConsole console)
     {
         _service = service ?? throw new ArgumentNullException(nameof(service));
         _files = files ?? throw new ArgumentNullException(nameof(files));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
     }
 
     public override int Execute(CommandContext context, DocsReviewImportSettings settings, CancellationToken cancellationToken)
@@ -119,12 +130,13 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(settings.InputPath);
             ReviewImportResult result = _service.ImportReview(settings, _files.ReadAllText(settings.InputPath));
-            CommandHelpers.Finish(result.Diagnostics, settings, "docs review import", "Candidate");
+            CommandHelpers.Finish(_console, result.Diagnostics, settings, "docs review import", "Candidate");
             return result.Success ? 0 : 1;
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
             DocsAnalysisCommandErrors.Render(
+                _console,
                 exception,
                 settings,
                 "docs review import");
@@ -138,9 +150,13 @@ public sealed class DocsReviewImportCommand : Command<DocsReviewImportSettings>
 public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
 {
     private readonly IDocsAnalysisCommandService _service;
+    private readonly IAnsiConsole _console;
 
-    public DocsGlossaryCommand(IDocsAnalysisCommandService service) =>
+    public DocsGlossaryCommand(IDocsAnalysisCommandService service, IAnsiConsole console)
+    {
         _service = service ?? throw new ArgumentNullException(nameof(service));
+        _console = console ?? throw new ArgumentNullException(nameof(console));
+    }
 
     public override int Execute(CommandContext context, DocsGlossarySettings settings, CancellationToken cancellationToken)
     {
@@ -151,12 +167,13 @@ public sealed class DocsGlossaryCommand : Command<DocsGlossarySettings>
             result.Diagnostics.AddMetric("glossaryChanged", result.Changed);
             result.Diagnostics.AddMetric("glossaryWritten", result.Written);
             result.Diagnostics.AddMetric("glossaryPreview", result.Markdown);
-            CommandHelpers.Finish(result.Diagnostics, settings, "docs glossary", "Glossary");
+            CommandHelpers.Finish(_console, result.Diagnostics, settings, "docs glossary", "Glossary");
             return result.Diagnostics.HasErrors ? 1 : 0;
         }
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
             DocsAnalysisCommandErrors.Render(
+                _console,
                 exception,
                 settings,
                 "docs glossary",
@@ -189,9 +206,10 @@ internal static class DocsAnalysisCommandErrors
     }
 
     public static void Render(
+        IAnsiConsole console,
         Exception exception,
         DocsSettings settings,
         string command,
         string code = DocumentationAnalysisRuleIds.ReviewRuleCode) =>
-        CommandHelpers.Finish(Report(exception, code), settings, command, "Operation");
+        CommandHelpers.Finish(console, Report(exception, code), settings, command, "Operation");
 }

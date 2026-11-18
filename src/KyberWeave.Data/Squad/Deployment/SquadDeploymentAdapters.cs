@@ -6,62 +6,6 @@ using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
-/// <summary>Preflights deployments against the tree on disk.</summary>
-public sealed class FileSquadDeploymentPlanner : ISquadDeploymentPlanner
-{
-    /// <inheritdoc />
-    public SquadDeploymentPlan CreateInstall(
-        string targetRoot,
-        SquadDeploymentScope scope,
-        SquadLock squadLock,
-        IReadOnlyList<SquadDeploymentFile> renderedFiles,
-        IReadOnlyList<SquadDegradation> degradations,
-        bool adopt,
-        TimeProvider timeProvider,
-        ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
-        IReadOnlyList<SquadRenderedBlock>? blocks = null) =>
-        SquadDeploymentPlanner.CreateInstall(
-            targetRoot, scope, squadLock, renderedFiles, degradations, adopt, timeProvider, globalRoots, siblingGlobalReceipts, blocks);
-
-    /// <inheritdoc />
-    public SquadDeploymentPlan CreateUpdate(
-        string targetRoot,
-        SquadDeploymentScope scope,
-        SquadLock squadLock,
-        IReadOnlyList<SquadDeploymentFile> renderedFiles,
-        SquadReceipt previousReceipt,
-        IReadOnlyList<SquadDegradation> degradations,
-        bool replaceManaged,
-        TimeProvider timeProvider,
-        ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
-        IReadOnlyList<SquadRenderedBlock>? blocks = null) =>
-        SquadDeploymentPlanner.CreateUpdate(
-            targetRoot, scope, squadLock, renderedFiles, previousReceipt, degradations, replaceManaged, timeProvider, globalRoots, siblingGlobalReceipts, blocks);
-
-    /// <inheritdoc />
-    public SquadDeploymentPlan CreateUninstall(
-        string targetRoot,
-        SquadDeploymentScope scope,
-        SquadReceipt receipt,
-        ISquadGlobalRootResolver? globalRoots = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
-        SquadTarget? onlyTarget = null) =>
-        SquadDeploymentPlanner.CreateUninstall(targetRoot, scope, receipt, globalRoots, siblingGlobalReceipts, onlyTarget);
-
-    /// <inheritdoc />
-    public IReadOnlyList<SquadUnmanagedPathCollision> CollectUnmanagedCollisions(
-        string targetRoot,
-        SquadDeploymentScope scope,
-        IReadOnlyList<SquadDeploymentFile> renderedFiles,
-        ISquadGlobalRootResolver? globalRoots,
-        SquadReceipt? receipt = null,
-        IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null) =>
-        SquadDeploymentPlanner.CollectUnmanagedCollisions(
-            targetRoot, scope, renderedFiles, globalRoots, receipt, siblingGlobalReceipts);
-}
-
 /// <summary>Creates deployment transactions over the state store.</summary>
 /// <param name="stateStore">The state store the transactions journal in.</param>
 public sealed class SquadTransactionFactory(ISquadStateStore stateStore) : ISquadTransactionFactory

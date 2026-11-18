@@ -256,7 +256,7 @@ public sealed class RemovedAgentResolutionTests
             [],
             [adopted]);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             temp.Path,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -292,8 +292,9 @@ public sealed class RemovedAgentResolutionTests
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
-            _ => null);
+            provider.GetRequiredService<IWritableFileSystem>(),
+            _ => null,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     /// <summary>The prompt the service builds for the plan's one task, under the roster of <paramref name="config"/>.</summary>

@@ -3,7 +3,6 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands;
 
@@ -75,9 +74,6 @@ public static class CommandHelpers
         return true;
     }
 
-    public static void Finish(DiagnosticReport report, AnalysisSettings settings, string command, string subjectLabel) =>
-        Finish(AnsiConsole.Console, report, settings, command, subjectLabel);
-
     /// <summary>
     /// Applies <c>--no-info</c>, renders <paramref name="report"/> in the requested format through
     /// <paramref name="console"/>, and prints the summary, so a command that writes to an injected console renders its
@@ -109,8 +105,8 @@ public static class CommandHelpers
             report = filtered;
         }
 
-        ReportRenderer.Render(console, report, settings.ParsedFormat, command, subjectLabel);
-        OutputFormat format = settings.ParsedFormat;
+        OutputFormat format = settings.FormatFor(console);
+        ReportRenderer.Render(console, report, format, command, subjectLabel);
         if (format == OutputFormat.Table)
         {
             console.WriteLine();
@@ -123,8 +119,9 @@ public static class CommandHelpers
     }
 
     /// <summary>
-    /// Runs <paramref name="write"/> with the static console's folding lifted, then restores the width.
+    /// Runs <paramref name="write"/> with <paramref name="console"/>'s folding lifted, then restores its width.
     /// </summary>
+    /// <param name="console">The console whose width is lifted for the write.</param>
     /// <param name="write">The output to produce at full width.</param>
     /// <remarks>
     /// <para>
@@ -140,16 +137,11 @@ public static class CommandHelpers
     /// is restored to <see cref="ConsoleWidth.Default"/>. A copy per branch is a fix that lands in
     /// one of them, and two commands that then render the same finding differently.
     /// </para>
+    /// <para>
+    /// The width belongs to the console the output goes to, so a command that writes to an injected console lifts that
+    /// one rather than the process-wide console.
+    /// </para>
     /// </remarks>
-    public static void WriteUnfolded(Action write) => WriteUnfolded(AnsiConsole.Console, write);
-
-    /// <summary>
-    /// Runs <paramref name="write"/> with <paramref name="console"/>'s folding lifted, then restores its width.
-    /// </summary>
-    /// <param name="console">The console whose width is lifted for the write.</param>
-    /// <param name="write">The output to produce at full width.</param>
-    /// <remarks>The width belongs to the console the output goes to, so a command that writes to an injected
-    /// console lifts that one rather than the process-wide console.</remarks>
     public static void WriteUnfolded(IAnsiConsole console, Action write)
     {
         ArgumentNullException.ThrowIfNull(console);
@@ -167,49 +159,6 @@ public static class CommandHelpers
         finally
         {
             profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
-        }
-    }
-
-    /// <summary>
-    /// Writes a report document to <paramref name="path"/>. A write failure is recorded as a
-    /// diagnostic rather than thrown: the analysis already ran, and losing its findings to a
-    /// filesystem error is a worse outcome than losing the file.
-    /// </summary>
-    public static void TryWriteReport(string? path, string content, string code, DiagnosticReport report)
-    {
-        if (path is null)
-            return;
-
-        // An empty --out names no file; resolving it would throw rather than report.
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            report.Add(new Diagnostic(
-                code,
-                Severity.Error,
-                "--out was given an empty value, so the report was not written.",
-                "review",
-                Hint: "Name the file to write, or drop --out."));
-            return;
-        }
-
-        string full = Path.GetFullPath(path);
-        try
-        {
-            string? directory = Path.GetDirectoryName(full);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(full, content);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            report.Add(new Diagnostic(
-                code,
-                Severity.Error,
-                $"Could not write the report to '{full}': {ex.Message}",
-                "review",
-                full,
-                Hint: "Check that the directory is writable, or drop --out."));
         }
     }
 }

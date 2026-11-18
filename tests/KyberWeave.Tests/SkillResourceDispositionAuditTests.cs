@@ -33,6 +33,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SkillResourceDispositionAuditTests
 {
+    private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
+
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private const string RelativeAuditPath = "docs/kyber-squad/skill-resource-dispositions.md";
@@ -499,7 +501,7 @@ public sealed class SkillResourceDispositionAuditTests
 
     /// <summary>
     /// Prevents a ledger Anchor from citing template wording that <c>docs init --kyber-standards</c>
-    /// never actually seeds: the embedded <see cref="KyberStandardsTemplates.Render"/> output for
+    /// never actually seeds: the embedded <see cref="IKyberStandardsTemplates.Render"/> output for
     /// the anchor's technology must contain it verbatim.
     /// </summary>
     [Fact]
@@ -529,7 +531,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     try
                     {
-                        template = KyberStandardsTemplates.Render(technology, "dpalfery", "2026-09-28");
+                        template = Templates.Render(technology, "dpalfery", "2026-09-28");
                     }
                     catch (ArgumentException exception)
                     {
@@ -544,7 +546,7 @@ public sealed class SkillResourceDispositionAuditTests
                 {
                     findings.Add(
                         $"{row.Source}:{row.Line}: Anchor '{row.Anchor}' does not appear in " +
-                        $"KyberStandardsTemplates.Render(\"{technology}\", ...).");
+                        $"Templates.Render(\"{technology}\", ...).");
                 }
             }
         }

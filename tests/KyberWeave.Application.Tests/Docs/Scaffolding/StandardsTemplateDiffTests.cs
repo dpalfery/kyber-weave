@@ -7,25 +7,45 @@ using Xunit;
 namespace KyberWeave.Application.Tests.Docs.Scaffolding;
 
 /// <summary>
-/// The standards-template diff reads through the file-system, path and environment seams, so a unit test runs it
-/// over an in-memory checkout.
+/// The standards-template diff reads through the file-system, path, environment and template seams, so a unit test
+/// runs it over an in-memory checkout with the template text it seeded.
 /// </summary>
 public sealed class StandardsTemplateDiffTests
 {
     private const string WorkingDirectory = "/kw/work";
     private const string Root = "/kw/work/repo";
     private const string Folder = Root + "/6-Docs/standards/csharp";
+    private const string Standard = "Standards.csharp.standards.md";
+
+    private const string Template =
+        """
+        ---
+        id: standards/csharp
+        title: csharp coding standard
+        owner: unassigned
+        last-reviewed: 2026-01-01
+        ---
+
+        # csharp coding standard
+        """;
 
     private static readonly OntologyConfig Declared = new() { Technologies = ["csharp"] };
 
     private readonly InMemoryFileSystem _disk = new();
+    private readonly FakeEmbeddedResources _resources = new();
     private readonly FakePathResolver _paths;
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: WorkingDirectory);
 
-    public StandardsTemplateDiffTests() => _paths = new FakePathResolver(_disk);
+    public StandardsTemplateDiffTests()
+    {
+        _paths = new FakePathResolver(_disk);
+        _resources.Add(Standard, Template);
+    }
+
+    private KyberStandardsTemplateReader Templates => new(_resources);
 
     private StandardsTemplateDiff Diff(string repoRoot = "repo") =>
-        new(_disk, repoRoot, Declared, _paths, _environment);
+        new(_disk, repoRoot, Declared, _paths, _environment, Templates);
 
     [Fact]
     public void ItReportsTheTemplateFilesAFolderLacksUnderTheInjectedWorkingDirectory()
@@ -44,7 +64,7 @@ public sealed class StandardsTemplateDiffTests
     public void ItReportsAFileWhoseBodyDiffersFromTheTemplate()
     {
         _disk.CreateDirectory(Folder);
-        Assert.True(KyberStandardsTemplates.TryRenderPart(
+        Assert.True(Templates.TryRenderPart(
             "csharp", KyberStandardsTemplates.Part.Standard, "unassigned", "2026-01-01", out string? template));
         _disk.WriteAllText($"{Folder}/csharp.standards.md", template + "\nAn authored line.\n");
 

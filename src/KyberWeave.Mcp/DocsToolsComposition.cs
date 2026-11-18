@@ -53,6 +53,9 @@ internal static class DocsToolsComposition
                 repositoryRoot,
                 () => provider.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repositoryRoot).Resolver,
                 () => provider.GetRequiredService<IDocumentSourceFactory>().Create(repositoryRoot, ontology).Load(),
+                provider.GetRequiredService<IRepositoryFileStore>(),
+                provider.GetRequiredService<IPathResolver>(),
+                provider.GetRequiredService<IProcessEnvironment>(),
                 ontology.DocsRoots,
                 ontology.ResolvedCatalogPath);
         });
@@ -140,8 +143,9 @@ internal static class DocsToolsComposition
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
-            technology => host.Current().StandardsFor(technology));
+            provider.GetRequiredService<IWritableFileSystem>(),
+            technology => host.Current().StandardsFor(technology),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     /// <summary>The analysis reader over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
@@ -157,7 +161,9 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IManagedGlossaryFactory>(),
             provider.GetRequiredService<IDocumentSourceFactory>(),
             provider.GetRequiredService<IPathResolver>(),
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IAnalysisPersistenceFactory>(),
+            provider.GetRequiredService<IEmbeddingGeneratorFactory>());
     }
 
     /// <summary>The tools over <paramref name="host"/>.</summary>

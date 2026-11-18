@@ -33,6 +33,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     private readonly IPathResolver _paths;
     private readonly IProcessEnvironment _environment;
     private readonly TimeProvider _time;
+    private readonly IKyberStandardsTemplates _templates;
     private readonly ReviewBlockWriter _reviewBlock;
 
     private const string AnalysisCacheIgnorePath = ".kyber-weave/.gitignore";
@@ -64,6 +65,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// <param name="paths">Turns the caller's root spelling into a full path and checks a write's containment.</param>
     /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
     /// <param name="time">Supplies the date every generated document carries.</param>
+    /// <param name="templates">Reads the standards templates the build ships.</param>
     public DocsScaffolder(
         IRepositoryFileStore files,
         IKyberWeaveConfigRepository config,
@@ -71,14 +73,16 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         IRepositoryTreeProbe tree,
         IPathResolver paths,
         IProcessEnvironment environment,
-        TimeProvider time)
+        TimeProvider time,
+        IKyberStandardsTemplates templates)
     {
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _time = time ?? throw new ArgumentNullException(nameof(time));
-        _reviewBlock = new ReviewBlockWriter(files, lister, tree);
+        _templates = templates ?? throw new ArgumentNullException(nameof(templates));
+        _reviewBlock = new ReviewBlockWriter(files, lister, tree, paths, environment);
     }
 
     /// <inheritdoc />
@@ -188,7 +192,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
                 string content =
                     templatedTechnologies.Contains(technology)
-                    && KyberStandardsTemplates.TryRenderPart(
+                    && _templates.TryRenderPart(
                         technology, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
                         : TechnologyStub(technology, part, resolvedOwner);
@@ -212,7 +216,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 }
 
                 string content =
-                    KyberStandardsTemplates.TryRenderPart(role, part, resolvedOwner, Today, out string? rendered)
+                    _templates.TryRenderPart(role, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
                         : RoleStub(role, part, resolvedOwner);
 
@@ -221,7 +225,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         }
 
         if ((kyberStandards || standards is { Count: > 0 })
-            && KyberStandardsTemplates.TryRenderSharedRules(resolvedOwner, Today, out string? sharedRules))
+            && _templates.TryRenderSharedRules(resolvedOwner, Today, out string? sharedRules))
         {
             files.Add(Write(
                 root,

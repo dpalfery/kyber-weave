@@ -24,7 +24,7 @@ internal static class SquadCliServices
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddSquadCliServices(this IServiceCollection services)
     {
-        services.TryAddSingleton<IAnsiConsole>(_ => AnsiConsole.Console);
+        _ = services.AddCliConsole();
         services.TryAddSingleton(sp => new SquadConsole(sp.GetRequiredService<IAnsiConsole>(), sp.GetRequiredService<IConsole>()));
         services.TryAddSingleton(sp => new SquadCommandRoots(
             sp.GetRequiredService<IWritableFileSystem>(),

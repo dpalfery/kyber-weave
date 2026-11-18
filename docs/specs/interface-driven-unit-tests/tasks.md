@@ -264,10 +264,11 @@ from this file when it is marked Ready.
   - **Depends on:** 3.1, 1.4, 1.6
   - _Requirements: 1.1, 2.1, 10.2_
 
-- [ ] 3.3 `SquadDeploymentPlanner` onto seams
+- [x] 3.3 `SquadDeploymentPlanner` onto seams
   - **Files:** `src/KyberWeave.Data/Squad/Deployment/SquadDeploymentPlanner.cs`
   - **Acceptance criteria:** an instance class behind `ISquadDeploymentPlanner`; no direct resource
     call; unit tests; contract tests pass on both.
+  - **Note:** the crash-safety contract runs on the real disk; its in-memory run lands with 3.4, because `SquadTransaction` still uses the real-disk path rules. Second reviewer: MERGE (2026-11-18).
   - **Depends on:** 3.2
   - _Requirements: 1.4, 2.1, 10.2_
 
@@ -291,16 +292,16 @@ from this file when it is marked Ready.
 
 Each task below is one folder; split further where the inventory shows more than about 30 sites.
 
-- [ ] 4.1 `KyberWeave.Application/Update` (`SelfUpdater`, 29 sites)
-- [ ] 4.2 `KyberWeave.Application/Docs` (56 sites: `StandardsFolderMigration`, `TaskPromptService`, `DocumentIndexHost` and the rest)
-- [ ] 4.3 `KyberWeave.Application/Review` and `Arbiter` (71 sites: `GateRunService` deadline onto `TimeProvider`, `ReviewVerdictService` paths)
+- [x] 4.1 `KyberWeave.Application/Update` (`SelfUpdater`, 29 sites)
+- [x] 4.2 `KyberWeave.Application/Docs` (56 sites: `StandardsFolderMigration`, `TaskPromptService`, `DocumentIndexHost` and the rest)
+- [x] 4.3 `KyberWeave.Application/Review` and `Arbiter` (71 sites: `GateRunService` deadline onto `TimeProvider`, `ReviewVerdictService` paths)
 - [ ] 4.4 `KyberWeave.Data` outside `Squad/` (`Arbiter`, `Review`, `Hooks`, `Docs`, `Configuration` and the rest: about 630 sites)
-- [ ] 4.5 `KyberWeave.Cli` (181 sites; `CommandHelpers`, `PlanArguments` and `SquadCommandComposition` first)
-- [ ] 4.6 `KyberWeave.Mcp` (32 sites; `CodeGraphFreshness` first)
-- [ ] 4.7 `KyberWeave.Arbiter` and `KyberWeave.Hooks` (6 sites)
-- [ ] 4.8 `KyberWeave.Application` folders no other task names (12 classes: `Agents/AgentFileReader`, `Doctor/CodeGraphIndexProvisioner`, `Doctor/McpServerLiveProbe`, `Doctor/PostCheckoutHookInstaller`, `Hooks/EditHookService`, `RunStart/RunStartRunner`, `Skills/SkillFileReader`, `Squad/Briefs/SquadBriefBuilder`, `Squad/Deployment/FactoryMcpConfiguration`, `Squad/Instances/SquadInstanceService`, `Squad/Packaging/SquadPackService`, `Utilities/StatusLineProductArtifactSource`)
-- [ ] 4.9 `KyberWeave.Kernel` logic and the clock inside adapters (`Parsing/FileReferenceExtractor` and `VersionControl/CodeGraphIndexStaleness` onto the file-system and path seams; `Data/Doctor/FileCodeGraphIndexWorkspace` and `Kernel/Processes/StdioSession` take `TimeProvider` instead of the system clock and `Thread.Sleep`)
-- [ ] 4.10 Credential seam (`ICredentialStore` exists; record it as a seam; `Data/Arbiter/Credentials/WindowsCredentialStore` and its siblings become its adapters, the only code that calls the native credential API; a fake and a contract suite; callers take the interface)
+- [x] 4.5 `KyberWeave.Cli` (181 sites; `CommandHelpers`, `PlanArguments` and `SquadCommandComposition` first)
+- [x] 4.6 `KyberWeave.Mcp` (32 sites; `CodeGraphFreshness` first)
+- [x] 4.7 `KyberWeave.Arbiter` and `KyberWeave.Hooks` (6 sites)
+- [x] 4.8 `KyberWeave.Application` folders no other task names (12 classes: `Agents/AgentFileReader`, `Doctor/CodeGraphIndexProvisioner`, `Doctor/McpServerLiveProbe`, `Doctor/PostCheckoutHookInstaller`, `Hooks/EditHookService`, `RunStart/RunStartRunner`, `Skills/SkillFileReader`, `Squad/Briefs/SquadBriefBuilder`, `Squad/Deployment/FactoryMcpConfiguration`, `Squad/Instances/SquadInstanceService`, `Squad/Packaging/SquadPackService`, `Utilities/StatusLineProductArtifactSource`)
+- [x] 4.9 `KyberWeave.Kernel` logic and the clock inside adapters (`Parsing/FileReferenceExtractor` and `VersionControl/CodeGraphIndexStaleness` onto the file-system and path seams; `Data/Doctor/FileCodeGraphIndexWorkspace` and `Kernel/Processes/StdioSession` take `TimeProvider` instead of the system clock and `Thread.Sleep`)
+- [x] 4.10 Credential seam (`ICredentialStore` exists; record it as a seam; `Data/Arbiter/Credentials/WindowsCredentialStore` and its siblings become its adapters, the only code that calls the native credential API; a fake and a contract suite; callers take the interface)
 
 For every task in phase 4:
   - **Acceptance criteria:** every class in the folder is an adapter or has no direct resource call;

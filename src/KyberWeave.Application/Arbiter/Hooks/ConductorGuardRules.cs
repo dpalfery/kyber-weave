@@ -173,7 +173,11 @@ internal static partial class ConductorGuardRules
         }
     }
 
-    internal static string DirectoryPrefix(string directory) => $"{Normalize(Path.GetFullPath(directory)).TrimEnd('/')}/";
+    /// <summary>The directory's full path with forward slashes and exactly one trailing slash.</summary>
+    /// <param name="directory">The directory, relative or fully qualified.</param>
+    /// <param name="baseDirectory">The fully qualified directory a relative <paramref name="directory"/> is resolved against.</param>
+    internal static string DirectoryPrefix(string directory, string baseDirectory) =>
+        $"{Normalize(Path.GetFullPath(directory, baseDirectory)).TrimEnd('/')}/";
 
     internal static string Normalize(string path) => path.Replace('\\', '/');
 

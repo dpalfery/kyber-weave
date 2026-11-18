@@ -397,7 +397,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
 
     private SquadDeploymentPlan CreatePlan(SquadCrashFlow flow) => flow switch
     {
-        SquadCrashFlow.Install => SquadDeploymentPlanner.CreateInstall(
+        SquadCrashFlow.Install => RealSquadDeployment.Planner.CreateInstall(
             Root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -409,7 +409,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
             [],
             adopt: true,
             new FixedTimeProvider(InstalledAt)),
-        SquadCrashFlow.Update => SquadDeploymentPlanner.CreateUpdate(
+        SquadCrashFlow.Update => RealSquadDeployment.Planner.CreateUpdate(
             Root,
             SquadDeploymentScope.Project,
             Lock("1.2.5"),
@@ -423,7 +423,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
             [],
             replaceManaged: false,
             new FixedTimeProvider(InstalledAt.AddDays(1))),
-        SquadCrashFlow.Uninstall => SquadDeploymentPlanner.CreateUninstall(
+        SquadCrashFlow.Uninstall => RealSquadDeployment.Planner.CreateUninstall(
             Root,
             SquadDeploymentScope.Project,
             BaselineReceipt()),

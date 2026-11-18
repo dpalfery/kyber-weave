@@ -143,7 +143,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             Encoding.UTF8.GetBytes("# Conductor Agent Content"),
             "claude");
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             instanceRoot,
             SquadDeploymentScope.Instance,
             squadLock,
@@ -194,7 +194,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "default");
         Directory.CreateDirectory(instanceRoot);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             instanceRoot,
             SquadDeploymentScope.Instance,
             CreateLock(),

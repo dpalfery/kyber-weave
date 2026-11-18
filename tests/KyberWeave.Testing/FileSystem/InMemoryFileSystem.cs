@@ -231,7 +231,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     {
         Enter(nameof(GetLinkTarget), path);
         Node? node = Resolve(path, followFinal: false);
-        return node?.LinkTarget is not null && Follow(node) is not null ? node.LinkTarget : null;
+        return node?.LinkTarget;
     }
 
     /// <inheritdoc />

@@ -1,3 +1,4 @@
+using Spectre.Console;
 using System.Text.Json;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
@@ -256,7 +257,7 @@ public sealed class DiagnosticLocationRenderingTests
     {
         CapturedConsoleExecution<bool> execution = ProcessConsoleCapture.Run(() =>
         {
-            ReportRenderer.Render(report ?? CreateReport(), format, "docs integrity-check", "Claim");
+            ReportRenderer.Render(AnsiConsole.Console, report ?? CreateReport(), format, "docs integrity-check", "Claim");
             return true;
         });
         return execution.Output;

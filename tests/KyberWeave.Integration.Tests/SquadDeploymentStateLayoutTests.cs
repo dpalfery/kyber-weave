@@ -35,7 +35,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         string home = Path.Combine(applicationData, "home");
         Directory.CreateDirectory(home);
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -85,7 +85,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         // dot-prefixed path here would only manufacture a self-contradicting receipt of this
         // test's own making against the read-side layout cross-check (#91), not exercise
         // anything CreateInstall itself does.
-        SquadDeploymentPlan firstPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan firstPlan = RealSquadDeployment.Planner.CreateInstall(
             firstRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -156,7 +156,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [SquadTarget.Codex] = codexRoot
         });
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -353,7 +353,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Assert.Equal(upperIdentity, symlinkIdentity);
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan activePlan = RealSquadDeployment.Planner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -361,7 +361,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        SquadDeploymentPlan siblingPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan siblingPlan = RealSquadDeployment.Planner.CreateInstall(
             lowerRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -423,7 +423,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             store.ResolveReceiptPath(caseAlias, SquadDeploymentScope.Global));
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan activePlan = RealSquadDeployment.Planner.CreateInstall(
             actualRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -434,7 +434,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         // Project scope, not global: the lease of a project is its physical root, so a case alias of that
         // root contends. Global state is leased on the home, which this root is not, so a global alias
         // would correctly not contend with a project at an unrelated root.
-        SquadDeploymentPlan aliasPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan aliasPlan = RealSquadDeployment.Planner.CreateInstall(
             caseAlias,
             SquadDeploymentScope.Project,
             Lock(),
@@ -475,7 +475,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Directory.CreateDirectory(firstRoot);
         Directory.CreateDirectory(secondRoot);
         Directory.CreateSymbolicLink(aliasRoot, firstRoot);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             aliasRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -816,7 +816,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [SquadTarget.Copilot] = fakeCopilotRoot
         });
 
-        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan uninstallPlan = RealSquadDeployment.Planner.CreateUninstall(
             recordedRoot,
             SquadDeploymentScope.Global,
             legacyReceipt,
@@ -888,7 +888,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [SquadTarget.Copilot] = fakeCopilotRoot
         });
 
-        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan uninstallPlan = RealSquadDeployment.Planner.CreateUninstall(
             recordedRoot,
             SquadDeploymentScope.Global,
             legacyReceipt,
@@ -1053,7 +1053,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
                     false)
             ]);
 
-        SquadDeploymentPlan updatePlan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan updatePlan = RealSquadDeployment.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -1097,7 +1097,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             ]);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateUpdate(
+            RealSquadDeployment.Planner.CreateUpdate(
                 targetRoot,
                 SquadDeploymentScope.Global,
                 Lock("1.2.4"),
@@ -1136,7 +1136,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
                     false)
             ]);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),

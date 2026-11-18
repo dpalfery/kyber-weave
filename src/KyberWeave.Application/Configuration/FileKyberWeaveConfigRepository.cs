@@ -225,7 +225,7 @@ public sealed class FileKyberWeaveConfigRepository(
         return KyberWeaveConfigAssembler.FromRepositoryYaml(
             yaml,
             root,
-            new ReviewWorkingDirectoryFacts(tree.DirectoryExists, tree.LeadsOutsideThroughSymlink),
+            new ReviewWorkingDirectoryFacts(tree.DirectoryExists, tree.LeadsOutsideThroughSymlink, FullPath),
             ReadRepositoryText);
     }
 

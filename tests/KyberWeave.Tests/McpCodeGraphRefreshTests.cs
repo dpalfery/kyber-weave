@@ -209,6 +209,9 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             Root,
             () => throw new InvalidOperationException("boom resolver"),
             () => throw new IOException("disk error / unreadable docs"),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
@@ -308,7 +311,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
                 Environment.NewLine + "stop-on-tool-failure: false" + Environment.NewLine);
         }
 
-        DocsTools tools = ScaffoldedTools(Root, () => CodeGraphResolverAdapter.ForRepository(Root));
+        DocsTools tools = ScaffoldedTools(Root, () => DocsPorts.CodeGraph(Root));
 
         string response = tools.Explore("anything");
 
@@ -639,6 +642,9 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             root,
             resolverFactory,
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
@@ -8,7 +9,8 @@ namespace KyberWeave.Application.Arbiter;
 
 /// <summary>Reads one plan file and parses it, for the <c>arbiter plan</c> listing.</summary>
 /// <param name="files">Reads the plan file.</param>
-public sealed class ArbiterPlanService(IFileSystem files) : IArbiterPlanService
+/// <param name="paths">Resolves the plan's path against the repository root.</param>
+public sealed class ArbiterPlanService(IFileSystem files, IPathResolver paths) : IArbiterPlanService
 {
     /// <inheritdoc />
     public ArbiterPlanRead? TryRead(
@@ -19,7 +21,7 @@ public sealed class ArbiterPlanService(IFileSystem files) : IArbiterPlanService
     {
         ArgumentNullException.ThrowIfNull(report);
 
-        string resolved = Path.GetFullPath(relative, root);
+        string resolved = paths.GetFullPath(relative, root);
         if (!files.FileExists(resolved))
         {
             report.Add(new Diagnostic(

@@ -11,6 +11,7 @@ using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
 using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Domain.CodeGraph;
+using Spectre.Console;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
@@ -233,13 +234,13 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
 
         int exitCode = ProcessConsoleCapture.Run(() => operation switch
         {
-            "export" => new DocsReviewExportCommand(service).Execute(
+            "export" => DocsTestCommands.ReviewExport(service).Execute(
                 null!,
                 new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output, Format = "json" }),
             "import" => DocsTestCommands.ReviewImport(service).Execute(
                 null!,
                 new DocsReviewImportSettings { Path = _temp.Path, InputPath = input, Format = "json" }),
-            "glossary" => new DocsGlossaryCommand(service).Execute(
+            "glossary" => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
                 null!,
                 new DocsGlossarySettings { Path = _temp.Path, Write = true, Format = "json" }),
             _ => throw new InvalidOperationException("Unknown operation.")
@@ -280,7 +281,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             DisposableEmbeddingGenerator embedding,
             ICodeGraphResolver resolver)
         {
-            Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory(resolver))
+            Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory(resolver), DocsPorts.AnalysisPersistence, DocsPorts.Embeddings)
             {
                 IsCacheSafe = _ => cacheSafe,
                 CreatePersistence = _ =>

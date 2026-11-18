@@ -34,7 +34,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
             string targetRoot = Path.Combine(fixture.Path, "target");
             Directory.CreateDirectory(targetRoot);
             SquadStateStore store = Store(Path.Combine(fixture.Path, "application-data"));
-            SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+            SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
                 targetRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -94,7 +94,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         Write(fixture.Path, ".codex/agents/conductor.toml", "same bytes");
         DateTime before = File.GetLastWriteTimeUtc(
             Path.Combine(fixture.Path, ".codex/agents/conductor.toml"));
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -117,7 +117,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
     {
         using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -149,7 +149,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         SortedDictionary<string, byte[]> before = Snapshot(fixture.Path);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -183,7 +183,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         Write(fixture.Path, unchanged.RelativePath, "installed conductor");
         Write(fixture.Path, edited.RelativePath, "operator reviewer edit");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);
@@ -208,7 +208,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned);
         WriteState(fixture.Path, Lock(), receipt);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt,
@@ -236,7 +236,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         SquadReceipt receipt = Receipt(CursorOwned);
         WriteState(fixture.Path, Lock(), receipt);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt,
@@ -258,7 +258,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         Write(fixture.Path, CursorOwned.RelativePath, cursorFileEdited ? "operator edit" : "cursor body");
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt,
@@ -278,7 +278,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         Write(fixture.Path, CursorOwned.RelativePath, "cursor body");
         SquadReceipt receipt = Receipt(CodexOwned, CursorOwned) with { Degradations = CodexAndCursorDegradations };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);
@@ -300,7 +300,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
         SquadReceipt receipt = GlobalReceiptWithHomeFiles(homeFile) with { Files = [codex, cursor] };
         SquadReceipt sibling = GlobalReceiptWithHomeFiles() with { Files = [codex] };
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             receipt,
@@ -325,7 +325,7 @@ public sealed class SquadDeploymentStateInstallTests : SquadDeploymentStateTestB
             false));
         Write(fixture.Path, relativePath, "installed body");
         WriteState(fixture.Path, Lock(), receipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             receipt);

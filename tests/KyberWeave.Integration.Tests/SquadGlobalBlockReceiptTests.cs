@@ -55,7 +55,7 @@ public sealed class SquadGlobalBlockReceiptTests
         string targetRoot = Path.Combine(fixture.Path, "install-root");
         Directory.CreateDirectory(targetRoot);
 
-        SquadDeploymentPlan two = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan two = RealSquadDeployment.Planner.CreateInstall(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -76,7 +76,7 @@ public sealed class SquadGlobalBlockReceiptTests
         AssertGlobalHookFile(globalRoots, SquadTarget.Cursor);
         AssertGlobalHookFile(globalRoots, SquadTarget.Codex);
 
-        SquadDeploymentPlan three = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan three = RealSquadDeployment.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock(),

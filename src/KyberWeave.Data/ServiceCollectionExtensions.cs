@@ -5,7 +5,10 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Data.Docs.Closeout;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Data.CodeGraph;
+using KyberWeave.Core.Docs.Analysis.Persistence;
+using KyberWeave.Data.Docs.Analysis.Embeddings;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Data.Docs.Mcp;
 using KyberWeave.Data.Arbiter;
@@ -45,8 +48,19 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
+        services.TryAddSingleton(sp => new CodeGraphIndexStaleness(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
+        services.TryAddSingleton(sp => new AnalysisCacheSafety(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IBoundedProcessExecutor>()));
+        services.TryAddSingleton<IAnalysisPersistenceFactory, SqliteAnalysisPersistenceFactory>();
+        services.TryAddSingleton<IEmbeddingTransport, LoopbackEmbeddingTransport>();
+        services.TryAddSingleton<IEmbeddingGeneratorFactory, OpenAiCompatibleEmbeddingGeneratorFactory>();
         services.TryAddSingleton<IGitHookFiles, FileGitHookFiles>();
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();

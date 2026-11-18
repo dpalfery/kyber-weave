@@ -91,6 +91,9 @@ public sealed class DocsTaskPromptToolTests
         fixture.Root,
         () => FakeCodeGraphResolver.WithSymbols(),
         () => RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(),
+        DocsPorts.Files,
+        DocsPorts.Paths,
+        DocsPorts.Environment,
         config.Ontology.DocsRoots,
         config.Ontology.ResolvedCatalogPath);
 
@@ -104,8 +107,9 @@ public sealed class DocsTaskPromptToolTests
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
-            Host(fixture, config).Current().StandardsFor);
+            provider.GetRequiredService<IWritableFileSystem>(),
+            Host(fixture, config).Current().StandardsFor,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     private static string Packet(DocFixture fixture, string task)

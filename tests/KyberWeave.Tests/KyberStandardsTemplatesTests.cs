@@ -32,6 +32,8 @@ public sealed class KyberStandardsTemplatesTests
 
     private static readonly string[] InnerLoopCommands = ["build", "test", "format"];
 
+    private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
+
     /// <summary>One argument per embedded template, so a template added later is covered without an edit here.</summary>
     public static IEnumerable<object[]> DeclaredTechnologies() =>
         KyberStandardsTemplates.All.Select(technology => new object[] { technology });
@@ -104,7 +106,7 @@ public sealed class KyberStandardsTemplatesTests
 
     private static string Template(string technology)
     {
-        bool found = KyberStandardsTemplates.TryGet(technology, out string? template);
+        bool found = Templates.TryGet(technology, out string? template);
 
         Assert.True(found, $"Expected template for '{technology}' to be found in embedded resources.");
         Assert.NotNull(template);
@@ -170,7 +172,7 @@ public sealed class KyberStandardsTemplatesTests
     [InlineData("typescript")]
     public void TryGetRetrievesTemplateForEachDeclaredTechnology(string technology)
     {
-        bool found = KyberStandardsTemplates.TryGet(technology, out string? rawTemplate);
+        bool found = Templates.TryGet(technology, out string? rawTemplate);
 
         Assert.True(found, $"Expected template for '{technology}' to be found in embedded resources.");
         Assert.NotNull(rawTemplate);
@@ -185,7 +187,7 @@ public sealed class KyberStandardsTemplatesTests
     [Fact]
     public void TryGetReturnsFalseForUnknownTechnology()
     {
-        bool found = KyberStandardsTemplates.TryGet("unknown-technology", out string? rawTemplate);
+        bool found = Templates.TryGet("unknown-technology", out string? rawTemplate);
 
         Assert.False(found);
         Assert.Null(rawTemplate);
@@ -201,7 +203,7 @@ public sealed class KyberStandardsTemplatesTests
         const string owner = "alice";
         const string date = "2026-08-17";
 
-        string rendered = KyberStandardsTemplates.Render("csharp", owner, date);
+        string rendered = Templates.Render("csharp", owner, date);
 
         Assert.Contains("owner: 'alice'", rendered, StringComparison.Ordinal);
         Assert.Contains("last-reviewed: '2026-08-17'", rendered, StringComparison.Ordinal);
@@ -222,7 +224,7 @@ public sealed class KyberStandardsTemplatesTests
         const string owner = "platform's: \"core\" #1";
         const string date = "2026-08-17";
 
-        string rendered = KyberStandardsTemplates.Render("csharp", owner, date);
+        string rendered = Templates.Render("csharp", owner, date);
 
         FrontmatterReadResult read = MarkdownFrontmatterReader.Read(rendered);
         Assert.True(read.HasFrontmatter);
@@ -242,7 +244,7 @@ public sealed class KyberStandardsTemplatesTests
     [Fact]
     public void RenderThrowsOnUnknownTechnology()
     {
-        Assert.Throws<ArgumentException>(() => KyberStandardsTemplates.Render("nonexistent", "owner", "2026-08-17"));
+        Assert.Throws<ArgumentException>(() => Templates.Render("nonexistent", "owner", "2026-08-17"));
     }
 
     /// <summary>
@@ -251,7 +253,7 @@ public sealed class KyberStandardsTemplatesTests
     [Fact]
     public void RenderThrowsWithDidYouMeanHintOnTypo()
     {
-        ArgumentException ex = Assert.Throws<ArgumentException>(() => KyberStandardsTemplates.Render("cshar", "owner", "2026-08-17"));
+        ArgumentException ex = Assert.Throws<ArgumentException>(() => Templates.Render("cshar", "owner", "2026-08-17"));
         Assert.Contains("Did you mean 'csharp'?", ex.Message, StringComparison.Ordinal);
         Assert.Equal("technology", ex.ParamName);
     }
@@ -262,7 +264,7 @@ public sealed class KyberStandardsTemplatesTests
     [Fact]
     public void TryRenderRendersKnownTechnology()
     {
-        bool found = KyberStandardsTemplates.TryRender("csharp", "alice", "2026-08-17", out string? rendered);
+        bool found = Templates.TryRender("csharp", "alice", "2026-08-17", out string? rendered);
 
         Assert.True(found);
         Assert.NotNull(rendered);
@@ -276,7 +278,7 @@ public sealed class KyberStandardsTemplatesTests
     [Fact]
     public void TryRenderReturnsFalseForUnknownTechnology()
     {
-        bool found = KyberStandardsTemplates.TryRender("unknown-tech", "alice", "2026-08-17", out string? rendered);
+        bool found = Templates.TryRender("unknown-tech", "alice", "2026-08-17", out string? rendered);
 
         Assert.False(found);
         Assert.Null(rendered);
@@ -288,7 +290,7 @@ public sealed class KyberStandardsTemplatesTests
     [Fact]
     public void TryRenderReturnsFalseForNullTechnology()
     {
-        bool found = KyberStandardsTemplates.TryRender(null, "alice", "2026-08-17", out string? rendered);
+        bool found = Templates.TryRender(null, "alice", "2026-08-17", out string? rendered);
 
         Assert.False(found);
         Assert.Null(rendered);

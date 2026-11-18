@@ -52,7 +52,11 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadModelPresetValidator>(sp => new SquadModelPresetValidator(sp.GetRequiredService<IFileSystem>()));
-        services.TryAddSingleton<ISquadDeploymentPlanner, FileSquadDeploymentPlanner>();
+        services.TryAddSingleton<ISquadDeploymentPlanner>(sp => new SquadDeploymentPlanner(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<ISquadStateStore>()));
         services.TryAddSingleton<ISquadResponseGuidanceStore, FileSquadResponseGuidanceStore>();
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();

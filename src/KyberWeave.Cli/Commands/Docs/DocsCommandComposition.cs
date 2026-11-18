@@ -198,13 +198,14 @@ internal static class DocsCommandComposition
     }
 }
 
-internal sealed class DocsAnalysisCompositionFactories(ICodeGraphPortsFactory codeGraph)
+internal sealed class DocsAnalysisCompositionFactories(
+    ICodeGraphPortsFactory codeGraph,
+    IAnalysisPersistenceFactory persistence,
+    IEmbeddingGeneratorFactory embeddings)
 {
-    public Func<string, bool> IsCacheSafe { get; init; } = AnalysisCacheSafety.IsSafe;
-    public Func<string, IAnalysisPersistence> CreatePersistence { get; init; } =
-        repositoryRoot => new SqliteAnalysisPersistence(repositoryRoot);
-    public Func<IEmbeddingGenerator> CreateEmbeddingGenerator { get; init; } =
-        () => new OpenAiCompatibleEmbeddingGenerator();
+    public Func<string, bool> IsCacheSafe { get; init; } = persistence.IsCacheSafe;
+    public Func<string, IAnalysisPersistence> CreatePersistence { get; init; } = persistence.Open;
+    public Func<IEmbeddingGenerator> CreateEmbeddingGenerator { get; init; } = embeddings.Create;
     public Func<string, ICodeGraphResolver> CreateResolver { get; init; } =
         repositoryRoot => codeGraph.ForRepository(repositoryRoot).Resolver;
 }

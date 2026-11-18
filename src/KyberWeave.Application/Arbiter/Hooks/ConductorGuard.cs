@@ -239,19 +239,19 @@ public sealed class ConductorGuard(
             return false;
         }
 
-        string fullPath = ConductorGuardRules.Normalize(cwd is null ? Path.GetFullPath(path) : Path.GetFullPath(path, cwd));
+        string fullPath = ConductorGuardRules.Normalize(Path.GetFullPath(path, cwd ?? process.CurrentDirectory));
 
         if (Path.IsPathRooted(copilotHome)
-            && (fullPath.StartsWith(ConductorGuardRules.DirectoryPrefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase)
-                || fullPath.StartsWith(ConductorGuardRules.DirectoryPrefix(Path.Combine(copilotHome, "skills")), StringComparison.OrdinalIgnoreCase)))
+            && (fullPath.StartsWith(Prefix(Path.Combine(copilotHome, "agents", "conductor")), StringComparison.OrdinalIgnoreCase)
+                || fullPath.StartsWith(Prefix(Path.Combine(copilotHome, "skills")), StringComparison.OrdinalIgnoreCase)))
         {
-            return !links.HasLinkBelow(ConductorGuardRules.DirectoryPrefix(copilotHome), fullPath);
+            return !links.HasLinkBelow(Prefix(copilotHome), fullPath);
         }
 
         if (Path.IsPathRooted(home)
-            && fullPath.StartsWith(ConductorGuardRules.DirectoryPrefix(Path.Combine(home, ".kyber-weave", "runs")), StringComparison.OrdinalIgnoreCase))
+            && fullPath.StartsWith(Prefix(Path.Combine(home, ".kyber-weave", "runs")), StringComparison.OrdinalIgnoreCase))
         {
-            return !links.HasLinkBelow(ConductorGuardRules.DirectoryPrefix(home), fullPath);
+            return !links.HasLinkBelow(Prefix(home), fullPath);
         }
 
         if (cwd is null)
@@ -259,20 +259,23 @@ public sealed class ConductorGuard(
             return false;
         }
 
-        if (fullPath.StartsWith(ConductorGuardRules.DirectoryPrefix(cwd), StringComparison.OrdinalIgnoreCase))
+        if (fullPath.StartsWith(Prefix(cwd), StringComparison.OrdinalIgnoreCase))
         {
-            return IsContractUnder(ConductorGuardRules.DirectoryPrefix(cwd), fullPath);
+            return IsContractUnder(Prefix(cwd), fullPath);
         }
 
         // Started only for a path outside the working directory: git names the repository's other worktrees, so a
         // directory that merely looks like one is never trusted. The deepest match wins, for a nested worktree.
         string? worktree = ListWorktreesOrNone(cwd)
-            .Select(ConductorGuardRules.DirectoryPrefix)
+            .Select(Prefix)
             .Where(root => fullPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))
             .OrderByDescending(root => root.Length)
             .FirstOrDefault();
         return worktree is not null && IsContractUnder(worktree, fullPath);
     }
+
+    /// <summary>The directory's prefix, a relative one resolved against the process's current directory.</summary>
+    private string Prefix(string directory) => ConductorGuardRules.DirectoryPrefix(directory, process.CurrentDirectory);
 
     /// <summary>The repository's worktrees, or none when git or the container cannot answer: the guard then trusts only the working directory.</summary>
     private IReadOnlyList<string> ListWorktreesOrNone(string cwd)

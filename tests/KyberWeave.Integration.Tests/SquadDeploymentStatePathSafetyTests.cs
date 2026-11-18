@@ -74,7 +74,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         using TempDirectory fixture = new();
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -103,7 +103,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             new SquadOwnedFile(aliasPath, Digest("second"), "codex", false));
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 receipt));
@@ -120,7 +120,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         using TempDirectory fixture = new();
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -143,7 +143,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         Directory.CreateSymbolicLink(Path.Combine(codex, "agents"), outside.Path);
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -175,7 +175,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false));
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 receipt));
@@ -197,7 +197,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         SquadReceipt receipt = Receipt(owned);
 
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -206,7 +206,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUpdate(
+            RealSquadDeployment.Planner.CreateUpdate(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -216,7 +216,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 receipt)));
@@ -237,7 +237,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             new SquadOwnedFile(aliasPath, Digest("alias"), "codex", false));
 
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -246,7 +246,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUpdate(
+            RealSquadDeployment.Planner.CreateUpdate(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -256,7 +256,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 receipt)));
@@ -406,7 +406,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction activeTransaction = new(store, blocker);
-        SquadDeploymentPlan upperPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan upperPlan = RealSquadDeployment.Planner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -423,7 +423,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         try
         {
             SquadTransaction siblingTransaction = new(store);
-            SquadDeploymentPlan lowerPlan = SquadDeploymentPlanner.CreateInstall(
+            SquadDeploymentPlan lowerPlan = RealSquadDeployment.Planner.CreateInstall(
                 lowerRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -480,7 +480,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             SquadPathPolicy.ResolveFile(upperRoot, $"escape/{canaryRelativePath}", SquadFileSystemPathSemantics.Instance));
 
         Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 upperRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -491,7 +491,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
 
         Directory.Delete(directAlias);
         Directory.CreateDirectory(Path.Combine(upperRoot, ".kyber-weave"));
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),

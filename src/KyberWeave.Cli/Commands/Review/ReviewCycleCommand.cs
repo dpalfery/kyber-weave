@@ -28,7 +28,7 @@ public sealed class ReviewCycleCommand(IReviewCycleService service, IConsole sta
                 settings.Config,
                 settings.Task,
                 settings.BaseRef,
-                settings.ParsedFormat == OutputFormat.Json),
+                settings.FormatFor(ansi) == OutputFormat.Json),
             standard.Out,
             cancellationToken);
 

@@ -45,14 +45,14 @@ public sealed class ArbiterPlanCommand(
 
         // Only json carries the metric. The table prints the digest on its own unfolded line, and a
         // metric row would print it again, truncated in a narrow cell.
-        if (read.Digest is { } digest && settings.ParsedFormat == OutputFormat.Json)
+        if (read.Digest is { } digest && settings.FormatFor(console) == OutputFormat.Json)
         {
             report.AddMetric("execution-digest", digest);
         }
 
         // The prose lines are for a person reading the table. Json, sarif and markdown must
         // carry only the rendered report, or a script reading stdout would parse a non-document.
-        if (ReportRenderer.IsHuman(settings.ParsedFormat))
+        if (ReportRenderer.IsHuman(settings.FormatFor(console)))
         {
             Print(read);
         }

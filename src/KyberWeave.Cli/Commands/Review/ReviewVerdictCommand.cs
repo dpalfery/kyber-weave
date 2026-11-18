@@ -39,7 +39,7 @@ public sealed class ReviewVerdictCommand(IReviewVerdictService verdicts, IConsol
             cancellationToken);
 
         CommandHelpers.Finish(ansi, result.Report, settings, "review verdict", "Review");
-        if (result.NextStep is { } next && ReportRenderer.IsHuman(settings.ParsedFormat))
+        if (result.NextStep is { } next && ReportRenderer.IsHuman(settings.FormatFor(ansi)))
             standard.Out.WriteLine(next);
 
         return result.ExitCode;

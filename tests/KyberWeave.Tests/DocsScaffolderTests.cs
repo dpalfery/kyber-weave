@@ -44,6 +44,8 @@ public sealed class DocsScaffolderTests : IDisposable
               directory-name: .agents/agents
         """;
 
+    private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
@@ -272,7 +274,7 @@ public sealed class DocsScaffolderTests : IDisposable
         ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
-        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+        Assert.True(DocsPorts.CacheSafety.IsSafe(_temp.Path));
         Assert.False(File.Exists(Path.Combine(_temp.Path, "docs", "glossary.md")));
         ScaffoldedFile entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
         Assert.Equal(ScaffoldOutcome.Created, entry.Outcome);
@@ -295,7 +297,7 @@ public sealed class DocsScaffolderTests : IDisposable
         // The operator's bytes are an exact prefix; the boundary newline and the two narrow
         // entries are the only thing appended.
         Assert.Equal(existing + "\ncache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
-        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+        Assert.True(DocsPorts.CacheSafety.IsSafe(_temp.Path));
         ScaffoldedFile entry = result.Files.Single(file => file.RelativePath == ".kyber-weave/.gitignore");
         Assert.Equal(ScaffoldOutcome.Updated, entry.Outcome);
     }
@@ -311,12 +313,12 @@ public sealed class DocsScaffolderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, ".kyber-weave"));
         const string existing = "cache/\n!cache/docs-analysis.sqlite3\n";
         File.WriteAllText(Path.Combine(_temp.Path, ".kyber-weave", ".gitignore"), existing);
-        Assert.False(AnalysisCacheSafety.IsSafe(_temp.Path));
+        Assert.False(DocsPorts.CacheSafety.IsSafe(_temp.Path));
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         Assert.Equal(existing + "cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
-        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+        Assert.True(DocsPorts.CacheSafety.IsSafe(_temp.Path));
     }
 
     /// <summary>
@@ -371,7 +373,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         byte[] appendedBytes = Encoding.Unicode.GetBytes("\r\ncache/\r\nreceipts/\r\n");
         Assert.Equal(originalBytes.Concat(appendedBytes), File.ReadAllBytes(path));
-        Assert.True(AnalysisCacheSafety.IsSafe(_temp.Path));
+        Assert.True(DocsPorts.CacheSafety.IsSafe(_temp.Path));
     }
 
     /// <summary>
@@ -999,7 +1001,7 @@ public sealed class DocsScaffolderTests : IDisposable
                 string relativePath =
                     $"{result.DocsRoot}/standards/{tech}/{KyberStandardsTemplates.FileName(tech, part)}";
                 string content = Read(relativePath);
-                string expected = KyberStandardsTemplates.RenderPart(tech, part, "unassigned", today);
+                string expected = Templates.RenderPart(tech, part, "unassigned", today);
                 Assert.Equal(expected, content);
             }
         }
@@ -1074,6 +1076,6 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.True(csharpFile2.Written);
         string overwrittenText = Read("docs/standards/csharp/csharp.standards.md");
         Assert.NotEqual(customText, overwrittenText);
-        Assert.Equal(KyberStandardsTemplates.Render("csharp", "unassigned", today), overwrittenText);
+        Assert.Equal(Templates.Render("csharp", "unassigned", today), overwrittenText);
     }
 }
