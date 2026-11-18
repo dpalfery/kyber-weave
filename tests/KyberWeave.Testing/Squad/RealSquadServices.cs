@@ -71,6 +71,14 @@ public static class RealSquadServices
         return new SquadHookJsonFile(files, new PhysicalPathResolver(files), new ProcessEnvironment());
     }
 
+    /// <summary>Creates the worktree MCP binding helper over the real disk.</summary>
+    /// <returns>The helper.</returns>
+    public static SquadWorktreeMcp WorktreeMcp()
+    {
+        PhysicalFileSystem files = new();
+        return new SquadWorktreeMcp(files, new PhysicalPathResolver(files), new ProcessEnvironment());
+    }
+
     /// <summary>Creates the render input reader over the real disk.</summary>
     /// <returns>The reader.</returns>
     public static FileSquadRenderInputReader RenderInputReader() => new(
