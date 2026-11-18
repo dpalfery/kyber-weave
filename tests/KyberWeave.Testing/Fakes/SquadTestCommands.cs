@@ -197,7 +197,9 @@ internal static class SquadTestCommands
         ISquadRenderer? renderer = null,
         SquadStateStore? stateStore = null,
         Func<string, string?>? environmentReader = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        SquadConsole? output = null,
+        IWritableFileSystem? files = null)
     {
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadDoctorCommand(
@@ -217,6 +219,8 @@ internal static class SquadTestCommands
             new SquadDoctorOptions(executor, workingDirectory),
             SquadFileSystemPathSemantics.Instance,
             configs ?? RealFileKyberWeaveConfigRepository.Create(),
+            output ?? CapturedSquadConsole(),
+            files ?? new PhysicalFileSystem(),
             PhysicalRoots(CapturedSquadConsole()));
     }
 

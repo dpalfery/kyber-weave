@@ -16,7 +16,8 @@ public sealed class ArbiterAuditCommand(
     IArbiterConfigResolver configs,
     IArbiterRepositoryLocator locator,
     IArbiterAuditService audits,
-    IRepositoryFileStore files) : Command<ArbiterSettings>
+    IRepositoryFileStore files,
+    IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>A ledger event with no decision: the hook was killed, timed out or crashed after recording the event.</summary>
     public const string MissingDecision = ArbiterAuditService.MissingDecision;
@@ -58,7 +59,7 @@ public sealed class ArbiterAuditCommand(
         DiagnosticReport report = new();
         if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
-            CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+            CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
             return 1;
         }
 
@@ -77,7 +78,7 @@ public sealed class ArbiterAuditCommand(
                     $"--since '{settings.Since}' is not an ISO-8601 timestamp.",
                     "--since",
                     Hint: "Pass an ISO-8601 timestamp, for example '2026-10-01T00:00:00Z'."));
-                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
                 return 1;
             }
 
@@ -92,7 +93,7 @@ public sealed class ArbiterAuditCommand(
             // still matches the repository-relative path the dispatch header carried.
             if (!PlanArguments.TryResolve(repositoryRoot, config, files, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
             {
-                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
                 return 1;
             }
 
@@ -101,20 +102,20 @@ public sealed class ArbiterAuditCommand(
 
         if (audits.Audit(repositoryRoot, config, since, settings.Session, matchesPlan, report) is not { } audited)
         {
-            CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+            CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
             return 1;
         }
 
         foreach (string attestation in audited.Attestations)
         {
-            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(attestation)}.[/]");
+            console.MarkupLine($"[grey]{Markup.Escape(attestation)}.[/]");
         }
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[grey]{audited.ModelEvaluations} decision-model evaluation(s) over {audited.ImplementationDispatches} dispatch(es) to implementation agents.[/]");
-        AnsiConsole.MarkupLine($"[grey]{audited.Findings} finding(s) over {audited.EventCount} ledger event(s).[/]");
+        console.MarkupLine($"[grey]{audited.Findings} finding(s) over {audited.EventCount} ledger event(s).[/]");
 
-        CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+        CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
         return report.HasErrors ? 1 : 0;
     }
 

@@ -112,6 +112,7 @@ task's list.
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Mcp` | `DrainingStreamServerTransport.cs` | Opens the standard streams for the MCP server |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
+| `ConsoleArbiterKeyInput` | Console | `KyberWeave.Cli` | `Commands/Arbiter/ConsoleArbiterKeyInput.cs` | The `IArbiterKeyInput` adapter: the only code that reads a key from standard input or from a masked Spectre prompt, and it reaches both through the `IConsole` and `IAnsiConsole` seams it is given |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
@@ -259,14 +260,11 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepoRoot` (`Commands/Arbiter/ArbiterRepoRoot.cs`) | file system, paths | 4.5 |
 | `ArbiterSectionsCommand` (`Commands/Arbiter/ArbiterSectionsCommand.cs`) | file system, paths | 4.5 |
 | `ArbiterUninstallCommand` (`Commands/Arbiter/ArbiterUninstallCommand.cs`) | paths | 4.5 |
-| `ConsoleArbiterKeyInput` (`Commands/Arbiter/ConsoleArbiterKeyInput.cs`) | console | 4.5 |
 | `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
 | `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
 | `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
-| `DocsInitCommand` (`Commands/Docs/DocsInitCommand.cs`) | file system, paths, environment, console | 4.5 |
 | `DocsMcpMigrateCommand` (`Commands/Docs/DocsMcpMigrateCommand.cs`) | console | 4.5 |
 | `DocsMcpWireCommand` (`Commands/Docs/DocsMcpWireCommand.cs`) | file system, paths | 4.5 |
-| `DocsOnboardingCommand` (`Commands/Docs/DocsOnboardingCommand.cs`) | file system, paths | 4.5 |
 | `DocsPacketCommand` (`Commands/Docs/DocsPacketCommand.cs`) | paths, console | 4.5 |
 | `DocsTasksCommand` (`Commands/Docs/DocsTasksCommand.cs`) | console | 4.5 |
 | `DoctorCommand` (`Commands/Doctor/DoctorCommand.cs`) | paths, console | 4.5 |
@@ -286,8 +284,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
 | `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
 | `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |
-| `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | file system, console | 4.5 |
-| `SquadDoctorCommand` (`Commands/Squad/SquadDoctorCommand.cs`) | file system, environment | 4.5 |
+| `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | console | 4.5 |
 | `SquadPresetClearCommand` (`Commands/Squad/SquadPresetClearCommand.cs`) | file system | 4.5 |
 | `SquadPresetListCommand` (`Commands/Squad/SquadPresetListCommand.cs`) | file system | 4.5 |
 | `SquadPresetUseCommand` (`Commands/Squad/SquadPresetUseCommand.cs`) | file system | 4.5 |

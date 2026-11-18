@@ -9,6 +9,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Arbiter;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Spectre.Console;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -37,8 +38,11 @@ internal static class UpdateCommandTestServices
         services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
         _ = services.AddSquadCliServices();
         _ = services.AddWeaveApplication();
+        ProcessConsoleCapture.EnsureInstalled();
         ServiceProvider provider = services.BuildServiceProvider();
-        return new UpdateCommand(provider.GetRequiredService<ISelfUpdateService>());
+        return new UpdateCommand(
+            provider.GetRequiredService<ISelfUpdateService>(),
+            provider.GetRequiredService<IAnsiConsole>());
     }
 
     private sealed class FixedRefresherFactory(IArbiterHookRefresher refresher) : IArbiterHookRefresherFactory

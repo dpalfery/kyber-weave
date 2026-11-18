@@ -25,7 +25,8 @@ public sealed class ArbiterSetupCommand(
     IArbiterUserOverrideWriter overrideWriter,
     IOllamaProbe ollama,
     IArbiterKeyInput keyInput,
-    ICredentialStore credentials) : Command<ArbiterSettings>
+    ICredentialStore credentials,
+    IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>The TypeSafe cloud endpoint written when no <c>--endpoint</c> is given.</summary>
     internal const string TypeSafeEndpoint = "https://api.typesafe.ai/v1";
@@ -51,7 +52,7 @@ public sealed class ArbiterSetupCommand(
         if (!TryParseProvider(settings.Provider, out ArbiterProviderKind kind, out Diagnostic? providerError))
         {
             report.Add(providerError!);
-            CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
+            CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
             return 1;
         }
 
@@ -67,7 +68,7 @@ public sealed class ArbiterSetupCommand(
                 $"--endpoint '{endpoint}' is not an absolute http(s) URL.",
                 "--endpoint",
                 Hint: "Use https://api.typesafe.ai/v1, or an http(s) Ollama URL."));
-            CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
+            CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
             return 1;
         }
 
@@ -89,7 +90,7 @@ public sealed class ArbiterSetupCommand(
                 $"--model cannot be written to the user override: {exception.Message.Split('\n')[0]}",
                 "--model",
                 Hint: "Use a model name with no newline or control characters, for example jev-1.14.0 or nimble."));
-            CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
+            CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
             return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
@@ -101,26 +102,26 @@ public sealed class ArbiterSetupCommand(
                 "arbiter",
                 overridePath,
                 Hint: "Confirm the home directory is writable, or set provider fields in kyber-weave.yml."));
-            CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
+            CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
             return 1;
         }
 
-        AnsiConsole.MarkupLine("[bold]Arbiter setup[/]");
-        AnsiConsole.MarkupLine($"  Provider: [bold]{Markup.Escape(kindName)}[/]");
-        AnsiConsole.MarkupLine($"  Endpoint: [bold]{Markup.Escape(endpoint)}[/]");
-        AnsiConsole.MarkupLine($"  Model: [bold]{Markup.Escape(model)}[/]");
-        AnsiConsole.MarkupLine($"  Override: [bold]{Markup.Escape(overridePath)}[/]");
+        console.MarkupLine("[bold]Arbiter setup[/]");
+        console.MarkupLine($"  Provider: [bold]{Markup.Escape(kindName)}[/]");
+        console.MarkupLine($"  Endpoint: [bold]{Markup.Escape(endpoint)}[/]");
+        console.MarkupLine($"  Model: [bold]{Markup.Escape(model)}[/]");
+        console.MarkupLine($"  Override: [bold]{Markup.Escape(overridePath)}[/]");
 
         ReportOllama(settings, endpoint, model);
 
         if (kind == ArbiterProviderKind.Systemone && !ArbiterKeyResolver.IsLoopbackEndpoint(endpoint)
             && !StoreKey(settings, endpoint, report))
         {
-            CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
+            CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
             return 1;
         }
 
-        CommandHelpers.Finish(report, settings, "arbiter setup", "Rule");
+        CommandHelpers.Finish(console, report, settings, "arbiter setup", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 
@@ -140,13 +141,13 @@ public sealed class ArbiterSetupCommand(
         if (versionUri is not null
             && ollama.TryDetect(versionUri, out string? version))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"  [green]ok[/] Ollama {Markup.Escape(version ?? "0.35")} detected at {Markup.Escape(probeBase)}; suggested model: [bold]nimble[/].");
         }
 
         if (model.StartsWith("tev1", StringComparison.Ordinal))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "  [yellow]warn[/] Model 'tev1' has a usable input of about 2,000 tokens, too small for most shipped rules; prefer nimble or jev-1.14.0.");
         }
     }
@@ -166,7 +167,7 @@ public sealed class ArbiterSetupCommand(
             : keyInput.PromptHidden();
         if (string.IsNullOrEmpty(key))
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "  [yellow]warn[/] No key supplied; a remote provider reports KW-ARB-KEY-001 until one resolves.");
             return true;
         }
@@ -193,7 +194,7 @@ public sealed class ArbiterSetupCommand(
             return false;
         }
 
-        AnsiConsole.MarkupLine($"  [green]ok[/] Stored a key for {Markup.Escape(origin)}.");
+        console.MarkupLine($"  [green]ok[/] Stored a key for {Markup.Escape(origin)}.");
         return true;
     }
 
