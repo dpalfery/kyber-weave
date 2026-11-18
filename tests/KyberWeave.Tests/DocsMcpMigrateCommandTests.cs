@@ -1137,7 +1137,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// depend on what the developer's own <c>$HOME</c> holds, and the defect it pins would rewrite
     /// the developer's own Cursor configuration. The verb takes its root from its one path argument,
     /// so that is the only input this case supplies; a fix that resolves the operator's home through
-    /// an injected reader — as <c>RepositoryDoctor.Run</c> does, defaulting to the process
+    /// an injected reader — as <c>IRepositoryDoctor.Run</c> does, defaulting to the process
     /// environment — is wired at the one <c>MigrateAt</c> call below, and none of these assertions
     /// change with it.
     /// </para>

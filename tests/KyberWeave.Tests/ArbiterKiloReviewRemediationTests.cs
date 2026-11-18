@@ -265,7 +265,7 @@ public sealed class ArbiterKiloReviewRemediationTests
             "read _tool\n" +
             "echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + dirWithRev + " rev=abc1234 dirty=false documents=7\"}]}}'\n");
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             dirWithRev,
             DoctorMode.Check,
             DoctorHarness.Options(stub),

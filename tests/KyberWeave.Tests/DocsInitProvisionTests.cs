@@ -7,6 +7,7 @@ using System.Diagnostics;
 using Xunit;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Doctor;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
 
@@ -14,7 +15,7 @@ namespace KyberWeave.Tests;
 
 /// <summary>
 /// Pins D12: <c>docs init</c> without <c>--provision</c> is pure scaffolding and starts no index, so CI's scaffold
-/// step is unchanged. The provisioning path, which delegates to <c>RepositoryDoctor</c> for the target's git root, is
+/// step is unchanged. The provisioning path, which delegates to <c>IRepositoryDoctor</c> for the target's git root, is
 /// skipped here because <c>DocsInitCommand</c> has no executor seam in the contract.
 /// </summary>
 public sealed class DocsInitProvisionTests : IDisposable
@@ -46,7 +47,35 @@ public sealed class DocsInitProvisionTests : IDisposable
     }
 
     /// <summary>
-    /// <c>docs init --provision</c> runs <c>RepositoryDoctor</c> in provision mode against the scaffolded root, or the
+    /// <c>docs init --provision</c> runs the injected doctor in provision mode against the scaffolded root, so the
+    /// command can be proven without a child process or a real index.
+    /// </summary>
+    [Fact]
+    public void DocsInit_WithProvision_UsesTheInjectedDoctor()
+    {
+        FakeRepositoryDoctor doctor = new();
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor);
+        DocsInitSettings settings = new()
+        {
+            Path = _repo.Path,
+            NoSkill = true,
+            NoReviewGates = true,
+            Provision = true,
+        };
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            command.Execute(null!, settings, CancellationToken.None));
+
+        Assert.True(
+            execution.Result == 0,
+            $"docs init --provision exited {execution.Result}. Output:{Environment.NewLine}{execution.Output}");
+        (string root, DoctorMode mode) = Assert.Single(doctor.Runs);
+        Assert.Equal(Path.GetFullPath(_repo.Path), root);
+        Assert.Equal(DoctorMode.Provision, mode);
+    }
+
+    /// <summary>
+    /// <c>docs init --provision</c> runs <c>IRepositoryDoctor</c> in provision mode against the scaffolded root, or the
     /// target's git root with <c>--target</c>.
     /// </summary>
     /// <remarks>
@@ -60,7 +89,7 @@ public sealed class DocsInitProvisionTests : IDisposable
         using TempDirectory stubs = new();
         string repo = _repo.Path;
         ScriptedProcessExecutor executor = DoctorHarness.Executor(repo);
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding)
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, DoctorTestServices.Doctor)
         {
             Executor = executor,
             McpExecutable = DoctorHarness.HealthyStub(stubs.Path, repo),

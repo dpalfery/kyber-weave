@@ -44,7 +44,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
         WriteGoverned("worktree-index-hook: false\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = RepositoryDoctor.RunPostCheckout(Root, DoctorHarness.Options(Mcp()), executor, _locks.Path);
+        DoctorReport report = DoctorTestServices.Doctor.RunPostCheckout(Root, DoctorHarness.Options(Mcp()), executor, _locks.Path);
 
         Assert.Empty(executor.CallsTo("codegraph"));
         Assert.Equal(0, report.ExitCode);
@@ -96,14 +96,14 @@ public sealed class DoctorPostCheckoutTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorReport report = RepositoryDoctor.RunPostCheckout(Root, DoctorHarness.Options(Mcp()), executor, _locks.Path);
+        DoctorReport report = DoctorTestServices.Doctor.RunPostCheckout(Root, DoctorHarness.Options(Mcp()), executor, _locks.Path);
 
         string[] restored = executor.CallsTo("git")
             .Where(call => call.ArgumentList.Contains("restore", StringComparer.Ordinal))
             .SelectMany(call => call.ArgumentList.SkipWhile(argument => argument != "--").Skip(1))
             .ToArray();
         Assert.Equal(
-            CodeGraphProvisioner.InitConfigFiles.Order(StringComparer.Ordinal),
+            CodeGraphIndexRules.InitConfigFiles.Order(StringComparer.Ordinal),
             restored.Order(StringComparer.Ordinal));
         Assert.DoesNotContain(EditedFile, restored, StringComparer.Ordinal);
 
@@ -125,7 +125,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
         string mcp = DoctorHarness.RecordingStub(_stubs.Path, Root, startedRecord);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        RepositoryDoctor.RunPostCheckout(Root, DoctorHarness.Options(mcp), executor, _locks.Path);
+        DoctorTestServices.Doctor.RunPostCheckout(Root, DoctorHarness.Options(mcp), executor, _locks.Path);
 
         Assert.False(File.Exists(startedRecord), "The MCP server must not start on the post-checkout path.");
         Assert.DoesNotContain(executor.Calls, call => call.FileName == mcp);
@@ -140,7 +140,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
         using TempDirectory bare = new();
         ScriptedProcessExecutor executor = DoctorHarness.Executor(bare.Path);
 
-        RepositoryDoctor.RunPostCheckout(bare.Path, DoctorHarness.Options(Mcp()), executor, _locks.Path);
+        DoctorTestServices.Doctor.RunPostCheckout(bare.Path, DoctorHarness.Options(Mcp()), executor, _locks.Path);
 
         Assert.Empty(executor.CallsTo("codegraph"));
     }
@@ -154,7 +154,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
     {
         WriteGoverned("stop-on-tool-failure: true\n");
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, Mcp());
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, Mcp());
 
         int exitCode = DoctorAppHarness.Run(command, "doctor", "--post-checkout", "--ensure", Root);
 
@@ -204,7 +204,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(Mcp()),
@@ -222,7 +222,7 @@ public sealed class DoctorPostCheckoutTests : IDisposable
 
     private string DirtyAfterInit() =>
         " M " + EditedFile + "\n"
-        + string.Concat(CodeGraphProvisioner.InitConfigFiles.Select(file => " M " + file + "\n"));
+        + string.Concat(CodeGraphIndexRules.InitConfigFiles.Select(file => " M " + file + "\n"));
 
     private void WriteGoverned(string config)
     {

@@ -4,7 +4,6 @@ using KyberWeave.Cli.Commands.Doctor;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
-using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -28,14 +27,17 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
 {
     private readonly IMcpWiringService _wiring;
     private readonly IDocsScaffoldingService _scaffolder;
+    private readonly IRepositoryDoctor _doctor;
 
     /// <summary>Creates the command over the services the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
     /// <param name="scaffolder">Bootstraps the documentation corpus.</param>
-    public DocsInitCommand(IMcpWiringService wiring, IDocsScaffoldingService scaffolder)
+    /// <param name="doctor">Runs the provisioning doctor when <c>--provision</c> is given.</param>
+    public DocsInitCommand(IMcpWiringService wiring, IDocsScaffoldingService scaffolder, IRepositoryDoctor doctor)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _scaffolder = scaffolder ?? throw new ArgumentNullException(nameof(scaffolder));
+        _doctor = doctor ?? throw new ArgumentNullException(nameof(doctor));
     }
 
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
@@ -160,7 +162,7 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
             McpExecutable ?? "kyber-weave-mcp");
         IProcessExecutor executor = Executor ?? ProcessExecutor.WithTimeout(ProvisionIndexTimeout);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = _doctor.Run(
             Path.GetFullPath(settings.Path),
             DoctorMode.Provision,
             options,

@@ -1,5 +1,6 @@
 using KyberWeave.Application;
 using KyberWeave.Application.Doctor;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Kernel.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,4 +16,13 @@ internal static class DoctorTestServices
 
     /// <summary>The file-system seam the container registers, for a test that runs against the real disk.</summary>
     public static IDoctorFileSystem Files { get; } = Provider.GetRequiredService<IDoctorFileSystem>();
+
+    /// <summary>Runs every doctor mode over the container's adapters.</summary>
+    public static IRepositoryDoctor Doctor { get; } = Provider.GetRequiredService<IRepositoryDoctor>();
+
+    /// <summary>Prepares the CodeGraph index over the container's adapters.</summary>
+    public static ICodeGraphProvisioner Provisioner { get; } = Provider.GetRequiredService<ICodeGraphProvisioner>();
+
+    /// <summary>Ensures a worktree's index over the container's adapters.</summary>
+    public static IWorktreeIndexGuard WorktreeIndex { get; } = Provider.GetRequiredService<IWorktreeIndexGuard>();
 }

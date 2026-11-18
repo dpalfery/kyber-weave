@@ -243,7 +243,7 @@ public sealed class WorktreeIndexGuardTests : IDisposable
     }
 
     private WorktreeIndexOutcome Ensure(ScriptedProcessExecutor executor) =>
-        DoctorServices.WorktreeIndex.Ensure(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
+        DoctorTestServices.WorktreeIndex.Ensure(_root, DoctorHarness.Options("kyber-weave-mcp"), executor, _locks);
 
     /// <summary>A CodeGraph that answers every verb healthily, except that each named verb exits 1.</summary>
     private static ScriptedProcessExecutor Codegraph(params string[] failingVerbs) =>

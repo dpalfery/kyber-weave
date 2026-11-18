@@ -33,7 +33,7 @@ namespace KyberWeave.Tests;
 /// </para>
 /// <para>
 /// The refresh is observed through the cross-process lock file the repository already uses for index
-/// work (<see cref="CodeGraphProvisioner.LockPathFor"/>). That path is public and derived from the
+/// work (<see cref="CodeGraphIndexRules.LockPathFor"/>). That path is public and derived from the
 /// repository root, so a temp root's lock is private to one test and no concurrent run can collide
 /// with it. The lock is acquired with no sharing, which is what the provisioner does, so a busy
 /// lock is the real condition rather than a simulated one.
@@ -227,11 +227,11 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void NonSharingViolationIOException_IsNotTreatedAsBusyLock()
     {
-        Assert.False(CodeGraphProvisioner.IsSharingViolation(new PathTooLongException("path too long")));
-        Assert.False(CodeGraphProvisioner.IsSharingViolation(new IOException("disk sector error", unchecked((int)0x80070017))));
+        Assert.False(CodeGraphIndexRules.IsSharingViolation(new PathTooLongException("path too long")));
+        Assert.False(CodeGraphIndexRules.IsSharingViolation(new IOException("disk sector error", unchecked((int)0x80070017))));
 
-        Assert.True(CodeGraphProvisioner.IsSharingViolation(new IOException("sharing violation", unchecked((int)0x80070020))));
-        Assert.True(CodeGraphProvisioner.IsSharingViolation(new IOException("The process cannot access the file because it is being used by another process.")));
+        Assert.True(CodeGraphIndexRules.IsSharingViolation(new IOException("sharing violation", unchecked((int)0x80070020))));
+        Assert.True(CodeGraphIndexRules.IsSharingViolation(new IOException("The process cannot access the file because it is being used by another process.")));
     }
 
     /// <summary>
@@ -593,7 +593,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         return ScaffoldedTools(root, () => FakeCodeGraphResolver.WithSymbols(), executor, pause);
     }
 
-    private static string LockPath(string root) => CodeGraphProvisioner.LockPathFor(root, Path.GetTempPath());
+    private static string LockPath(string root) => CodeGraphIndexRules.LockPathFor(root, Path.GetTempPath());
 
     /// <summary>
     /// Clears a lock file a previous run of this machine left for this repository root. The root is a

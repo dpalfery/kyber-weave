@@ -37,7 +37,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root, _ => throw DoctorHarness.BinaryNotFound());
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root, DoctorMode.Provision, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
 
         Assert.Equal(3, report.ExitCode);
@@ -55,7 +55,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Provision,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -83,7 +83,7 @@ public sealed class RepositoryDoctorTests : IDisposable
         Directory.CreateDirectory(IndexDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Provision,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -115,7 +115,7 @@ public sealed class RepositoryDoctorTests : IDisposable
                 ? throw new TimeoutException("codegraph sync exceeded its timeout.")
                 : DoctorHarness.Ok());
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Provision,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -139,7 +139,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -154,7 +154,7 @@ public sealed class RepositoryDoctorTests : IDisposable
 
     /// <summary>
     /// Bare <c>doctor</c> with no TTY, or with <c>CI</c> set, acts as <c>--check</c>. The TTY and <c>CI</c> resolution
-    /// belongs to the CLI command, and <see cref="RepositoryDoctor.Run"/> takes no TTY seam.
+    /// belongs to the CLI command, and <c>IRepositoryDoctor.Run</c> takes no TTY seam.
     /// </summary>
     /// <remarks>
     /// Skipped, not weakened. The contract's <c>Run</c> signature takes a mode and no TTY, so this cannot be expressed
@@ -164,7 +164,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     public void Doctor_NonInteractive_Bare_BehavesAsCheck_PrintsHint()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, name => name == "CI" ? "true" : null), executor, "kyber-weave-mcp-absent");
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, name => name == "CI" ? "true" : null), executor, "kyber-weave-mcp-absent");
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
             command.Execute(null!, new DoctorSettings { Path = Root }, CancellationToken.None));
@@ -183,7 +183,7 @@ public sealed class RepositoryDoctorTests : IDisposable
                 ? new ProcessResult(128, string.Empty, "fatal: not a git repository")
                 : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root, DoctorMode.Provision, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
 
         Assert.Equal(2, report.ExitCode);
@@ -199,7 +199,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Provision,
             DoctorHarness.Options("kyber-weave-mcp-absent"),
@@ -224,12 +224,12 @@ public sealed class RepositoryDoctorTests : IDisposable
     {
         Directory.CreateDirectory(IndexDirectory);
         string lockDirectory = Path.GetTempPath();
-        string lockPath = CodeGraphProvisioner.LockPathFor(Root, lockDirectory);
+        string lockPath = CodeGraphIndexRules.LockPathFor(Root, lockDirectory);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
         using (new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
         {
-            DoctorReport report = RepositoryDoctor.Run(
+            DoctorReport report = DoctorTestServices.Doctor.Run(
                 Root,
                 DoctorMode.Provision,
                 new DoctorOptions(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(20), "codegraph", "kyber-weave-mcp-absent"),
@@ -259,7 +259,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options("kyber-weave-mcp-absent"),
@@ -282,7 +282,7 @@ public sealed class RepositoryDoctorTests : IDisposable
                 ? throw new TimeoutException("git exceeded its timeout.")
                 : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root, DoctorMode.Check, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
 
         Assert.Equal(2, report.ExitCode);
@@ -306,7 +306,7 @@ public sealed class RepositoryDoctorTests : IDisposable
                 ? new ProcessResult(2, string.Empty, "error: unknown option '--version'")
                 : DoctorHarness.Ok());
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root, DoctorMode.Provision, DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)), executor, _ => null);
 
         Assert.Equal(1, report.ExitCode);
@@ -325,7 +325,7 @@ public sealed class RepositoryDoctorTests : IDisposable
             Root,
             _ => throw new IOException("The pipe has been ended."));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root, DoctorMode.Provision, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
 
         Assert.Equal(1, report.ExitCode);
@@ -345,7 +345,7 @@ public sealed class RepositoryDoctorTests : IDisposable
                 ? DoctorHarness.Ok()
                 : throw new IOException("The child process could not be started."));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root, DoctorMode.Provision, DoctorHarness.Options("kyber-weave-mcp-absent"), executor, _ => null);
 
         Assert.Equal(1, report.ExitCode);
@@ -391,7 +391,7 @@ public sealed class RepositoryDoctorTests : IDisposable
             }
 
             ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-            DoctorReport report = RepositoryDoctor.Run(
+            DoctorReport report = DoctorTestServices.Doctor.Run(
                 Root,
                 DoctorMode.Provision,
                 DoctorHarness.Options("kyber-weave-mcp-absent"),
@@ -427,7 +427,7 @@ public sealed class RepositoryDoctorTests : IDisposable
     public void Doctor_BlankPath_Exits2()
     {
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, "kyber-weave-mcp-absent");
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, "kyber-weave-mcp-absent");
 
         int exitCode = ProcessConsoleCapture.Run(() =>
             command.Execute(null!, new DoctorSettings { Path = string.Empty }, CancellationToken.None)).Result;
@@ -462,7 +462,7 @@ public sealed class RepositoryDoctorTests : IDisposable
         {
             ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
-            DoctorReport report = RepositoryDoctor.Run(
+            DoctorReport report = DoctorTestServices.Doctor.Run(
                 Root,
                 DoctorMode.Provision,
                 DoctorHarness.Options("kyber-weave-mcp-absent"),
@@ -503,7 +503,7 @@ public sealed class RepositoryDoctorTests : IDisposable
         ScriptedProcessExecutor executor = DoctorHarness.Executor(Root);
 
         int exitCode = DoctorAppHarness.Run(
-            new KyberWeave.Cli.Commands.Doctor.DoctorCommand(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, AppendingStub(callLog)),
+            new KyberWeave.Cli.Commands.Doctor.DoctorCommand(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, AppendingStub(callLog)),
             "doctor",
             "--ensure",
             Root);

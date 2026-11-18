@@ -9,7 +9,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-///     Verifies that <see cref="DoctorCommand" /> and <see cref="RepositoryDoctor.Run" /> correctly inspect
+///     Verifies that <see cref="DoctorCommand" /> and <c>IRepositoryDoctor.Run</c> correctly inspect
 ///     a specified canonical repository path when invoked with an explicit path argument from within an
 ///     arbitrary directory (simulating a worktree checking its canonical parent) (T3).
 /// </summary>
@@ -60,7 +60,7 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
 
         DoctorSettings settings = new()
         {
@@ -107,7 +107,7 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
 
         DoctorSettings settings = new()
         {
@@ -134,7 +134,7 @@ public sealed class DoctorCommandTests : IDisposable
     }
 
     /// <summary>
-    ///     Verifies that RepositoryDoctor.Run inspects the explicit canonical path supplied as root,
+    ///     Verifies that IRepositoryDoctor.Run inspects the explicit canonical path supplied as root,
     ///     ensuring that DoctorReport.Root reflects the canonical repository and all checks pass.
     /// </summary>
     [Fact]
@@ -146,7 +146,7 @@ public sealed class DoctorCommandTests : IDisposable
         string stubPath = DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath);
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             CanonicalPath,
             DoctorMode.Check,
             DoctorHarness.Options(stubPath),
@@ -175,7 +175,7 @@ public sealed class DoctorCommandTests : IDisposable
                 ? new ProcessResult(128, string.Empty, "fatal: not a git repository")
                 : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
 
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, "kyber-weave-mcp-absent");
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, "kyber-weave-mcp-absent");
 
         DoctorSettings settings = new()
         {
@@ -203,7 +203,7 @@ public sealed class DoctorCommandTests : IDisposable
         Directory.CreateDirectory(Path.Combine(CanonicalPath, ".codegraph"));
         ScriptedProcessExecutor executor = DoctorHarness.Executor(CanonicalPath);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             CanonicalPath,
             DoctorMode.Provision,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, CanonicalPath)),
@@ -233,7 +233,7 @@ public sealed class DoctorCommandTests : IDisposable
             _ => throw DoctorHarness.BinaryNotFound());
 
         int exitCode = DoctorAppHarness.Run(
-            new DoctorCommand(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, "kyber-weave-mcp-absent"),
+            new DoctorCommand(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, "kyber-weave-mcp-absent"),
             "doctor",
             "--ensure",
             CanonicalPath);
