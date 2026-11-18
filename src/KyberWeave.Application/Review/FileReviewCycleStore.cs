@@ -4,22 +4,22 @@ using KyberWeave.Core.Review;
 
 namespace KyberWeave.Data.Review;
 
-/// <summary>Reads and writes review cycle folders on the file system.</summary>
-public sealed class FileReviewCycleStore : IReviewCycleStore
+/// <summary>Reads and writes review cycle folders through the file-system seam.</summary>
+public sealed class FileReviewCycleStore(IWritableFileSystem files) : IReviewCycleStore
 {
     /// <inheritdoc />
     public IReadOnlyList<ReviewCycleRecord> ReadFinished(string reviewFolder)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(reviewFolder);
 
-        if (!Directory.Exists(reviewFolder))
+        if (!files.DirectoryExists(reviewFolder))
             return [];
 
         List<ReviewCycleRecord> cycles = [];
-        foreach (string folder in Directory.EnumerateDirectories(reviewFolder))
+        foreach (string folder in files.EnumerateDirectories(reviewFolder))
         {
             if (ReviewCyclePlanning.TryNumber(Path.GetFileName(folder)) is not { } number
-                || !File.Exists(Path.Combine(folder, ReviewCyclePlanning.FindingsFile)))
+                || !files.FileExists(Path.Combine(folder, ReviewCyclePlanning.FindingsFile)))
                 continue;
 
             cycles.Add(Read(number, folder));
@@ -35,7 +35,7 @@ public sealed class FileReviewCycleStore : IReviewCycleStore
 
         string full = Path.GetFullPath(priorFolder);
         if (ReviewCyclePlanning.TryNumber(Path.GetFileName(full)) is not { } number)
-            return Directory.Exists(full) ? [Read(0, full)] : [];
+            return files.DirectoryExists(full) ? [Read(0, full)] : [];
 
         string parent = Path.GetDirectoryName(full) ?? full;
         return [.. ReadFinished(parent).Where(cycle => cycle.Number < number), Read(number, full)];
@@ -47,8 +47,8 @@ public sealed class FileReviewCycleStore : IReviewCycleStore
         ArgumentException.ThrowIfNullOrWhiteSpace(cycleFolder);
         ArgumentNullException.ThrowIfNull(identity);
 
-        Directory.CreateDirectory(cycleFolder);
-        File.WriteAllText(
+        files.CreateDirectory(cycleFolder);
+        files.WriteAllText(
             Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile),
             ReviewCyclePlanning.SerializeIdentity(identity));
     }
@@ -58,18 +58,18 @@ public sealed class FileReviewCycleStore : IReviewCycleStore
         ReviewCyclePlanning.ReadRecordedIdentity(ReadText(Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile)));
 
     /// <inheritdoc />
-    public bool HasIdentity(string cycleFolder) => File.Exists(Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile));
+    public bool HasIdentity(string cycleFolder) => files.FileExists(Path.Combine(cycleFolder, ReviewCyclePlanning.IdentityFile));
 
     /// <inheritdoc />
     public IReadOnlyList<string> TaskFolders(string scratchpad) =>
-        Directory.Exists(scratchpad)
-            ? [.. Directory.EnumerateDirectories(scratchpad)
-                .Where(dir => Directory.Exists(Path.Combine(dir, "review")))
+        files.DirectoryExists(scratchpad)
+            ? [.. files.EnumerateDirectories(scratchpad)
+                .Where(dir => files.DirectoryExists(Path.Combine(dir, "review")))
                 .Select(dir => Path.GetFileName(dir))
                 .Order(StringComparer.Ordinal)]
             : [];
 
-    private static ReviewCycleRecord Read(int number, string folder) =>
+    private ReviewCycleRecord Read(int number, string folder) =>
         ReviewCyclePlanning.Record(
             number,
             folder,
@@ -77,14 +77,14 @@ public sealed class FileReviewCycleStore : IReviewCycleStore
             ReadText(Path.Combine(folder, ReviewCyclePlanning.IdentityFile)),
             ReadText(Path.Combine(folder, ReviewCyclePlanning.GatesFile)));
 
-    private static string? ReadText(string path, bool failOnUnreadable = false)
+    private string? ReadText(string path, bool failOnUnreadable = false)
     {
-        if (!File.Exists(path))
+        if (!files.FileExists(path))
             return null;
 
         try
         {
-            return File.ReadAllText(path);
+            return files.ReadAllText(path);
         }
         catch (Exception ex) when (!failOnUnreadable && FileFailure.Is(ex))
         {

@@ -57,7 +57,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
         _ = services.AddWeaveSquadData();
         services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
-        services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
