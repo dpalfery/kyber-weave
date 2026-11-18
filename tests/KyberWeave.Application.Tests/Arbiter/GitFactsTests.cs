@@ -67,6 +67,12 @@ public sealed class GitFactsTests
     }
 
     [Fact]
+    public void AnUnscriptedGitCallSurfacesInsteadOfReadingAsAnAbsentFact()
+    {
+        _ = Assert.Throws<UnscriptedProcessCallException>(() => Facts().GetHead(Root));
+    }
+
+    [Fact]
     public void AMissingGitLeavesEveryFactAbsentRatherThanThrowing()
     {
         _ = _git.Throws("git", new FileNotFoundException("git is not installed."));
