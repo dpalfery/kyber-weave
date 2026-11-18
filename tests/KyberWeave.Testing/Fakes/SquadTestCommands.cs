@@ -224,6 +224,45 @@ internal static class SquadTestCommands
             PhysicalRoots(CapturedSquadConsole()));
     }
 
+    /// <summary>
+    /// Builds <c>squad doctor</c> over an in-memory Squad state: its file system, path rules, environment and Squad source
+    /// loader, so a doctor test touches no disk, process or real home. Pass <paramref name="state"/> to share a tree the test
+    /// arranged.
+    /// </summary>
+    public static SquadDoctorCommand InMemoryDoctor(
+        InMemorySquadState state,
+        IProcessExecutor? executor = null,
+        string? workingDirectory = null,
+        ISquadGlobalRootResolver? globalRoots = null,
+        ISquadRenderer? renderer = null,
+        IKyberWeaveConfigRepository? configs = null,
+        SquadConsole? output = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        InMemorySquadServices services = new(state.Files);
+        SquadConsole console = output ?? CapturedSquadConsole();
+        return new SquadDoctorCommand(
+            state.Store,
+            state.Migration,
+            globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
+            renderer ?? new SquadRendererRegistry(SquadHostDefaults.CreateRenderers(), services.RenderInputReader()),
+            new SquadModelPresetStore(state.UserPaths, state.Files),
+            state.Planner,
+            new SquadResponseGuidanceReader(state.Files),
+            state.Environment,
+            new SquadPackSourceLocator(state.Files, state.Paths, state.Environment),
+            services.SourceLoader(),
+            new SquadSkillShadowing(state.Files, state.Semantics, state.Environment),
+            new DevinImportOverlap(state.Files, state.Semantics, state.Environment),
+            new ZCodeMcpConfiguration(state.Files, state.Semantics, state.Environment),
+            new SquadDoctorOptions(executor, workingDirectory),
+            state.Semantics,
+            configs ?? new FakeKyberWeaveConfigRepository(),
+            console,
+            state.Files,
+            new SquadCommandRoots(state.Files, state.Paths, state.Environment, console));
+    }
+
     public static SquadPresetUseCommand PresetUse(
         ISquadUserPaths? userPaths = null,
         SquadStateStore? stateStore = null,

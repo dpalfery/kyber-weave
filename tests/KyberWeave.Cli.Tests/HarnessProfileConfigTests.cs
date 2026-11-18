@@ -1,11 +1,13 @@
-using KyberWeave.Tests.Configuration;
-
+using KyberWeave.Application.Agents;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Validation;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Tests.Configuration;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 using YamlDotNet.Core;
 
@@ -47,7 +49,7 @@ public class HarnessProfileConfigTests
     [Fact]
     public void HostOverrideConductorMappingSatisfiesRoleWhenSkillDirectoryPresent()
     {
-        using HarnessRepoFixture repo = new HarnessRepoFixture()
+        HarnessRepoFixture repo = new HarnessRepoFixture()
             .WithConductorSkillDirectory()
             .WithAgent(HarnessKind.Kilo, "conductor");
 
@@ -74,7 +76,7 @@ public class HarnessProfileConfigTests
                     conductor: conductor
             """);
 
-        HarnessProfileConfig config = ConfigFileReader.LoadHarness(yamlPath);
+        HarnessProfileConfig config = repo.Config.LoadHarness(yamlPath);
 
         foreach (HarnessKind harness in SixHarnesses)
         {
@@ -84,7 +86,7 @@ public class HarnessProfileConfigTests
         }
 
         AgentSet agentSet = repo.LoadAgentSet();
-        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, config, File.Exists);
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, config, repo.Files.FileExists);
 
         List<Diagnostic> conductorMissing = report.Items
             .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -113,7 +115,8 @@ public class HarnessProfileConfigTests
     [Fact]
     public void UnknownHarnessProfileNameIsRejected()
     {
-        string yamlPath = WriteTempYaml("""
+        InMemoryConfigFiles config = new();
+        string yamlPath = config.Write(Path.Combine(config.Files.Root, "host", "kyber-weave.yml"), """
             harness:
               profiles:
                 not-a-harness:
@@ -122,53 +125,44 @@ public class HarnessProfileConfigTests
             """);
 
         YamlException ex = Assert.ThrowsAny<YamlException>(
-            () => ConfigFileReader.LoadHarness(yamlPath));
+            () => config.LoadHarness(yamlPath));
         Assert.Contains("not-a-harness", ex.Message, StringComparison.Ordinal);
     }
 
     [Fact]
     public void UnknownHarnessProfileNameThroughTryLoadReportsKWCONFIG001()
     {
-        string root = Path.Combine(Path.GetTempPath(), "kw-config-unknown-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        try
-        {
-            DirectoryInfo configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
-            File.WriteAllText(Path.Combine(configDir.FullName, "kyber-weave.yml"), """
-                harness:
-                  profiles:
-                    not-a-harness:
-                      mapped-role-skill-overrides:
-                        conductor: conductor
-                """);
+        InMemoryConfigFiles files = new();
+        string root = Path.Combine(files.Files.Root, "repo");
+        files.WriteRepositoryConfig(root, """
+            harness:
+              profiles:
+                not-a-harness:
+                  mapped-role-skill-overrides:
+                    conductor: conductor
+            """);
 
-            KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(root);
+        KyberWeaveConfigLoadResult result = files.TryLoad(root);
 
-            Assert.False(result.Success);
-            Assert.Null(result.Config);
-            Assert.NotNull(result.Error);
-            Assert.Contains("not-a-harness", result.Error, StringComparison.Ordinal);
-            Assert.NotNull(result.ConfigPath);
+        Assert.False(result.Success);
+        Assert.Null(result.Config);
+        Assert.NotNull(result.Error);
+        Assert.Contains("not-a-harness", result.Error, StringComparison.Ordinal);
+        Assert.NotNull(result.ConfigPath);
 
-            // The rule code is emitted by the CLI's load helper, so it is asserted on the diagnostic that carries it
-            // rather than on the failed result, which holds no code.
-            DiagnosticReport report = new();
-            bool loaded = CommandHelpers.TryLoadConfig(
-                ConfigFileReader.Repository, root, null, report, out KyberWeaveConfig config);
+        // The rule code is emitted by the CLI's load helper, so it is asserted on the diagnostic that carries it
+        // rather than on the failed result, which holds no code.
+        DiagnosticReport report = new();
+        bool loaded = CommandHelpers.TryLoadConfig(
+            files.Repository, root, null, report, out KyberWeaveConfig config);
 
-            Assert.False(loaded);
-            Assert.Same(KyberWeaveConfigDefaults.Product, config);
-            Diagnostic diagnostic = Assert.Single(report.Items);
-            Assert.Equal("KW-CONFIG-001", diagnostic.Code);
-            Assert.Equal(Severity.Error, diagnostic.Severity);
-            Assert.Contains("not-a-harness", diagnostic.Message, StringComparison.Ordinal);
-            Assert.Equal(result.ConfigPath, diagnostic.FilePath);
-        }
-        finally
-        {
-            if (Directory.Exists(root))
-                Directory.Delete(root, recursive: true);
-        }
+        Assert.False(loaded);
+        Assert.Same(KyberWeaveConfigDefaults.Product, config);
+        Diagnostic diagnostic = Assert.Single(report.Items);
+        Assert.Equal("KW-CONFIG-001", diagnostic.Code);
+        Assert.Equal(Severity.Error, diagnostic.Severity);
+        Assert.Contains("not-a-harness", diagnostic.Message, StringComparison.Ordinal);
+        Assert.Equal(result.ConfigPath, diagnostic.FilePath);
     }
 
     [Fact]
@@ -198,12 +192,13 @@ public class HarnessProfileConfigTests
             """;
 
         // Root-level SKILL.md alone must NOT satisfy mapped roles.
-        using (HarnessRepoFixture repo = new HarnessRepoFixture()
-            .WithRootSkillMd()
-            .WithAgent(HarnessKind.Kilo, "conductor"))
         {
-            HarnessProfileConfig config = ConfigFileReader.LoadHarness(repo.WriteHostProfile(hostYaml));
-            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, File.Exists);
+            HarnessRepoFixture repo = new HarnessRepoFixture()
+            .WithRootSkillMd()
+            .WithAgent(HarnessKind.Kilo, "conductor");
+
+            HarnessProfileConfig config = repo.Config.LoadHarness(repo.WriteHostProfile(hostYaml));
+            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, repo.Files.FileExists);
 
             List<Diagnostic> conductorMissing = report.Items
                 .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -218,12 +213,13 @@ public class HarnessProfileConfigTests
         }
 
         // Canonical SKILL.md inside the mapped skill directory does satisfy.
-        using (HarnessRepoFixture repo = new HarnessRepoFixture()
-            .WithConductorSkillDirectory()
-            .WithAgent(HarnessKind.Kilo, "conductor"))
         {
-            HarnessProfileConfig config = ConfigFileReader.LoadHarness(repo.WriteHostProfile(hostYaml));
-            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, File.Exists);
+            HarnessRepoFixture repo = new HarnessRepoFixture()
+            .WithConductorSkillDirectory()
+            .WithAgent(HarnessKind.Kilo, "conductor");
+
+            HarnessProfileConfig config = repo.Config.LoadHarness(repo.WriteHostProfile(hostYaml));
+            DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, repo.Files.FileExists);
 
             List<Diagnostic> conductorMissing = report.Items
                 .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -244,37 +240,43 @@ public class HarnessProfileConfigTests
     [Fact]
     public void WithoutOverrideMissingHarnessRoleEmitsKWAGENTSYNC001()
     {
-        using HarnessRepoFixture repo = new HarnessRepoFixture()
+        HarnessRepoFixture repo = new HarnessRepoFixture()
             .WithAgent(HarnessKind.Kilo, "architect");
 
         AgentSet agentSet = repo.LoadAgentSet();
-        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, HarnessProfileConfig.ProductDefaults, File.Exists);
+        DiagnosticReport report = AgentSyncLinter.LintSet(agentSet, repo.Root, HarnessProfileConfig.ProductDefaults, repo.Files.FileExists);
 
         Assert.Contains(
             report.Items,
             i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "architect", Severity: Severity.Warning });
     }
 
-    private sealed class HarnessRepoFixture : IDisposable
+    private sealed class HarnessRepoFixture
     {
-        public string Root { get; }
-
         public HarnessRepoFixture()
         {
-            Root = Path.Combine(Path.GetTempPath(), "kw-harness-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Root);
+            Config = new InMemoryConfigFiles();
+            Root = Path.Combine(Files.Root, "repo");
+            Files.CreateDirectory(Root);
         }
+
+        public InMemoryConfigFiles Config { get; }
+
+        public InMemoryFileSystem Files => Config.Files;
+
+        public string Root { get; }
 
         public HarnessRepoFixture WithConductorSkillDirectory()
         {
-            Directory.CreateDirectory(Path.Combine(Root, ".agents", "skills", "conductor"));
-            File.WriteAllText(Path.Combine(Root, ".agents", "skills", "conductor", "SKILL.md"), "---\nname: conductor\n---\n");
+            string directory = Path.Combine(Root, ".agents", "skills", "conductor");
+            Files.CreateDirectory(directory);
+            Files.WriteAllText(Path.Combine(directory, "SKILL.md"), "---\nname: conductor\n---\n");
             return this;
         }
 
         public HarnessRepoFixture WithRootSkillMd()
         {
-            File.WriteAllText(Path.Combine(Root, "SKILL.md"), "---\nname: conductor\n---\n");
+            Files.WriteAllText(Path.Combine(Root, "SKILL.md"), "---\nname: conductor\n---\n");
             return this;
         }
 
@@ -292,10 +294,8 @@ public class HarnessProfileConfigTests
             };
 
             string dir = Path.Combine(Root, folder.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(dir);
-
-            string path = Path.Combine(dir, fileName);
-            File.WriteAllText(path, $"""
+            Files.CreateDirectory(dir);
+            Files.WriteAllText(Path.Combine(dir, fileName), $"""
                 ---
                 name: {roleName}
                 description: Test agent for harness profile contract.
@@ -306,29 +306,13 @@ public class HarnessProfileConfigTests
             return this;
         }
 
-        public string WriteHostProfile(string yaml) =>
-            WriteTempYaml(yaml);
+        public string WriteHostProfile(string yaml) => Config.Write(Path.Combine(Root, "kyber-weave.yml"), yaml);
 
-        public AgentSet LoadAgentSet() => GovernanceTestFiles.Agents.LoadAll(Root);
-
-        public void Dispose()
+        public AgentSet LoadAgentSet()
         {
-            if (Directory.Exists(Root))
-                Directory.Delete(Root, recursive: true);
+            FakePathResolver paths = new(Files);
+            FakeProcessEnvironment environment = new(currentDirectory: Root, isFileSystemCaseInsensitive: !Files.CaseSensitive);
+            return new AgentFileReader(Files, paths, environment).LoadAll(Root);
         }
-
-        private string WriteTempYaml(string content)
-        {
-            string path = Path.Combine(Root, "kyber-weave.yml");
-            File.WriteAllText(path, content);
-            return path;
-        }
-    }
-
-    private static string WriteTempYaml(string content)
-    {
-        string path = Path.Combine(Path.GetTempPath(), "kw-harness-" + Guid.NewGuid().ToString("N") + ".yml");
-        File.WriteAllText(path, content);
-        return path;
     }
 }
