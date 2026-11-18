@@ -37,7 +37,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
         WriteProvenOldKey(withLeftover);
         List<string> log = [];
 
-        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(EnvironmentWithHome(), log.Add);
+        ArbiterHookRefresher refresher = PhysicalArbiterRefresher.Create(EnvironmentWithHome(), log.Add);
         refresher.Refresh([withLeftover, clean]);
 
         string[] notices = [.. log.Where(line => line.Contains(WarningCode, StringComparison.Ordinal))];
@@ -58,7 +58,7 @@ public sealed class ArbiterHookRefresherRenameNoticeTests : IDisposable
         byte[] before = File.ReadAllBytes(Path.Combine(project, ".mcp.json"));
         List<string> log = [];
 
-        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(EnvironmentWithHome(), log.Add);
+        ArbiterHookRefresher refresher = PhysicalArbiterRefresher.Create(EnvironmentWithHome(), log.Add);
         refresher.Refresh([project]);
 
         Assert.Contains(log, line => line.Contains(WarningCode, StringComparison.Ordinal));
