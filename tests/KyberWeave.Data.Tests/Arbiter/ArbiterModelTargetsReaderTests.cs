@@ -1,9 +1,10 @@
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Core.Arbiter.ModelTargets;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Data.Tests.Arbiter;
 
 /// <summary>
 /// Contract for the Arbiter model-targets reader: <c>model-targets.&lt;harness&gt;.json</c> in the
@@ -11,7 +12,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// Any absent, unreadable, mis-schemed, or other-harness file yields null, and no exception escapes.
 /// RED: <c>ArbiterModelTargets</c> does not exist yet.
 /// </summary>
-public sealed class ArbiterModelTargetsReaderTests : IDisposable
+public sealed class ArbiterModelTargetsReaderTests
 {
     private const string ValidJson =
         "{\"schema\":\"kyber-arbiter.model-targets/v1\",\"harness\":\"claude\"," +
@@ -20,19 +21,22 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
         "\"architect\":\"opus\",\"orchestration\":null}," +
         "\"agents\":{\"dev-medium\":{\"profile\":\"general\",\"token\":\"claude-sonnet-5-5\"}}}";
 
-    private readonly TempDirectory _arbiterDirectory = new();
+    private const string ArbiterDirectory = "/repo/artifacts/arbiter";
 
-    public void Dispose() => _arbiterDirectory.Dispose();
+    private readonly InMemoryFileSystem _files = new();
 
-    private void WriteTargets(string harness, string content) =>
-        File.WriteAllText(Path.Combine(_arbiterDirectory.Path, $"model-targets.{harness}.json"), content);
+    private void WriteTargets(string harness, string content)
+    {
+        _files.CreateDirectory(ArbiterDirectory);
+        _files.WriteAllText(Path.Combine(ArbiterDirectory, $"model-targets.{harness}.json"), content);
+    }
 
     [Fact]
     public void ValidFileReadsEveryField()
     {
         WriteTargets("claude", ValidJson);
 
-        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(_arbiterDirectory.Path, "claude");
+        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(_files).TryRead(ArbiterDirectory, "claude");
 
         Assert.NotNull(targets);
         Assert.Equal("kyber-arbiter.model-targets/v1", targets.Schema);
@@ -56,7 +60,7 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
         WriteTargets("claude", ValidJson.Replace(
             "\"token\":\"claude-sonnet-5-5\"", "\"token\":null", StringComparison.Ordinal));
 
-        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(_arbiterDirectory.Path, "claude");
+        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(_files).TryRead(ArbiterDirectory, "claude");
 
         Assert.NotNull(targets);
         Assert.Equal("general", targets.Agents["dev-medium"].Profile);
@@ -66,7 +70,7 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
     [Fact]
     public void MissingFileReturnsNull()
     {
-        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(_arbiterDirectory.Path, "claude");
+        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(_files).TryRead(ArbiterDirectory, "claude");
 
         Assert.Null(targets);
     }
@@ -76,7 +80,7 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
     {
         WriteTargets("claude", "{\"schema\":\"kyber-arbiter.model-targets/v1\",");
 
-        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(_arbiterDirectory.Path, "claude");
+        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(_files).TryRead(ArbiterDirectory, "claude");
 
         Assert.Null(targets);
     }
@@ -87,7 +91,7 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
         WriteTargets("claude", ValidJson.Replace(
             "kyber-arbiter.model-targets/v1", "kyber-arbiter.model-targets/v2", StringComparison.Ordinal));
 
-        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(_arbiterDirectory.Path, "claude");
+        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(_files).TryRead(ArbiterDirectory, "claude");
 
         Assert.Null(targets);
     }
@@ -97,7 +101,7 @@ public sealed class ArbiterModelTargetsReaderTests : IDisposable
     {
         WriteTargets("codex", ValidJson);
 
-        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(new PhysicalFileSystem()).TryRead(_arbiterDirectory.Path, "codex");
+        ArbiterModelTargets? targets = new FileArbiterModelTargetsReader(_files).TryRead(ArbiterDirectory, "codex");
 
         Assert.Null(targets);
     }
