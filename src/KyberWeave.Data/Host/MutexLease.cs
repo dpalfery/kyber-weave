@@ -30,7 +30,7 @@ public sealed class MutexLease : ILease
         Justification = "A returned HeldLease owns the mutex and disposes it; every other path disposes it in the catch block.")]
     public IDisposable Acquire(string name, TimeSpan timeout)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _ = LeaseNames.Validate(name);
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
 
         if (!HeldInProcess.TryAdd(name, 0))

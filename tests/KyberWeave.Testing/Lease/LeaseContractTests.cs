@@ -166,6 +166,29 @@ public abstract class LeaseContractTests
         _ = Assert.ThrowsAny<ArgumentException>(() => lease.Acquire("  ", GenerousTimeout));
     }
 
+    [Theory]
+    [InlineData("Global\\kyber-weave-lease")]
+    [InlineData("Local\\kyber-weave-lease")]
+    [InlineData("kyber-weave\\lease")]
+    [InlineData("kyber-weave/lease")]
+    public void RejectsALeaseNameTheOperatingSystemWouldReinterpret(string name)
+    {
+        ILease lease = CreateLease();
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(() => lease.Acquire(name, GenerousTimeout));
+
+        Assert.Contains(name, exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void RejectsALeaseNameLongerThanTheOperatingSystemAccepts()
+    {
+        ILease lease = CreateLease();
+        string name = new('a', 500);
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => lease.Acquire(name, GenerousTimeout));
+    }
+
     [Fact]
     public void RejectsANegativeTimeout()
     {

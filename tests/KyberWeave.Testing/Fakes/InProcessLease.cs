@@ -21,7 +21,7 @@ public sealed class InProcessLease : ILease
     /// <inheritdoc />
     public IDisposable Acquire(string name, TimeSpan timeout)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _ = LeaseNames.Validate(name);
         ArgumentOutOfRangeException.ThrowIfLessThan(timeout, TimeSpan.Zero);
 
         if (!Held.TryAdd(name, 0))
@@ -38,7 +38,7 @@ public sealed class InProcessLease : ILease
     /// <exception cref="InvalidOperationException">The lease is already held.</exception>
     public IDisposable Hold(string name)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(name);
+        _ = LeaseNames.Validate(name);
         return Held.TryAdd(name, 0)
             ? new HeldLease(name)
             : throw new InvalidOperationException($"The lease '{name}' is already held.");
