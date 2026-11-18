@@ -39,6 +39,14 @@ public abstract class KyberWeaveConfigRepositoryContractTests : IDisposable
     /// <summary>Writes <paramref name="yaml"/> at <paramref name="fileName"/> under <paramref name="root"/>.</summary>
     protected abstract void WriteConfigFile(string root, string fileName, string yaml);
 
+    /// <summary>
+    /// Makes the file at <paramref name="path"/> exist but fail every read until the returned value is disposed, the way
+    /// a permission or sharing failure does on disk.
+    /// </summary>
+    /// <param name="path">The full path of a file that exists.</param>
+    /// <returns>A scope that restores the read when disposed.</returns>
+    protected abstract IDisposable MakeUnreadable(string path);
+
     /// <summary>The full path of a repository's <c>.kyber-weave/kyber-weave.yml</c>.</summary>
     protected static string RepositoryConfigPath(string root) => Path.Combine(
         Path.GetFullPath(root),
@@ -188,6 +196,46 @@ public abstract class KyberWeaveConfigRepositoryContractTests : IDisposable
         Assert.Null(result.Config);
         Assert.NotNull(result.Error);
         Assert.Equal(RepositoryConfigPath(root), result.ConfigPath);
+    }
+
+    [Fact]
+    public void ARepositoryConfigFileThatCannotBeReadFailsTheAttempt()
+    {
+        string root = NewRoot();
+        WriteRepositoryConfig(root, "task-prompt-budget: 41009\n");
+        IKyberWeaveConfigRepository repository = CreateRepository();
+
+        using (MakeUnreadable(RepositoryConfigPath(root)))
+        {
+            Assert.ThrowsAny<IOException>(() => repository.Load(root));
+            KyberWeaveConfigLoadResult result = repository.TryLoad(root);
+
+            Assert.False(result.Success);
+            Assert.Null(result.Config);
+            Assert.NotNull(result.Error);
+            Assert.Equal(RepositoryConfigPath(root), result.ConfigPath);
+        }
+
+        Assert.Equal(41009, repository.Load(root).TaskPromptBudget);
+    }
+
+    [Fact]
+    public void AUserConfigFileThatCannotBeReadFailsTheAttempt()
+    {
+        string home = NewHome();
+        WriteUserConfig(home, "task-prompt-budget: 41010\n");
+        IKyberWeaveConfigRepository repository = CreateRepository();
+
+        using (MakeUnreadable(UserConfigPath(home)))
+        {
+            Assert.ThrowsAny<IOException>(() => repository.LoadUserConfig(home));
+            KyberWeaveConfigLoadResult result = repository.TryLoadUserConfig(home);
+
+            Assert.False(result.Success);
+            Assert.Null(result.Config);
+            Assert.NotNull(result.Error);
+            Assert.Equal(UserConfigPath(home), result.ConfigPath);
+        }
     }
 
     [Fact]

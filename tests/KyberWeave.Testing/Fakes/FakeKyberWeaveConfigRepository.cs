@@ -17,6 +17,7 @@ namespace KyberWeave.Tests.Fakes;
 public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
 {
     private readonly Dictionary<string, string> _files = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, Exception> _readFailures = new(StringComparer.Ordinal);
     private readonly List<string> _roots = [];
 
     /// <summary>Answers what the file system says about a gate's <c>working-directory</c>; empty means no directory exists.</summary>
@@ -65,6 +66,20 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
     /// <summary>The full path of the per-user config file under <paramref name="home"/>.</summary>
     /// <param name="home">The operator's home directory.</param>
     public static string UserConfigPath(string home) => UserHostConfigPath.Of(Path.GetFullPath(home));
+
+    /// <summary>
+    /// Makes every read of <paramref name="fullPath"/> fail until the returned scope is disposed, so a test can reach
+    /// the result the real repository reports for a file that exists but cannot be read.
+    /// </summary>
+    /// <param name="fullPath">The full path of a file the fake holds.</param>
+    /// <param name="error">The failure the read throws; an <see cref="IOException"/> when null.</param>
+    /// <returns>A scope that restores the read when disposed.</returns>
+    public IDisposable FailReads(string fullPath, Exception? error = null)
+    {
+        string path = Path.GetFullPath(fullPath);
+        _readFailures[path] = error ?? new IOException($"The fake could not read '{path}'.");
+        return new ReadFailureScope(this, path);
+    }
 
     /// <inheritdoc />
     public KyberWeaveConfig Load(string repoRoot, string? configPath = null)
@@ -125,7 +140,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         if (path is null)
             return KyberWeaveConfig.ProductDefaults;
 
-        if (!_files.TryGetValue(path, out string? yaml))
+        if (!_files.ContainsKey(path))
         {
             if (!string.IsNullOrWhiteSpace(configPath))
             {
@@ -137,7 +152,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
             return KyberWeaveConfig.ProductDefaults;
         }
 
-        return KyberWeaveConfigAssembler.FromUserYaml(yaml);
+        return KyberWeaveConfigAssembler.FromUserYaml(ReadFile(path));
     }
 
     /// <inheritdoc />
@@ -149,7 +164,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
         if (path is null)
             return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path);
 
-        if (!_files.TryGetValue(path, out string? yaml))
+        if (!_files.ContainsKey(path))
         {
             return string.IsNullOrWhiteSpace(configPath)
                 ? KyberWeaveConfigLoadResult.Ok(KyberWeaveConfig.ProductDefaults, path)
@@ -158,7 +173,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
 
         try
         {
-            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfigAssembler.FromUserYaml(yaml), path);
+            return KyberWeaveConfigLoadResult.Ok(KyberWeaveConfigAssembler.FromUserYaml(ReadFile(path)), path);
         }
         catch (YamlException ex)
         {
@@ -202,7 +217,7 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
 
     private KyberWeaveConfig FromFile(string path)
     {
-        string yaml = _files[Path.GetFullPath(path)];
+        string yaml = ReadFile(path);
         string directory = Path.GetDirectoryName(Path.GetFullPath(path)) ?? Path.GetFullPath(path);
         string root = Path.GetFileName(directory) == KyberWeaveYamlParser.DefaultDirectoryName
             ? Path.GetDirectoryName(directory) ?? directory
@@ -215,5 +230,28 @@ public sealed class FakeKyberWeaveConfigRepository : IKyberWeaveConfigRepository
             ReadText);
     }
 
-    private string? ReadText(string path) => _files.TryGetValue(Path.GetFullPath(path), out string? text) ? text : null;
+    private string? ReadText(string path)
+    {
+        string full = Path.GetFullPath(path);
+        ThrowIfUnreadable(full);
+        return _files.TryGetValue(full, out string? text) ? text : null;
+    }
+
+    private string ReadFile(string path)
+    {
+        string full = Path.GetFullPath(path);
+        ThrowIfUnreadable(full);
+        return _files[full];
+    }
+
+    private void ThrowIfUnreadable(string fullPath)
+    {
+        if (_readFailures.TryGetValue(fullPath, out Exception? error))
+            throw error;
+    }
+
+    private sealed class ReadFailureScope(FakeKyberWeaveConfigRepository owner, string path) : IDisposable
+    {
+        public void Dispose() => owner._readFailures.Remove(path);
+    }
 }

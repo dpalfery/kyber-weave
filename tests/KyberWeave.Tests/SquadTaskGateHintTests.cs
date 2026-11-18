@@ -47,7 +47,31 @@ public sealed class SquadTaskGateHintTests
     [Fact]
     public void AnUnreadableConfigKeepsTheHintRatherThanFailingTheVerb()
     {
+        FakeKyberWeaveConfigRepository configs = Config("review:\n  parallelism: 3\n");
+
+        using (configs.FailReads(FakeKyberWeaveConfigRepository.RepositoryConfigPath("/project")))
+        {
+            Assert.False(SquadTaskGateHint.HasTaskGates(configs, "/project"));
+        }
+    }
+
+    [Fact]
+    public void InvalidConfigKeepsTheHint()
+    {
         Assert.False(SquadTaskGateHint.HasTaskGates(Config("review:\n  parallelism: not-a-number\n"), "/project"));
+    }
+
+    [Fact]
+    public void AConfigTheRepositoryCannotEvenResolveKeepsTheHint()
+    {
+        FakeKyberWeaveConfigRepository configs = Config("review:\n  parallelism: 3\n");
+
+        using (configs.FailReads(
+                   FakeKyberWeaveConfigRepository.RepositoryConfigPath("/project"),
+                   new System.Security.SecurityException("denied")))
+        {
+            Assert.False(SquadTaskGateHint.HasTaskGates(configs, "/project"));
+        }
     }
 
     private static FakeKyberWeaveConfigRepository Config(string yaml)

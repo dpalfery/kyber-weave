@@ -53,7 +53,8 @@ internal static class SquadTaskGateHint
                        || result.Config.Review.TechnologyGates.Count > 0);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException
-                                       or InvalidDataException or ArgumentException)
+                                       or InvalidDataException or ArgumentException
+                                       or System.Security.SecurityException or NotSupportedException)
         {
             // TryLoad already turns invalid YAML and I/O failures into a failed result; what
             // reaches here is a path the loader could not even attempt. Unreadable gates are
