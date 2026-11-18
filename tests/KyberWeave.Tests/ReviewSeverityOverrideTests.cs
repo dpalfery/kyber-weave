@@ -1,3 +1,4 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
@@ -298,7 +299,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     public async Task OverrideQuestionsAreCappedAndTheSkippedComparisonsAreReported()
     {
         FakeProvider provider = new(_ => ("no", 0.99));
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 160).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
         await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
@@ -333,7 +334,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     public async Task OnlyTheStepsFindingLimitIsLookedAtAndTheRestAreReportedAsLeftOut()
     {
         FakeProvider provider = new(_ => ("no", 0.99));
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerStep + 100).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
         await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
@@ -346,7 +347,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     public async Task AFaultChangesNothingAndStopsFurtherCalls()
     {
         FakeProvider provider = new(_ => ("belongs", 1.0)) { Fault = true };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 6).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
         (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrides.Parse(Table), many);
@@ -360,7 +361,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public async Task ProviderNoneAsksNothing()
     {
-        ReviewDecisionModel model = new(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+        ReviewDecisionSession model = ReviewTestServices.DecisionModel(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
 
         (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
             model, SeverityOverrides.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
@@ -405,8 +406,8 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
 
     private string LogDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
 
-    private ReviewDecisionModel Model(IArbiterProvider provider) =>
-        new(provider, ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+    private ReviewDecisionSession Model(IArbiterProvider provider) =>
+        ReviewTestServices.DecisionModel(provider, ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
 
     private static string Section(params string[] rows) =>
         "## Severity overrides\n\n| Id | Finding class | Severity | Applies to | Why |\n|---|---|---|---|---|\n" + string.Join('\n', rows) + "\n";

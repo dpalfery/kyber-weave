@@ -1,8 +1,13 @@
 using KyberWeave.Application;
+using KyberWeave.Application.Review;
 using KyberWeave.Cli.Composition;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
+using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spectre.Console.Cli;
@@ -68,6 +73,31 @@ internal static class ReviewTestServices
 
     /// <summary>The decision-model steps the review commands ask, over the registered cited-file readers.</summary>
     public static IReviewDecisionSteps DecisionSteps { get; } = Provider.GetRequiredService<IReviewDecisionSteps>();
+
+    /// <summary>The decision model a review command builds from its provider, over the given log and an in-memory answer cache.</summary>
+    /// <param name="provider">The provider that answers; null is the model switched off.</param>
+    /// <param name="rules">The effective Arbiter rules.</param>
+    /// <param name="logDirectory">The directory the decision log is written to; null logs nothing.</param>
+    /// <param name="clock">Stamps the decision records.</param>
+    /// <param name="unavailableReason">Why a configured model cannot be used; null otherwise.</param>
+    /// <param name="cacheStore">The answer cache; an in-memory fake when null.</param>
+    /// <param name="cachePath">The cache file's name; null keeps no answers.</param>
+    public static ReviewDecisionSession DecisionModel(
+        IArbiterProvider? provider,
+        IReadOnlyList<ArbiterRule> rules,
+        string? logDirectory,
+        TimeProvider clock,
+        string? unavailableReason = null,
+        IReviewDecisionCacheStore? cacheStore = null,
+        string? cachePath = null) =>
+        new(
+            provider,
+            rules,
+            logDirectory is null ? null : new DecisionLog(logDirectory),
+            clock,
+            unavailableReason,
+            cacheStore ?? new FakeReviewDecisionCacheStore(),
+            cachePath);
 
     /// <summary>Reports the declarations whose bodies repeat verbatim.</summary>
     public static IDuplicateDetectionService Duplicates { get; } = Provider.GetRequiredService<IDuplicateDetectionService>();

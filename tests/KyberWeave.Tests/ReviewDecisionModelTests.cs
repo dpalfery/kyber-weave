@@ -1,3 +1,4 @@
+using KyberWeave.Application.Review;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
@@ -24,7 +25,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task AConfidentNotApplicableLeavesTheLensUnseatedWithItsConfidence()
     {
         FakeProvider provider = new() { Noul = 0.02 };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
 
         IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(
             model, ["security", "performance"], "src/\n  src/a.cs +1 -0");
@@ -37,7 +38,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task AnUnsureApplicabilityAnswerSeatsTheLens()
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.5 });
+        ReviewDecisionSession model = Model(new FakeProvider { Noul = 0.5 });
 
         IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
@@ -60,7 +61,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task AFaultSeatsEveryLensAndStopsFurtherCalls()
     {
         FakeProvider provider = new() { Fault = true };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
 
         IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(
             model, ["security", "performance", "supportability", "prior-art", "authz-tenancy", "intent-alignment"], "x");
@@ -75,7 +76,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task AnAbsorbedProviderExceptionKeepsItsTypeInTheSummaryLine()
     {
         FakeProvider provider = new() { Throws = new TimeoutException("the endpoint did not answer") };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
 
         await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security", "performance"], "x");
 
@@ -92,7 +93,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
                 ? new TimeoutException("first")
                 : new IOException("second")
         };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
 
         await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security", "performance"], "x");
 
@@ -105,7 +106,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task AFaultWithNoExceptionStillSaysItStoppedWithoutAType()
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Fault = true });
+        ReviewDecisionSession model = Model(new FakeProvider { Fault = true });
 
         await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
@@ -119,7 +120,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
         // A file where the log folder belongs: the log cannot be created, as on a read-only or full disk.
         Directory.CreateDirectory(Path.GetDirectoryName(LogDirectory)!);
         await File.WriteAllTextAsync(LogDirectory, "not a folder");
-        ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.02 });
+        ReviewDecisionSession model = Model(new FakeProvider { Noul = 0.02 });
 
         IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security", "performance"], "x");
 
@@ -131,7 +132,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task ADecisionThatIsLoggedLeavesNoUnloggedNoteInTheSummaryLine()
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Noul = 0.02 });
+        ReviewDecisionSession model = Model(new FakeProvider { Noul = 0.02 });
 
         await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
@@ -142,7 +143,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task ProviderNoneAsksNothingAndPrintsNothing()
     {
-        ReviewDecisionModel model = new(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+        ReviewDecisionSession model = ReviewTestServices.DecisionModel(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
 
         IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
@@ -155,7 +156,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public void AConfiguredModelThatCannotBeUsedSaysSoOnce()
     {
-        ReviewDecisionModel model = new(null, [], null, TimeProvider.System, "no key for https://example.test");
+        ReviewDecisionSession model = ReviewTestServices.DecisionModel(null, [], null, TimeProvider.System, "no key for https://example.test");
 
         Assert.Equal("decision model: not configured (no key for https://example.test)", model.SummaryLine([]));
     }
@@ -165,7 +166,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task AConfidentNitpickDropsAMinorFinding()
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = "nitpick", Confidence = 0.95 });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = "nitpick", Confidence = 0.95 });
 
         (List<ReviewFinding> kept, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =
             await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
@@ -194,7 +195,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [InlineData("nitpick", 0.99, true)]
     public async Task OnlyAnAnswerAtTheFloorDropsANitpick(string choice, double confidence, bool dropped)
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
 
         (_, List<(ReviewFinding Finding, double? Confidence)> nitpicks) =
             await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
@@ -207,7 +208,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         IReadOnlyList<ArbiterRule> rules = [.. ArbiterConfig.ProductDefaults.Rules
             .Select(rule => rule.Id == ReviewVerdictRules.NitpickRule ? rule with { Shadow = true } : rule)];
-        ReviewDecisionModel model = new(new FakeProvider { Choice = "nitpick", Confidence = 0.99 }, rules, LogDirectory, TimeProvider.System);
+        ReviewDecisionSession model = ReviewTestServices.DecisionModel(new FakeProvider { Choice = "nitpick", Confidence = 0.99 }, rules, LogDirectory, TimeProvider.System);
 
         (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
 
@@ -219,7 +220,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task AFaultKeepsEveryFinding()
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Fault = true });
+        ReviewDecisionSession model = Model(new FakeProvider { Fault = true });
 
         (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.DropNitpicksAsync(model, [Finding("a/minor", ReviewSeverity.Minor)]);
 
@@ -231,7 +232,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task AConfidentDuplicateIsMergedIntoTheHigherSeverityFinding()
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = "same-defect", Confidence = 0.97 });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = "same-defect", Confidence = 0.97 });
 
         (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(
             model, [Finding("intent/b", ReviewSeverity.Minor, line: 16), Finding("docs/a", ReviewSeverity.Major, line: 16)]);
@@ -257,7 +258,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task DuplicateQuestionsAreCappedAndTheSkippedComparisonsAreReported()
     {
         FakeProvider provider = new() { Choice = "different-defect", Confidence = 0.99 };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 30).Select(index => Finding($"x/f{index}", ReviewSeverity.Major, line: index))];
 
         (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(model, many);
@@ -272,7 +273,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [InlineData("different-defect", 0.99)]
     public async Task AnUnsureOrDifferentAnswerKeepsBothFindings(string choice, double confidence)
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
 
         (List<ReviewFinding> kept, List<MergedFindings> merged) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(
             model, [Finding("a", ReviewSeverity.Major), Finding("b", ReviewSeverity.Minor)]);
@@ -287,7 +288,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task AConfidentSupportedClaimNeedsNoRefuter()
     {
         string root = Repository();
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = "supports", Confidence = 0.95 });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = "supports", Confidence = 0.95 });
 
         ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)]));
 
@@ -298,7 +299,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task AConfidentContradictedClaimStillGoesToTheRefuter()
     {
         string root = Repository();
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = "contradicts", Confidence = 0.99 });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = "contradicts", Confidence = 0.99 });
 
         ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)]));
 
@@ -310,7 +311,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task AnUnsureClaimAnswerGoesToTheRefuter()
     {
         string root = Repository();
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = "supports", Confidence = 0.6 });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = "supports", Confidence = 0.6 });
 
         Assert.True(Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, [Finding("a", ReviewSeverity.Major)])).NeedsRefuter);
     }
@@ -399,7 +400,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [InlineData("too-high", 0.5, null)]
     public async Task OnlyAConfidentMismatchIsNoted(string choice, double confidence, string? direction)
     {
-        ReviewDecisionModel model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
+        ReviewDecisionSession model = Model(new FakeProvider { Choice = choice, Confidence = confidence });
 
         IReadOnlyList<(ReviewFinding Finding, string Direction, double? Confidence)> notes =
             await ReviewTestServices.DecisionSteps.CheckSeveritiesAsync(model, [Finding("a", ReviewSeverity.Major)]);
@@ -411,14 +412,15 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task ACachedAnswerIsReusedWithoutAnotherCall()
     {
         string cache = Path.Combine(_temp.Path, "decision-model.json");
+        FakeReviewDecisionCacheStore answers = new();
         string root = Repository();
         FakeProvider first = new() { Choice = "supports", Confidence = 0.95 };
         await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
-            new ReviewDecisionModel(first, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]);
+            ReviewTestServices.DecisionModel(first, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cacheStore: answers, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]);
         FakeProvider second = new() { Choice = "contradicts", Confidence = 0.99 };
 
         ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
-            new ReviewDecisionModel(second, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]));
+            ReviewTestServices.DecisionModel(second, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cacheStore: answers, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]));
 
         Assert.False(check.NeedsRefuter);
         Assert.Equal(0, second.Calls);
@@ -622,7 +624,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task AFindingsOverTheLimitAreReportedInTheSummaryAndNeverLost()
     {
         FakeProvider provider = new() { Choice = "different", Confidence = 0.99 };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] findings = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerFile + 25).Select(index => Finding($"f{index}", ReviewSeverity.Minor, line: 1))];
 
         (List<ReviewFinding> kept, _) = await ReviewTestServices.DecisionSteps.MergeDuplicatesAsync(model, findings);
@@ -636,7 +638,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     public async Task EveryStepAsksAtMostTheQuestionCapEvenWhenItDidNotCapItself()
     {
         FakeProvider provider = new() { Choice = "about-right", Confidence = 0.99 };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] findings = [.. Enumerable.Range(0, 450).Select(index => Finding($"f{index}", ReviewSeverity.Major, line: index))];
 
         await ReviewTestServices.DecisionSteps.CheckSeveritiesAsync(model, findings);
@@ -655,7 +657,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         string root = Repository();
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] readable = [.. Enumerable.Range(0, ReviewVerdictRules.MaxQuestionsPerStep).Select(index => Finding($"ok/f{index}", ReviewSeverity.Major))];
         ReviewFinding[] later = [.. Enumerable.Range(0, 50).Select(index => Finding($"late/f{index}", ReviewSeverity.Major, file: "missing.cs"))];
 
@@ -677,7 +679,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     {
         string root = Repository();
         FakeProvider provider = new() { Choice = "supports", Confidence = 0.95 };
-        ReviewDecisionModel model = Model(provider);
+        ReviewDecisionSession model = Model(provider);
         ReviewFinding[] unreadable = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerStep + 7).Select(index => Finding($"x/f{index}", ReviewSeverity.Major, file: "missing.cs"))];
 
         IReadOnlyList<ClaimCheck> checks = await ReviewTestServices.DecisionSteps.CheckClaimsAsync(model, root, unreadable);
@@ -782,8 +784,8 @@ public sealed class ReviewDecisionModelTests : IDisposable
 
     private string LogDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
 
-    private ReviewDecisionModel Model(IArbiterProvider provider) =>
-        new(provider, ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+    private ReviewDecisionSession Model(IArbiterProvider provider) =>
+        ReviewTestServices.DecisionModel(provider, ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
 
     private string Repository()
     {
