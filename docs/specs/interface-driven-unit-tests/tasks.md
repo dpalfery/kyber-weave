@@ -172,7 +172,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.5, 2.2
   - _Requirements: 1.5, 2.2_
 
-- [ ] 2.5 Move Domain's logic to Application, one Domain folder per task
+- [x] 2.5 Move Domain's logic to Application, one Domain folder per task
   - **Objective:** the logic classes in each of Domain's folders (`Agents`, `Arbiter`, `Docs`, `Review`,
     `Squad` and the rest) move to the matching folder in `KyberWeave.Application`; the 33 direct resource
     sites and 17 services built inside services among them move onto seams as they go. Each move follows
@@ -237,7 +237,8 @@ from this file when it is marked Ready.
     tasks
   - _Requirements: 1.2, 1.4, 2.1 to 2.9, 4.2, 4.3_
 
-- [ ] 2.6 Domain holds data only
+- [x] 2.6 Domain holds data only
+  - **Result (2026-11-18):** Domain references only Kernel and declares no interface; 509 types remain, 17 constants-only static classes; every other member is construction, equality, formatting or validation of its own values, or a read-only property derived from its own fields (counted as data).
   - **Objective:** confirm the end state once every 2.5 task is done.
   - **Acceptance criteria:** no class in `KyberWeave.Domain` has a method beyond construction,
     equality, formatting of itself, or validation of its own values; the count is reported.
