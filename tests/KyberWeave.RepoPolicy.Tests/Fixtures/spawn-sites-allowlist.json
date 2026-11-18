@@ -578,7 +578,7 @@
       "bound": "Windows only (guarded by OperatingSystem.IsWindows in TryEnableWindowsDirectoryCaseSensitivity). ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
     },
     {
-      "file": "tests/KyberWeave.Tests/CodeGraphFreshnessTests.cs",
+      "file": "tests/KyberWeave.Mcp.Tests/CodeGraph/CodeGraphFreshnessTests.cs",
       "text": "System.Diagnostics.ProcessStartInfo start = new(\"codegraph\")",
       "count": 1,
       "bound": "Fake: the start information is handed to a scripted process runner that records the request and starts nothing."
