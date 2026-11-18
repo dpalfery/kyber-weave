@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests.Fakes;
@@ -20,8 +21,10 @@ namespace KyberWeave.Tests.Fakes;
 /// </remarks>
 public static class TestSquadCorpus
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly Lazy<SquadSource> LazyCanonicalSource =
         new(static () => SquadSourceLoader.Load(ProductRoot));
@@ -75,8 +78,7 @@ public static class TestSquadCorpus
     /// </remarks>
     public static string ExpectedSubagentRenderText(SquadTarget target, string canonicalText)
     {
-        string block = File.ReadAllText(
-            Path.Combine(ProductRoot, "shared", "worker-baseline.md"));
+        string block = Corpus.ReadText("products/kyber-squad/shared/worker-baseline.md");
         int start = block.IndexOf("<worker-baseline>", StringComparison.Ordinal);
         int end = block.IndexOf("</worker-baseline>", StringComparison.Ordinal);
         Assert.True(start >= 0 && end > start, "products/kyber-squad/shared/worker-baseline.md must carry one tagged block.");
