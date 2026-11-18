@@ -114,6 +114,30 @@ public sealed class SquadLifecycleRecoveryNoticeTests
         Assert.True(_state.Files.DirectoryExists(journal));
     }
 
+    [Fact]
+    public async Task AnUninstallDryRunOverAPendingJournalWarnsThatItChangedNothing()
+    {
+        (string root, FakeSquadReleaseSource release) = await InstalledAsync();
+        await LeaveAnUpdateInterruptedAsync(root);
+        string journal = Path.Combine(root, ".kyber-weave", ".squad-transaction");
+        SquadLifecycleService lifecycle = SquadTestCommands.InMemoryLifecycle(
+            _state,
+            release,
+            FakeSquadRenderer.Responding(Rendered));
+
+        SquadLifecycleResult dryRun = await lifecycle.UninstallAsync(new SquadUninstallRequest(
+            root,
+            SquadDeploymentScope.Project,
+            DryRun: true));
+
+        Assert.True(dryRun.Success, string.Join("; ", dryRun.Errors ?? []));
+        Assert.Contains(
+            dryRun.Warnings ?? [],
+            warning => warning.Contains("unfinished Squad transaction", StringComparison.Ordinal) &&
+                       warning.Contains("--dry-run", StringComparison.Ordinal));
+        Assert.True(_state.Files.DirectoryExists(journal));
+    }
+
     private async Task<(string Root, FakeSquadReleaseSource Release)> InstalledAsync()
     {
         string root = _state.CreateRoot("recovery-notice");

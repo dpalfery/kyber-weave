@@ -138,6 +138,54 @@ public sealed class SquadUninstallCommandTests
         Assert.Empty(lifecycle.Uninstalls);
     }
 
+    [Fact]
+    public void Execute_DryRunAfterARecovery_PrintsThePendingJournalNotice()
+    {
+        SquadDeploymentPlan plan = UninstallPlan();
+        FakeSquadLifecycleService lifecycle = new(_state)
+        {
+            Result = new SquadLifecycleResult(
+                true,
+                plan,
+                plan.Receipt,
+                plan.Lock,
+                [],
+                DryRun: true,
+                Warnings: [PendingJournalNotice])
+        };
+
+        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings { DryRun = true });
+
+        Assert.Equal(0, exit);
+        Assert.Contains("warning: " + PendingJournalNotice + "\n", Output(), StringComparison.Ordinal);
+    }
+
+    private static SquadDeploymentPlan UninstallPlan()
+    {
+        SquadReceipt receipt = new(
+            SquadStateSchemas.ReceiptSchemaV1,
+            SquadDeploymentScope.Project,
+            WorkingDirectory,
+            DateTimeOffset.UnixEpoch,
+            [],
+            [new SquadOwnedFile(".codex/agents/worker.md", new string('0', 64), "codex", false)]);
+        return new SquadDeploymentPlan(
+            WorkingDirectory,
+            new SquadPhysicalRootIdentity(WorkingDirectory, "root-key"),
+            SquadDeploymentScope.Project,
+            null,
+            receipt,
+            [SquadFileMutation.Delete(".codex/agents/worker.md", "codex")],
+            [],
+            SquadStateMutation.Keep,
+            SquadStateMutation.Keep);
+    }
+
+    private const string PendingJournalNotice =
+        "An unfinished Squad transaction is waiting at '/kw/work/.kyber-weave/.squad-transaction'. This dry run " +
+        "changed nothing and planned from the files as they stand; run the command again without --dry-run to " +
+        "recover it first.";
+
     private SquadUninstallCommand Command(
         FakeSquadLifecycleService lifecycle,
         bool interactive = false,

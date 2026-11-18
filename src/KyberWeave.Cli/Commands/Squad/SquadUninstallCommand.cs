@@ -217,6 +217,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                             $"  [red]remove[/] {Markup.Escape(removal.RelativePath)} ({Markup.Escape(removal.Target)})");
                     }
 
+                    _output.WriteTransactionWarnings(result.Warnings);
                     return 0;
                 }
 

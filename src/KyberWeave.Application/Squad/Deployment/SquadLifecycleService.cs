@@ -877,7 +877,8 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                 plan.Receipt,
                 plan.Lock,
                 plan.Receipt.Degradations,
-                DryRun: true));
+                DryRun: true,
+                Warnings: recovery));
 
         ISquadTransaction transaction = _transactions.Create(_observer);
         transaction.Execute(plan);
