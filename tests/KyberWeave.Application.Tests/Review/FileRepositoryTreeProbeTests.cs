@@ -17,8 +17,8 @@ public sealed class FileRepositoryTreeProbeTests
 
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
 
-    private FileRepositoryTreeProbe Probe() =>
-        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: "/"));
+    private FileRepositoryTreeProbe Probe(string currentDirectory = "/") =>
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: currentDirectory));
 
     private void WriteFile(string path, string text)
     {
@@ -109,6 +109,22 @@ public sealed class FileRepositoryTreeProbeTests
         _files.CreateDirectoryLink(Path.Combine(Root, "link"), Path.Combine(Root, "real"));
 
         Assert.False(Probe().LeadsOutsideThroughSymlink(Root, "link/a.cs"));
+    }
+
+    [Fact]
+    public void ProbeRootReadsARelativeRootAgainstTheWorkingDirectory()
+    {
+        _files.CreateDirectory(Path.Combine("/work", "repo"));
+
+        Assert.True(Probe(currentDirectory: "/work").ProbeRoot("repo").Exists);
+    }
+
+    [Fact]
+    public void DirectoryExistsReadsARelativePathAgainstTheWorkingDirectory()
+    {
+        _files.CreateDirectory(Path.Combine("/work", "repo"));
+
+        Assert.True(Probe(currentDirectory: "/work").DirectoryExists("repo"));
     }
 
     [Fact]

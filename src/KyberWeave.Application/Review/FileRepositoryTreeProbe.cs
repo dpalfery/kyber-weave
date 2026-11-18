@@ -17,14 +17,26 @@ public sealed class FileRepositoryTreeProbe(
     /// <inheritdoc />
     public RepositoryRootAccess ProbeRoot(string root)
     {
+        string full;
         try
         {
-            if (!files.DirectoryExists(root))
+            full = paths.GetFullPath(root, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
+                                       or System.Security.SecurityException)
+        {
+            // A spelling the file system cannot resolve names no directory, which is what an absent root answers.
+            return new RepositoryRootAccess(false);
+        }
+
+        try
+        {
+            if (!files.DirectoryExists(full))
                 return new RepositoryRootAccess(false);
 
             // DirectoryExists returns false without throwing on permission-denied roots;
             // enumerate to detect accessibility issues.
-            _ = files.EnumerateEntries(root).FirstOrDefault();
+            _ = files.EnumerateEntries(full).FirstOrDefault();
             return RepositoryRootAccess.Accessible;
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -34,7 +46,18 @@ public sealed class FileRepositoryTreeProbe(
     }
 
     /// <inheritdoc />
-    public bool DirectoryExists(string path) => files.DirectoryExists(path);
+    public bool DirectoryExists(string path)
+    {
+        try
+        {
+            return files.DirectoryExists(paths.GetFullPath(path, environment.CurrentDirectory));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
+                                       or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
