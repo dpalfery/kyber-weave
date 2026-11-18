@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Diagnostics;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -265,7 +267,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     {
         WriteConfiguration("ontology:\n  docs-root: docs\nreview:\n  council-deadline-seconds: 42\n");
 
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repo);
+        KyberWeaveConfigLoadResult loaded = ConfigFileReader.TryLoad(_repo);
 
         Assert.True(loaded.Success);
         Assert.NotNull(loaded.Config);
@@ -277,7 +279,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     {
         WriteConfiguration("ontology:\n  docs-root: docs\n");
 
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(_repo);
+        KyberWeaveConfigLoadResult loaded = ConfigFileReader.TryLoad(_repo);
 
         Assert.True(loaded.Success);
         Assert.NotNull(loaded.Config);

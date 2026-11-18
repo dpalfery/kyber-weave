@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Arbiter.Hooks;
@@ -27,7 +29,7 @@ public sealed class ArchitectShellGuardSyncTests
     private static readonly Regex BacktickSpan = new("`([^`]+)`", RegexOptions.CultureInvariant);
 
     private static readonly Lazy<IReadOnlyList<string>> PlanningDirectories = new(() =>
-        ReadGuard.ProtectedDirectories(KyberWeaveConfigLoader.Load(Corpus.Root)));
+        ReadGuard.ProtectedDirectories(ConfigFileReader.Load(Corpus.Root)));
 
     public static IEnumerable<object[]> DocumentedKeys() =>
         ArchitectShellGuard.DocumentedForms.Keys.Select(key => new object[] { key });

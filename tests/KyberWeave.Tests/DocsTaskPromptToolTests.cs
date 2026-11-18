@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -83,7 +85,7 @@ public sealed class DocsTaskPromptToolTests
             """;
     }
 
-    internal static KyberWeaveConfig Config(DocFixture fixture) => KyberWeaveConfigLoader.Load(fixture.Root);
+    internal static KyberWeaveConfig Config(DocFixture fixture) => ConfigFileReader.Load(fixture.Root);
 
     private static DocumentIndexHost Host(DocFixture fixture, KyberWeaveConfig config) => new(
         fixture.Root,

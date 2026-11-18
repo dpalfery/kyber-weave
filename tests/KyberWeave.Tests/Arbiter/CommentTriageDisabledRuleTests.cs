@@ -71,7 +71,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     /// <summary>The effective rules with the comment rule disabled by a host override, as the loader builds them.</summary>
     private static IReadOnlyList<ArbiterRule> RulesWithCommentDisabled() =>
-        KyberWeaveConfigLoader.LoadFromYaml("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n")
+        KyberWeaveConfigAssembler.FromYaml("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n")
             .Arbiter.Rules;
 
     /// <summary>The effective rules with the comment rule absent from the set.</summary>
@@ -152,7 +152,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Real), KyberWeaveConfigLoader.LoadFromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Real), KyberWeaveConfigAssembler.FromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -183,7 +183,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         using JsonDocument disabled = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, _home, RulesWithCommentDisabled())
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
         using JsonDocument answered = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Real), Root, _home,
-                KyberWeaveConfigLoader.LoadFromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
+                KyberWeaveConfigAssembler.FromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
 
         Assert.Equal("real", disabled.RootElement.GetProperty("class").GetString());

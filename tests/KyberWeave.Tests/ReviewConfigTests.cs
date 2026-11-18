@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Reflection;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -17,7 +19,7 @@ public class ReviewConfigTests
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static ReviewConfig Load(string yaml) =>
-        KyberWeaveConfigLoader.LoadFromYaml(yaml).Review;
+        KyberWeaveConfigAssembler.FromYaml(yaml).Review;
 
     private static YamlException Invalid(string yaml) =>
         Assert.ThrowsAny<YamlException>(() => Load(yaml));
@@ -357,7 +359,7 @@ public class ReviewConfigTests
     [Fact]
     public void ThisRepositorysOwnReviewConfigurationLoadsCleanlyWithStrictPolicy()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         ReviewConfig review = result.Config!.Review;

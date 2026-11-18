@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Data.Configuration;
 using KyberWeave.Tests.Arbiter;
 using System.Security.Cryptography;
@@ -232,7 +234,7 @@ public sealed class ArbiterKiloReviewRemediationTests
     }
 
     [Fact]
-    public void Item10_KyberWeaveConfigLoader_TryLoadUserConfig_NonexistentExplicitPath_FailsNamingExplicitPath()
+    public void Item10_ConfigFileReader_TryLoadUserConfig_NonexistentExplicitPath_FailsNamingExplicitPath()
     {
         using TempDirectory home = new();
         string defaultDir = Path.Combine(home.Path, ".kyber-weave");
@@ -240,7 +242,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         File.WriteAllText(Path.Combine(defaultDir, "kyber-weave.yml"), "arbiter:\n  enabled: true\n");
 
         string customNonexistent = Path.Combine(home.Path, "custom-does-not-exist.yml");
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoadUserConfig(home.Path, customNonexistent);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoadUserConfig(home.Path, customNonexistent);
 
         Assert.False(result.Success);
         Assert.Equal(customNonexistent, result.ConfigPath);

@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -31,7 +33,7 @@ public sealed class SquadConfigurationTests : IDisposable
     [Fact]
     public void CombinedConfigLoaderBindsCompleteSquadSection()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             squad:
               bundle: full
               version: 1.2.3
@@ -107,7 +109,7 @@ public sealed class SquadConfigurationTests : IDisposable
               translation: best-effort
             """);
 
-        SquadConfig config = KyberWeaveYamlFile.LoadSquadMerged(defaults, path);
+        SquadConfig config = ConfigFileReader.LoadSquadMerged(defaults, path);
 
         Assert.Equal(defaults.Bundle, config.Bundle);
         Assert.Equal(defaults.Version, config.Version);
@@ -130,7 +132,7 @@ public sealed class SquadConfigurationTests : IDisposable
               exclusions: [kilo, warp]
             """);
 
-        SquadConfig config = KyberWeaveYamlFile.LoadSquadMerged(defaults, path);
+        SquadConfig config = ConfigFileReader.LoadSquadMerged(defaults, path);
 
         Assert.Equal([SquadTarget.Claude], config.Targets);
         Assert.Equal([SquadTarget.Kilo, SquadTarget.Warp], config.Exclusions);
@@ -150,7 +152,7 @@ public sealed class SquadConfigurationTests : IDisposable
               exclusions: []
             """);
 
-        SquadConfig config = KyberWeaveYamlFile.LoadSquadMerged(defaults, path);
+        SquadConfig config = ConfigFileReader.LoadSquadMerged(defaults, path);
 
         Assert.Empty(config.Targets);
         Assert.Empty(config.Exclusions);
@@ -222,7 +224,7 @@ public sealed class SquadConfigurationTests : IDisposable
         };
         string configPath = WriteRepositoryConfig($"squad:\n  {body}\n");
 
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_temp.Path);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_temp.Path);
 
         Assert.False(result.Success);
         Assert.Null(result.Config);
@@ -231,12 +233,12 @@ public sealed class SquadConfigurationTests : IDisposable
         Assert.Contains($"squad.{(invalidField == "target" ? "targets" : invalidField)}", result.Error, StringComparison.Ordinal);
 
         DiagnosticReport report = new DiagnosticReport();
-        bool success = CommandHelpers.TryLoadConfig(_temp.Path, null, report, out KyberWeaveConfig config);
+        bool success = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _temp.Path, null, report, out KyberWeaveConfig config);
 
         Assert.False(success);
         Assert.Equal(KyberWeaveConfig.ProductDefaults, config);
         Diagnostic diagnostic = Assert.Single(report.Items);
-        Assert.Equal(KyberWeaveConfigLoader.ConfigLoadErrorCode, diagnostic.Code);
+        Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, diagnostic.Code);
         Assert.Equal(Severity.Error, diagnostic.Severity);
         Assert.Equal("kyber-weave.yml", diagnostic.Subject);
         Assert.Equal(configPath, diagnostic.FilePath);

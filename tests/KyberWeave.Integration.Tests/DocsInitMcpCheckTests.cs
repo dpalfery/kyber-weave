@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
@@ -497,7 +499,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         CapturedConsoleExecution<int> execution = RunDocsInit(repository);
 
         Assert.NotEqual(0, execution.Result);
-        Assert.Contains(KyberWeaveConfigLoader.ConfigLoadErrorCode, execution.Output, StringComparison.Ordinal);
+        Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("KW-MCP-WIRE-", execution.Output, StringComparison.Ordinal);
     }
 
@@ -869,7 +871,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
 
         // The repair offers no write for cursor: the old key is the reason the wire would be refused, so
         // the rename notice is the only thing the operator is offered for that file.
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repository);
+        KyberWeaveConfig config = ConfigFileReader.Load(repository);
         McpWiringReport report = McpWiringTestServices.Wiring.Inspect(repository, config.Mcp);
         IReadOnlyList<McpWiringFix> fixes = McpWiringTestServices.Wiring.Derive(report, repository);
         Assert.DoesNotContain(fixes, fix => fix.Harness == Cursor);

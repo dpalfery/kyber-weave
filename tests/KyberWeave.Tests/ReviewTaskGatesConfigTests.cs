@@ -1,8 +1,10 @@
+using KyberWeave.Tests.Configuration;
+
 // ASSUMED API (RED test: implementers must provide these names, or update this comment and the
 // tests together):
 //
-//   KyberWeaveConfigLoader.LoadFromYaml(string) -> KyberWeaveConfig
-//   KyberWeaveConfigLoader.TryLoad(string repoRoot) -> KyberWeaveConfigLoadResult
+//   KyberWeaveConfigAssembler.FromYaml(string) -> KyberWeaveConfig
+//   ConfigFileReader.TryLoad(string repoRoot) -> KyberWeaveConfigLoadResult
 //   KyberWeaveConfig.Review.TaskGates
 //       : IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>>
 //       key   = agent slug ("csharp-dev"); value = gates in declaration order; empty when absent
@@ -45,7 +47,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> TaskGates(string yaml)
     {
-        return KyberWeaveConfigLoader.LoadFromYaml(yaml).Review.TaskGates;
+        return KyberWeaveConfigAssembler.FromYaml(yaml).Review.TaskGates;
     }
 
     /// <summary>
@@ -74,7 +76,7 @@ public sealed class ReviewTaskGatesConfigTests
     /// </summary>
     private static void AssertRejected(string yaml, params string[] mustName)
     {
-        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
         foreach (string fragment in mustName)
             Assert.True(
                 ex.Message.Contains(fragment, StringComparison.Ordinal),
@@ -213,7 +215,7 @@ public sealed class ReviewTaskGatesConfigTests
     [Fact]
     public void ReviewGatesStillParseAlongsideTaskGates()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
                                                                       review:
                                                                         gates:
                                                                           - id: build
@@ -627,7 +629,7 @@ public sealed class ReviewTaskGatesConfigTests
     [Fact]
     public void ReviewBuildGateCarriesNoNodeReuseAndNoSharedCompilation()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         ReviewGate build = Assert.Single(result.Config!.Review.Gates, gate => gate.Id == "build");
@@ -880,7 +882,7 @@ public sealed class ReviewTaskGatesConfigTests
                   - SingleSegmentName
             """;
 
-        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
         Assert.Contains("SingleSegmentName", ex.Message, StringComparison.Ordinal);
         Assert.Contains("not a fully qualified class name", ex.Message, StringComparison.Ordinal);
     }
@@ -895,7 +897,7 @@ public sealed class ReviewTaskGatesConfigTests
                   - "  Namespace.TestClass  "
             """;
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(yaml);
         Assert.True(config.Review.TestMap.ContainsKey("src/**"));
         Assert.Equal(["Namespace.TestClass"], config.Review.TestMap["src/**"]);
     }
@@ -909,14 +911,14 @@ public sealed class ReviewTaskGatesConfigTests
                 "":
                   - Namespace.TestClass
             """;
-        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yamlEmptyPattern));
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yamlEmptyPattern));
 
         string yamlNoClasses = """
             review:
               test-map:
                 "src/**": []
             """;
-        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yamlNoClasses));
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yamlNoClasses));
 
         string yamlEmptyClassName = """
             review:
@@ -924,7 +926,7 @@ public sealed class ReviewTaskGatesConfigTests
                 "src/**":
                   - ""
             """;
-        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yamlEmptyClassName));
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yamlEmptyClassName));
     }
 
     [Fact]
@@ -939,7 +941,7 @@ public sealed class ReviewTaskGatesConfigTests
                   - Namespace.SecondTest
             """;
 
-        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
         Assert.Contains("duplicate pattern 'src/**'", ex.Message, StringComparison.Ordinal);
     }
 
@@ -986,7 +988,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> RepositoryTaskGates()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.TaskGates;
@@ -994,7 +996,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> RepositoryTechnologyGates()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.TechnologyGates;
@@ -1002,7 +1004,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     private static IReadOnlyList<ReviewGate> RepositoryReviewGates()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.Gates;

@@ -25,7 +25,7 @@ public sealed class TaskPromptServiceTests
           technologies: [csharp, react, typescript, cobol]
         """;
 
-    private static KyberWeaveConfig Config(string yaml = ConfigYaml) => KyberWeaveConfigLoader.LoadFromYaml(yaml);
+    private static KyberWeaveConfig Config(string yaml = ConfigYaml) => KyberWeaveConfigAssembler.FromYaml(yaml);
 
     /// <summary>A corpus with a Ready plan whose tasks name <paramref name="technology"/>, and a task file.</summary>
     private static DocFixture Ready(string technology = "csharp", string? planMarkdown = null)

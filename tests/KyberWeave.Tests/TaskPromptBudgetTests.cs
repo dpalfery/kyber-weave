@@ -33,7 +33,7 @@ public sealed class TaskPromptBudgetTests
         """;
 
     private static KyberWeaveConfig Config(int? budget = null) =>
-        KyberWeaveConfigLoader.LoadFromYaml(ConfigYaml.Replace(
+        KyberWeaveConfigAssembler.FromYaml(ConfigYaml.Replace(
             "{budget}",
             (budget ?? KyberWeaveConfig.DefaultTaskPromptBudget).ToString(System.Globalization.CultureInfo.InvariantCulture),
             StringComparison.Ordinal));
@@ -51,7 +51,7 @@ public sealed class TaskPromptBudgetTests
     {
         string yaml = ConfigYaml.Replace("{budget}", budget, StringComparison.Ordinal);
 
-        Assert.Throws<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        Assert.Throws<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
     }
 
     /// <summary>A corpus whose rules are small and whose skills and standard sections are large.</summary>
@@ -247,7 +247,7 @@ public sealed class TaskPromptBudgetTests
         }
 
         KyberWeaveConfig config = Config();
-        KyberWeaveConfig site = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig site = KyberWeaveConfigAssembler.FromYaml("""
             ontology:
               docs-root: 6-Docs
             """);

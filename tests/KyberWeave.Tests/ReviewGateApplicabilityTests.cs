@@ -31,7 +31,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void AppliesWhenPathsAreParsedFromYaml()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: ts-typecheck
@@ -58,7 +58,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void AppliesWhenWithNoPathsIsRejected()
     {
-        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(
             "review:\n  gates:\n    - id: a\n      run: [dotnet]\n      applies-when:\n        paths: []\n"));
 
         Assert.Contains("applies-when", ex.Message, StringComparison.Ordinal);

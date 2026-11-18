@@ -206,7 +206,7 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
         string yaml = "arbiter:\n  enabled: true\n" + (shadow
             ? "  rules:\n    - id: KW-ARB-LENS-002\n      shadow: true\n"
             : string.Empty);
-        KyberWeaveConfig loaded = KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        KyberWeaveConfig loaded = KyberWeaveConfigAssembler.FromYaml(yaml);
         List<ArbiterRule> lensOnly = loaded.Arbiter.Rules
             .Where(rule => string.Equals(rule.Id, LensRuleId, StringComparison.Ordinal))
             .ToList();

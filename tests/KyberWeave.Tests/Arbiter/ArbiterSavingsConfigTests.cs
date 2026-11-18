@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -48,7 +50,7 @@ public sealed class ArbiterSavingsConfigTests
     public void UnknownModelTargetingMode_RaisesConfig012NamingTheModes(string mode)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml($"""
+            () => KyberWeaveConfigAssembler.FromYaml($"""
                 arbiter:
                   model-targeting:
                     mode: {mode}
@@ -62,7 +64,7 @@ public sealed class ArbiterSavingsConfigTests
     public void DifficultyValueOutsideTheSixProfiles_RaisesConfig012ListingTheSix()
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml("""
+            () => KyberWeaveConfigAssembler.FromYaml("""
                 arbiter:
                   model-targeting:
                     difficulty-profiles:
@@ -82,7 +84,7 @@ public sealed class ArbiterSavingsConfigTests
     public void InvalidLadder_RaisesConfig013WithAnExampleLadder(string ladder)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml($"""
+            () => KyberWeaveConfigAssembler.FromYaml($"""
                 arbiter:
                   model-targeting:
                     {ladder}
@@ -100,7 +102,7 @@ public sealed class ArbiterSavingsConfigTests
     public void ShadowOverrideOnDifficultyOrLadderRule_RaisesConfig014NamingModeKey(string ruleId, string shadow)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml($"""
+            () => KyberWeaveConfigAssembler.FromYaml($"""
                 arbiter:
                   rules:
                     - id: {ruleId}
@@ -119,7 +121,7 @@ public sealed class ArbiterSavingsConfigTests
     public void OutOfRangeStoreLimit_RaisesConfig015(string setting)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml($"""
+            () => KyberWeaveConfigAssembler.FromYaml($"""
                 arbiter:
                   stores:
                     {setting}
@@ -132,7 +134,7 @@ public sealed class ArbiterSavingsConfigTests
     public void BlankBotLogin_RaisesConfig015()
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml("""
+            () => KyberWeaveConfigAssembler.FromYaml("""
                 arbiter:
                   comment-triage:
                     bot-logins: ["  "]
@@ -146,7 +148,7 @@ public sealed class ArbiterSavingsConfigTests
     public void HostRuleUsingForEach_RaisesConfig015(string extraField)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml($$"""
+            () => KyberWeaveConfigAssembler.FromYaml($$"""
                 arbiter:
                   rules:
                     - id: HOST-SAVINGS-001
@@ -172,7 +174,7 @@ public sealed class ArbiterSavingsConfigTests
     public void HostRuleEffectInTheForbiddenSet_RaisesConfig015(string effect)
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml($$"""
+            () => KyberWeaveConfigAssembler.FromYaml($$"""
                 arbiter:
                   rules:
                     - id: HOST-SAVINGS-002
@@ -188,7 +190,7 @@ public sealed class ArbiterSavingsConfigTests
     [Fact]
     public void ShippedRuleShadowFalse_IsAcceptedAndSetsRuleShadow()
     {
-        ArbiterConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ArbiterConfig config = KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               rules:
                 - id: KW-ARB-PLAN-001
@@ -202,7 +204,7 @@ public sealed class ArbiterSavingsConfigTests
     [Fact]
     public void ThisRepositoryHostConfig_LoadsWithProviderKindNone()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Corpus.Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(Corpus.Root);
 
         Assert.Equal(ArbiterProviderKind.None, config.Arbiter.Provider.Kind);
     }

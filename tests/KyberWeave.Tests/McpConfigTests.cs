@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
@@ -46,7 +48,7 @@ public sealed class McpConfigTests : IDisposable
     [Fact]
     public void AFullSectionParsesEveryDeclaredField()
     {
-        McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        McpConfig config = KyberWeaveConfigAssembler.FromYaml("""
                                                                mcp:
                                                                  required-servers:
                                                                    kyber-weave:
@@ -86,7 +88,7 @@ public sealed class McpConfigTests : IDisposable
     [Fact]
     public void AnEntryWithoutALevelIsTreatedAsRequired()
     {
-        McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        McpConfig config = KyberWeaveConfigAssembler.FromYaml("""
                                                                mcp:
                                                                  required-servers:
                                                                    codegraph:
@@ -104,7 +106,7 @@ public sealed class McpConfigTests : IDisposable
     [Fact]
     public void ArgvOrderIsPreserved()
     {
-        McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        McpConfig config = KyberWeaveConfigAssembler.FromYaml("""
                                                                mcp:
                                                                  required-servers:
                                                                    codegraph:
@@ -124,7 +126,7 @@ public sealed class McpConfigTests : IDisposable
     [Fact]
     public void InstallIsOptionalAndKeptVerbatimWithoutTouchingTheArgv()
     {
-        McpConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        McpConfig config = KyberWeaveConfigAssembler.FromYaml("""
                                                                mcp:
                                                                  required-servers:
                                                                    kyber-weave:
@@ -150,7 +152,7 @@ public sealed class McpConfigTests : IDisposable
     [InlineData("review:\n  policy:\n    strictness: strict\n")]
     public void AnAbsentSectionDeclaresNoServers(string yaml)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(yaml);
 
         Assert.Empty(config.Mcp.RequiredServers);
     }
@@ -166,7 +168,7 @@ public sealed class McpConfigTests : IDisposable
     [InlineData("mcp:\n  required-servers: {}\n")]
     public void AnEmptySectionDeclaresNoServers(string yaml)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(yaml);
 
         Assert.Empty(config.Mcp.RequiredServers);
     }
@@ -189,7 +191,7 @@ public sealed class McpConfigTests : IDisposable
     [Fact]
     public void TheHostsServerMapReplacesTheDefaultsRatherThanMerging()
     {
-        McpConfig defaults = KyberWeaveConfigLoader.LoadFromYaml("""
+        McpConfig defaults = KyberWeaveConfigAssembler.FromYaml("""
                                                                  mcp:
                                                                    required-servers:
                                                                      inherited:
@@ -219,7 +221,7 @@ public sealed class McpConfigTests : IDisposable
     [Fact]
     public void TheServerMapFallsBackToTheDefaultsWhenTheSectionIsAbsent()
     {
-        McpConfig defaults = KyberWeaveConfigLoader.LoadFromYaml("""
+        McpConfig defaults = KyberWeaveConfigAssembler.FromYaml("""
                                                                  mcp:
                                                                    required-servers:
                                                                      inherited:
@@ -324,7 +326,7 @@ public sealed class McpConfigTests : IDisposable
     /// </summary>
     private void AssertRefusedAsConfigError(string configPath, string offender)
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
 
         Assert.False(result.Success);
         Assert.Null(result.Config);
@@ -336,12 +338,12 @@ public sealed class McpConfigTests : IDisposable
         Assert.Contains(offender, error, StringComparison.Ordinal);
 
         DiagnosticReport report = new();
-        bool loaded = CommandHelpers.TryLoadConfig(_root.Path, null, report, out KyberWeaveConfig config);
+        bool loaded = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _root.Path, null, report, out KyberWeaveConfig config);
 
         Assert.False(loaded);
         Assert.Equal(KyberWeaveConfig.ProductDefaults, config);
         Diagnostic diagnostic = Assert.Single(report.Items);
-        Assert.Equal(KyberWeaveConfigLoader.ConfigLoadErrorCode, diagnostic.Code);
+        Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, diagnostic.Code);
         Assert.Equal(Severity.Error, diagnostic.Severity);
         Assert.Contains(offender, diagnostic.Message, StringComparison.Ordinal);
     }

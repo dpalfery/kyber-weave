@@ -82,7 +82,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void AbsentSection_KeepsProductDefaults()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\n");
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: docs\n");
 
         Assert.False(config.Arbiter.Enabled);
         Assert.Equal(ArbiterProviderKind.None, config.Arbiter.Provider.Kind);
@@ -92,7 +92,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void Section_MergesEnabledAndProvider()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               enabled: true
               provider:
@@ -113,7 +113,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void ProviderTimeout_AboveTheCap_IsRejected()
     {
-        YamlException ex = Assert.Throws<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml("""
+        YamlException ex = Assert.Throws<YamlException>(() => KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               provider:
                 timeout-ms: 600001
@@ -125,7 +125,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void ProviderFields_DefaultIndividually()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               provider:
                 model: tev1
@@ -140,7 +140,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void HostOverride_TunesShippedRuleById()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               rules:
                 - id: KW-ARB-SCOPE-002
@@ -167,7 +167,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void HostOverride_EffectsMergePerAnswer()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               rules:
                 - id: KW-ARB-SCOPE-001
@@ -185,7 +185,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void HostRule_WithFullShape_IsAppendedAfterShippedRules()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               rules:
                 - id: HOST-MIGRATIONS-001
@@ -218,7 +218,7 @@ public sealed class ArbiterConfigTests
     public void HostOverride_NonOverridableField_RaisesConfig005WithHostRuleHint()
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml("""
+            () => KyberWeaveConfigAssembler.FromYaml("""
                 arbiter:
                   rules:
                     - id: KW-ARB-SCOPE-002
@@ -233,7 +233,7 @@ public sealed class ArbiterConfigTests
     public void HostRule_ReservedPrefix_RaisesConfig005()
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml("""
+            () => KyberWeaveConfigAssembler.FromYaml("""
                 arbiter:
                   rules:
                     - id: KW-ARB-HOST-001
@@ -250,7 +250,7 @@ public sealed class ArbiterConfigTests
     public void HostRule_DuplicateId_RaisesConfig005()
     {
         YamlDotNet.Core.YamlException exception = Assert.ThrowsAny<YamlDotNet.Core.YamlException>(
-            () => KyberWeaveConfigLoader.LoadFromYaml("""
+            () => KyberWeaveConfigAssembler.FromYaml("""
                 arbiter:
                   rules:
                     - id: HOST-DUP-001
@@ -394,7 +394,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void Clone_PreservesArbiterSection()
     {
-        KyberWeaveConfig configured = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig configured = KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               enabled: true
             """);

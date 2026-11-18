@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Parsing;
@@ -77,7 +79,7 @@ public class LegacyHostMigrationTests : IDisposable
             configPath,
             HostConfigYaml.WithTechnologies(File.ReadAllText(configPath), Technologies));
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_repo.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_repo.Path);
         string agents = PathOf("AGENTS.md");
         File.WriteAllText(
             agents,

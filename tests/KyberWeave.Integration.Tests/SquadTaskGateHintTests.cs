@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -52,7 +54,7 @@ public sealed class SquadTaskGateHintTests
                   run: [git, --version]
             """;
         PreparedCase prepared = InstallCase("install-empty-gates", yaml, global: false);
-        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.Empty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
@@ -74,7 +76,7 @@ public sealed class SquadTaskGateHintTests
                     run: [git, --version]
             """;
         PreparedCase prepared = InstallCase("install-with-gates", yaml, global: false);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
@@ -95,8 +97,8 @@ public sealed class SquadTaskGateHintTests
                     run: [dotnet, build]
             """;
         PreparedCase prepared = InstallCase("install-with-technology-gates", yaml, global: false);
-        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TechnologyGates);
+        Assert.Empty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(ConfigFileReader.Load(prepared.TargetRoot).Review.TechnologyGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
@@ -179,8 +181,8 @@ public sealed class SquadTaskGateHintTests
                     run: [dotnet, build]
             """;
         PreparedCase prepared = UpdateCase("update-with-technology-gates", yaml);
-        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TechnologyGates);
+        Assert.Empty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(ConfigFileReader.Load(prepared.TargetRoot).Review.TechnologyGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);

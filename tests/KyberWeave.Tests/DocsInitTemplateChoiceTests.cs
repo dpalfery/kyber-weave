@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -39,7 +41,7 @@ public class DocsInitTemplateChoiceTests : IDisposable
         Assert.False(Directory.Exists(PathOf("docs/standards/typescript")));
         Assert.True(File.Exists(PathOf("docs/standards/shared-rules.md")));
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Equal(["csharp", "python"], config.Ontology.Technologies);
         Assert.Empty(config.Ontology.Roles);
     }
@@ -120,7 +122,7 @@ public class DocsInitTemplateChoiceTests : IDisposable
             File.ReadAllText(PathOf("docs/standards/reviewer/reviewer.standards.md")),
             StringComparison.Ordinal);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Equal(["reviewer"], config.Ontology.Roles);
         Assert.Empty(config.Ontology.Technologies);
     }
@@ -209,7 +211,7 @@ public class DocsInitTemplateChoiceTests : IDisposable
         Assert.True(File.Exists(PathOf("docs/standards/reviewer/reviewer.standards.md")));
         Assert.True(File.Exists(PathOf("docs/standards/csharp/csharp.standards.md")));
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Contains("reviewer", config.Ontology.Roles);
     }
 

@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.ComponentModel;
 using System.Globalization;
 using System.Reflection;
@@ -203,7 +205,7 @@ public sealed class McpDocsProvenanceTests : IDisposable
 
     private static DocumentIndexHost CreateHost(string root)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         return new DocumentIndexHost(
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),

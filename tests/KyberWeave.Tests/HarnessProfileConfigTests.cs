@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Validation;
@@ -71,7 +73,7 @@ public class HarnessProfileConfigTests
                     conductor: conductor
             """);
 
-        HarnessProfileConfig config = KyberWeaveYamlFile.LoadHarness(yamlPath);
+        HarnessProfileConfig config = ConfigFileReader.LoadHarness(yamlPath);
 
         foreach (HarnessKind harness in SixHarnesses)
         {
@@ -119,7 +121,7 @@ public class HarnessProfileConfigTests
             """);
 
         YamlException ex = Assert.ThrowsAny<YamlException>(
-            () => KyberWeaveYamlFile.LoadHarness(yamlPath));
+            () => ConfigFileReader.LoadHarness(yamlPath));
         Assert.Contains("not-a-harness", ex.Message, StringComparison.Ordinal);
     }
 
@@ -139,13 +141,13 @@ public class HarnessProfileConfigTests
                         conductor: conductor
                 """);
 
-            KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(root);
+            KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(root);
 
             Assert.False(result.Success);
             Assert.Null(result.Config);
             Assert.NotNull(result.Error);
             Assert.Contains("not-a-harness", result.Error, StringComparison.Ordinal);
-            Assert.Equal(KyberWeaveConfigLoader.ConfigLoadErrorCode, "KW-CONFIG-001");
+            Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, "KW-CONFIG-001");
             Assert.NotNull(result.ConfigPath);
         }
         finally
@@ -186,7 +188,7 @@ public class HarnessProfileConfigTests
             .WithRootSkillMd()
             .WithAgent(HarnessKind.Kilo, "conductor"))
         {
-            HarnessProfileConfig config = KyberWeaveYamlFile.LoadHarness(repo.WriteHostProfile(hostYaml));
+            HarnessProfileConfig config = ConfigFileReader.LoadHarness(repo.WriteHostProfile(hostYaml));
             DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, File.Exists);
 
             List<Diagnostic> conductorMissing = report.Items
@@ -206,7 +208,7 @@ public class HarnessProfileConfigTests
             .WithConductorSkillDirectory()
             .WithAgent(HarnessKind.Kilo, "conductor"))
         {
-            HarnessProfileConfig config = KyberWeaveYamlFile.LoadHarness(repo.WriteHostProfile(hostYaml));
+            HarnessProfileConfig config = ConfigFileReader.LoadHarness(repo.WriteHostProfile(hostYaml));
             DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config, File.Exists);
 
             List<Diagnostic> conductorMissing = report.Items

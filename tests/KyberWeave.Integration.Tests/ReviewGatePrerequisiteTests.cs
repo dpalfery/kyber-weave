@@ -153,7 +153,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
                                   run: [npm, run, --prefix, dash, typecheck]
                             """;
 
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml).Review;
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml(yaml).Review;
         ReviewGate gate = Assert.Single(config.Gates);
         Assert.Equal(["dash/node_modules"], gate.RequiresPaths);
     }
@@ -169,7 +169,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
                                   run: [npm, run, --prefix, dash, typecheck]
                             """;
 
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml).Review;
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml(yaml).Review;
         ReviewGate gate = Assert.Single(config.Gates);
         Assert.Equal(["~cache/deps"], gate.RequiresPaths);
     }
@@ -194,7 +194,7 @@ public sealed class ReviewGatePrerequisiteTests : IDisposable
                             run: [npm, run, --prefix, dash, typecheck]
                       """;
 
-        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
     }
 
     [Fact]

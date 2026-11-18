@@ -132,7 +132,7 @@ public sealed class EmbeddingClientTests
     [Fact]
     public void LoadConfigWhenEndpointIsIpv4Mapped127Slash8AcceptsItAsLoopback()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             docs-analysis:
               embeddings:
                 mode: prefer

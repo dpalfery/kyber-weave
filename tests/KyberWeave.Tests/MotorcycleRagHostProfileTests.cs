@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Validation;
@@ -58,7 +60,7 @@ public class MotorcycleRagHostProfileTests
     [Fact]
     public void HostProfileRestoresDocsValidateExclusionExpectations()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(HostProfileYaml);
         using HostProfileDocFixture fixture = new HostProfileDocFixture(config);
 
         fixture.WithCatalog()
@@ -76,7 +78,7 @@ public class MotorcycleRagHostProfileTests
     [Fact]
     public void HostProfileRestoresCatalogColumnMapping()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(HostProfileYaml);
         using HostProfileDocFixture fixture = new HostProfileDocFixture(config);
 
         fixture.WithCatalog(
@@ -110,7 +112,7 @@ public class MotorcycleRagHostProfileTests
     [Fact]
     public void HostProfileRestoresConductorSyncCheckExpectations()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(HostProfileYaml);
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(HostProfileYaml);
         using HostProfileRepoFixture repo = new HostProfileRepoFixture();
 
         repo.WithConductorSkillDirectory();
@@ -159,7 +161,7 @@ public class MotorcycleRagHostProfileTests
         using HostProfileRepoFixture repo = new HostProfileRepoFixture();
         repo.WriteHostConfig(HostProfileYaml);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo.Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(repo.Root);
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
         Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
@@ -171,7 +173,7 @@ public class MotorcycleRagHostProfileTests
         using HostProfileRepoFixture repo = new HostProfileRepoFixture();
         repo.WriteLegacyRootConfig(HostProfileYaml);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo.Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(repo.Root);
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
         Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
@@ -184,7 +186,7 @@ public class MotorcycleRagHostProfileTests
         repo.WriteLegacyRootConfig("ontology:\n  docs-root: legacy-docs\n");
         repo.WriteHostConfig(HostProfileYaml);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo.Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(repo.Root);
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
     }

@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using KyberWeave.Tests.Corpus;
@@ -144,7 +146,7 @@ public sealed class TaskGatesRepositoryConfigTests
 
     private static KyberWeaveConfig Load()
     {
-        return KyberWeaveConfigLoader.Load(Corpus.Root);
+        return ConfigFileReader.Load(Corpus.Root);
     }
 
     private static YamlMappingNode LoadRoot()

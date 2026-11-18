@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Review.Catalogue;
@@ -9,7 +11,7 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// <see cref="GateCatalogueRenderer"/> loads the five embedded family files and renders the <c>review:</c>
 /// block <c>docs init</c> writes. Every rendered block must load through
-/// <see cref="KyberWeaveConfigLoader"/>, so a bad catalogue entry fails here rather than in a host's
+/// <see cref="ConfigFileReader"/>, so a bad catalogue entry fails here rather than in a host's
 /// first review. Gates aimed at a root the repository does not have are written commented out, so
 /// they never run against the wrong directory. Test-dev receives only format and lint gates, so a
 /// developer agent's test run is never mixed into another agent's checks.
@@ -589,7 +591,7 @@ public sealed class GateCatalogueRenderTests
 
     /// <summary>
     /// Writes the rendered block as the host's <c>.kyber-weave/kyber-weave.yml</c>, creates every declared
-    /// root directory, and loads the repository through <see cref="KyberWeaveConfigLoader"/>. A load failure
+    /// root directory, and loads the repository through <see cref="ConfigFileReader"/>. A load failure
     /// throws here, so every test that calls this also proves the block is valid.
     /// </summary>
     private static KyberWeaveConfig LoadRendered(
@@ -609,6 +611,6 @@ public sealed class GateCatalogueRenderTests
         Directory.CreateDirectory(configDirectory);
         File.WriteAllText(Path.Combine(configDirectory, "kyber-weave.yml"), block.Yaml);
 
-        return KyberWeaveConfigLoader.Load(repository);
+        return ConfigFileReader.Load(repository);
     }
 }

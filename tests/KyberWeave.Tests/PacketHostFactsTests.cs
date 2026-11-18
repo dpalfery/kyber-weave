@@ -21,7 +21,7 @@ public sealed class PacketHostFactsTests : IDisposable
             Directory.Delete(_root, recursive: true);
     }
 
-    private static KyberWeaveConfig Config(string yaml = "ontology:\n  docs-root: handbook\n") => KyberWeaveConfigLoader.LoadFromYaml(yaml);
+    private static KyberWeaveConfig Config(string yaml = "ontology:\n  docs-root: handbook\n") => KyberWeaveConfigAssembler.FromYaml(yaml);
 
     private void Agents(string markdown) => File.WriteAllText(Path.Combine(_root, "AGENTS.md"), markdown);
 

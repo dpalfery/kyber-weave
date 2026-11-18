@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Graph;
@@ -21,7 +23,7 @@ public sealed class DocLinkFragmentValidationTests
     [Fact]
     public void KnownBrokenCorpusFragmentsReportKWDOCLINK001()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(RepositoryRoot);
+        KyberWeaveConfig config = ConfigFileReader.Load(RepositoryRoot);
         DocumentSet set = new DocumentLoader(RepositoryRoot, config.Ontology).Load();
         DiagnosticReport report = new DocSpecValidator(RepositoryRoot, config.Ontology).Validate(set);
 

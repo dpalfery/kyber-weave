@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -79,7 +81,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     {
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         KeyValuePair<string, RequiredMcpServer> declared = Assert.Single(config.Mcp.RequiredServers);
 
         // The scaffold names the shipped server kw-docs. The old kyber-weave key is retired and only
@@ -153,7 +155,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         Assert.Equal(originalBytes.Concat(appended), File.ReadAllBytes(ConfigFile));
         Assert.Equal(
             "kw-docs",
-            Assert.Single(KyberWeaveConfigLoader.Load(_temp.Path).Mcp.RequiredServers).Key);
+            Assert.Single(ConfigFileReader.Load(_temp.Path).Mcp.RequiredServers).Key);
     }
 
     /// <summary>
@@ -184,7 +186,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         // and this test would prove nothing about preservation.
         Assert.Equal(
             "codegraph",
-            Assert.Single(KyberWeaveConfigLoader.Load(_temp.Path).Mcp.RequiredServers).Key);
+            Assert.Single(ConfigFileReader.Load(_temp.Path).Mcp.RequiredServers).Key);
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: force, reviewGates: false);
 

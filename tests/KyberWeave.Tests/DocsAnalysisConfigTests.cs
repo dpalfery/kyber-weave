@@ -43,7 +43,7 @@ public class DocsAnalysisConfigTests
     [Fact]
     public void LoadFromYamlParsesEveryDocsAnalysisSetting()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             ontology:
               docs-root: [docs, components/gameplay/docs]
             docs-analysis:
@@ -97,7 +97,7 @@ public class DocsAnalysisConfigTests
     [Fact]
     public void LoadFromYamlReplacesStatusesAndRetainsUnspecifiedNestedDefaults()
     {
-        DocsAnalysisConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        DocsAnalysisConfig config = KyberWeaveConfigAssembler.FromYaml("""
             ontology:
               statuses: [current, editorial]
             docs-analysis:
@@ -263,7 +263,7 @@ public class DocsAnalysisConfigTests
     [Fact]
     public void LoadFromYamlWhenGlossaryPathIsUnderAnyConfiguredDocsRootAcceptsIt()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             ontology:
               docs-root: [docs, components/gameplay/docs]
             docs-analysis:
@@ -274,5 +274,5 @@ public class DocsAnalysisConfigTests
     }
 
     private static YamlException AssertInvalid(string yaml) =>
-        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
 }

@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -135,7 +137,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
               enabled: true
             """);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(Root);
 
         Assert.Equal("typescript", config.Arbiter.RuleFolderParents["react"]);
         Assert.False(config.Arbiter.RuleFolderParents.ContainsKey("typescript"));
@@ -534,7 +536,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         string path = WriteFolder("conductor", "rules:\n  -\n");
         WriteConfig("ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n");
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(Root);
 
         Diagnostic finding = Assert.Single(
             config.Arbiter.RuleFolderFindings,
@@ -670,8 +672,8 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
             """);
         WriteConfig("ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n");
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
-        IReadOnlyList<Diagnostic> diagnostics = RuleValidator.Validate(config.Arbiter, KyberWeaveConfigLoader.FindConfigPath(Root));
+        KyberWeaveConfig config = ConfigFileReader.Load(Root);
+        IReadOnlyList<Diagnostic> diagnostics = RuleValidator.Validate(config.Arbiter, ConfigFileReader.FindConfigPath(Root));
 
         Diagnostic finding = Assert.Single(diagnostics, item => item.Subject == "KW-ARB-SCOPE-001");
         Assert.Equal(Severity.Error, finding.Severity);
@@ -687,7 +689,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
         WriteFolder("conductor", HostScopeRule);
         WriteConfig("ontology:\n  docs-root: docs\narbiter:\n  enabled: true\n");
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(Root);
 
         Assert.Equal(
             "Does the host's own scope question hold?",
@@ -707,7 +709,7 @@ public sealed class ArbiterRuleFolderLoadingTests : IDisposable
               enabled: true
             """);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(Root);
 
         Assert.Contains(config.Arbiter.Rules, rule => rule.Id == "react-read-001");
     }

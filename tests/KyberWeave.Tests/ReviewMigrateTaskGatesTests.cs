@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Application.Review;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Review;
@@ -153,7 +155,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.DoesNotContain("    go-dev:", after, StringComparison.Ordinal);
 
         // The Go agent is a removed one, so its gates are now read under the technology that outlives it.
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
         Assert.Equal(["go-build"], config.Review.TechnologyGates["go"].Select(gate => gate.Id));
         Assert.DoesNotContain("go-dev", config.Review.TaskGates.Keys);
         Assert.Equal(["review-config"], config.Review.TaskGates["docs-dev"].Select(gate => gate.Id));
@@ -203,7 +205,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
         Assert.Equal(["build"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
         Assert.Empty(config.Review.TaskGates);
     }
@@ -324,7 +326,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.DoesNotContain("does not hold", run.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("folded", run.Output, StringComparison.OrdinalIgnoreCase);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
         Assert.Equal(["build"], config.Review.TaskGates["csharp-dev"].Select(gate => gate.Id));
         Assert.Equal(["build"], config.Review.TaskGates["dal-dev"].Select(gate => gate.Id));
         Assert.Equal(["build", "test"], config.Review.TaskGates["maui-dev"].Select(gate => gate.Id));
@@ -385,7 +387,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.Equal(0, run.ExitCode);
         Assert.Contains("moved", run.Output, StringComparison.OrdinalIgnoreCase);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
         Assert.Equal(["format"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
         Assert.Equal(["format"], config.Review.TaskGates["test-dev"].Select(gate => gate.Id));
     }
@@ -445,7 +447,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.Contains("# dal-dev runs the same list, so it needs no entry of its own", after, StringComparison.Ordinal);
         Assert.DoesNotContain("dal-dev:", after, StringComparison.Ordinal);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
         Assert.Equal(["format"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
     }
 
@@ -475,7 +477,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.Equal(1, after.Split("technology-gates:", StringSplitOptions.None).Length - 1);
         Assert.DoesNotContain("task-gates:", after, StringComparison.Ordinal);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
         Assert.Equal(["go-build"], config.Review.TechnologyGates["go"].Select(gate => gate.Id));
         Assert.Equal(["build"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
     }
@@ -498,7 +500,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
         Assert.Equal(["go-build"], config.Review.TechnologyGates["go"].Select(gate => gate.Id));
         Assert.Empty(config.Review.TaskGates);
     }
@@ -514,7 +516,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     [Fact]
     public void AnEntryForARemovedAgentStillResolvesAndWarnsNamingTheMigrationCommand()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             worker-roster: tiered
             review:
               task-gates:
@@ -541,7 +543,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     [Fact]
     public void AHostThatNeverSelectedARosterIsNotWarnedAboutARemovedAgent()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               task-gates:
                 csharp-dev:

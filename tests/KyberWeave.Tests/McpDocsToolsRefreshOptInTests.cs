@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
@@ -76,7 +78,7 @@ public sealed class McpDocsToolsRefreshOptInTests : IDisposable
     /// <param name="root">A repository root that already carries the scaffolded corpus.</param>
     private static DocsTools ToolsWithoutARefreshSchedule(string root)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentIndexHost host = new(
             root,
             () => new UnreadableCodeGraph(),

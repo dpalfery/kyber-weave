@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -92,7 +94,7 @@ public class ConfigRegResolutionTests
     [Fact]
     public void AnEnabledIntakeSettingPublishesTheIntakeAssessmentModeProperty()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  intake: true\n");
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("ontology:\n  intake: true\n");
         IReadOnlyList<ConfigRegEntry> entries = config.ConfigReg.Resolve(config.Ontology);
 
         Assert.Contains("intake-assessment", entries.Select(entry => entry.Name));
@@ -125,7 +127,7 @@ public class ConfigRegResolutionTests
     /// </summary>
     private static IReadOnlyList<ConfigRegEntry> Resolved(string yaml)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(yaml);
         return config.ConfigReg.Resolve(config.Ontology);
     }
 
@@ -141,12 +143,12 @@ public class ConfigRegResolutionTests
 public class ConfigRegLoadingTests
 {
     private static YamlException AssertInvalid(string yaml) =>
-        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
 
     [Fact]
     public void ReadsHostAdditionsInTheOrderTheyWereWritten()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             config-reg:
               auth-design: docs/reference/auth-design.md
               azure-naming-standard: docs/reference/azure-naming.md
@@ -162,7 +164,7 @@ public class ConfigRegLoadingTests
     [InlineData("autonomous")]
     public void ReadsTheAutonomySetting(string value)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml($"autonomy: {value}\n");
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml($"autonomy: {value}\n");
 
         Assert.Equal(value, config.ConfigReg.Autonomy);
     }
@@ -171,7 +173,7 @@ public class ConfigRegLoadingTests
     public void AutonomyIsUnsetByDefault()
     {
         Assert.Null(KyberWeaveConfig.ProductDefaults.ConfigReg.Autonomy);
-        Assert.Null(KyberWeaveConfigLoader.LoadFromYaml("config-reg:\n  x: docs/x.md\n").ConfigReg.Autonomy);
+        Assert.Null(KyberWeaveConfigAssembler.FromYaml("config-reg:\n  x: docs/x.md\n").ConfigReg.Autonomy);
     }
 
     [Theory]
@@ -294,7 +296,7 @@ public class ConfigRegLoadingTests
     [InlineData("/etc/passwd")]
     public void RejectsAPathThatLeavesTheRepository(string path)
     {
-        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml($"config-reg:\n  x: {path}\n"));
+        Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml($"config-reg:\n  x: {path}\n"));
     }
 
     [Theory]
@@ -530,7 +532,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
         string agents = File.ReadAllText(Path.Combine(_temp.Path, "AGENTS.md"));
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         DiagnosticReport report = Validate(config);
 
         Assert.Contains("- **<onboarding>**: `done`", agents, StringComparison.Ordinal);
@@ -695,9 +697,9 @@ public sealed class ConfigRegValidatorTests : IDisposable
     /// set a property on a type.
     /// </summary>
     private static KyberWeaveConfig IntakeEnabled() =>
-        KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\n  intake: true\n");
+        KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: docs\n  intake: true\n");
 
     /// <summary>A host configuration that chose the tiered worker roster.</summary>
     private static KyberWeaveConfig Tiered() =>
-        KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\nworker-roster: tiered\n");
+        KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: docs\nworker-roster: tiered\n");
 }

@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
@@ -73,7 +75,7 @@ public class OntologyConfigTests
                 onboarding: []
             """);
 
-        OntologyConfig merged = KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.True(merged.IsRequired(DocType.Reference, "audience"));
         Assert.False(merged.IsRequired(DocType.Onboarding, "component"));
@@ -92,7 +94,7 @@ public class OntologyConfigTests
                 - reviewer
             """);
 
-        OntologyConfig merged = KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.Equal(["csharp"], merged.Technologies);
         Assert.Equal(["conductor", "reviewer"], merged.Roles);
@@ -108,7 +110,7 @@ public class OntologyConfigTests
             """);
 
         Assert.Throws<YamlException>(() =>
-            KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
+            ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
     }
 
     [Fact]
@@ -127,7 +129,7 @@ public class OntologyConfigTests
                 owner-column: 7
             """);
 
-        OntologyConfig merged = KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig merged = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
 
         Assert.Equal("custom-docs", merged.DocsRoot);
         Assert.Equal(["archive", "vendor-cache"], merged.ExcludedPathSegments);
@@ -148,7 +150,7 @@ public class OntologyConfigTests
                 - vendored/skill.md
             """);
 
-        OntologyConfig config = KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
+        OntologyConfig config = ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath);
         using OntologyConfigDocFixture fixture = new OntologyConfigDocFixture(config);
 
         fixture.WithCatalog()
@@ -168,7 +170,7 @@ public class OntologyConfigTests
     {
         string yamlPath = WriteTempYaml("ontology: [unclosed");
 
-        OntologyConfigLoadResult result = KyberWeaveYamlFile.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ParseError);
@@ -185,14 +187,14 @@ public class OntologyConfigTests
                   - audience
             """);
 
-        OntologyConfigLoadResult result = KyberWeaveYamlFile.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.Contains("not-a-real-type", result.ParseError, StringComparison.Ordinal);
         Assert.Null(result.Config);
 
         YamlException ex = Assert.ThrowsAny<YamlException>(
-            () => KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
+            () => ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
         Assert.Contains("not-a-real-type", ex.Message, StringComparison.Ordinal);
     }
 
@@ -209,10 +211,10 @@ public class OntologyConfigTests
             """);
 
         YamlException thrown = Assert.ThrowsAny<YamlException>(
-            () => KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
+            () => ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, yamlPath));
         Assert.Contains("null entry", thrown.Message, StringComparison.Ordinal);
 
-        OntologyConfigLoadResult result = KyberWeaveYamlFile.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
         Assert.False(result.Success);
         Assert.Contains("null entry", result.ParseError, StringComparison.Ordinal);
         Assert.Null(result.Config);
@@ -230,7 +232,7 @@ public class OntologyConfigTests
                   - audience
             """);
 
-        OntologyConfigLoadResult result = KyberWeaveYamlFile.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.NotNull(result.ParseError);
@@ -249,7 +251,7 @@ public class OntologyConfigTests
                   - audience
             """);
 
-        OntologyConfigLoadResult result = KyberWeaveYamlFile.TryLoadOntology(yamlPath);
+        OntologyConfigLoadResult result = ConfigFileReader.TryLoadOntology(yamlPath);
 
         Assert.False(result.Success);
         Assert.Contains("required-keys", result.ParseError, StringComparison.Ordinal);
@@ -266,13 +268,13 @@ public class OntologyConfigTests
             DirectoryInfo configDir = Directory.CreateDirectory(Path.Combine(root, ".kyber-weave"));
             File.WriteAllText(Path.Combine(configDir.FullName, "kyber-weave.yml"), "ontology: [unclosed");
 
-            KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(root);
+            KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(root);
 
             Assert.False(result.Success);
             Assert.NotNull(result.Error);
             Assert.NotNull(result.ConfigPath);
             Assert.Null(result.Config);
-            Assert.Equal(KyberWeaveConfigLoader.ConfigLoadErrorCode, "KW-CONFIG-001");
+            Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, "KW-CONFIG-001");
         }
         finally
         {
