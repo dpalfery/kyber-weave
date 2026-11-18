@@ -475,7 +475,7 @@ jobs:
           dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
           -c ${{ env.CONFIGURATION }}
           --no-restore
-          --filter "FullyQualifiedName~SquadDeploymentState|FullyQualifiedName~PhysicalFileSystemContractTests"
+          --filter "FullyQualifiedName~SquadDeploymentState|FullyQualifiedName~PhysicalFileSystemContractTests|FullyQualifiedName~SelfUpdate"
 
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)
