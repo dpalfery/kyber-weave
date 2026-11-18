@@ -819,13 +819,17 @@ public sealed class ReviewGatesService(
 
     private string EnclosingRepositoryRoot(string path)
     {
-        for (DirectoryInfo? dir = new(path); dir is not null; dir = dir.Parent)
+        string full = FullPath(path);
+        for (string? dir = full; !string.IsNullOrEmpty(dir); dir = Path.GetDirectoryName(dir))
         {
-            string gitPath = Path.Combine(dir.FullName, ".git");
-            if (files.DirectoryExists(gitPath) || files.FileExists(gitPath) || files.DirectoryExists(Path.Combine(dir.FullName, ".kyber-weave")))
-                return dir.FullName;
+            string gitPath = Path.Combine(dir, ".git");
+            if (files.DirectoryExists(gitPath)
+                || files.FileExists(gitPath)
+                || files.DirectoryExists(Path.Combine(dir, ".kyber-weave")))
+                return dir;
         }
-        return path;
+
+        return full;
     }
 
     /// <summary>The verdict command line the reviewer copies; it needs no other argument, since the cycle folder records the rest.</summary>
