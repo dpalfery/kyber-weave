@@ -1,6 +1,7 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -75,10 +76,34 @@ public sealed class PlanFactsTests
     [Fact]
     public void AWhitespaceRepositoryRoot_IsAnAbsentPlanRatherThanAThrow()
     {
-        ArbiterFactSet facts = new PlanFacts(new PlanFileResolver(), _files).Enrich(
+        ArbiterFactSet facts = new PlanFacts(new ContainedPlanFileResolver(), _files).Enrich(
             new ArbiterFactSet(),
             new TriggerClassification("delegate", "conductor", "harness", "dev-medium", "implementation", Headers(("PLAN_FILE", "docs/plans/cards.md")), null, true),
             "   ");
+
+        Assert.Equal(false, Value(facts, "plan.exists"));
+    }
+
+    [Fact]
+    public void AHeaderNamingAPathOutsideTheRepository_IsAnAbsentPlan()
+    {
+        WritePlan("docs/plans/cards.md", Plan);
+        _files.CreateDirectory("/tmp");
+        _files.WriteAllText("/tmp/evil.md", Plan);
+
+        ArbiterFactSet facts = Facts(Headers(("PLAN_FILE", "/tmp/evil.md")));
+
+        Assert.Equal(false, Value(facts, "plan.exists"));
+    }
+
+    [Fact]
+    public void AHeaderClimbingOutOfTheRepository_IsAnAbsentPlan()
+    {
+        WritePlan("docs/plans/cards.md", Plan);
+        _files.CreateDirectory("/etc");
+        _files.WriteAllText("/etc/passwd", Plan);
+
+        ArbiterFactSet facts = Facts(Headers(("PLAN_FILE", "../../etc/passwd")));
 
         Assert.Equal(false, Value(facts, "plan.exists"));
     }
@@ -89,7 +114,7 @@ public sealed class PlanFactsTests
             facts ?? new ArbiterFactSet());
 
     private ArbiterFactSet Facts(TriggerClassification classification, ArbiterFactSet facts) =>
-        new PlanFacts(new PlanFileResolver(), _files).Enrich(facts, classification, Root);
+        new PlanFacts(new ContainedPlanFileResolver(), _files).Enrich(facts, classification, Root);
 
     private void WritePlan(string relative, string text)
     {
@@ -102,16 +127,4 @@ public sealed class PlanFactsTests
 
     private static IReadOnlyDictionary<string, string> Headers(params (string Name, string Value)[] values) =>
         values.ToDictionary(value => value.Name, value => value.Value, StringComparer.Ordinal);
-
-    /// <summary>Resolves a repository-relative plan inside the root it is given, and refuses a path that escapes.</summary>
-    private sealed class PlanFileResolver : Contracts.Repositories.IPlanFileResolver
-    {
-        public string? Resolve(string? planFile, string repositoryRoot)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-            return planFile is null || planFile.StartsWith("..", StringComparison.Ordinal)
-                ? null
-                : Path.Combine(repositoryRoot, planFile);
-        }
-    }
 }

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
@@ -21,7 +22,7 @@ public sealed class PlanRootResolverTests
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
     private readonly InMemoryFileSystem _files;
     private readonly FakePathResolver _paths;
-    private readonly PlanFileResolver _planPaths = new();
+    private readonly ContainedPlanFileResolver _planPaths = new();
 
     public PlanRootResolverTests()
     {
@@ -114,11 +115,23 @@ public sealed class PlanRootResolverTests
     }
 
     [Fact]
-    public void TheHostRegistersTheResolverWithTheFileAndPathSeamsItReads()
+    public void Resolve_ThePlanHeaderNamesAPathOutsideTheRepository_KeepsTheHookRoot()
     {
-        IPlanRootResolver resolver = ArbiterTestServices.Get<IPlanRootResolver>();
+        string root = Resolver().Resolve(HookRoot, "PLAN_FILE: /tmp/evil.md\n\nWork on the task.", _ => [HookRoot, Worktree]);
 
-        Assert.IsType<PlanRootResolver>(resolver);
+        Assert.Equal(HookRoot, root);
+    }
+
+    [Fact]
+    public void TheHostRegistersTheResolverOnceWithTheSeamsItsConstructorNeeds()
+    {
+        IPlanRootResolver first = ArbiterTestServices.Get<IPlanRootResolver>();
+        IPlanRootResolver second = ArbiterTestServices.Get<IPlanRootResolver>();
+
+        Assert.IsType<PlanRootResolver>(first);
+        Assert.Same(first, second);
+        Assert.NotNull(ArbiterTestServices.Get<IFileSystem>());
+        Assert.NotNull(ArbiterTestServices.Get<IPathResolver>());
     }
 
     private void WritePlan(string worktree, string text)
@@ -130,15 +143,6 @@ public sealed class PlanRootResolverTests
     private PlanRootResolver Resolver() => new(new StubGitFacts(), _planPaths, _files, _paths);
 
     private static string Prompt() => "PLAN_FILE: docs/plans/task.md\n\nWork on the task.";
-
-    /// <summary>Resolves a repository-relative plan inside the root it is given, and refuses a path that escapes.</summary>
-    private sealed class PlanFileResolver : IPlanFileResolver
-    {
-        public string? Resolve(string? planFile, string repositoryRoot) =>
-            planFile is null || planFile.StartsWith("..", StringComparison.Ordinal)
-                ? null
-                : Path.Combine(repositoryRoot, planFile);
-    }
 
     /// <summary>Answers only the worktree list: the resolver asks git nothing else.</summary>
     private sealed class StubGitFacts(IReadOnlyList<string>? worktrees = null, Exception? failure = null) : IGitRepositoryFacts
