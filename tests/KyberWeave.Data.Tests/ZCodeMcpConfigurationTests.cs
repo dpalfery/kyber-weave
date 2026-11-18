@@ -17,13 +17,15 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ZCodeMcpConfigurationTests
 {
-    private static readonly string Base = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "zcode-mcp");
     private static readonly string[] Required = ["codegraph", "context7", "kw-docs"];
 
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly string _base;
+
+    public ZCodeMcpConfigurationTests() => _base = _files.CreateTemporaryDirectory("kw-zcode-mcp-");
 
     private ZCodeMcpConfiguration Zcode =>
-        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Base));
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: _base));
 
     private static string ServersConfig(params string[] serverNames)
     {
@@ -45,7 +47,7 @@ public sealed class ZCodeMcpConfigurationTests
 
     private string WorkingDirectory(string name)
     {
-        string working = Path.Combine(Base, name);
+        string working = Path.Combine(_base, name);
         _files.CreateDirectory(working);
         return working;
     }
@@ -53,7 +55,7 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_UserConfigDeclaringEveryRequiredServer_ReportsNothingMissing()
     {
-        string root = Path.Combine(Base, "zcode");
+        string root = Path.Combine(_base, "zcode");
         string working = WorkingDirectory("project");
         string userConfig = Path.Combine(root, "cli", "config.json");
         Write(userConfig, ServersConfig(Required));
@@ -68,7 +70,7 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_NoConfigAnywhere_ReportsEveryRequiredServerMissing()
     {
-        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(Base, "zcode"), WorkingDirectory("bare"));
+        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(_base, "zcode"), WorkingDirectory("bare"));
 
         Assert.Equal(Required, report.MissingServers);
         Assert.Empty(report.InspectedPaths);
@@ -77,7 +79,7 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_PartialUserConfig_ReportsOnlyTheAbsentServers()
     {
-        string root = Path.Combine(Base, "partial-zcode");
+        string root = Path.Combine(_base, "partial-zcode");
         Write(Path.Combine(root, "cli", "config.json"), ServersConfig("codegraph", "kw-docs"));
 
         ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, root, WorkingDirectory("partial-project"));
@@ -94,7 +96,7 @@ public sealed class ZCodeMcpConfigurationTests
     [InlineData(".zcode/config.json")]
     public void Inspect_ProjectConfigCompletesTheUserConfig(string relativePath)
     {
-        string root = Path.Combine(Base, "merge-zcode");
+        string root = Path.Combine(_base, "merge-zcode");
         string working = WorkingDirectory("merge-project");
         string projectConfig = Path.Combine(working, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Write(Path.Combine(root, "cli", "config.json"), ServersConfig("codegraph"));
@@ -113,13 +115,13 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_ProjectConfigAtTheWorktreeRootCountsForANestedWorkingDirectory()
     {
-        string repositoryRoot = Path.Combine(Base, "repo");
+        string repositoryRoot = Path.Combine(_base, "repo");
         string nested = WorkingDirectory(Path.Combine("repo", "src", "nested"));
         _files.CreateDirectory(Path.Combine(repositoryRoot, ".git"));
         string rootConfig = Path.Combine(repositoryRoot, "zcode.json");
         Write(rootConfig, ServersConfig(Required));
 
-        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(Base, "nested-zcode"), nested);
+        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(_base, "nested-zcode"), nested);
 
         Assert.Empty(report.MissingServers);
         Assert.Contains(rootConfig, report.InspectedPaths, StringComparer.Ordinal);
@@ -131,13 +133,13 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_GitFileMarksTheWorktreeRootAsADirectoryDoes()
     {
-        string repositoryRoot = Path.Combine(Base, "linked");
+        string repositoryRoot = Path.Combine(_base, "linked");
         string nested = WorkingDirectory(Path.Combine("linked", "src"));
         Write(Path.Combine(repositoryRoot, ".git"), "gitdir: elsewhere");
         string rootConfig = Path.Combine(repositoryRoot, "zcode.json");
         Write(rootConfig, ServersConfig(Required));
 
-        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(Base, "linked-zcode"), nested);
+        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(_base, "linked-zcode"), nested);
 
         Assert.Contains(rootConfig, report.InspectedPaths, StringComparer.Ordinal);
     }
@@ -149,12 +151,12 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_ConfigAboveTheWorktreeRootIsNotRead()
     {
-        string outer = Path.Combine(Base, "outer");
+        string outer = Path.Combine(_base, "outer");
         string repositoryRoot = WorkingDirectory(Path.Combine("outer", "repo"));
         _files.CreateDirectory(Path.Combine(repositoryRoot, ".git"));
         Write(Path.Combine(outer, "zcode.json"), ServersConfig(Required));
 
-        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(Base, "outer-zcode"), repositoryRoot);
+        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(_base, "outer-zcode"), repositoryRoot);
 
         Assert.Equal(Required, report.MissingServers);
         Assert.Empty(report.InspectedPaths);
@@ -167,13 +169,13 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_NoWorktreeMarker_ReadsOnlyTheStartingDirectory()
     {
-        string outer = Path.Combine(Base, "unmarked");
+        string outer = Path.Combine(_base, "unmarked");
         string working = WorkingDirectory(Path.Combine("unmarked", "project"));
         Write(Path.Combine(outer, "zcode.json"), ServersConfig(Required));
         string ownConfig = Path.Combine(working, "zcode.json");
         Write(ownConfig, ServersConfig("codegraph"));
 
-        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(Base, "unmarked-zcode"), working);
+        ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, Path.Combine(_base, "unmarked-zcode"), working);
 
         Assert.Equal(["context7", "kw-docs"], report.MissingServers);
         Assert.Equal([ownConfig], report.InspectedPaths);
@@ -186,7 +188,7 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_UnreadableTier_DeclaresNothingRatherThanThrowing()
     {
-        string root = Path.Combine(Base, "unreadable-zcode");
+        string root = Path.Combine(_base, "unreadable-zcode");
         string working = WorkingDirectory("unreadable-project");
         string userConfig = Path.Combine(root, "cli", "config.json");
         Write(userConfig, ServersConfig(Required));
@@ -212,7 +214,7 @@ public sealed class ZCodeMcpConfigurationTests
     [InlineData("[]")]
     public void Inspect_UnparseableConfigContributesNothingRatherThanThrowing(string content)
     {
-        string root = Path.Combine(Base, "bad-zcode");
+        string root = Path.Combine(_base, "bad-zcode");
         Write(Path.Combine(root, "cli", "config.json"), content);
 
         ZCodeMcpConfigurationReport report = Zcode.Inspect(Required, root, WorkingDirectory("bad-project"));
@@ -227,7 +229,7 @@ public sealed class ZCodeMcpConfigurationTests
     [Fact]
     public void Inspect_ConfigWithCommentsAndTrailingCommasIsRead()
     {
-        string root = Path.Combine(Base, "jsonc-zcode");
+        string root = Path.Combine(_base, "jsonc-zcode");
         const string Content = """
             {
               // the servers Squad agents call

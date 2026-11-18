@@ -18,41 +18,54 @@ namespace KyberWeave.Tests.Paths;
 /// </remarks>
 public sealed class CaseDistinctSiblingPathTests
 {
-    private const string CaseParent = "/case-distinct-parent";
-    private const string UpperRoot = CaseParent + "/Root";
-    private const string LowerSibling = CaseParent + "/root";
+    private readonly InMemoryFileSystem _files = new(caseSensitive: false);
+    private readonly string _caseParent;
+    private readonly string _upperRoot;
+    private readonly string _lowerSibling;
+
+    public CaseDistinctSiblingPathTests()
+    {
+        _caseParent = _files.CreateTemporaryDirectory("kw-case-distinct-");
+        _files.CreateDirectory(_caseParent, caseSensitiveNames: true);
+        _upperRoot = Path.Combine(_caseParent, "Root");
+        _lowerSibling = Path.Combine(_caseParent, "root");
+    }
 
     [Fact]
     public void IsWithinRefusesALinkIntoACaseDistinctSibling()
     {
-        FileSystemPathResolver resolver = WindowsVolumeWithCaseSensitiveDirectory(out _);
-        string candidate = UpperRoot + "/escape/outside-canary.txt";
+        FileSystemPathResolver resolver = WindowsVolumeWithCaseSensitiveDirectory();
+        string candidate = Path.Combine(_upperRoot, "escape", "outside-canary.txt");
 
-        Assert.False(resolver.IsWithin(UpperRoot, candidate));
-        Assert.Equal(LowerSibling + "/outside-canary.txt", resolver.Canonicalize(candidate));
-        Assert.Equal(UpperRoot, resolver.Canonicalize(UpperRoot));
-        Assert.Equal(LowerSibling, resolver.Canonicalize(LowerSibling));
+        Assert.False(resolver.IsWithin(_upperRoot, candidate));
+        Assert.Equal(Path.Combine(_lowerSibling, "outside-canary.txt"), resolver.Canonicalize(candidate));
+        Assert.Equal(_upperRoot, resolver.Canonicalize(_upperRoot));
+        Assert.Equal(_lowerSibling, resolver.Canonicalize(_lowerSibling));
     }
 
     [Fact]
     public void TheDeploymentViewRefusesTheSameEscape()
     {
-        FileSystemPathResolver resolver = WindowsVolumeWithCaseSensitiveDirectory(out _);
+        FileSystemPathResolver resolver = WindowsVolumeWithCaseSensitiveDirectory();
         SquadFileSystemPathSemantics semantics = new(resolver);
 
         _ = Assert.Throws<SquadPathContainmentException>(
-            () => SquadPathPolicy.ResolveFile(UpperRoot, "escape/outside-canary.txt", semantics));
+            () => SquadPathPolicy.ResolveFile(_upperRoot, "escape/outside-canary.txt", semantics));
     }
 
     [Fact]
     public void IsWithinStillFoldsASpellingTheVolumeComparesIgnoringCase()
     {
-        FileSystemPathResolver resolver = WindowsVolumeWithCaseSensitiveDirectory(out _);
-        string root = UpperRoot + "/folder";
-        string candidate = CaseParent.ToUpperInvariant() + "/Root/folder/leaf.md";
+        FileSystemPathResolver resolver = WindowsVolumeWithCaseSensitiveDirectory();
+        string root = Path.Combine(_upperRoot, "folder");
+        string candidate = Path.Combine(
+            _caseParent.ToUpperInvariant(),
+            Path.GetFileName(_upperRoot),
+            "folder",
+            "leaf.md");
 
         Assert.True(resolver.IsWithin(root, candidate));
-        Assert.Equal(UpperRoot + "/folder/leaf.md", resolver.Canonicalize(candidate));
+        Assert.Equal(Path.Combine(_upperRoot, "folder", "leaf.md"), resolver.Canonicalize(candidate));
     }
 
     /// <summary>
@@ -68,16 +81,15 @@ public sealed class CaseDistinctSiblingPathTests
     [Fact]
     public void ProjectLeaseKeysSeparateCaseDistinctRootsAndFollowALink()
     {
-        InMemoryFileSystem files = new(caseSensitive: false);
-        files.CreateDirectory(CaseParent, caseSensitiveNames: true);
-        files.CreateDirectory(UpperRoot);
-        files.CreateDirectory(LowerSibling);
-        files.CreateDirectoryLink(CaseParent + "/Root-alias", UpperRoot);
-        SquadFileSystemPathSemantics semantics = new(new FileSystemPathResolver(files, caseSensitiveFileSystem: false));
+        _files.CreateDirectory(_upperRoot);
+        _files.CreateDirectory(_lowerSibling);
+        string alias = Path.Combine(_caseParent, "Root-alias");
+        _files.CreateDirectoryLink(alias, _upperRoot);
+        SquadFileSystemPathSemantics semantics = new(new FileSystemPathResolver(_files, caseSensitiveFileSystem: false));
 
-        string upperKey = SquadPhysicalRootIdentity.Resolve(UpperRoot, semantics).Key;
-        string lowerKey = SquadPhysicalRootIdentity.Resolve(LowerSibling, semantics).Key;
-        string aliasKey = SquadPhysicalRootIdentity.Resolve(CaseParent + "/Root-alias", semantics).Key;
+        string upperKey = SquadPhysicalRootIdentity.Resolve(_upperRoot, semantics).Key;
+        string lowerKey = SquadPhysicalRootIdentity.Resolve(_lowerSibling, semantics).Key;
+        string aliasKey = SquadPhysicalRootIdentity.Resolve(alias, semantics).Key;
 
         Assert.NotEqual(upperKey, lowerKey);
         Assert.Equal(upperKey, aliasKey);
@@ -87,17 +99,15 @@ public sealed class CaseDistinctSiblingPathTests
     /// Builds the configuration the Windows job runs in: the volume folds names, the parent directory matches them
     /// exactly, and one of the two siblings that differ only in case is the target of a link inside the root.
     /// </summary>
-    private static FileSystemPathResolver WindowsVolumeWithCaseSensitiveDirectory(out InMemoryFileSystem files)
+    private FileSystemPathResolver WindowsVolumeWithCaseSensitiveDirectory()
     {
-        files = new InMemoryFileSystem(caseSensitive: false);
-        files.CreateDirectory(CaseParent, caseSensitiveNames: true);
-        files.CreateDirectory(UpperRoot);
-        files.CreateDirectory(LowerSibling);
-        files.CreateDirectory(UpperRoot + "/folder");
-        files.WriteAllText(LowerSibling + "/outside-canary.txt", "outside canary");
-        files.CreateDirectoryLink(UpperRoot + "/escape", LowerSibling);
+        _files.CreateDirectory(_upperRoot);
+        _files.CreateDirectory(_lowerSibling);
+        _files.CreateDirectory(Path.Combine(_upperRoot, "folder"));
+        _files.WriteAllText(Path.Combine(_lowerSibling, "outside-canary.txt"), "outside canary");
+        _files.CreateDirectoryLink(Path.Combine(_upperRoot, "escape"), _lowerSibling);
 
         // The host rule of an NTFS volume: names fold to one entry unless the directory says otherwise.
-        return new FileSystemPathResolver(files, caseSensitiveFileSystem: false);
+        return new FileSystemPathResolver(_files, caseSensitiveFileSystem: false);
     }
 }

@@ -51,14 +51,16 @@ public sealed class FakePathResolverBehaviourTests
     {
         InMemoryFileSystem first = new(caseSensitive: false);
         InMemoryFileSystem second = new(caseSensitive: false);
-        first.CreateDirectory("/scope/One");
-        second.CreateDirectory("/scope/Two");
+        string oneScope = Path.Combine(first.CreateTemporaryDirectory("kw-scope-"), "One");
+        string twoScope = Path.Combine(second.CreateTemporaryDirectory("kw-scope-"), "Two");
+        first.CreateDirectory(oneScope);
+        second.CreateDirectory(twoScope);
         FakePathResolver one = new(first);
         FakePathResolver two = new(second);
 
         using IDisposable scope = FileSystemPathResolver.BeginListingScope();
 
-        Assert.Equal("/scope/One", one.Canonicalize("/scope/one"));
-        Assert.Equal("/scope/Two", two.Canonicalize("/scope/two"));
+        Assert.Equal(oneScope, one.Canonicalize(oneScope.ToUpperInvariant()));
+        Assert.Equal(twoScope, two.Canonicalize(twoScope.ToUpperInvariant()));
     }
 }

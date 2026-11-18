@@ -53,7 +53,7 @@ public sealed class WritableFileSystemFlushForwardingTests
         InMemoryFileSystem inner = new();
         FlushRecorder recorder = new();
         FaultInjectingFileSystem wrapper = new(recorder.Wrap(inner));
-        string directory = OperatingSystem.IsWindows() ? "C:\\flush" : "/flush";
+        string directory = Path.Combine(inner.CreateTemporaryDirectory("kw-flush-"), "flush");
         wrapper.CreateDirectory(directory);
 
         wrapper.WriteAllBytesAtomic(Path.Combine(directory, "a.bin"), [1], flushToDisk);
