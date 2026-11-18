@@ -1,34 +1,24 @@
 using KyberWeave.Testing.Squad;
 using System.Reflection;
-using KyberWeave.Tests.Fakes;
-using System.Text;
 using System.Text.Json;
 using KyberWeave.Arbiter.Mcp;
-using KyberWeave.Cli.Commands.Squad;
-using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
-using KyberWeave.Core.Squad.Rendering;
 using ModelContextProtocol.Server;
-using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
 /// Contract for task 17.3 (design §10.6): <c>decision.query</c> is in the canonical
-/// vocabulary, every profile declares it, the Arbiter server is declared in <c>mcp.json</c>
-/// and <c>toolchain.yml</c>, and no hooked target grants the server.
+/// vocabulary, every profile declares it, and the Arbiter server is declared in <c>mcp.json</c>
+/// and <c>toolchain.yml</c>. That no hooked target grants the server is checked where the
+/// renderers are tested.
 /// </summary>
 public sealed class ArbiterCanonicalSquadTests
 {
     private const string DecisionQuery = "decision.query";
     private const string ArbiterServer = "kw-arbiter";
-
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly string[] AllowedProfiles = ["orchestrator", "reviewer"];
 
@@ -55,7 +45,7 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void DecisionQueryJoinsTheCapabilityVocabulary()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         Assert.Contains(DecisionQuery, source.CapabilityProfiles.Capabilities);
     }
@@ -63,7 +53,7 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void EveryProfileDeclaresDecisionQueryAllowForConductorAndReviewerAndDenyForTheRest()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         Assert.Equal(
             (AllowedProfiles.Concat(DeniedProfiles)).Order(StringComparer.Ordinal),
@@ -87,7 +77,7 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void McpConfigurationDeclaresTheArbiterServerAsServeAtTheRepositoryRoot()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         JsonElement server = source.McpConfiguration
             .GetProperty("mcpServers")
@@ -102,47 +92,12 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void ToolchainArbiterToolsEqualTheToolsArbiterToolsDeclares()
     {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         string[] declared = DeclaredArbiterToolNames();
         string[] pinned = [.. source.Toolchain.RequiredMcpTools[ArbiterServer].Order(StringComparer.Ordinal)];
 
         Assert.Equal(declared, pinned);
-    }
-
-    [Fact]
-    public async Task NoHookedTargetGrantsTheArbiterServer()
-    {
-        string[] qualifiedTools = DeclaredArbiterToolNames()
-            .Select(tool => $"mcp__{ArbiterServer}__{tool}")
-            .ToArray();
-        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
-
-        foreach (SquadTarget target in Enum.GetValues<SquadTarget>())
-        {
-            if (!ArbiterHookWiring.HookedTargets.Contains(SquadTargetCatalog.GetToken(target)))
-            {
-                continue;
-            }
-
-            SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
-                SourceDirectory: ProductRoot,
-                Targets: [target],
-                Scope: SquadDeploymentScope.Project).Prepared());
-            Assert.True(result.Success, string.Join("; ", result.Errors));
-
-            foreach (SquadDeploymentFile file in result.Files)
-            {
-                string content = Encoding.UTF8.GetString(file.Content.Span);
-
-                foreach (string tool in qualifiedTools)
-                {
-                    Assert.DoesNotContain(tool, content, StringComparison.Ordinal);
-                }
-
-                Assert.DoesNotContain($"{ArbiterServer}/", content, StringComparison.Ordinal);
-            }
-        }
     }
 
     private static string[] DeclaredArbiterToolNames() =>
