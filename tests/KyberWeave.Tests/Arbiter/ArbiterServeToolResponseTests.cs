@@ -314,7 +314,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             "  rules:\n" +
             string.Join(
                 "\n",
-                ArbiterConfigTests.ExpectedRuleIds
+                ArbiterExpectedRuleIds.All
                     .Where(id => id is not ("KW-ARB-DIFFICULTY-001" or "KW-ARB-SCOPE-002"))
                     .Select(id => $"    - id: {id}\n      enabled: false")) + "\n");
 
@@ -348,7 +348,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             "  rules:\n" +
             string.Join(
                 "\n",
-                ArbiterConfigTests.ExpectedRuleIds.Select(
+                ArbiterExpectedRuleIds.All.Select(
                     id => $"    - id: {id}\n      enabled: false")) + "\n");
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(

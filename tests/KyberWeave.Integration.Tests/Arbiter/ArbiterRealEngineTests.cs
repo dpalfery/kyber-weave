@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using Xunit;
@@ -91,7 +92,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
     private static string DisabledShippedRules() =>
         string.Join(
             "\n",
-            ArbiterConfigTests.ExpectedRuleIds
+            ArbiterExpectedRuleIds.All
                 .Where(id => !string.Equals(id, LensNoCodeChangeRule, StringComparison.Ordinal))
                 .Select(id => $"                - id: {id}\n                  enabled: false"));
 
@@ -346,7 +347,7 @@ public sealed class ArbiterRealEngineTests : IDisposable
         HookCommand command = CreateCommand(
             new FakeProvider(),
             credentialStoreFactory: () => new SecretServiceCredentialStore(
-                new ArbiterSecretToolMissingTests.MissingExecutableCredentialProcessRunner()),
+                new MissingExecutableCredentialProcessRunner()),
             environment: _ => null);
 
         (int exit, string stdout, string log) = Run(command, Payload("PreToolUse", "dev-medium", Prompt));
