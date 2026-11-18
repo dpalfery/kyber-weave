@@ -2165,12 +2165,35 @@ public sealed class SquadTransaction : ISquadTransaction
             : OriginalEntryKind.Missing;
     }
 
-    private IReadOnlyList<string> CaptureMissingDirectories(
+    /// <summary>
+    /// Captures the directories that do not exist yet between <paramref name="directoryPath"/> and its
+    /// <paramref name="boundaryPath"/>, so a failed transaction removes exactly what it created.
+    /// </summary>
+    /// <remarks>
+    /// Both paths must be absolute. Resolving a relative path would consult the process working directory, and a
+    /// deployment started elsewhere would then capture and later delete a directory outside its own tree.
+    /// </remarks>
+    /// <exception cref="ArgumentException">A path is not absolute.</exception>
+    internal IReadOnlyList<string> CaptureMissingDirectories(
         string directoryPath,
         string boundaryPath)
     {
-        string boundary = Path.TrimEndingDirectorySeparator(Path.GetFullPath(boundaryPath));
-        string current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(directoryPath));
+        if (!Path.IsPathFullyQualified(boundaryPath))
+        {
+            throw new ArgumentException(
+                "A transaction boundary must be an absolute path.",
+                nameof(boundaryPath));
+        }
+
+        if (!Path.IsPathFullyQualified(directoryPath))
+        {
+            throw new ArgumentException(
+                "A transaction directory must be an absolute path.",
+                nameof(directoryPath));
+        }
+
+        string boundary = Path.TrimEndingDirectorySeparator(boundaryPath);
+        string current = Path.TrimEndingDirectorySeparator(directoryPath);
         List<string> missing = new();
         while (!_semantics.AreSame(current, boundary) &&
                _semantics.IsWithin(boundary, current))
@@ -2580,13 +2603,8 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         using Stream stream = _files.OpenWriteNew(path);
         stream.Write(content);
-        if (!SyncToDisk)
-            return;
-
-        if (stream is FileStream disk)
-            disk.Flush(true);
-        else
-            stream.Flush();
+        if (SyncToDisk)
+            _files.FlushToStableStorage(stream);
     }
 
     private void CopyFileNoOverwrite(string sourcePath, string destinationPath) =>
@@ -3374,10 +3392,17 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private string ResolveArtifactNode(string areaRoot, string relativePath)
     {
+        if (!Path.IsPathFullyQualified(areaRoot))
+        {
+            throw new ArgumentException(
+                "A transaction artifact root must be an absolute path.",
+                nameof(areaRoot));
+        }
+
         string normalized = SquadPathPolicy.NormalizeRelativePath(relativePath);
-        string fullPath = Path.GetFullPath(Path.Combine(
+        string fullPath = Path.Combine(
             areaRoot,
-            normalized.Replace('/', Path.DirectorySeparatorChar)));
+            normalized.Replace('/', Path.DirectorySeparatorChar));
         string? parentRelativePath = Path.GetDirectoryName(
             normalized.Replace('/', Path.DirectorySeparatorChar));
         if (!string.IsNullOrEmpty(parentRelativePath))

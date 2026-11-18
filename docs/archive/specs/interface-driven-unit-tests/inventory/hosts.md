@@ -1,11 +1,12 @@
 ---
-id: specs/interface-driven-unit-tests/inventory/hosts
+id: archive/specs/interface-driven-unit-tests/inventory/hosts
 title: Inventory of concrete dependencies, Cli, Mcp, Arbiter and Hooks
 doc-type: reference
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 component: CI Pipelines
+documentation-impact: no-design-change
 ---
 
 # Inventory of concrete dependencies: Cli, Mcp, Arbiter and Hooks
@@ -450,3 +451,24 @@ true unit tests is the 1,281 direct resource calls, and the distribution is unev
 - No test project was inspected; the goal was production code. `tests/` was out of scope.
 - `src/KyberWeave.Core.Squad` contains no `.cs` files — it contributes nothing and is worth a
   decision (remove, or restore its content).
+
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| INV-1 | What does this inventory record? | The class-by-class evidence the specification was written from. It is not current guidance; the seams register carries the outcome. | Closed |
+
+## Design harvest
+
+Documentation waiver — nothing survives from this document, because it is the evidence read when the
+specification was written, not a design decision or an operational rule.
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| INV-1 | [Seams register](../../../../reference/seams.md) | no-design-change | archived |
+| INV-1 | [Kyber-Squad architecture](../../../../kyber-squad/architecture.md) | no-design-change | archived |
+| INV-1 | [Kyber Arbiter architecture](../../../../kyber-arbiter/architecture.md) | no-design-change | archived |
+| INV-1 | [Documentation ontology](../../../../documentation-ontology.md) | no-design-change | archived |
+| INV-1 | [Review council architecture](../../../../code-review/architecture.md) | no-design-change | archived |

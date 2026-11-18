@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberSquad
 source-root: src/KyberWeave.Domain/Squad
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 status: current
 decided-by:
   - adr/0076-test-first-is-one-worker-per-task
@@ -853,6 +853,19 @@ When an interrupted deployment or crash occurs, `SquadTransaction.Recover` resto
 - **Clean Reversibility**: Uncontended rollbacks restore the pre-transaction state, clean up empty directories created by the transaction, and restore application-data topologies.
 - **Owned Artifacts Only**: A committed journal is finished forward by removing only the entries the transaction wrote — its intent and unpublished temporaries, `backups/`, the staging folders, `state-originals/`, `state-staging/` and `claimed-*`. Any other entry in `.kyber-weave/.squad-transaction` stops recovery, which refuses naming the journal and removes nothing.
 - **Empty Tool Folder Removal**: A run that finds an empty `.kyber-weave` folder removes it, including one that existed before the run; it holds no state, and the next run recreates it.
+- **Automatic recovery before planning**: `squad install`, `squad update` and `squad uninstall` first recover an unfinished transaction, then plan. Recovery deletes only the entries the journal says the transaction wrote and refuses, changing nothing, on any other entry. A dry run reports a pending journal instead of recovering it.
+
+#### Crash-safety contract tests
+
+The install, update, uninstall, rollback, recovery and self-update paths are proved by a crash-safety
+contract suite in `tests/KyberWeave.Testing` (`SquadCrashSafetyContractTests`,
+`SquadInstanceLinkSyncCrashSafetyContractTests`, `SquadStateMigrationCrashSafetyContractTests` and
+`SelfUpdateCrashSafetyContractTests`). Each test injects a fault at one file operation, runs recovery,
+and compares the whole tree with the old tree or the complete new one, asserting that foreign,
+adopted and locally edited files are untouched. The same suite runs twice: on the in-memory file
+system in `KyberWeave.Application.Tests` and on the real disk in `KyberWeave.Integration.Tests`.
+A fault the in-memory run cannot model is a gap in the suite, not a reason to trust the real-disk run
+alone. The seven weaknesses the 2026-11-17 review found are each a test here.
 
 ---
 

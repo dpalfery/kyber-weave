@@ -312,6 +312,30 @@ Governing standards: [`docs/standards/csharp`](docs/standards/csharp/README.md) 
   remaining writer of the state it guarded.
 - A cache or temp root that grows per distinct key names its bound or its cleanup. (#468)
 
+### 15. Seams: direct resource access and logic in Domain
+
+Governing rule: [`AGENTS.md`](AGENTS.md#seams-only-an-adapter-touches-a-resource) and
+[the test standard](docs/standards/test/test.standards.md#the-seams-and-their-fakes).
+
+- **Direct resource access outside an adapter is a finding.** A class other than an adapter or a
+  composition root that calls `System.IO`, `Process`, `Environment`, `Console`, the system clock,
+  `Guid.NewGuid`, `Random`, `Mutex` or a network client reaches the resource around its seam, so no
+  unit test can control it. Name the seam it should have taken
+  ([the register](docs/reference/seams.md)) and ask for the in-memory test that proves the behaviour
+  through it. An adapter that grows a decision beyond translating the call is the same finding from
+  the other side.
+- **Logic in `KyberWeave.Domain` is a finding.** Domain holds data only: records, DTOs, property
+  bags, value objects, enums, options and constants. A method that parses, validates, renders or
+  decides belongs in `KyberWeave.Application`; a read-only property computed from the type's own
+  fields counts as data and is not a finding.
+- **A test that reaches the real disk, a real clock or a real program in a unit project is a
+  finding** for `test-adequacy`, even when it passes: it spends the 120-second budget and proves
+  nothing the contract suite does not. The fix is the fake, not a longer timeout.
+- These rules are enforced by this guidance and by review, never by a build check, architecture
+  test or guard test (decision D11, [ADR 0089](docs/adr/0089-every-behaviour-is-testable-through-a-seam.md)).
+  A missing entry in the seam register or the exceptions register is a `documentation-accuracy`
+  finding in the same review that adds an adapter or a sealed framework type.
+
 ### Scope discipline
 
 - A change that touches `AGENTS.md`, `settings.json`, hooks, CI workflows, or generated
@@ -345,14 +369,14 @@ and *What not to flag* only.
 | Lens | Take these sections |
 |---|---|
 | intent-alignment | Scope discipline, 11 |
-| correctness | 1, 2, 3, 5, 6, 7, 13 |
+| correctness | 1, 2, 3, 5, 6, 7, 13, 15 |
 | security | 2, 4, 5, 6, 12 |
 | authz-tenancy | 6, 12 |
-| di-composition | Ground rules only |
+| di-composition | 15 |
 | model-placement | Ground rules only |
 | prior-art | 5 |
 | duplicate-implementation | Ground rules and *What not to flag* only |
-| test-adequacy | 10 |
+| test-adequacy | 10, 15 |
 | test-infrastructure | 4, 10, 14 |
 | documentation-accuracy | 11, Scope discipline |
 | static-analysis-triage | Ground rules and *What not to flag* only |
@@ -371,7 +395,7 @@ The sections named here are sections of this file. Only the technologies with a 
 | Technology | Files | Take these sections |
 |---|---|---|
 | azure | Azure resource definitions | 12 |
-| csharp | `*.cs`, `*.csproj` | 2, 3, 5, 6, 7, 9, 10, 12, 14 |
+| csharp | `*.cs`, `*.csproj` | 2, 3, 5, 6, 7, 9, 10, 12, 14, 15 |
 | github-actions | `.github/workflows/*.yml`, `templates/github-actions/*.yml` | 7, 12 |
 | pulumi | Pulumi programs | 12 |
 | python | `*.py` and embedded Python | 2, 3, 4, 5, 12 |

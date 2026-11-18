@@ -1,11 +1,12 @@
 ---
-id: specs/interface-driven-unit-tests/inventory/application
+id: archive/specs/interface-driven-unit-tests/inventory/application
 title: Inventory of concrete dependencies, Application
 doc-type: reference
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 component: CI Pipelines
+documentation-impact: no-design-change
 ---
 
 # Inventory of concrete dependencies: Application
@@ -450,3 +451,24 @@ Ordered by the number of call sites each would replace. "Members" is the minimum
 **Complete:** all 150 `.cs` files under `src/KyberWeave.Application` were scanned line by line (45,261 lines), and every declared type appears in the tables above — including the 53 records, which are marked D. Nothing in this project was left out.
 
 **Not in this report's scope** (owned by other jobs): `src/KyberWeave.Cli`, `src/KyberWeave.Mcp`, `src/KyberWeave.Data`, `src/KyberWeave.Domain`, `src/KyberWeave.Kernel`, `src/KyberWeave.Contracts`, `dash/`, `tests/`. Note that removing the concrete dependencies found here also requires the *interfaces* to live in `Contracts`/`Domain` and the *implementations* to be registered in `Data`/the composition root — cross-project work this inventory did not audit.
+
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| INV-1 | What does this inventory record? | The class-by-class evidence the specification was written from. It is not current guidance; the seams register carries the outcome. | Closed |
+
+## Design harvest
+
+Documentation waiver — nothing survives from this document, because it is the evidence read when the
+specification was written, not a design decision or an operational rule.
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| INV-1 | [Seams register](../../../../reference/seams.md) | no-design-change | archived |
+| INV-1 | [Kyber-Squad architecture](../../../../kyber-squad/architecture.md) | no-design-change | archived |
+| INV-1 | [Kyber Arbiter architecture](../../../../kyber-arbiter/architecture.md) | no-design-change | archived |
+| INV-1 | [Documentation ontology](../../../../documentation-ontology.md) | no-design-change | archived |
+| INV-1 | [Review council architecture](../../../../code-review/architecture.md) | no-design-change | archived |

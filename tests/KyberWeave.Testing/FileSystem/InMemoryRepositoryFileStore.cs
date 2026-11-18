@@ -203,6 +203,9 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public Stream OpenWriteNew(string path) => _fs.OpenWriteNew(path);
 
     /// <inheritdoc />
+    public void FlushToStableStorage(Stream stream) => _fs.FlushToStableStorage(stream);
+
+    /// <inheritdoc />
     public Stream OpenExclusive(string path) => _fs.OpenExclusive(path);
 
     /// <inheritdoc />

@@ -64,6 +64,9 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public Stream OpenWriteNew(string path) => _inner.OpenWriteNew(path);
 
     /// <inheritdoc />
+    public void FlushToStableStorage(Stream stream) => _inner.FlushToStableStorage(stream);
+
+    /// <inheritdoc />
     public void MoveDirectory(string sourcePath, string destinationPath) => _inner.MoveDirectory(sourcePath, destinationPath);
 
     /// <inheritdoc />

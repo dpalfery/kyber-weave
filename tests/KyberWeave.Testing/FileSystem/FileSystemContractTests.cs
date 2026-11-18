@@ -542,6 +542,21 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void FlushToStableStorageKeepsTheBytesAStreamHasWritten()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = At(root, "flushed.bin");
+
+        using (Stream stream = files.OpenWriteNew(path))
+        {
+            stream.Write([4, 5, 6]);
+            files.FlushToStableStorage(stream);
+        }
+
+        Assert.Equal([4, 5, 6], files.ReadAllBytes(path));
+    }
+
+    [Fact]
     public void OpenWriteNewRefusesAnOccupiedPathAndLeavesItIntact()
     {
         IWritableFileSystem files = Starting(out string root);

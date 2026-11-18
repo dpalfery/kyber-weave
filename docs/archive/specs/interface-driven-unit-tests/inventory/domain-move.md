@@ -1,11 +1,12 @@
 ---
-id: specs/interface-driven-unit-tests/inventory/domain-move
+id: archive/specs/interface-driven-unit-tests/inventory/domain-move
 title: Inventory of Domain's data and logic, and the callers of its logic
 doc-type: reference
-status: draft
+status: archived
 owner: dpalfery
 last-reviewed: 2026-11-18
 component: CI Pipelines
+documentation-impact: no-design-change
 ---
 
 # Inventory of Domain's data and logic, and the callers of its logic
@@ -744,3 +745,23 @@ would rewrite the same call sites and fake twice.
   call-by-call reading of all 78 files. Where a row's route says "none", the check that remains is
   mechanical: the caller names only data members.
 
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| INV-1 | What does this inventory record? | The class-by-class evidence the specification was written from. It is not current guidance; the seams register carries the outcome. | Closed |
+
+## Design harvest
+
+Documentation waiver — nothing survives from this document, because it is the evidence read when the
+specification was written, not a design decision or an operational rule.
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| INV-1 | [Seams register](../../../../reference/seams.md) | no-design-change | archived |
+| INV-1 | [Kyber-Squad architecture](../../../../kyber-squad/architecture.md) | no-design-change | archived |
+| INV-1 | [Kyber Arbiter architecture](../../../../kyber-arbiter/architecture.md) | no-design-change | archived |
+| INV-1 | [Documentation ontology](../../../../documentation-ontology.md) | no-design-change | archived |
+| INV-1 | [Review council architecture](../../../../code-review/architecture.md) | no-design-change | archived |

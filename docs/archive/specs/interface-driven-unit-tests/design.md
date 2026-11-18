@@ -1,10 +1,10 @@
 ---
-id: specs/interface-driven-unit-tests/design
+id: archive/specs/interface-driven-unit-tests/design
 title: Interface-driven unit tests design
 doc-type: spec
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 component: CI Pipelines
 documentation-impact: extends-component
 impact-components: [CI Pipelines, KyberSquad, KyberArbiter, DocGraph, ReviewCouncil]
@@ -249,10 +249,37 @@ None. Q1 to Q3 are answered in D10, D7 and D11.
 
 ## Design harvest
 
-| Item | Target component | Target document |
-|---|---|---|
-| The seams table and the adapter register | CI Pipelines | `docs/reference/cli-composition.md` and a new `docs/reference/seams.md` |
-| The test project layout and what is an integration test | CI Pipelines | `docs/standards/test/` and `AGENTS.md` |
-| The in-memory file system and contract suites | CI Pipelines | `docs/standards/test/` |
-| Crash-safety contract tests for squad deployment | KyberSquad | `docs/kyber-squad/architecture.md` |
-| D1 to D11 | CI Pipelines | An ADR for D2 to D8 and D11 |
+| ID | Design item | Target component | Target document | Harvested |
+|---|---|---|---|---|
+| H1 | The seams table and the adapter register | CI Pipelines | [Seams register](../../../reference/seams.md), [CLI composition](../../../reference/cli-composition.md) | yes |
+| H2 | The test project layout and what is an integration test | CI Pipelines | [Test standard](../../../standards/test/test.standards.md), [`AGENTS.md`](../../../../AGENTS.md) | yes |
+| H3 | The in-memory file system and contract suites | CI Pipelines | [Test standard](../../../standards/test/test.standards.md#the-seams-and-their-fakes) | yes |
+| H4 | Crash-safety contract tests for squad deployment | KyberSquad | [Kyber-Squad architecture](../../../kyber-squad/architecture.md#crash-safety-contract-tests) | yes |
+| H5 | D1 to D12 and the owner decisions made during delivery | CI Pipelines | [ADR 0089](../../../adr/0089-every-behaviour-is-testable-through-a-seam.md) | yes |
+| H7 | The Arbiter calibration harness is an opt-in integration test | KyberArbiter | [Kyber Arbiter architecture](../../../kyber-arbiter/architecture.md#provider-and-models) | yes |
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| D1 | [Seams register](../../../reference/seams.md) | extends-component | archived |
+| D2 | [Seams register](../../../reference/seams.md) | extends-component | archived |
+| D3 | [Seams register](../../../reference/seams.md) | extends-component | archived |
+| D4 | [Test standard](../../../standards/test/test.standards.md#the-seams-and-their-fakes) | extends-component | archived |
+| D5 | [Seams register](../../../reference/seams.md) | extends-component | archived |
+| D6 | [ADR 0089](../../../adr/0089-every-behaviour-is-testable-through-a-seam.md) | extends-component | archived |
+| D7 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) | extends-component | archived |
+| D8 | [Test standard](../../../standards/test/test.standards.md#three-kinds-of-test) | extends-component | archived |
+| D9 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md#crash-safety-contract-tests) | extends-component | archived |
+| D10 | [Documentation ontology](../../../documentation-ontology.md) | extends-component | archived |
+| D11 | [Review council architecture](../../../code-review/architecture.md#review-guidance) | extends-component | archived |
+| D12 | [Seams register](../../../reference/seams.md) | extends-component | archived |
+| H1 | [Seams register](../../../reference/seams.md) | extends-component | archived |
+| H2 | [Test standard](../../../standards/test/test.standards.md) | extends-component | archived |
+| H3 | [Test standard](../../../standards/test/test.standards.md#the-seams-and-their-fakes) | extends-component | archived |
+| H4 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md#crash-safety-contract-tests) | extends-component | archived |
+| H5 | [ADR 0089](../../../adr/0089-every-behaviour-is-testable-through-a-seam.md) | extends-component | archived |
+| H6 | [Review council architecture](../../../code-review/architecture.md#review-guidance) | extends-component | archived |
+| H7 | [Kyber Arbiter architecture](../../../kyber-arbiter/architecture.md#provider-and-models) | extends-component | archived |
+| D3 | [Test standard](../../../standards/test/test.standards.md#the-seams-and-their-fakes) | extends-component | archived |
+| H6 | [Seams register](../../../reference/seams.md) | extends-component | archived |

@@ -6,7 +6,7 @@ status: current
 component: ReviewCouncil
 source-root: src/KyberWeave.Application/Review
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -183,7 +183,11 @@ failure. There are two sources, and neither copies the other.
   Reg. It holds the defect classes this repository has actually been caught on. Each rule is
   cited by id (`R2`–`R16`) or by section (`§N`). A new rule needs the same class of finding in
   three or more reviews, across at least two PRs; otherwise it becomes an example bullet under an
-  existing section.
+  existing section. Section 15 is the seam rule: direct resource access outside an adapter, logic
+  in `KyberWeave.Domain`, and a unit test that reaches a real resource are findings for the
+  `correctness`, `di-composition`, `test-adequacy` and `test-infrastructure` seats. It is written
+  guidance only; no build check or architecture test enforces it (decision D11,
+  [ADR 0089](../adr/0089-every-behaviour-is-testable-through-a-seam.md)).
 - **Technology checklists.** Eleven pointer checklists under
   `skills/code-review/references/`: C#, Python, React, SQL, Pulumi, Azure, GitHub Actions,
   TypeScript (Node), Rust, Tauri and Go. Each names the host's `<technology>-coding-standard`

@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -47,6 +47,41 @@ integration classes keep `KyberWeave.Integration.Tests`, so a fully-qualified cl
 test in one project.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
+
+### Three kinds of test
+
+| Kind | Project | What it does | When it runs |
+|---|---|---|---|
+| **Unit** | `<Project>.Tests` for the code under test | Runs in memory over the shared fakes; touches no disk, starts no program, reads no environment variable, reads no real clock and opens no socket | Locally, and in every developer, task-gate and council run |
+| **Integration** | `tests/KyberWeave.Integration.Tests` | Runs an adapter's contract suite against the real resource, or smoke-tests a whole flow with real adapters | CI only, in its own required job |
+| **Content** | `tests/KyberWeave.Content.Tests` | Checks the shipped agents, skills, standards, documents and workflows, read through the corpus seam | With the unit projects, inside the same 120 seconds |
+
+A content test writes nothing and starts no program, so it is not an integration test. It is not a
+unit test either: the shipped corpus is its subject and cannot be faked (D10). A test of how
+*product code* handles content uses fixture content in memory and lives in the unit project of that
+code.
+
+### The seams and their fakes
+
+Every outside resource is reached through one interface, a seam, in `src/KyberWeave.Contracts`. Its
+adapter is the only product code allowed to call the resource, and it lives in `src/KyberWeave.Data`
+(or `src/KyberWeave.Kernel` for the low-level file-system and process work). The fake lives in
+[`tests/KyberWeave.Testing`](../../../tests/KyberWeave.Testing/AGENTS.md), **one fake per
+interface**. [`docs/reference/seams.md`](../../reference/seams.md) is the register of each seam, its
+adapter, its fake and the sealed framework types allowed through with a reason.
+
+Every fake is kept honest by a **contract suite**: an abstract test class in `KyberWeave.Testing`
+that runs against the fake in the owning unit project and against the adapter in
+`KyberWeave.Integration.Tests`. A behaviour the fake cannot reproduce is a failing contract test,
+not a silent difference. The in-memory file system is the hardest of these: `InMemoryFileSystem`
+reproduces atomic rename, exclusive create, case-insensitive but case-preserving names, links and
+their resolution, deletion without following links, enumeration, and fault injection at the Nth
+operation. A unit test that depends on a file-system behaviour must first add it to the contract
+suite.
+
+A test that needs any of that takes the fake from `KyberWeave.Testing` and never builds a local
+copy. A test root is derived from the fake's in-memory root or the test temp root and is
+platform-qualified: never a POSIX literal such as `/kw/work`, so the same test runs on Windows.
 
 ### Which project a test belongs in
 

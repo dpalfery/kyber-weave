@@ -1,10 +1,10 @@
 ---
-id: specs/interface-driven-unit-tests/requirements
+id: archive/specs/interface-driven-unit-tests/requirements
 title: Interface-driven unit tests requirements
 doc-type: requirements
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 component: CI Pipelines
 documentation-impact: extends-component
 impact-components: [CI Pipelines, KyberSquad, KyberArbiter, DocGraph, ReviewCouncil]
@@ -52,6 +52,34 @@ application, and make sure that there's nothing that's using concrete classes, a
 designed to be interface domain-driven so that all code can be tested by a true unit test and that no
 integration tests are required. Only exception to that would be usage of sealed classes provided by
 frameworks that don't support interface-driven design."
+
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| RQ-1 | Where is this document's lasting record? | Requirements 1–10, as delivered. The behaviour it delivered is in the seams register, the test standard and the review guidance mapped below. | Closed |
+
+## Design harvest
+
+This document declares no harvest rows of its own: the specification's items H1–H6 are declared in
+[the specification](README.md#design-harvest) and mapped there. These rows trace this document's own
+content.
+
+| ID | Design item | Target component | Target doc type | Harvested |
+|---|---|---|---|---|
+| RH-1 | Requirements 1–10, as delivered: seams, adapters, layers, tests and the written rules | CI Pipelines | coding-standard | yes |
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| RQ-1 | [Seams register](../../../reference/seams.md) | extends-component | archived |
+| RH-1 | [Test standard](../../../standards/test/test.standards.md) | extends-component | archived |
+| RQ-1 | [Kyber-Squad architecture](../../../kyber-squad/architecture.md) | extends-component | archived |
+| RQ-1 | [Kyber Arbiter architecture](../../../kyber-arbiter/architecture.md) | extends-component | archived |
+| RQ-1 | [Documentation ontology](../../../documentation-ontology.md) | extends-component | archived |
+| RQ-1 | [Review council architecture](../../../code-review/architecture.md) | extends-component | archived |
+
 
 ## Requirements
 

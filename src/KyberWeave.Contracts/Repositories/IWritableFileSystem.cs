@@ -115,6 +115,15 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">The file or a directory already exists at the path, or the file could not be created.</exception>
     Stream OpenWriteNew(string path);
 
+    /// <summary>Flushes a stream this file system opened so its bytes reach stable storage before it is disposed.</summary>
+    /// <param name="stream">A stream returned by this file system. The caller still owns it.</param>
+    /// <remarks>
+    /// The file-system seam is the only code that knows what a stream really is, so it is the only code that can ask
+    /// the device to flush it. An in-memory implementation has no device and flushes the stream only.
+    /// </remarks>
+    /// <exception cref="IOException">The flush failed.</exception>
+    void FlushToStableStorage(Stream stream);
+
     /// <summary>Opens a file for reading and writing, creating it when missing, and keeps every other opener out until the stream is disposed.</summary>
     /// <param name="path">The file.</param>
     /// <returns>A read-write stream positioned at the start of the file; disposing it releases the file. The caller owns the stream.</returns>
