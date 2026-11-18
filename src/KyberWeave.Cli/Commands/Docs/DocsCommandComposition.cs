@@ -1,6 +1,5 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Candidates;
@@ -97,8 +96,8 @@ internal static class DocsCommandComposition
         return true;
     }
 
-    public static ICodeGraphResolver CreateResolver(DocsSettings settings) =>
-        CodeGraphResolvers.ForRepository(settings.Path).Resolver;
+    public static ICodeGraphResolver CreateResolver(DocsSettings settings, ICodeGraphPortsFactory codeGraph) =>
+        codeGraph.ForRepository(settings.Path).Resolver;
 
     public static bool TryCreateAnalysisRuntime(
         DocsSettings settings,
@@ -191,7 +190,7 @@ internal static class DocsCommandComposition
     }
 }
 
-internal sealed class DocsAnalysisCompositionFactories
+internal sealed class DocsAnalysisCompositionFactories(ICodeGraphPortsFactory codeGraph)
 {
     public Func<string, bool> IsCacheSafe { get; init; } = AnalysisCacheSafety.IsSafe;
     public Func<string, IAnalysisPersistence> CreatePersistence { get; init; } =
@@ -199,7 +198,7 @@ internal sealed class DocsAnalysisCompositionFactories
     public Func<IEmbeddingGenerator> CreateEmbeddingGenerator { get; init; } =
         () => new OpenAiCompatibleEmbeddingGenerator();
     public Func<string, ICodeGraphResolver> CreateResolver { get; init; } =
-        repositoryRoot => CodeGraphResolvers.ForRepository(repositoryRoot).Resolver;
+        repositoryRoot => codeGraph.ForRepository(repositoryRoot).Resolver;
 }
 
 internal sealed class DocsAnalysisRuntime(

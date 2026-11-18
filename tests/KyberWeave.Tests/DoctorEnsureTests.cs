@@ -425,9 +425,9 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(mcpExecutable),
@@ -487,9 +487,9 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(mcpExecutable),
@@ -549,9 +549,9 @@ public sealed class DoctorEnsureTests : IDisposable
 
         string mcpExecutable = DoctorHarness.HealthyStub(_stubs.Path, Root);
 
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, mcpExecutable);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(mcpExecutable),
@@ -580,7 +580,7 @@ public sealed class DoctorEnsureTests : IDisposable
     [InlineData("src/`cmd`.cs", "'src/`cmd`.cs'")]
     public void QuoteShellPath_QuotesOnlyWhenNecessary_UsingSingleQuotesOnPosix(string input, string expected)
     {
-        Assert.Equal(expected, CodeGraphProvisioner.QuoteShellPath(input, isWindows: false));
+        Assert.Equal(expected, CodeGraphIndexRules.QuoteShellPath(input, isWindows: false));
     }
 
     [Theory]
@@ -591,7 +591,7 @@ public sealed class DoctorEnsureTests : IDisposable
     [InlineData("src/$evil.cs", "\"src/$evil.cs\"")]
     public void QuoteShellPath_QuotesOnlyWhenNecessary_UsingDoubleQuotesOnWindows(string input, string expected)
     {
-        Assert.Equal(expected, CodeGraphProvisioner.QuoteShellPath(input, isWindows: true));
+        Assert.Equal(expected, CodeGraphIndexRules.QuoteShellPath(input, isWindows: true));
     }
 
     /// <summary>
@@ -601,7 +601,7 @@ public sealed class DoctorEnsureTests : IDisposable
     [Fact]
     public void EnsureSamplesBaselineTrackedChangesAfterLockAcquisition()
     {
-        string lockPath = CodeGraphProvisioner.LockPathFor(Root, Path.GetTempPath());
+        string lockPath = CodeGraphIndexRules.LockPathFor(Root, Path.GetTempPath());
         bool lockHeldDuringBaselineStatus = false;
         int statusCalls = 0;
 
@@ -748,7 +748,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
     /// <summary>Runs the ensure doctor with the pauses between sync attempts set to nothing.</summary>
     private DoctorReport RunEnsureWithoutWaiting(ScriptedProcessExecutor executor) =>
-        RepositoryDoctor.Run(
+        DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)) with
@@ -760,7 +760,7 @@ public sealed class DoctorEnsureTests : IDisposable
 
     private int RunEnsure(ScriptedProcessExecutor executor)
     {
-        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, DoctorHarness.HealthyStub(_stubs.Path, Root));
+        DoctorCommand command = new(DoctorTestServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, DoctorHarness.HealthyStub(_stubs.Path, Root));
 
         return DoctorAppHarness.Run(command, "doctor", "--ensure", Root);
     }

@@ -1,6 +1,8 @@
 using KyberWeave.Application.Review;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Validation;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
@@ -24,7 +26,7 @@ public sealed class DocsPacketCommandTests
     }
 
     private static (int Exit, string Output) Packet(
-        DocFixture fixture, string task, string? plan = null, string? prior = null, params string[] worktrees)
+        DocFixture fixture, string task, string? plan = null, string? prior = null, IServiceProvider? services = null, params string[] worktrees)
     {
         DocsPacketSettings settings = new()
         {
@@ -35,8 +37,23 @@ public sealed class DocsPacketCommandTests
             ListWorktrees = _ => [fixture.Root, .. worktrees],
         };
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => DocsTestCommands.Packet().Execute(null!, settings, CancellationToken.None));
+            () => DocsTestCommands.Packet(services).Execute(null!, settings, CancellationToken.None));
         return (execution.Result, execution.Output);
+    }
+
+    /// <summary>The CodeGraph ports are the injected factory's, so a checkout outside this one is read the same way.</summary>
+    [Fact]
+    public void TheCodeGraphPortsComeFromTheInjectedFactory()
+    {
+        using DocFixture fixture = Ready();
+        FakeCodeGraphPortsFactory codeGraph = new(FakeCodeGraphResolver.WithNodes());
+        IServiceProvider services = DocsTestCommands.Services(
+            collection => collection.AddSingleton<ICodeGraphPortsFactory>(codeGraph));
+
+        (int exit, string output) = Packet(fixture, "T1", services: services);
+
+        Assert.True(exit == 0, output);
+        Assert.Contains(codeGraph.Roots, root => Path.GetFullPath(root) == Path.GetFullPath(fixture.Root));
     }
 
     [Theory]

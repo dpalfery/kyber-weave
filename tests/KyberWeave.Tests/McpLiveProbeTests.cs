@@ -7,7 +7,7 @@ using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Pins the live MCP proof (D1, D7, D8, D9) through <see cref="RepositoryDoctor.Run"/>. CodeGraph is answered by
+/// Pins the live MCP proof (D1, D7, D8, D9) through <c>IRepositoryDoctor.Run</c>. CodeGraph is answered by
 /// the scripted executor and the server is a trivial shell stub, so the proof runs over a real stdio session with
 /// no real <c>kyber-weave-mcp</c>. The stubs live in a temp directory and are removed with it.
 /// </summary>
@@ -39,7 +39,7 @@ public sealed class McpLiveProbeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -67,7 +67,7 @@ public sealed class McpLiveProbeTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string callPath = Path.Combine(_stubs.Path, "call.json");
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.CallRecordingStub(_stubs.Path, Root, callPath)),
@@ -92,7 +92,7 @@ public sealed class McpLiveProbeTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string argvPath = Path.Combine(_stubs.Path, "argv.txt");
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.RecordingStub(_stubs.Path, Root, argvPath)),
@@ -118,7 +118,7 @@ public sealed class McpLiveProbeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.SilentStub(_stubs.Path), TimeSpan.FromSeconds(1)),
@@ -143,7 +143,7 @@ public sealed class McpLiveProbeTests : IDisposable
             _stubs.Path,
             "echo 'KW-MCP-ROOT-001: No Kyber-Weave host configuration was found for MCP root' >&2\nexit 1");
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(stub),
@@ -168,7 +168,7 @@ public sealed class McpLiveProbeTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string stub = DoctorHarness.WriteStub(_stubs.Path, "echo 'something else broke' >&2\nexit 1");
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(stub),
@@ -198,7 +198,7 @@ public sealed class McpLiveProbeTests : IDisposable
                 ? new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root)
                 : DoctorHarness.Ok("1.5.0"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             mode,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -233,7 +233,7 @@ public sealed class McpLiveProbeTests : IDisposable
                     : new ProcessResult(1, string.Empty, "✗ CodeGraph not initialized in " + Root);
             });
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Ensure,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -261,7 +261,7 @@ public sealed class McpLiveProbeTests : IDisposable
                 ? new ProcessResult(1, string.Empty, "telemetry not initialized, sync failed")
                 : DoctorHarness.Ok("1.5.0"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Provision,
             DoctorHarness.Options(DoctorHarness.HealthyStub(_stubs.Path, Root)),
@@ -283,7 +283,7 @@ public sealed class McpLiveProbeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ErroringDocsExploreStub(_stubs.Path, Root)),
@@ -304,7 +304,7 @@ public sealed class McpLiveProbeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.WrongRootStub(_stubs.Path)),
@@ -327,7 +327,7 @@ public sealed class McpLiveProbeTests : IDisposable
         string root = Path.Combine(_root.Path, "repo with spaces");
         Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(
@@ -353,7 +353,7 @@ public sealed class McpLiveProbeTests : IDisposable
         string wrongRoot = Path.Combine(_root.Path, "other repo with spaces");
         Directory.CreateDirectory(Path.Combine(root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(
@@ -378,7 +378,7 @@ public sealed class McpLiveProbeTests : IDisposable
 
         string call = "{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"provenance: root=" + root + "\"}]}}";
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(
@@ -407,7 +407,7 @@ public sealed class McpLiveProbeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ClosesInputAfterInitializeStub(_stubs.Path), TimeSpan.FromSeconds(5)),
@@ -446,7 +446,7 @@ public sealed class McpLiveProbeTests : IDisposable
             _ => """{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=/elsewhere"}]}}""",
         };
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(_stubs.Path, initialize, call)),
@@ -471,7 +471,7 @@ public sealed class McpLiveProbeTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         const string call = """{"jsonrpc":"2.0","id":2,"result":{"isError":false,"content":[{"type":"text","text":"provenance: root=/tmp/ev\u0000il"}]}}""";
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.ReplyingStub(_stubs.Path, DoctorHarness.InitializeReply, call)),
@@ -492,7 +492,7 @@ public sealed class McpLiveProbeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options("kyber-weave-mcp-absent-for-test"),
@@ -514,7 +514,7 @@ public sealed class McpLiveProbeTests : IDisposable
     /// <remarks>
     /// The cap is the session's own classification of a child it must stop reading, and the session reports it as
     /// <see cref="InvalidDataException"/>. A reply is the child's data, so an unterminated one must reach the same
-    /// check line as any other bad reply. Escaping <see cref="RepositoryDoctor.Run"/> would skip the renderer and
+    /// check line as any other bad reply. Escaping <c>IRepositoryDoctor.Run</c> would skip the renderer and
     /// break the documented 0/1/2/3 exit contract, which is the whole point of the probe.
     /// </remarks>
     [Fact]
@@ -530,7 +530,7 @@ public sealed class McpLiveProbeTests : IDisposable
             sleep 30
             """);
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(stub, TimeSpan.FromSeconds(30)),
@@ -554,7 +554,7 @@ public sealed class McpLiveProbeTests : IDisposable
     {
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(
@@ -592,7 +592,7 @@ public sealed class McpLiveProbeTests : IDisposable
         Directory.CreateDirectory(Path.Combine(Root, ".codegraph"));
         string argvPath = Path.Combine(_stubs.Path, "argv.txt");
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(DoctorHarness.RecordingStub(_stubs.Path, Root, argvPath)),
@@ -625,7 +625,7 @@ public sealed class McpLiveProbeTests : IDisposable
             + served
             + "\"}]}}";
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             Root,
             DoctorMode.Check,
             DoctorHarness.Options(
@@ -655,7 +655,7 @@ public sealed class McpLiveProbeTests : IDisposable
             + served
             + "\"}]}}";
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             spacedRoot,
             DoctorMode.Check,
             DoctorHarness.Options(
@@ -686,7 +686,7 @@ public sealed class McpLiveProbeTests : IDisposable
             + served
             + "\"}]}}";
 
-        DoctorReport report = RepositoryDoctor.Run(
+        DoctorReport report = DoctorTestServices.Doctor.Run(
             evilRoot,
             DoctorMode.Check,
             DoctorHarness.Options(
