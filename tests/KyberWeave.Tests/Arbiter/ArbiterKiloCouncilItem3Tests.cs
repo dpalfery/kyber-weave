@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -45,29 +46,6 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
     public void Dispose() => _repo.Dispose();
 
     private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
-
-    private sealed class SameFailureProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = new(StringComparer.Ordinal)
-            {
-                [ScopeRule] = "within-task",
-                [DifficultyRule] = "hard",
-                [FailureRule] = "same",
-            };
-            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8),
-                [FailureRule] = new(null, 0.9, 0.85),
-            };
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, scores));
-        }
-    }
 
     /// <summary>
     /// The plan facts the evaluator reads, with the rating the task file records: under the one remaining roster
@@ -158,7 +136,12 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
     public void ASameFailureAdvisoryKeepsTheResolvedModelOnTheRework()
     {
         WriteTable();
-        SameFailureProvider provider = new();
+        FakeArbiterProvider provider = new FakeArbiterProvider
+    {
+        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard", [FailureRule] = "same" },
+        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8), [FailureRule] = new(null, 0.9, 0.85) },
+        Model = "stub",
+    };
         KyberWeaveConfig config = EnforcedConfig();
 
         HookOutcome first = Engine(provider).DecidePreDispatch(

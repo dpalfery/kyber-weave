@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -31,28 +32,6 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
     public void Dispose() => _repo.Dispose();
 
     private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
-
-    /// <summary>Answers DIFFICULTY as hard with a confident score, so the difficulty rule wants a retarget.</summary>
-    private sealed class HardProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = new(StringComparer.Ordinal)
-            {
-                [ScopeRule] = "within-task",
-                [DifficultyRule] = "hard",
-            };
-            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8),
-            };
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, scores));
-        }
-    }
 
     /// <summary>
     /// The plan facts the evaluator reads. Under the one remaining roster the difficulty rule takes the recorded
@@ -97,7 +76,11 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
     };
 
     private ArbiterEvaluator Evaluator() => new(
-        new HardProvider(),
+        new FakeArbiterProvider
+    {
+        Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+        Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+    },
         _ => null,
         new InFlightLedger(ArbiterDirectory),
         new DecisionLog(ArbiterDirectory),

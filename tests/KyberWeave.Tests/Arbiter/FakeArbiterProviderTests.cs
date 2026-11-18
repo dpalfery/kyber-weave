@@ -20,7 +20,7 @@ public sealed class FakeArbiterProviderTests
     {
         FakeArbiterProvider provider = new()
         {
-            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [First] = "yes" },
+            Answers = { [First] = "yes" },
             Confidence = 0.9,
         };
 

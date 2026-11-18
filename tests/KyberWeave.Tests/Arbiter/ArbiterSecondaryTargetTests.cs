@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -28,19 +29,6 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
     public void Dispose() => _repo.Dispose();
 
     private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
-
-    private sealed class ScopeProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = new(StringComparer.Ordinal) { [ScopeRule] = "within-task" };
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)));
-        }
-    }
 
     private sealed class PlanFacts : IArbiterPlanReader
     {
@@ -68,7 +56,7 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
     };
 
     private ArbiterEvaluator Evaluator() => new(
-        new ScopeProvider(),
+        FakeArbiterProvider.AnsweringByRule((ScopeRule, "within-task")),
         _ => null,
         new InFlightLedger(ArbiterDirectory),
         new DecisionLog(ArbiterDirectory),

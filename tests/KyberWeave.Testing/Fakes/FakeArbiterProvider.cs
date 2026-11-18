@@ -45,11 +45,23 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
         Exception? fault = null) =>
         new()
         {
-            Answers = new Dictionary<string, string>(StringComparer.Ordinal) { [ruleId] = answer },
+            Answers = { [ruleId] = answer },
             Confidence = confidence,
             RequestSent = requestSent,
             Fault = fault,
         };
+
+    /// <summary>A provider that answers the named rules and leaves the rest unanswered.</summary>
+    internal static FakeArbiterProvider AnsweringByRule(params (string RuleId, string Answer)[] answers)
+    {
+        FakeArbiterProvider provider = new();
+        foreach ((string ruleId, string answer) in answers)
+        {
+            provider.Answers[ruleId] = answer;
+        }
+
+        return provider;
+    }
 
     /// <summary>A provider that raises <paramref name="fault"/> for every request.</summary>
     internal static FakeArbiterProvider Throwing(Exception fault) => new() { Fault = fault };
@@ -91,8 +103,7 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
     internal string? AnswerAsked { get; init; }
 
     /// <summary>The answer for a named rule; wins over <see cref="AnswerAll"/> and <see cref="AnswerAsked"/>.</summary>
-    internal IReadOnlyDictionary<string, string> Answers { get; init; } =
-        new Dictionary<string, string>(StringComparer.Ordinal);
+    internal Dictionary<string, string> Answers { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Answers a rule the maps and defaults do not name; null leaves the rule unanswered.</summary>
     internal Func<FakeArbiterProviderCall, ArbiterRule, string?>? AnswerRule { get; init; }
@@ -107,8 +118,7 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
     internal double? Threshold { get; init; }
 
     /// <summary>An explicit score by rule id; wins over <see cref="Confidence"/>.</summary>
-    internal IReadOnlyDictionary<string, ArbiterStep1Score> Scores { get; init; } =
-        new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal);
+    internal Dictionary<string, ArbiterStep1Score> Scores { get; } = new(StringComparer.Ordinal);
 
     /// <summary>The model named in every result; null reports none.</summary>
     internal string? Model { get; init; } = "fake-arbiter-provider";
@@ -172,9 +182,7 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
             string? answer =
                 Answers.TryGetValue(rule.Id, out string? named) ? named
                 : AnswerRule?.Invoke(call, rule)
-                ?? (rule.Ask is not null ? AnswerAsked : null)
-                ?? AnswerAll
-                ?? DefaultAnswer;
+                ?? (rule.Ask is not null ? AnswerAsked ?? AnswerAll ?? DefaultAnswer : AnswerAll);
             if (answer is null)
             {
                 continue;
