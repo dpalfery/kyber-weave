@@ -30,7 +30,8 @@ internal static class DocsPorts
     internal static StandardsTemplateDiff StandardsDiff(string repoRoot, OntologyConfig ontology)
     {
         IFileSystem files = new PhysicalFileSystem();
-        return new StandardsTemplateDiff(files, repoRoot, ontology, new PhysicalPathResolver(files), Environment);
+        return new StandardsTemplateDiff(
+            files, repoRoot, ontology, new PhysicalPathResolver(files), Environment, ShippedKyberStandards.Templates);
     }
 
     /// <summary>The standards migration over the physical seams, for a test that runs it on a temporary checkout.</summary>

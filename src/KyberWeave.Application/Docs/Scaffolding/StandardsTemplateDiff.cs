@@ -33,6 +33,7 @@ public sealed class StandardsTemplateDiff
     private static readonly string[] HostOwnedKeys = ["owner:", "status:", "last-reviewed:"];
 
     private readonly IFileSystem _files;
+    private readonly IKyberStandardsTemplates _templates;
     private readonly OntologyConfig _config;
     private readonly string _repoRoot;
 
@@ -42,19 +43,23 @@ public sealed class StandardsTemplateDiff
     /// <param name="config">The ontology that declares the technologies and roles.</param>
     /// <param name="paths">Turns the repository root into a full path.</param>
     /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
+    /// <param name="templates">Supplies the template text a host file is compared with.</param>
     public StandardsTemplateDiff(
         IFileSystem files,
         string repoRoot,
         OntologyConfig config,
         IPathResolver paths,
-        IProcessEnvironment environment)
+        IProcessEnvironment environment,
+        IKyberStandardsTemplates templates)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(templates);
         _files = files;
+        _templates = templates;
         _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
     }
@@ -109,7 +114,7 @@ public sealed class StandardsTemplateDiff
             string fileName = KyberStandardsTemplates.FileName(scope, part);
             string hostPath = $"{folder}/{fileName}";
 
-            if (!KyberStandardsTemplates.TryRenderPart(
+            if (!_templates.TryRenderPart(
                     scope, part, "unassigned", "2026-01-01", out string? template))
             {
                 continue;
