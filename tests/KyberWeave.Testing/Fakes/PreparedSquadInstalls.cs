@@ -429,14 +429,38 @@ public static class SquadInstallCopy
 
     private static void ReRootTextFiles(string directory, string from, string to)
     {
-        foreach (FileInfo entry in new DirectoryInfo(directory).EnumerateFiles("*", SearchOption.AllDirectories))
+        foreach (string file in EnumerateOwnFiles(directory))
         {
-            if (entry.LinkTarget is not null || !TextExtensions.Contains(entry.Extension))
+            if (!TextExtensions.Contains(Path.GetExtension(file)))
                 continue;
 
-            string text = File.ReadAllText(entry.FullName);
+            string text = File.ReadAllText(file);
             if (TryReplaceRoot(text, from, to, out string updated))
-                WriteTextAtomically(entry.FullName, updated);
+                WriteTextAtomically(file, updated);
+        }
+    }
+
+    /// <summary>
+    /// Lists the files the directory owns: links, file and directory, are not its content, so neither is
+    /// returned nor descended into. A copy keeps the template's links, and following one would rewrite a
+    /// file outside the copy, visit one inode twice through the linked path, or never finish on a cycle.
+    /// </summary>
+    private static IEnumerable<string> EnumerateOwnFiles(string directory)
+    {
+        foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos("*", SearchOption.TopDirectoryOnly))
+        {
+            if (entry.LinkTarget is not null)
+                continue;
+
+            if (entry is DirectoryInfo nested)
+            {
+                foreach (string file in EnumerateOwnFiles(nested.FullName))
+                    yield return file;
+
+                continue;
+            }
+
+            yield return entry.FullName;
         }
     }
 

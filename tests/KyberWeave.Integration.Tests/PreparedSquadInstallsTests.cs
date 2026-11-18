@@ -237,6 +237,26 @@ public sealed class PreparedSquadInstallsTests : IDisposable
     }
 
     /// <summary>
+    /// A copy keeps a directory link as a link, so re-rooting must stop at the copy's own files: the
+    /// link is not the copy's content, and following it would rewrite a file outside the sandbox.
+    /// </summary>
+    [Fact]
+    public void ReRootDoesNotFollowADirectorySymlinkOutOfTheCopy()
+    {
+        using TempDirectory temp = new();
+        using TempDirectory outside = new();
+        string outsideFile = Path.Combine(outside.Path, "settings.json");
+        string original = $$"""{"root":"{{From}}/a"}""";
+        File.WriteAllText(outsideFile, original);
+        string stateDir = Directory.CreateDirectory(Path.Combine(temp.Path, "state")).FullName;
+        Directory.CreateSymbolicLink(Path.Combine(stateDir, "escape"), outside.Path);
+
+        SquadInstallCopy.ReRoot(stateDir, From, To);
+
+        Assert.Equal(original, File.ReadAllText(outsideFile));
+    }
+
+    /// <summary>
     /// Re-rooting touches only the recorded root itself: a binary file that happens to contain the
     /// bytes is left alone, and a sibling path that merely starts with the root is not rewritten.
     /// </summary>
@@ -245,8 +265,8 @@ public sealed class PreparedSquadInstallsTests : IDisposable
     {
         using TempDirectory temp = new();
         string stateDir = Directory.CreateDirectory(Path.Combine(temp.Path, "state")).FullName;
-        string from = "/tmp/kw-k/12";
-        string to = "/tmp/kw-k/99";
+        string from = From;
+        string to = To;
         byte[] binaryBytes = [.. System.Text.Encoding.UTF8.GetBytes(from), 0x00, 0x01, 0xFF];
         string binaryPath = Path.Combine(stateDir, "cache.db");
         File.WriteAllBytes(binaryPath, binaryBytes);
@@ -263,6 +283,10 @@ public sealed class PreparedSquadInstallsTests : IDisposable
     private sealed class FirstSubtype(string key, TempDirectory directory) : PreparedSquadInstall(key, directory);
 
     private sealed class SecondSubtype(string key, TempDirectory directory) : PreparedSquadInstall(key, directory);
+
+    private const string From = "/tmp/kw-k/12";
+
+    private const string To = "/tmp/kw-k/99";
 
     private string NewKey(string purpose)
     {
