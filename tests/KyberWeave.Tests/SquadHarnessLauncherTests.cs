@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using System.Diagnostics;
@@ -361,5 +362,67 @@ public sealed class SquadHarnessLauncherTests
 
         Assert.Equal(cleanArgs.Length, startInfo.ArgumentList.Count);
         for (int i = 0; i < cleanArgs.Length; i++) Assert.Equal(cleanArgs[i], startInfo.ArgumentList[i]);
+    }
+
+    [Fact]
+    public void ExecutableOnPathIsFoundThroughTheFileSeam()
+    {
+        InMemoryFileSystem files = new(caseSensitive: true);
+        files.CreateDirectory("/opt/tools");
+        files.WriteAllText("/opt/tools/claude", "binary");
+        SquadHarnessLauncher launcher = new(files, new FakeProcessEnvironment(
+            readVariable: name => name == "PATH" ? $"/usr/bin{Path.PathSeparator}/opt/tools" : null));
+
+        Assert.Equal("/opt/tools/claude", launcher.FindOnPath("claude"));
+    }
+
+    [Fact]
+    public void ExecutableMissingFromEveryPathDirectoryIsNotFound()
+    {
+        InMemoryFileSystem files = new(caseSensitive: true);
+        files.CreateDirectory("/opt/tools");
+        SquadHarnessLauncher launcher = new(files, new FakeProcessEnvironment(
+            readVariable: name => name == "PATH" ? "/opt/tools" : null));
+
+        Assert.Null(launcher.FindOnPath("claude"));
+    }
+
+    [Fact]
+    public void LaunchOnTheEnvironmentsOwnPathAndOperatingSystemWrapsAShimInTheCommandInterpreter()
+    {
+        InMemoryFileSystem files = new(caseSensitive: false);
+        files.CreateDirectory("/winbin");
+        files.WriteAllText("/winbin/claude.cmd", "shim");
+        FakeProcessEnvironment environment = new(
+            operatingSystem: OperatingSystemKind.Windows,
+            readVariable: name => name switch
+            {
+                "PATH" => "/winbin",
+                "PATHEXT" => ".CMD",
+                "ComSpec" => "/winbin/cmd.exe",
+                _ => null
+            });
+        SquadHarnessLauncher launcher = new(files, environment);
+
+        ProcessStartInfo startInfo = launcher.PrepareLaunch(ClaudeRow, "/tmp/instances/claude/fast", ["--version"]);
+
+        Assert.Equal("/winbin/cmd.exe", startInfo.FileName);
+        Assert.StartsWith("/d /s /c", startInfo.Arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LaunchOnANonWindowsEnvironmentPassesTheArgumentsAsAList()
+    {
+        InMemoryFileSystem files = new(caseSensitive: true);
+        files.CreateDirectory("/opt/tools");
+        files.WriteAllText("/opt/tools/claude", "binary");
+        SquadHarnessLauncher launcher = new(files, new FakeProcessEnvironment(
+            operatingSystem: OperatingSystemKind.Linux,
+            readVariable: name => name == "PATH" ? "/opt/tools" : null));
+
+        ProcessStartInfo startInfo = launcher.PrepareLaunch(ClaudeRow, "/tmp/instances/claude/fast", ["--version"]);
+
+        Assert.Equal("/opt/tools/claude", startInfo.FileName);
+        Assert.Equal(["--version"], startInfo.ArgumentList);
     }
 }
