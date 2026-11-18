@@ -88,6 +88,10 @@ public sealed class ArbiterReviewRunAndFindingCapTests
     private static string Finding(int number) =>
         $"id: nit-{number}\nseverity: Minor\nfile: src/Widget.cs\nline: {number}\nclaim: naming";
 
+    /// <summary>The directory a run store's findings sit under, with the separator so a sibling name cannot match.</summary>
+    private static string StoresDirectory =>
+        Path.Combine(InMemoryArbiterState.Directory, "stores") + Path.DirectorySeparatorChar;
+
     private IReadOnlyList<ArbiterDecisionRecord> LensRecords() =>
         _arbiter.Records.Where(record => record.Trigger == LensTrigger).ToList();
 
@@ -113,9 +117,9 @@ public sealed class ArbiterReviewRunAndFindingCapTests
         Assert.Contains(ReviewRunMissing, NotesOf(record), StringComparison.Ordinal);
         Assert.Contains(record.Rules, rule => rule.Id == NitpickRule && rule.Answer == Nitpick);
         Assert.True(provider.CallCount > 0, "the finding must still be judged when the review run is missing");
-        Assert.False(
-            _arbiter.Files.DirectoryExists(Path.Combine(InMemoryArbiterState.Directory, "stores")),
-            "with no review run there is no review to persist into, so no store is written");
+        Assert.DoesNotContain(
+            _arbiter.Log.AppendedPaths,
+            path => path.StartsWith(StoresDirectory, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -170,6 +174,9 @@ public sealed class ArbiterReviewRunAndFindingCapTests
         string item = Assert.Single(stored);
         Assert.Contains("nit-1", item, StringComparison.Ordinal);
         Assert.Contains("status: kept", item, StringComparison.Ordinal);
+        Assert.Contains(
+            _arbiter.Log.AppendedPaths,
+            path => path.StartsWith(StoresDirectory, StringComparison.Ordinal));
     }
 
     // ---- (b) more findings than the question budget ----
