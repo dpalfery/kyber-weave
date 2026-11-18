@@ -24,11 +24,11 @@ public sealed class ArbiterRepositoryLocator(
         string working = paths.GetFullPath(path, environment.CurrentDirectory);
         try
         {
-            string workingDirectory = files.DirectoryExists(working) ? working : Path.GetDirectoryName(working) ?? ".";
+            string workingDirectory = files.DirectoryExists(working) ? working : Path.GetDirectoryName(working) ?? working;
             GitOutcome result = git.Run(workingDirectory, ["rev-parse", "--show-toplevel"]);
             string root = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
             if (!string.IsNullOrWhiteSpace(root))
-                return root;
+                return paths.GetFullPath(root, workingDirectory);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
         {

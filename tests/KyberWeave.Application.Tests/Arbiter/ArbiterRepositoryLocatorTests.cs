@@ -35,6 +35,32 @@ public sealed class ArbiterRepositoryLocatorTests
     }
 
     [Fact]
+    public void AGitAnswerIsTakenAsAFullPath()
+    {
+        _files.CreateDirectory("/kw/checkout");
+
+        Assert.Equal("/kw/checkout", Locator(new GitOutcome(0, "/kw/checkout/", string.Empty)).ResolveRepositoryRoot(WorkingDirectory));
+    }
+
+    [Fact]
+    public void ARelativeGitAnswerResolvesAgainstTheDirectoryGitRanIn()
+    {
+        _files.CreateDirectory("/kw/work/project/checkout");
+
+        Assert.Equal(
+            "/kw/work/project/checkout",
+            Locator(new GitOutcome(0, "checkout", string.Empty)).ResolveRepositoryRoot("/kw/work/project"));
+    }
+
+    [Fact]
+    public void AGitAnswerThatNamesNoPathLeavesTheInjectedPathAsTheRoot()
+    {
+        _files.CreateDirectory(WorkingDirectory);
+
+        Assert.Equal(WorkingDirectory, Locator(new GitOutcome(0, "a\0b", string.Empty)).ResolveRepositoryRoot(WorkingDirectory));
+    }
+
+    [Fact]
     public void AGitThatCannotAnswerLeavesTheInjectedPathAsTheRoot()
     {
         _files.CreateDirectory(WorkingDirectory);
