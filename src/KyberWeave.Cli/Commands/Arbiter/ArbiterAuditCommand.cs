@@ -1,5 +1,6 @@
 using System.Globalization;
 using KyberWeave.Application.Arbiter;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Rules;
@@ -17,6 +18,7 @@ public sealed class ArbiterAuditCommand(
     IArbiterRepositoryLocator locator,
     IArbiterAuditService audits,
     IRepositoryFileStore files,
+    IPathResolver paths,
     IAnsiConsole console,
     PlanArguments plans) : Command<ArbiterSettings>
 {
@@ -98,7 +100,7 @@ public sealed class ArbiterAuditCommand(
                 return 1;
             }
 
-            matchesPlan = new PlanFilter(repositoryRoot, config, relative, files).Matches;
+            matchesPlan = new PlanFilter(repositoryRoot, config, relative, files, paths).Matches;
         }
 
         if (audits.Audit(repositoryRoot, config, since, settings.Session, matchesPlan, report) is not { } audited)
@@ -125,7 +127,7 @@ public sealed class ArbiterAuditCommand(
         Execute(context, settings, CancellationToken.None);
 
     /// <summary>The plan <c>--plan</c> named, resolved to its repository-relative path, and the same resolution of a ledger event's plan file.</summary>
-    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative, IRepositoryFileStore files)
+    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative, IRepositoryFileStore files, IPathResolver paths)
     {
         private readonly PlanFileResolver _resolver = new(root, config, files);
         private readonly Dictionary<string, string> _seen = new(StringComparer.Ordinal);
@@ -140,7 +142,7 @@ public sealed class ArbiterAuditCommand(
                 PlanPathResolution resolution = _resolver.Resolve(eventPlan, root);
                 canonical = resolution.Found
                     ? resolution.Path!
-                    : Path.GetRelativePath(root, Path.GetFullPath(eventPlan, root)).Replace('\\', '/');
+                    : Path.GetRelativePath(root, paths.GetFullPath(eventPlan, root)).Replace('\\', '/');
                 _seen[eventPlan] = canonical;
             }
 
