@@ -84,6 +84,15 @@ public sealed class SquadPackerTests
     }
 
     [Fact]
+    public void PackApmOfAMissingSourceThrowsInsteadOfWritingAnEmptyArchive()
+    {
+        string missing = Path.GetFullPath("/repo/products/no-such-squad");
+
+        Assert.Throws<DirectoryNotFoundException>(() => Packer().PackApm(missing, Out, "1.2.3"));
+        Assert.False(_files.FileExists(ArchivePath("1.2.3")));
+    }
+
+    [Fact]
     public void PackApmDoesNotDescendIntoADirectoryLinkSoALoopCannotRecurseForever()
     {
         WriteSourceFile("squad.yml", "name: demo\n");

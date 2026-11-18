@@ -30,6 +30,7 @@ public sealed class SquadPacker(IWritableFileSystem files, ISquadCompanionSkills
         ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(outDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(version);
+        ThrowWhenSourceIsMissing(sourcePath);
 
         string archivePath = Path.Combine(outDirectory, $"kyber-squad-{version}.zip");
 
@@ -207,6 +208,20 @@ public sealed class SquadPacker(IWritableFileSystem files, ISquadCompanionSkills
         return filled.Files
             .Select(file => (file.RelativePath, file.Content.ToArray()))
             .ToList();
+    }
+
+    /// <summary>
+    /// Refuses a source root that is not there, as the directory listing the packer used before the move did. Without
+    /// it a mistyped root would pack a valid archive holding no Squad content at all.
+    /// </summary>
+    /// <param name="sourcePath">The directory the source is expected under.</param>
+    /// <exception cref="DirectoryNotFoundException">Nothing is at the path.</exception>
+    private void ThrowWhenSourceIsMissing(string sourcePath)
+    {
+        if (!files.DirectoryExists(sourcePath))
+        {
+            throw new DirectoryNotFoundException($"Squad source root '{sourcePath}' does not exist.");
+        }
     }
 
     /// <summary>
