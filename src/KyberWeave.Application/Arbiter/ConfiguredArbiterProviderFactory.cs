@@ -2,7 +2,6 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Providers;
-using KyberWeave.Data.Arbiter.Credentials;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Data.Arbiter;
@@ -16,12 +15,21 @@ namespace KyberWeave.Data.Arbiter;
 /// cannot be read all answer null, without a network call, so a host with no model pays nothing and sees nothing.
 /// </remarks>
 /// <param name="userSettings">Applies the user override to the repository provider.</param>
-public sealed class ConfiguredArbiterProviderFactory(IArbiterUserSettings userSettings)
+/// <param name="environment">Where the key's environment variable is read.</param>
+/// <param name="handlers">Supplies the transport when the caller names none.</param>
+/// <param name="clock">Dates each client's retry deadline.</param>
+/// <param name="credentialStore">Builds the operating system's credential store; called once per provider, so a failure to build it is absorbed there.</param>
+public sealed class ConfiguredArbiterProviderFactory(
+    IArbiterUserSettings userSettings,
+    IProcessEnvironment environment,
+    IArbiterHttpHandlers handlers,
+    TimeProvider clock,
+    Func<ICredentialStore> credentialStore)
 {
     /// <summary>The provider to ask, or null when none is configured or reachable without a call.</summary>
     /// <param name="repositoryProvider">The provider the repository configures.</param>
     /// <param name="homeDirectory">The user's home directory, where the override lives.</param>
-    /// <param name="handler">The HTTP handler; null for a new <see cref="HttpClientHandler"/>.</param>
+    /// <param name="handler">The HTTP handler; null for the transport the handler seam creates.</param>
     /// <param name="storeFactory">The credential store; null for the operating system's.</param>
     [System.Diagnostics.CodeAnalysis.SuppressMessage(
         "Reliability",
@@ -58,7 +66,7 @@ public sealed class ConfiguredArbiterProviderFactory(IArbiterUserSettings userSe
         ICredentialStore? store;
         try
         {
-            store = (storeFactory ?? OperatingSystemCredentialStore.Create)();
+            store = (storeFactory ?? credentialStore)();
         }
         catch (Exception exception) when (exception is InvalidOperationException or IOException or PlatformNotSupportedException)
         {
@@ -69,7 +77,7 @@ public sealed class ConfiguredArbiterProviderFactory(IArbiterUserSettings userSe
         {
             try
             {
-                return ArbiterKeyResolver.Resolve(uri.ToString(), store, Environment.GetEnvironmentVariable, userOverride);
+                return ArbiterKeyResolver.Resolve(uri.ToString(), store, environment.GetVariable, userOverride);
             }
             catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception)
             {
@@ -81,6 +89,6 @@ public sealed class ConfiguredArbiterProviderFactory(IArbiterUserSettings userSe
             return null;
 
         return SystemOneClient.CreateForProduct(
-            handler ?? new HttpClientHandler(), endpoint, provider.Model, provider.TimeoutMs, keyResolver);
+            handler ?? handlers.Create(), endpoint, provider.Model, provider.TimeoutMs, clock, keyResolver);
     }
 }

@@ -6,7 +6,9 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Arbiter.Mcp;
+using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Data.Arbiter;
 using KyberWeave.Data;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Hooks.Arbiter;
@@ -29,6 +31,13 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterKeyService, Core.Arbiter.ArbiterKeyService>();
         services.TryAddSingleton<IArbiterDryRunService, Core.Arbiter.ArbiterDryRunService>();
         services.TryAddSingleton<IOllamaProbe, Core.Arbiter.OllamaProbe>();
+        services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
+        services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(
+            sp.GetRequiredService<IArbiterUserSettings>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IArbiterHttpHandlers>(),
+            sp.GetRequiredService<TimeProvider>(),
+            () => sp.GetRequiredService<ICredentialStore>()));
         services.TryAddSingleton<IArbiterConfigResolver, Cli.Commands.Arbiter.ArbiterConfigResolver>();
         services.TryAddSingleton<IArbiterSectionSelectionService, ArbiterSectionSelectionService>();
         services.TryAddSingleton<IPlanRootResolver>(sp => new Core.Arbiter.Plans.PlanRootResolver(
