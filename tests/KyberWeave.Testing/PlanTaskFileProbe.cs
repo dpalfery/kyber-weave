@@ -120,9 +120,14 @@ internal static class PlanTaskFileProbe
         "dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class \"" + TestClass + "\"";
 
     /// <summary>A corpus holding the plan index and the plan, and no task file.</summary>
-    internal static DocFixture Corpus(string? planMarkdown = null)
+    internal static DocFixture Corpus(string? planMarkdown = null) => Populate(new DocFixture(), planMarkdown);
+
+    /// <summary>The same corpus on an in-memory file system, for a unit test.</summary>
+    internal static DocFixture CorpusInMemory(string? planMarkdown = null) => Populate(DocFixture.CreateInMemory(), planMarkdown);
+
+    private static DocFixture Populate(DocFixture fixture, string? planMarkdown)
     {
-        return new DocFixture().WithCatalog()
+        return fixture.WithCatalog()
             .Write(
                 ".kyber-weave/kyber-weave.yml",
                 """

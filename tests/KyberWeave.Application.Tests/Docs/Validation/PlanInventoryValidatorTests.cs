@@ -79,7 +79,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void APackLeftInThePlansFolderWhenItsPlanWasArchivedIsKWDOCLIFECYCLE001()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("""
                 ## Active Plans
 
@@ -103,7 +103,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void APlanReachedThroughALinkedPackIsListed()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("- [Spine dispatch pack](tasks/)"))
             .Write("6-Docs/plans/tasks/README.md", Plan("plans/tasks/index", "- [T1](T1.md)"))
             .Write("6-Docs/plans/tasks/T1.md", Plan("plans/tasks/T1"));
@@ -116,7 +116,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void APageOutsideThePlansFolderDoesNotListAPlanByLinkingIt()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("- [Architecture](../architecture.md)"))
             .Write("6-Docs/architecture.md", Index("- [Rollout](plans/rollout.md)", id: "architecture"))
             .Write("6-Docs/plans/rollout.md", Plan("plans/rollout"));
@@ -129,7 +129,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void ACorpusWithoutAPlanIndexIsSilent()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/plans/rollout.md", Plan("plans/rollout"));
 
         DiagnosticReport report = Validate(fixture);
@@ -145,11 +145,11 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void APlanUnderTheArchiveSegmentIsNotUnlistedWhenTheIndexSitsAboveTheArchiveSubtree()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/README.md", Index("None.", "docs/index"))
             .Write("6-Docs/archive/plans/closed-spine.md", Plan("plans/closed-spine"));
 
-        DocumentSet set = RealDocumentLoader.Create(fixture.Root, ArchiveInCorpus).Load();
+        DocumentSet set = fixture.Loader(ArchiveInCorpus).Load();
         DiagnosticReport report = new PlanInventoryValidator(RootPlanIndexOverrides).Validate(set);
 
         Assert.True(report.Items.Count == 0, Describe(report));
@@ -160,7 +160,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void AnOpenRowWhosePlanFileIsGoneIsKWDOCLIFECYCLE006()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index(Columns + "| [Cards](2026-11-13-cards.md) | Ready | Add cards. |"));
 
         DiagnosticReport report = Validate(fixture);
@@ -171,7 +171,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void AProseSentenceRestatingAPlansStatusIsKWDOCLIFECYCLE006()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("**One active plan:** `Cards` (Draft). Every other plan is archived.\n\n" + Columns));
 
         DiagnosticReport report = Validate(fixture);
@@ -182,7 +182,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void AnOpenRowForAnExistingPlanIsClean()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index(Columns + "| [Cards](2026-11-13-cards.md) | Ready | Add cards. |"))
             .Write("6-Docs/plans/2026-11-13-cards.md", Plan("plans/cards"));
 
@@ -194,7 +194,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void AnExistingPlanTheIndexOmitsIsStillKWDOCLIFECYCLE001()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index(Columns))
             .Write("6-Docs/plans/2026-11-13-cards.md", Plan("plans/cards"));
 
@@ -206,7 +206,7 @@ public sealed class PlanInventoryValidatorTests
     [Fact]
     public void AnIndexLeftAfterArchiveWithNoOpenRowOrSentenceIsClean()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("No plans are open.\n\n| [Cards](../archive/plans/cards.md) | Archived | Add cards. |"));
 
         DiagnosticReport report = Validate(fixture);

@@ -36,4 +36,8 @@ internal static class PlanFinalizeFixture
         Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
         return fixture;
     }
+
+    /// <summary>The same repository on an in-memory file system, for a unit test.</summary>
+    internal static DocFixture RepositoryInMemory(string? plan = null) =>
+        PlanTaskFileProbe.CorpusInMemory(plan ?? DraftPlan()).Write(PlanTaskFileProbe.PlanIndexPath, PlanIndexTable).EnsureDirectory(".git");
 }

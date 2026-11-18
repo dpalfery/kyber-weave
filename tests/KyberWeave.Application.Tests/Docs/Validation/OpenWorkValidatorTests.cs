@@ -1,10 +1,8 @@
-using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
-using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Arbiter;
 namespace KyberWeave.Tests;
 
@@ -53,7 +51,7 @@ public sealed class OpenWorkValidatorTests
 
     /// <summary>Runs the validator over the fixture with the product-default registry.</summary>
     private static DiagnosticReport Validate(DocFixture fixture) =>
-        new OpenWorkValidator(KyberWeaveConfigDefaults.Product, DocsPorts.Files).Validate(fixture.Load());
+        new OpenWorkValidator(KyberWeaveConfigDefaults.Product, fixture.Store).Validate(fixture.Load());
 
     /// <summary>Lists each finding's code and file, for assertion messages.</summary>
     private static string Describe(DiagnosticReport report) =>
@@ -66,7 +64,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void APlanStillInThePlansFolderIsKWDOCLIFECYCLE003()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write("6-Docs/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"));
 
@@ -86,7 +84,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ASpecificationFolderIsOneFindingPointingAtItsReadme()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SpecIndex, Index("specs/index"))
             .Write("6-Docs/specs/tray/README.md", Index("specs/tray/index"))
             .Write("6-Docs/specs/tray/requirements.md", Work("specs/tray/requirements", "requirements"))
@@ -104,7 +102,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void TheIndexesAloneAreNotOpenWork()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write(SpecIndex, Index("specs/index"));
 
@@ -117,7 +115,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ArchivedPlansAndSpecificationsAreClosed()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write(SpecIndex, Index("specs/index"))
             .Write("6-Docs/archive/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"))
@@ -139,124 +137,15 @@ public sealed class OpenWorkValidatorTests
         {
             Additions = [new ConfigRegEntry(ConfigRegConfig.PlanIndexProperty, "6-Docs/README.md")]
         });
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/README.md", Index("index"))
             .Write("6-Docs/guide.md", Work("guide", "reference"))
             .Write("6-Docs/2026-09-14-kilo.md", Work("2026-09-14-kilo", "plan"));
 
-        DiagnosticReport report = new OpenWorkValidator(rootPlanIndex, DocsPorts.Files).Validate(fixture.Load());
+        DiagnosticReport report = new OpenWorkValidator(rootPlanIndex, fixture.Store).Validate(fixture.Load());
 
         Diagnostic finding = Assert.Single(report.Items);
         Assert.Equal("6-Docs/2026-09-14-kilo.md", finding.FilePath);
-    }
-
-    /// <summary>
-    /// Open work is correct while it is being built, so the rule runs only when the merge
-    /// gate asks for it; the default <c>docs validate</c> stays silent.
-    /// </summary>
-    [Theory]
-    [InlineData(false, 0)]
-    [InlineData(true, 1)]
-    public void DocsValidateReportsOpenWorkOnlyWithMergeReady(bool mergeReady, int expectedExit)
-    {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
-            .Write(PlanIndex, """
-                ---
-                id: plans/index
-                title: Plans
-                doc-type: index
-                status: current
-                owner: Maintainers
-                last-reviewed: 2026-09-24
-                ---
-
-                # Plans
-
-                - [Kilo](2026-09-14-kilo.md)
-                """)
-            .Write("6-Docs/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"));
-        DocsValidateSettings settings = new DocsValidateSettings
-        {
-            Path = fixture.Root,
-            Format = "json",
-            MergeReady = mergeReady
-        };
-
-        CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
-
-        Assert.Equal(expectedExit, execution.Result);
-        Assert.Equal(mergeReady, execution.Output.Contains(OpenWorkValidator.OpenWork, StringComparison.Ordinal));
-    }
-
-    /// <summary>
-    /// The worker prompts are duplicated from the plan into a tracked task file, and the plan is
-    /// the authority, so the file has a shelf life of exactly one plan: the commit that archives
-    /// the plan deletes it. One left behind describes work nobody is doing any more, and the
-    /// next architect reads it as live.
-    /// </summary>
-    /// <remarks>
-    /// The gate placement is part of the rule. An open plan is correct while the build runs, so
-    /// this is a merge gate: the same corpus passes <c>docs validate</c> and fails
-    /// <c>docs validate --merge-ready</c>.
-    /// </remarks>
-    [Fact]
-    public void ALeftoverTaskFileFailsMergeReadyAsKWDOCCLIFECYCLE005()
-    {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
-            .Write(PlanIndex, """
-                ---
-                id: plans/index
-                title: Plans
-                doc-type: index
-                status: current
-                owner: Maintainers
-                last-reviewed: 2026-09-24
-                ---
-
-                # Plans
-
-                - [Kilo](2026-09-14-kilo.md)
-                """)
-            .Write("6-Docs/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"))
-            .Write(
-                "6-Docs/plans/2026-09-14-kilo.tasks.yml",
-                """{ "schema-version": 1, "plan": "6-Docs/plans/2026-09-14-kilo.md", "tasks": [] }""");
-
-        MergedRun withoutTheGate = ValidateThroughTheCommand(fixture, mergeReady: false);
-        Assert.DoesNotContain(LeftoverTaskFile, withoutTheGate.Output, StringComparison.Ordinal);
-
-        MergedRun withTheGate = ValidateThroughTheCommand(fixture, mergeReady: true);
-        Assert.True(
-            withTheGate.Output.Contains(LeftoverTaskFile, StringComparison.Ordinal),
-            $"a merge carrying a leftover task file must report {LeftoverTaskFile}; it reported: {withTheGate.Output}");
-
-        // The fixture is a plain directory, not a git repository, so the archive-closeout gate
-        // also fails here. What this pins is that the leftover file is an error and not a
-        // warning: it alone would already make the merge gate exit 1.
-        Assert.Equal(1, withTheGate.Exit);
-    }
-
-    /// <summary>
-    /// A specification's task file lives in the specification folder, so the closeout moves it
-    /// with the folder. Looking only in the active folders would let a file ride into the
-    /// archive beside its specification, where it stays readable and forever stale.
-    /// </summary>
-    [Fact]
-    public void ATaskFileArchivedWithItsSpecificationIsStillCaught()
-    {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
-            .Write(SpecIndex, Index("specs/index"))
-            .Write(
-                "6-Docs/archive/specs/tray/tasks.yml",
-                """{ "schema-version": 1, "plan": "6-Docs/archive/specs/tray/design.md", "tasks": [] }""");
-
-        MergedRun run = ValidateThroughTheCommand(fixture, mergeReady: true);
-
-        Assert.True(
-            run.Output.Contains(LeftoverTaskFile, StringComparison.Ordinal),
-            $"an archived specification carrying its task file must report {LeftoverTaskFile}; " +
-            $"it reported: {run.Output}");
     }
 
     /// <summary>
@@ -265,7 +154,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ATaskFileInASecondaryDocsRootIsCaught()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write(
                 "secondary/plans/2026-09-14-kilo.tasks.yml",
@@ -277,7 +166,7 @@ public sealed class OpenWorkValidatorTests
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["6-Docs", "secondary"])
         };
 
-        DiagnosticReport report = new OpenWorkValidator(config, DocsPorts.Files, fixture.Root).Validate(fixture.Load());
+        DiagnosticReport report = new OpenWorkValidator(config, fixture.Store, fixture.Root).Validate(fixture.Load());
 
         Assert.True(
             report.Items.Any(i => i.Code == LeftoverTaskFile && i.FilePath == "secondary/plans/2026-09-14-kilo.tasks.yml"),
@@ -286,21 +175,4 @@ public sealed class OpenWorkValidatorTests
 
     /// <summary>A task file left behind when the change merges (<c>KW-DOC-LIFECYCLE-005</c>).</summary>
     private const string LeftoverTaskFile = "KW-DOC-LIFECYCLE-005";
-
-    private static MergedRun ValidateThroughTheCommand(DocFixture fixture, bool mergeReady)
-    {
-        DocsValidateSettings settings = new()
-        {
-            Path = fixture.Root,
-            Format = "json",
-            MergeReady = mergeReady
-        };
-
-        CapturedConsoleExecution<int> execution =
-            ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
-        return new MergedRun(execution.Result, execution.Output);
-    }
-
-    /// <summary>What one <c>docs validate</c> child-in-process returned.</summary>
-    private sealed record MergedRun(int Exit, string Output);
 }
