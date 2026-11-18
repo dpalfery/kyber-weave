@@ -297,7 +297,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |
 | `SquadTargetRootConfirmation` (`Commands/Squad/Infrastructure/SquadTargetRootConfirmation.cs`) | console | 4.5 |
 | `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | file system, paths, console | 4.5 |
-| `SquadDoctorCommand` (`Commands/Squad/SquadDoctorCommand.cs`) | file system, environment | 4.5 |
 | `SquadHostDefaults` (`Commands/Squad/SquadHostDefaults.cs`) | file system, environment | 4.5 |
 | `SquadInstallCommand` (`Commands/Squad/SquadInstallCommand.cs`) | environment, console | 4.5 |
 | `SquadPresetClearCommand` (`Commands/Squad/SquadPresetClearCommand.cs`) | file system | 4.5 |
