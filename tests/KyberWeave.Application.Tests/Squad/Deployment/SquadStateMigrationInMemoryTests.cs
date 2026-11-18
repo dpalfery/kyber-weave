@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
@@ -69,6 +70,134 @@ public sealed class SquadStateMigrationInMemoryTests
             SquadStateTreeCapture.Capture(_state.Files, Layout.LegacyGlobalDirectory(root))));
         JsonObject ledger = JsonNode.Parse(_state.Files.ReadAllText(Layout.LedgerPath()))!.AsObject();
         Assert.Equal([Layout.KeyOf(root)], ledger["globalMigratedFrom"]!.AsArray().Select(node => node!.GetValue<string>()));
+    }
+
+    private SquadStateMigration MigrationWith(Action beforeLease) =>
+        new(
+            _state.Store,
+            _state.UserPaths,
+            _state.Files,
+            _state.Semantics,
+            new BeforeAcquireLease(new InProcessLease(_state.LeaseHost), beforeLease),
+            _state.Time);
+
+    private sealed class BeforeAcquireLease(ILease inner, Action before) : ILease
+    {
+        public IDisposable Acquire(string name, TimeSpan timeout)
+        {
+            before();
+            return inner.Acquire(name, timeout);
+        }
+    }
+
+    [Fact]
+    public void AProjectReconcileWritesNothingWhenTheHomeReceiptVanishesBeforeTheLeaseIsHeld()
+    {
+        string repo = SeedInRepo();
+        _state.Migration.ImportProject(repo);
+        _state.Files.DeleteFile(Layout.RegistryPath());
+        _state.Files.DeleteFile(Layout.LedgerPath());
+        string receipt = Path.Combine(Layout.HomeProjectDirectory(repo), "squad.receipt.json");
+
+        MigrationWith(() => _state.Files.DeleteFile(receipt)).ImportProject(repo);
+
+        Assert.False(_state.Files.FileExists(Layout.RegistryPath()));
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Fact]
+    public void AGlobalReconcileWritesNothingWhenTheHomeReceiptVanishesBeforeTheLeaseIsHeld()
+    {
+        SeedLegacyGlobal();
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+        _state.Files.DeleteFile(Layout.LedgerPath());
+        string receipt = Path.Combine(Layout.HomeGlobalDirectory(), "squad.receipt.json");
+
+        MigrationWith(() => _state.Files.DeleteFile(receipt)).MigrateGlobal(invokingCwd: null);
+
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Fact]
+    public void AProjectReconcileIsSkippedWhileAnotherWriterHoldsTheProjectLease()
+    {
+        string repo = SeedInRepo();
+        _state.Migration.ImportProject(repo);
+        _state.Files.DeleteFile(Layout.RegistryPath());
+        _state.Files.DeleteFile(Layout.LedgerPath());
+        using IDisposable holder = new InProcessLease(_state.LeaseHost).Hold(LeaseNameOfProject(repo));
+
+        SquadMigrationReport report = _state.Migration.ImportProject(repo);
+
+        Assert.Empty(report.Warnings);
+        Assert.False(_state.Files.FileExists(Layout.RegistryPath()));
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Theory]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(IOException))]
+    public void AProjectReconcileThatCannotWriteReportsAWarningAndLeavesTheWorkForTheNextRun(Type failure)
+    {
+        string repo = SeedInRepo();
+        _state.Migration.ImportProject(repo);
+        _state.Files.DeleteFile(Layout.RegistryPath());
+        _state.Files.DeleteFile(Layout.LedgerPath());
+        _state.Files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.WriteAllBytesAtomic) || operation.Name == nameof(InMemoryFileSystem.WriteAllTextAtomic),
+            (Exception)Activator.CreateInstance(failure, "read-only home")!);
+
+        SquadMigrationReport report = _state.Migration.ImportProject(repo);
+
+        Assert.Contains(report.Warnings, warning => warning.Contains("read-only home", StringComparison.Ordinal));
+        _state.Files.ClearFaults();
+        _state.Migration.ImportProject(repo);
+        Assert.True(_state.Files.FileExists(Layout.RegistryPath()));
+        Assert.True(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Fact]
+    public void AGlobalReconcileThatCannotWriteReportsAWarningAndLeavesTheWorkForTheNextRun()
+    {
+        SeedLegacyGlobal();
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+        _state.Files.DeleteFile(Layout.LedgerPath());
+        _state.Files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.WriteAllBytesAtomic),
+            new UnauthorizedAccessException("read-only home"));
+
+        SquadMigrationReport report = _state.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.Contains(report.Warnings, warning => warning.Contains("read-only home", StringComparison.Ordinal));
+        _state.Files.ClearFaults();
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+        Assert.True(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Fact]
+    public void AFreshHomeInstallDoesNotMarkAnUntouchedLegacyGlobalRootAsMigrated()
+    {
+        SeedLegacyGlobal();
+        Layout.WriteText(Path.Combine(Layout.HomeGlobalDirectory(), "squad.receipt.json"), "{}");
+        Layout.WriteText(Path.Combine(Layout.HomeGlobalDirectory(), "squad.lock.yml"), "a different lock");
+
+        _state.Migration.MigrateGlobal(invokingCwd: null);
+
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+    }
+
+    [Fact]
+    public void AFreshHomeProjectInstallIsNeitherRecordedNorRegisteredByTheReconcile()
+    {
+        string repo = SeedInRepo();
+        string directory = Layout.HomeProjectDirectory(repo);
+        Layout.WriteText(Path.Combine(directory, "squad.receipt.json"), "{}");
+        Layout.WriteText(Path.Combine(directory, "squad.lock.yml"), "a different lock");
+
+        _state.Migration.ImportProject(repo);
+
+        Assert.False(_state.Files.FileExists(Layout.LedgerPath()));
+        Assert.False(_state.Files.FileExists(Layout.RegistryPath()));
     }
 
     [Fact]

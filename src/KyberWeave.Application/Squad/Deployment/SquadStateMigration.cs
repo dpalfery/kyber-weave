@@ -194,7 +194,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
             if (!dryRun)
             {
-                ReconcileGlobalLedger(remaining, warnings);
+                ReconcileGlobalLedger(homeGlobalDirectory, remaining, warnings);
             }
         }
 
@@ -254,7 +254,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
         else if (homeReceiptExists && !dryRun && _files.FileExists(inRepoReceiptPath))
         {
-            ReconcileProjectImport(identity, projectDirectory);
+            ReconcileProjectImport(identity, projectDirectory, inRepoLockPath, warnings);
         }
 
         return new SquadMigrationReport([], [], imported, warnings);
@@ -263,15 +263,29 @@ public sealed class SquadStateMigration : ISquadStateMigration
     /// <summary>
     /// Finishes what a run stopped after the home receipt left undone. The receipt is the completion marker of a
     /// copy, so a later run no longer copies, and the ledger entry and the registry entry that follow it in a copy
-    /// would otherwise stay missing for good. The ledger is written only here, after the receipt is known to exist.
+    /// would otherwise stay missing for good. Only a copy that was actually made is finished: the home lock must be
+    /// byte-identical to the in-repo lock, which is what an interrupted copy leaves behind and a fresh install does
+    /// not. The receipt is checked again once the lease is held, so an uninstall that ran in between is not undone,
+    /// and a file failure is a warning, never an error, because this runs before read-only verbs.
     /// </summary>
-    private void ReconcileProjectImport(SquadPhysicalRootIdentity identity, string projectDirectory)
+    private void ReconcileProjectImport(
+        SquadPhysicalRootIdentity identity,
+        string projectDirectory,
+        string inRepoLockPath,
+        List<string> warnings)
     {
         string leaseIdentity = _stateStore.ResolveLeaseIdentity(identity.PhysicalPath, SquadDeploymentScope.Project);
-        RunUnderLease(
+        string homeReceiptPath = Path.Combine(projectDirectory, ReceiptFileName);
+        GuardedReconcile(
             leaseIdentity,
+            warnings,
             () =>
             {
+                if (!_files.FileExists(homeReceiptPath) || !LocksMatch(Path.Combine(projectDirectory, LockFileName), inRepoLockPath))
+                {
+                    return;
+                }
+
                 if (!SquadMigrationLedger.Read(_files, LedgerPath(), out _).HasProjectImport(identity.Key))
                 {
                     RecordInLedger(ledger => ledger.WithProjectImport(identity.Key));
@@ -285,7 +299,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
                 SquadReceipt receipt;
                 try
                 {
-                    receipt = _stateStore.DeserializeReceipt(_files.ReadAllText(Path.Combine(projectDirectory, ReceiptFileName)));
+                    receipt = _stateStore.DeserializeReceipt(_files.ReadAllText(homeReceiptPath));
                 }
                 catch (InvalidDataException)
                 {
@@ -298,39 +312,62 @@ public sealed class SquadStateMigration : ISquadStateMigration
     }
 
     /// <summary>
-    /// Records the ledger entry of each legacy root a stop after the home receipt left out. The home receipt exists,
-    /// so the entry is never written before the receipt it follows.
+    /// Records the ledger entry of each legacy root whose copy a stop after the home receipt left unrecorded. A root
+    /// counts as copied only when the home lock is byte-identical to its lock, so a fresh home install does not mark
+    /// an untouched legacy root as migrated. The home receipt is checked again under the lease, and a file failure
+    /// is a warning.
     /// </summary>
-    private void ReconcileGlobalLedger(List<string> legacyDirectories, List<string> warnings)
+    private void ReconcileGlobalLedger(string homeGlobalDirectory, List<string> legacyDirectories, List<string> warnings)
     {
         if (legacyDirectories.Count == 0)
         {
             return;
         }
 
-        SquadMigrationLedger recorded = ReadLedger(warnings);
-        List<string> missing = legacyDirectories
-            .Select(Path.GetFileName)
-            .OfType<string>()
-            .Where(key => !recorded.HasGlobalMigration(key))
-            .ToList();
-        if (missing.Count == 0)
-        {
-            return;
-        }
-
         string leaseIdentity = _stateStore.ResolveLeaseIdentity(_stateStore.ResolveHomeRoot(), SquadDeploymentScope.Global);
-        RunUnderLease(
+        string homeReceiptPath = Path.Combine(homeGlobalDirectory, ReceiptFileName);
+        GuardedReconcile(
             leaseIdentity,
+            warnings,
             () =>
             {
-                SquadMigrationLedger current = SquadMigrationLedger.Read(_files, LedgerPath(), out _);
-                foreach (string key in missing.Where(key => !current.HasGlobalMigration(key)))
+                if (!_files.FileExists(homeReceiptPath))
                 {
-                    RecordInLedger(ledger => ledger.WithGlobalMigration(key));
+                    return;
+                }
+
+                SquadMigrationLedger current = SquadMigrationLedger.Read(_files, LedgerPath(), out _);
+                foreach (string legacyDirectory in legacyDirectories)
+                {
+                    string key = Path.GetFileName(legacyDirectory);
+                    if (!current.HasGlobalMigration(key) &&
+                        LocksMatch(Path.Combine(homeGlobalDirectory, LockFileName), Path.Combine(legacyDirectory, LockFileName)))
+                    {
+                        RecordInLedger(ledger => ledger.WithGlobalMigration(key));
+                    }
                 }
             });
     }
+
+    /// <summary>Runs a reconcile under the lease. A busy lease skips it; a file failure becomes a warning and the work waits for the next run.</summary>
+    private void GuardedReconcile(string leaseIdentity, List<string> warnings, Action reconcile)
+    {
+        try
+        {
+            RunUnderLease(leaseIdentity, reconcile);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add(
+                $"The migration could not finish recording a copy that an earlier run left unrecorded ({exception.Message}). " +
+                "It will try again on the next run.");
+        }
+    }
+
+    private bool LocksMatch(string homeLockPath, string sourceLockPath) =>
+        _files.FileExists(homeLockPath) &&
+        _files.FileExists(sourceLockPath) &&
+        _files.ReadAllBytes(homeLockPath).AsSpan().SequenceEqual(_files.ReadAllBytes(sourceLockPath));
 
     private static IReadOnlyList<string> TargetsOf(SquadReceipt receipt) =>
         receipt.Files
