@@ -9,7 +9,7 @@ namespace KyberWeave.Cli.Commands.Utilities;
 
 /// <summary>
 ///     Checks the status-line deployment and its runtime prerequisites, and prints the activation
-///     snippet. It never reads a harness settings file (D5).
+///     snippet for a harness that is deployed. It never reads a harness settings file (D5).
 /// </summary>
 /// <remarks>
 ///     Doctor checks only what Kyber Utilities can see without touching the operator's settings: the
@@ -142,7 +142,8 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
 
         if (target == StatusLineTarget.Agy) healthy &= ReportKyberDash(token);
 
-        healthy &= ReportOwnedFiles(target, roots, token);
+        healthy &= ReportOwnedFiles(target, roots, token, out bool deployed);
+        if (!deployed) return healthy;
 
         string stagingRoot = roots.ResolveStagingRoot(target);
         string commandPath;
@@ -188,8 +189,19 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
     }
 
     /// <summary>Checks every receipt-owned file's checksum and, where owed, its executable bit.</summary>
-    private bool ReportOwnedFiles(StatusLineTarget target, StatusLineTargetRoots roots, string token)
+    /// <param name="target">The harness being diagnosed.</param>
+    /// <param name="roots">The resolved per-user roots.</param>
+    /// <param name="token">The harness's CLI token, for the report.</param>
+    /// <param name="deployed">Whether a receipt exists, so the activation snippet has a deployed file to name.</param>
+    /// <returns>Whether every owned file is healthy.</returns>
+    private bool ReportOwnedFiles(
+        StatusLineTarget target,
+        StatusLineTargetRoots roots,
+        string token,
+        out bool deployed)
     {
+        deployed = false;
+
         StatusLineReceipt? receipt;
         try
         {
@@ -212,6 +224,7 @@ public sealed class UtilitiesStatusLineDoctorCommand : Command<UtilitiesStatusLi
             return true;
         }
 
+        deployed = true;
         string stagingRoot = roots.ResolveStagingRoot(target);
         bool healthy = true;
         foreach (StatusLineOwnedFile file in receipt.Files)

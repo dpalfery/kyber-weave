@@ -364,6 +364,7 @@ public sealed class UtilitiesStatusLineCommandSeamTests
     public void DoctorReportsAnInstalledHarnessAndItsVersion()
     {
         InstallClaude();
+        _plans.WithReceipt(StatusLineTarget.Claude, Owned("statusline/statusline.sh"));
 
         int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
             .Execute(null!, new UtilitiesStatusLineSettings());
@@ -372,6 +373,24 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.Contains("(1.2.3)", _console.Output, StringComparison.Ordinal);
         Assert.Contains("prerequisite 'jq'", _console.Output, StringComparison.Ordinal);
         Assert.Contains("Activation — claude", _console.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An installed harness with nothing deployed is told to deploy. The activation snippet names a file the deploy
+    /// would create, so printing it with "not deployed" in the same run would point the operator at an absent path.
+    /// </summary>
+    [Fact]
+    public void DoctorWithNoDeploymentPrintsNoActivationSnippet()
+    {
+        InstallClaude();
+
+        int result = Doctor((_, _) => new ProcessResult(0, "1.2.3\n", string.Empty))
+            .Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(0, result);
+        Assert.Contains("not deployed", _console.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Activation — claude", _console.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("Apply this snippet yourself.", _console.Output, StringComparison.Ordinal);
     }
 
     /// <summary>A missing prerequisite fails the run with a remedy, while the other checks still report.</summary>
@@ -445,6 +464,7 @@ public sealed class UtilitiesStatusLineCommandSeamTests
     public void DoctorReportsAnActivationPathThePolicyRefuses()
     {
         InstallClaude();
+        _plans.WithReceipt(StatusLineTarget.Claude, Owned("statusline/statusline.sh"));
 
         int result = DoctorOver(
                 (_, _) => new ProcessResult(0, "1.2.3\n", string.Empty),
