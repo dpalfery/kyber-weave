@@ -23,6 +23,7 @@ using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
+using KyberWeave.Data.Docs.Mcp;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -115,6 +116,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
+        services.TryAddSingleton<IGitWorktreeIdentity>(sp => new GitWorktreeIdentity(sp.GetRequiredService<IProcessRunner>()));
+        services.TryAddSingleton<IGitCheckoutProbe>(sp => new GitCheckoutProbe(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
         services.TryAddSingleton(sp => new ReviewBlockWriter(
             sp.GetRequiredService<IRepositoryFileStore>(),
