@@ -202,7 +202,7 @@ from this file when it is marked Ready.
     Step 0 outcomes recorded 2026-11-18: these `Data` files wait for phase 3, because squad deployment
     code names them or they need the lease semantics task 3.4 settles: `Squad/Rendering`'s
     `FileSquadRenderInputReader`, `CopilotMcpServerProbe` and `SquadOperatorChannelOverlayFile` (they move
-    together once `SquadWorkerBaselineFile` has an interface), `Squad/Presets/SquadModelPresetValidator`, and
+    together once `SquadWorkerBaselineFile` has an interface), `Squad/Presets/SquadModelPresetValidator`, `Squad/Parsing/SquadSourceLoader` (its 1,904 lines are named by `SquadDeploymentAdapters`), and
     `Squad/Instances/SquadInstanceLinkSync` (its unbounded, in-process-queuing mutex wait needs an `ILease`
     acquire that waits; decide it with 3.4). These stay adapters in `Data`, each now a phase 4 conversion
     rather than a move: `Doctor/FileCodeGraphIndexWorkspace` (task 4.9), `Update/CopilotPromptRefresher`
