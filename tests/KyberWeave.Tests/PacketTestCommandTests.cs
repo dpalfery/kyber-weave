@@ -1,4 +1,5 @@
 using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
@@ -39,7 +40,8 @@ public sealed class PacketTestCommandTests
             row,
             windows,
             Services.GetRequiredService<IPlanTaskTargetService>(),
-            Services.GetRequiredService<ITaskGateSelectionService>());
+            Services.GetRequiredService<ITaskGateSelectionService>(),
+            Services.GetRequiredService<IFileSystem>());
 
 
     private static KyberWeaveConfig Config() => KyberWeaveConfigAssembler.FromYaml("""

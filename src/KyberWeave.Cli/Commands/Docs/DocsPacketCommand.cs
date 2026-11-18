@@ -178,7 +178,8 @@ public sealed class DocsPacketCommand(
                 targets.ContractRow(root, plan, entry.Id),
                 environment.OperatingSystem == OperatingSystemKind.Windows,
                 targets,
-                taskGates) is { } tests)
+                taskGates,
+                files) is { } tests)
         {
             CommandHelpers.WriteUnfolded(console, () =>
             {

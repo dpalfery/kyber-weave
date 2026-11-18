@@ -1,5 +1,6 @@
 using KyberWeave.Application.Review;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -9,21 +10,24 @@ namespace KyberWeave.Tests;
 /// technology's <c>review.technology-gates</c> entry, then the entry of the technology agent the shipped map
 /// names, then the parent technology's entry. The council's <c>review.gates</c> are not part of it.
 /// </summary>
-public sealed class TaskGateResolverTests : IDisposable
+public sealed class TaskGateResolverTests
 {
-    private readonly TempDirectory _root = new();
+    private const string Root = "/repo";
 
-    public void Dispose() => _root.Dispose();
+    private readonly InMemoryFileSystem _files = new();
 
     private static KyberWeaveConfig Config(string yaml) => KyberWeaveConfigAssembler.FromYaml(yaml);
 
     private void Standard(string technology, string frontmatter, string fileName = "")
     {
-        string folder = Path.Combine(_root.Path, "docs", "standards", technology);
-        Directory.CreateDirectory(folder);
+        string folder = Path.Combine(Root, "docs", "standards", technology);
+        _files.CreateDirectory(folder);
         string name = fileName.Length == 0 ? technology + ".standards.md" : fileName;
-        File.WriteAllText(Path.Combine(folder, name), $"---\n{frontmatter}\n---\n\n# {technology}\n");
+        _files.WriteAllText(Path.Combine(folder, name), $"---\n{frontmatter}\n---\n\n# {technology}\n");
     }
+
+    private void FailReadOf(string path, Exception failure) =>
+        _files.FailWhen(operation => operation.Name == nameof(InMemoryFileSystem.ReadAllText) && operation.Path == path, failure);
 
     [Fact]
     public void AnAgentsOwnEntryWinsOverTheTechnologyEntry()
@@ -101,7 +105,7 @@ public sealed class TaskGateResolverTests : IDisposable
                     run: [npx, tsc]
             """);
 
-        string? parent = TaskGateResolver.ParentTechnology(_root.Path, config, "react");
+        string? parent = TaskGateResolver.ParentTechnology(_files, Root, config, "react");
         TaskGateResolution resolved = TaskGateResolver.Resolve(config.Review, "dev-medium", "react", parent);
 
         Assert.Equal("typescript", parent);
@@ -163,7 +167,7 @@ public sealed class TaskGateResolverTests : IDisposable
         Standard("tauri", "builds-on: rust");
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
 
-        Assert.Equal("rust", TaskGateResolver.ParentTechnology(_root.Path, config, "tauri"));
+        Assert.Equal("rust", TaskGateResolver.ParentTechnology(_files, Root, config, "tauri"));
     }
 
     [Fact]
@@ -172,10 +176,10 @@ public sealed class TaskGateResolverTests : IDisposable
         Standard("react", "builds-on: typescript", "README.md");
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
 
-        string expected = Path.Combine(_root.Path, "docs", "standards", "react", "README.md");
-        Assert.True(File.Exists(expected), expected);
+        string expected = Path.Combine(Root, "docs", "standards", "react", "README.md");
+        Assert.True(_files.FileExists(expected), expected);
 
-        Assert.Equal("typescript", TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
+        Assert.Equal("typescript", TaskGateResolver.ParentTechnology(_files, Root, config, "react"));
     }
 
     [Fact]
@@ -183,8 +187,8 @@ public sealed class TaskGateResolverTests : IDisposable
     {
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
 
-        Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, "csharp"));
-        Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, null));
+        Assert.Null(TaskGateResolver.ParentTechnology(_files, Root, config, "csharp"));
+        Assert.Null(TaskGateResolver.ParentTechnology(_files, Root, config, null));
     }
 
     [Fact]
@@ -192,7 +196,7 @@ public sealed class TaskGateResolverTests : IDisposable
     {
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
 
-        Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, "../escape"));
+        Assert.Null(TaskGateResolver.ParentTechnology(_files, Root, config, "../escape"));
     }
 
     /// <summary>
@@ -206,7 +210,7 @@ public sealed class TaskGateResolverTests : IDisposable
         Standard("react", "builds-on: [unclosed");
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
 
-        Assert.Null(TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
+        Assert.Null(TaskGateResolver.ParentTechnology(_files, Root, config, "react"));
     }
 
     /// <summary>
@@ -219,20 +223,12 @@ public sealed class TaskGateResolverTests : IDisposable
     {
         Standard("react", "builds-on: dotnet");
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
-        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+        string path = Path.Combine(Root, "docs", "standards", "react", "react.standards.md");
 
-        if (!UnixFileModes.TryRemoveReadPermission(path, out UnixFileMode originalMode))
-            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+        FailReadOf(path, new UnauthorizedAccessException($"Access to the path '{path}' is denied."));
 
-        try
-        {
-            Assert.Throws<UnauthorizedAccessException>(
-                () => TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
-        }
-        finally
-        {
-            UnixFileModes.Restore(path, originalMode);
-        }
+        Assert.Throws<UnauthorizedAccessException>(
+            () => TaskGateResolver.ParentTechnology(_files, Root, config, "react"));
     }
 
     /// <summary>
@@ -244,22 +240,14 @@ public sealed class TaskGateResolverTests : IDisposable
     {
         Standard("react", "builds-on: dotnet");
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
-        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+        string path = Path.Combine(Root, "docs", "standards", "react", "react.standards.md");
 
-        if (!UnixFileModes.TryRemoveReadPermission(path, out UnixFileMode originalMode))
-            Assert.Skip("A Unix file mode denies a read only off Windows and to an unprivileged process.");
+        FailReadOf(path, new UnauthorizedAccessException($"Access to the path '{path}' is denied."));
 
-        try
-        {
-            List<string> problems = [];
-            Assert.Null(TaskGateResolver.ParentTechnologyOrNone(_root.Path, config, "react", problems));
-            string problem = Assert.Single(problems);
-            Assert.Contains("react.standards.md", problem, StringComparison.Ordinal);
-        }
-        finally
-        {
-            UnixFileModes.Restore(path, originalMode);
-        }
+        List<string> problems = [];
+        Assert.Null(TaskGateResolver.ParentTechnologyOrNone(_files, Root, config, "react", problems));
+        string problem = Assert.Single(problems);
+        Assert.Contains("react.standards.md", problem, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -271,11 +259,11 @@ public sealed class TaskGateResolverTests : IDisposable
     {
         Standard("react", "builds-on: dotnet");
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
-        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+        string path = Path.Combine(Root, "docs", "standards", "react", "react.standards.md");
 
-        using FileStream held = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        FailReadOf(path, new IOException($"The process cannot access the file '{path}' because another handle holds it."));
 
-        Assert.ThrowsAny<IOException>(() => TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
+        Assert.ThrowsAny<IOException>(() => TaskGateResolver.ParentTechnology(_files, Root, config, "react"));
     }
 
     /// <summary>
@@ -287,12 +275,12 @@ public sealed class TaskGateResolverTests : IDisposable
     {
         Standard("react", "builds-on: dotnet");
         KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
-        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+        string path = Path.Combine(Root, "docs", "standards", "react", "react.standards.md");
 
-        using FileStream held = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        FailReadOf(path, new IOException($"The process cannot access the file '{path}' because another handle holds it."));
 
         List<string> problems = [];
-        Assert.Null(TaskGateResolver.ParentTechnologyOrNone(_root.Path, config, "react", problems));
+        Assert.Null(TaskGateResolver.ParentTechnologyOrNone(_files, Root, config, "react", problems));
         string problem = Assert.Single(problems);
         Assert.Contains("react.standards.md", problem, StringComparison.Ordinal);
     }

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Review.Catalogue;
@@ -106,11 +107,13 @@ public static class TaskGateResolver
     /// no standard of its own, its standard's frontmatter does not parse, or the name is not something a folder
     /// can be called. A standard that exists but cannot be read throws: a permission or I/O failure is not an absent parent.
     /// </summary>
+    /// <param name="files">The file system the standards are read through.</param>
     /// <param name="repoRoot">The repository root the standards folders sit under.</param>
     /// <param name="config">The effective configuration, whose ontology names the documentation root.</param>
     /// <param name="technology">The task's technology.</param>
-    public static string? ParentTechnology(string repoRoot, KyberWeaveConfig config, string? technology)
+    public static string? ParentTechnology(IFileSystem files, string repoRoot, KyberWeaveConfig config, string? technology)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
 
@@ -127,12 +130,12 @@ public static class TaskGateResolver
 
         foreach (string path in candidates)
         {
-            if (!File.Exists(path))
+            if (!files.FileExists(path))
                 continue;
 
             try
             {
-                FrontmatterReadResult read = MarkdownFrontmatterReader.Read(File.ReadAllText(path));
+                FrontmatterReadResult read = MarkdownFrontmatterReader.Read(files.ReadAllText(path));
                 if (!read.HasFrontmatter)
                     continue;
 
@@ -165,11 +168,13 @@ public static class TaskGateResolver
     /// parent or none instead: the failure is recorded in <paramref name="problems"/> when the caller
     /// collects them, and the technology names no parent.
     /// </remarks>
+    /// <param name="files">The file system the standards are read through.</param>
     /// <param name="repoRoot">The repository root the standards folders sit under.</param>
     /// <param name="config">The effective configuration, whose ontology names the documentation root.</param>
     /// <param name="technology">The task's technology.</param>
     /// <param name="problems">Receives one line naming the standard that could not be read; null when the caller has nowhere to report it.</param>
     public static string? ParentTechnologyOrNone(
+        IFileSystem files,
         string repoRoot,
         KyberWeaveConfig config,
         string? technology,
@@ -177,7 +182,7 @@ public static class TaskGateResolver
     {
         try
         {
-            return ParentTechnology(repoRoot, config, technology);
+            return ParentTechnology(files, repoRoot, config, technology);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {

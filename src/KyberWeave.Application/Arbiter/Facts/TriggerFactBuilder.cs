@@ -1,4 +1,5 @@
 using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
@@ -139,6 +140,7 @@ public static class TriggerFactBuilder
     /// <param name="secondaryTriggers">Secondary triggers whose declared facts are added to the bag.</param>
     /// <param name="promptInserted">Whether the hook inserted the prompt into this dispatch.</param>
     /// <param name="repoRoot">The repository root the standards folders sit under, when the caller has one.</param>
+    /// <param name="files">The file system the standards are read through; required when <paramref name="repoRoot"/> is given.</param>
     /// <exception cref="ArgumentException">Thrown for an unknown trigger, with the known names as hint.</exception>
     public static ArbiterFactSet Build(
         string trigger,
@@ -152,11 +154,14 @@ public static class TriggerFactBuilder
         string? delegationModel = null,
         IReadOnlyList<string>? secondaryTriggers = null,
         bool promptInserted = false,
-        string? repoRoot = null)
+        string? repoRoot = null,
+        IFileSystem? files = null)
     {
         ArgumentNullException.ThrowIfNull(trigger);
         ArgumentNullException.ThrowIfNull(prompt);
         ArgumentNullException.ThrowIfNull(config);
+        if (repoRoot is not null)
+            ArgumentNullException.ThrowIfNull(files);
 
         if (!ArbiterTriggerCatalog.TryGetFacts(trigger, out IReadOnlySet<string>? primaryDeclared))
         {
@@ -189,7 +194,7 @@ public static class TriggerFactBuilder
         block.Headers.TryGetValue("TASK", out string? task);
         block.Headers.TryGetValue("TECHNOLOGY", out string? technology);
         string? parentTechnology = repoRoot is not null && technology is not null
-            ? TaskGateResolver.ParentTechnologyOrNone(repoRoot, config, technology)
+            ? TaskGateResolver.ParentTechnologyOrNone(files!, repoRoot, config, technology)
             : null;
         block.Headers.TryGetValue("LENS", out string? lens);
         block.Headers.TryGetValue("REFUTE", out string? refute);

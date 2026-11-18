@@ -597,7 +597,7 @@ public sealed class ReviewGatesService(
 
         List<string> unreadableStandards = [];
         string? parentTechnology = TaskGateResolver.ParentTechnologyOrNone(
-            EnclosingRepositoryRoot(root), config, target?.Entry.Technology, unreadableStandards);
+            files, EnclosingRepositoryRoot(root), config, target?.Entry.Technology, unreadableStandards);
         if (unreadableStandards.Count > 0)
         {
             // The task's gates may be keyed on the parent technology, so a standard this process may not read
