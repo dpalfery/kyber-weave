@@ -173,6 +173,97 @@ public sealed class PreparedSquadInstallsTests : IDisposable
         Assert.Equal(0, PreparedSquadInstalls.BuildsOf(key));
     }
 
+    [Fact]
+    public void DifferentInstallSubtypesSharingAKeyDoNotCollide()
+    {
+        string key = NewKey("subtype-isolation");
+
+        FirstSubtype first = PreparedSquadInstalls.Get(key, () => new FirstSubtype(key, Seeded(key)));
+        SecondSubtype second = PreparedSquadInstalls.Get(key, () => new SecondSubtype(key, Seeded(key)));
+
+        Assert.NotSame(first, second);
+        Assert.Equal(2, PreparedSquadInstalls.BuildsOf(key));
+    }
+
+    /// <summary>
+    /// A factory that returns null must fail at the point of the request, and must not leave a build
+    /// count behind that would read as a successful install.
+    /// </summary>
+    [Fact]
+    public void NullFactoryResultThrowsInvalidOperationWithoutIncrementingBuildCount()
+    {
+        string key = NewKey("null-factory");
+
+        _ = Assert.Throws<InvalidOperationException>(
+            () => PreparedSquadInstalls.Get<PreparedSquadInstall>(key, () => null!));
+
+        Assert.Equal(0, PreparedSquadInstalls.BuildsOf(key));
+    }
+
+    /// <summary>
+    /// A copy keeps symbolic links as links and keeps the Unix mode that makes a deployed hook runnable,
+    /// so a test deploying through the copy behaves as the real install does.
+    /// </summary>
+    [Fact]
+    public void TreePreservesSymlinksAndUnixExecutableMode()
+    {
+        using TempDirectory source = new();
+        using TempDirectory destination = new();
+        string targetFile = Path.Combine(source.Path, "hook.sh");
+        File.WriteAllText(targetFile, "#!/bin/sh\necho ok\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(
+                targetFile,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        string fileLink = Path.Combine(source.Path, "hook-link.sh");
+        File.CreateSymbolicLink(fileLink, "hook.sh");
+        string realDir = Directory.CreateDirectory(Path.Combine(source.Path, "real-dir")).FullName;
+        File.WriteAllText(Path.Combine(realDir, "inside.txt"), "inside");
+        string dirLink = Path.Combine(source.Path, "dir-link");
+        Directory.CreateSymbolicLink(dirLink, "real-dir");
+
+        SquadInstallCopy.Tree(source.Path, destination.Path);
+
+        Assert.Equal("hook.sh", new FileInfo(Path.Combine(destination.Path, "hook-link.sh")).LinkTarget);
+        Assert.Equal("real-dir", new DirectoryInfo(Path.Combine(destination.Path, "dir-link")).LinkTarget);
+        if (!OperatingSystem.IsWindows())
+        {
+            UnixFileMode copiedMode = File.GetUnixFileMode(Path.Combine(destination.Path, "hook.sh"));
+            Assert.True(copiedMode.HasFlag(UnixFileMode.UserExecute));
+        }
+    }
+
+    /// <summary>
+    /// Re-rooting touches only the recorded root itself: a binary file that happens to contain the
+    /// bytes is left alone, and a sibling path that merely starts with the root is not rewritten.
+    /// </summary>
+    [Fact]
+    public void ReRootSkipsBinariesAndSiblingPrefixMatches()
+    {
+        using TempDirectory temp = new();
+        string stateDir = Directory.CreateDirectory(Path.Combine(temp.Path, "state")).FullName;
+        string from = "/tmp/kw-k/12";
+        string to = "/tmp/kw-k/99";
+        byte[] binaryBytes = [.. System.Text.Encoding.UTF8.GetBytes(from), 0x00, 0x01, 0xFF];
+        string binaryPath = Path.Combine(stateDir, "cache.db");
+        File.WriteAllBytes(binaryPath, binaryBytes);
+
+        string jsonPath = Path.Combine(stateDir, "receipt.json");
+        File.WriteAllText(jsonPath, $$"""{"self":"{{from}}/a","sibling":"/tmp/kw-k/123/b"}""");
+
+        SquadInstallCopy.ReRoot(stateDir, from, to);
+
+        Assert.Equal(binaryBytes, File.ReadAllBytes(binaryPath));
+        Assert.Equal($$"""{"self":"{{to}}/a","sibling":"/tmp/kw-k/123/b"}""", File.ReadAllText(jsonPath));
+    }
+
+    private sealed class FirstSubtype(string key, TempDirectory directory) : PreparedSquadInstall(key, directory);
+
+    private sealed class SecondSubtype(string key, TempDirectory directory) : PreparedSquadInstall(key, directory);
+
     private string NewKey(string purpose)
     {
         string key = $"prepared-installs-tests/{purpose}/{Guid.NewGuid():N}";
