@@ -118,6 +118,17 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     /// <inheritdoc />
     public string CreateTemporaryDirectory(string prefix)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(prefix);
+        if (Path.IsPathRooted(prefix) ||
+            prefix.Contains('/', StringComparison.Ordinal) ||
+            prefix.Contains('\\', StringComparison.Ordinal) ||
+            prefix.Contains("..", StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                "The prefix names a path rather than a directory name, so the directory would not stay in the system temporary directory.",
+                nameof(prefix));
+        }
+
         string path = Path.Combine(Path.GetTempPath(), prefix + Guid.NewGuid().ToString("N"));
         _ = Directory.CreateDirectory(path);
         return path;

@@ -130,7 +130,9 @@ public interface IWritableFileSystem : IFileSystem
     /// <summary>Creates a new, empty directory with a unique name under the system temporary directory.</summary>
     /// <param name="prefix">A recognizable start for the directory's name, such as a tool name.</param>
     /// <returns>The absolute path of the directory this call created.</returns>
-    /// <remarks>The name is random, so two callers never receive the same directory.</remarks>
+    /// <remarks>The name is random, so two callers never receive the same directory. The prefix is a name fragment,
+    /// not a path: it may not be rooted and may not contain a directory separator.</remarks>
+    /// <exception cref="ArgumentException">The prefix is empty, rooted, or contains a separator or <c>..</c>.</exception>
     /// <exception cref="UnauthorizedAccessException">The process may not create the directory.</exception>
     /// <exception cref="IOException">The directory could not be created.</exception>
     string CreateTemporaryDirectory(string prefix);

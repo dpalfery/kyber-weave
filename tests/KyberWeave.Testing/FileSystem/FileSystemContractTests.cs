@@ -463,6 +463,16 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void CreateTemporaryDirectoryRejectsAPrefixThatLeavesTheTemporaryRoot()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.Throws<ArgumentException>(() => files.CreateTemporaryDirectory(root));
+        _ = Assert.Throws<ArgumentException>(() => files.CreateTemporaryDirectory("nested/prefix-"));
+        _ = Assert.Throws<ArgumentException>(() => files.CreateTemporaryDirectory(string.Empty));
+    }
+
+    [Fact]
     public void CreateTemporaryDirectoryCreatesAnEmptyUniqueDirectory()
     {
         IWritableFileSystem files = CreateFileSystem();
