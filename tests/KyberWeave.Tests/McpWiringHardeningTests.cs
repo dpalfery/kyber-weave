@@ -1,4 +1,5 @@
 using KyberWeave.Data.Docs.Mcp;
+using KyberWeave.Tests.Fakes;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -451,7 +452,10 @@ public sealed class McpWiringHardeningTests : IDisposable
             DenyTraversal(directory, target);
 
             CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-                new DocsMcpMigrateCommand(McpWiringTestServices.Wiring).Execute(
+                new DocsMcpMigrateCommand(
+                    McpWiringTestServices.Wiring,
+                    FakePathResolver.OverEmptyFileSystem(),
+                    new FakeProcessEnvironment()).Execute(
                     null!,
                     new DocsMcpMigrateSettings { Path = Repo, Target = VsCode }));
 
