@@ -37,7 +37,8 @@ public sealed class CodeGraphIndexLockPathTests
             new FakeDoctorFileSystem(),
             workspace,
             FakePathResolver.OverEmptyFileSystem(),
-            new FakeProcessEnvironment(currentDirectory: currentDirectory));
+            new FakeProcessEnvironment(currentDirectory: currentDirectory),
+            TimeProvider.System);
 
         provisioner.Provision(
             root,

@@ -172,7 +172,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `AgentFileReader` (`Agents/AgentFileReader.cs`) | paths | 4.8 |
 | `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
 | `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
@@ -222,11 +221,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
 | `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | paths | 2.5 |
-| `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | 4.8 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
-| `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | 4.8 |
-| `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | 4.8 |
-| `EditHookService` (`Hooks/EditHookService.cs`) | file system, paths | 4.8 |
 | `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
@@ -248,15 +243,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
 | `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
-| `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.8 |
-| `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.8 |
 | `SkillParser` (`Skills/Parsing/SkillParser.cs`) | paths | 2.5 |
-| `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.8 |
-| `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.8 |
-| `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | 4.8 |
 | `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
-| `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | 4.8 |
-| `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | 4.8 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |

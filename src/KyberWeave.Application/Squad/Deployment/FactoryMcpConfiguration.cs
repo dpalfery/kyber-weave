@@ -33,7 +33,7 @@ public static class FactoryMcpConfiguration
     /// <param name="targets">The harnesses this deployment renders.</param>
     /// <param name="scope">The deployment scope; a harness instance's config location is not known.</param>
     /// <param name="source">The squad source whose <c>mcp.json</c> names the granted servers.</param>
-    /// <param name="targetRoot">The project root for a project deployment.</param>
+    /// <param name="targetRoot">The fully qualified project root for a project deployment; its ancestors are read as strings.</param>
     /// <param name="homeDirectory">The user's home directory.</param>
     public static IReadOnlyList<string> Warnings(
         ISquadFileAccess files,
@@ -97,9 +97,11 @@ public static class FactoryMcpConfiguration
             yield break;
         }
 
-        for (DirectoryInfo? directory = new(targetRoot); directory is not null; directory = directory.Parent)
+        for (string? directory = Path.TrimEndingDirectorySeparator(targetRoot);
+             directory is not null;
+             directory = Path.GetDirectoryName(directory))
         {
-            yield return Path.Combine(directory.FullName, ProjectConfigDirectory, ConfigFileName);
+            yield return Path.Combine(directory, ProjectConfigDirectory, ConfigFileName);
         }
     }
 

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
@@ -9,7 +10,7 @@ namespace KyberWeave.Application.Agents;
 /// Every <c>.harnessname/agents</c> directory under the root is a harness agent tree. The
 /// parser it dispatches to is pure; reading the files and listing the directories happens here.
 /// </remarks>
-public sealed class AgentFileReader(IFileSystem files)
+public sealed class AgentFileReader(IFileSystem files, IPathResolver paths, IProcessEnvironment environment)
 {
     // Held through the interface, and in priority order: TOML first, because a .agent.md
     // file matches the Markdown parser and nothing else, while the TOML parser is the
@@ -60,7 +61,7 @@ public sealed class AgentFileReader(IFileSystem files)
     private IReadOnlyList<AgentLoadResult> LoadResults(string projectRoot, HarnessKind? harnessFilter = null)
     {
         List<AgentLoadResult> results = [];
-        string fullRoot = Path.GetFullPath(projectRoot);
+        string fullRoot = paths.GetFullPath(projectRoot, environment.CurrentDirectory);
 
         if (!files.DirectoryExists(fullRoot))
             return results;

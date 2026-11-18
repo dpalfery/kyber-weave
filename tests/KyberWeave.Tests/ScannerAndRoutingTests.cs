@@ -5,6 +5,7 @@ using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Routing;
 using KyberWeave.Core.Skills.Security;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -234,7 +235,7 @@ public class SkillEvalGovernanceTests
         InMemoryFileSystem files = new();
         files.WriteAllText("/eval.yaml", "cases: [unclosed");
 
-        SkillGovernanceService service = new(files, new UnusedArchiveWriter());
+        SkillGovernanceService service = new(files, new UnusedArchiveWriter(), new FakePathResolver(files), new FakeProcessEnvironment());
 
         RoutingEvalParseException error = Assert.Throws<RoutingEvalParseException>(
             () => service.Evaluate("/eval.yaml", new LexicalRoutingStrategy(), SampleSet()));
