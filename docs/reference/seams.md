@@ -302,9 +302,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | file system, paths | 4.4 |
 | `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | file system, paths | 4.4 |
 | `InFlightLedger` (`Arbiter/Ledger/InFlightLedger.cs`) | file system, clock | 4.4 |
-| `PlanFacts` (`Arbiter/Plans/PlanFacts.cs`) | file system | 4.4 |
 | `PlanPathResolver` (`Arbiter/Plans/PlanPathResolver.cs`) | file system, paths | 4.4 |
-| `PlanRootResolver` (`Arbiter/Plans/PlanRootResolver.cs`) | file system, paths | 4.4 |
 | `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
 | `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
 | `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | file system, paths, clock | 4.4 |

@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.RunStart;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
@@ -47,7 +48,7 @@ public sealed class ArbiterPlanWorktreeTests
         string worktree = AddWorktree(probe, "run-wt");
         WritePlan(worktree);
 
-        string root = new PlanRootResolver(RealGitFacts.Create(), new PlanPathResolver()).Resolve(probe.Root, Prompt());
+        string root = RealPlanRoots.Create().Resolve(probe.Root, Prompt());
 
         Assert.True(HoldsPlan(root), $"resolved '{root}', which does not hold the plan");
         Assert.NotEqual(Path.GetFullPath(probe.Root), Path.GetFullPath(root));
@@ -61,7 +62,7 @@ public sealed class ArbiterPlanWorktreeTests
         WritePlan(worktree);
         WritePlan(probe.Root);
 
-        Assert.Equal(probe.Root, new PlanRootResolver(RealGitFacts.Create(), new PlanPathResolver()).Resolve(probe.Root, Prompt()));
+        Assert.Equal(probe.Root, RealPlanRoots.Create().Resolve(probe.Root, Prompt()));
     }
 
     [Fact]
@@ -70,7 +71,7 @@ public sealed class ArbiterPlanWorktreeTests
         using RunStartProbe probe = RunStartProbe.Create();
         _ = AddWorktree(probe, "run-wt");
 
-        Assert.Equal(probe.Root, new PlanRootResolver(RealGitFacts.Create(), new PlanPathResolver()).Resolve(probe.Root, Prompt()));
+        Assert.Equal(probe.Root, RealPlanRoots.Create().Resolve(probe.Root, Prompt()));
     }
 
     [Fact]
@@ -83,8 +84,8 @@ public sealed class ArbiterPlanWorktreeTests
         WritePlan(second);
         File.SetLastWriteTimeUtc(Path.Combine(first, PlanRelative), DateTime.UtcNow.AddHours(1));
 
-        string named = new PlanRootResolver(RealGitFacts.Create(), new PlanPathResolver()).Resolve(probe.Root, Prompt($"Worktree: {second}\n\nWrite the tests."));
-        string newest = new PlanRootResolver(RealGitFacts.Create(), new PlanPathResolver()).Resolve(probe.Root, Prompt());
+        string named = RealPlanRoots.Create().Resolve(probe.Root, Prompt($"Worktree: {second}\n\nWrite the tests."));
+        string newest = RealPlanRoots.Create().Resolve(probe.Root, Prompt());
 
         Assert.EndsWith("run-b", Path.TrimEndingDirectorySeparator(named), StringComparison.Ordinal);
         Assert.EndsWith("run-a", Path.TrimEndingDirectorySeparator(newest), StringComparison.Ordinal);
@@ -96,7 +97,7 @@ public sealed class ArbiterPlanWorktreeTests
         using RunStartProbe probe = RunStartProbe.Create();
         string worktree = AddWorktree(probe, "run-wt");
 
-        string root = new PlanRootResolver(RealGitFacts.Create(), new PlanPathResolver()).Resolve(probe.Root, $"Worktree: {worktree}\n\nWrite the tests.");
+        string root = RealPlanRoots.Create().Resolve(probe.Root, $"Worktree: {worktree}\n\nWrite the tests.");
 
         Assert.EndsWith("run-wt", Path.TrimEndingDirectorySeparator(root), StringComparison.Ordinal);
     }

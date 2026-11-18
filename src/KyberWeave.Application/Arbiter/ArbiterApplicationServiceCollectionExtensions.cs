@@ -1,4 +1,5 @@
 using KyberWeave.Application.RunStart;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Release;
@@ -30,6 +31,14 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IOllamaProbe, Core.Arbiter.OllamaProbe>();
         services.TryAddSingleton<IArbiterConfigResolver, Cli.Commands.Arbiter.ArbiterConfigResolver>();
         services.TryAddSingleton<IArbiterSectionSelectionService, ArbiterSectionSelectionService>();
+        services.TryAddSingleton<IPlanRootResolver>(sp => new Core.Arbiter.Plans.PlanRootResolver(
+            sp.GetRequiredService<IGitRepositoryFacts>(),
+            sp.GetRequiredService<IPlanFileResolver>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>()));
+        services.TryAddSingleton<IPlanFacts>(sp => new Core.Arbiter.Plans.PlanFacts(
+            sp.GetRequiredService<IPlanFileResolver>(),
+            sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterPlanService, ArbiterPlanService>();
         services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
         services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();

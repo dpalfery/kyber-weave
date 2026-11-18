@@ -23,7 +23,9 @@ namespace KyberWeave.Core.Arbiter.Plans;
 /// failure.
 /// </para>
 /// </remarks>
-public sealed partial class PlanFacts(IPlanFileResolver planPaths) : IPlanFacts
+/// <param name="planPaths">Resolves the dispatch's plan inside the repository.</param>
+/// <param name="files">The file system the plan and the planning folders are read from.</param>
+public sealed partial class PlanFacts(IPlanFileResolver planPaths, IFileSystem files) : IPlanFacts
 {
     /// <summary>
     /// How the dispatch's plan and task were identified: <c>headers</c> when the dispatch wrote <c>PLAN_FILE</c> or
@@ -79,17 +81,19 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths) : IPlanFacts
             return facts;
         }
 
-        string? resolved = planPaths.Resolve(planFile, repositoryRoot);
-        if (resolved is null || !File.Exists(resolved))
-        {
-            return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
-        }
-
+        // The resolver and the read both answer "absent" for anything they cannot use, including a root the
+        // resolver refuses: a caller's blank root must not take the hook's whole evaluation down.
         PlanDocument document;
         string content;
         try
         {
-            content = File.ReadAllText(resolved);
+            string? resolved = planPaths.Resolve(planFile, repositoryRoot);
+            if (resolved is null || !files.FileExists(resolved))
+            {
+                return facts.With("plan.exists", false, ArbiterFactLabel.Derived);
+            }
+
+            content = files.ReadAllText(resolved);
             document = PlanDocumentParser.Parse(content);
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -168,16 +172,16 @@ public sealed partial class PlanFacts(IPlanFileResolver planPaths) : IPlanFacts
             string directory = Path.Combine(repositoryRoot, folder.Replace('/', Path.DirectorySeparatorChar));
             try
             {
-                if (!Directory.Exists(directory))
+                if (!files.DirectoryExists(directory))
                     continue;
-                IEnumerable<string> candidates = Directory.EnumerateFiles(directory, "*.md", SearchOption.TopDirectoryOnly)
+                IEnumerable<string> candidates = files.EnumerateFiles(directory, "*.md", recursive: false)
                     .Where(file => !string.Equals(Path.GetFileName(file), "README.md", StringComparison.OrdinalIgnoreCase))
-                    .Concat(Directory.EnumerateDirectories(directory)
+                    .Concat(files.EnumerateDirectories(directory)
                         .Select(sub => Path.Combine(sub, "tasks.md"))
-                        .Where(File.Exists));
+                        .Where(files.FileExists));
                 foreach (string file in candidates)
                 {
-                    if (ActiveStatusRegex().IsMatch(File.ReadAllText(file)))
+                    if (ActiveStatusRegex().IsMatch(files.ReadAllText(file)))
                         active.Add(Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/'));
                 }
             }
