@@ -867,7 +867,7 @@
     },
     {
       "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",
-      "text": "using Process process = Process.Start(startInfo)",
+      "text": "using Process process = Process.Start(startInfo) // nosemgrep",
       "count": 1,
       "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console."
     },
