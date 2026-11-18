@@ -347,7 +347,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     private McpWiringRepairReport Repair(params string[] targets) =>
         McpWiringTestServices.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), targets, dryRun: false);
 
-    private LaunchCommandResolver ResolverOver(params string[] searchPaths) => new(searchPaths);
+    private LaunchCommandResolver ResolverOver(params string[] searchPaths) => PhysicalLaunchCommands.Over(searchPaths);
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);

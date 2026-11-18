@@ -82,7 +82,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [Fact]
     public void ARelativePlanPathResolvesInsideTheRepository()
     {
-        string? resolved = new PlanPathResolver().Resolve("docs/plans/plan.md", _root);
+        string? resolved = PhysicalPlanPaths.Create().Resolve("docs/plans/plan.md", _root);
 
         Assert.NotNull(resolved);
         Assert.True(File.Exists(resolved));
@@ -96,7 +96,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [InlineData("../../../../../../../../etc/passwd")]
     public void APathOutsideTheRepositoryIsRejected(string hostile)
     {
-        Assert.Null(new PlanPathResolver().Resolve(hostile, _root));
+        Assert.Null(PhysicalPlanPaths.Create().Resolve(hostile, _root));
     }
 
     [Theory]
@@ -106,7 +106,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [InlineData("./docs/../secret.md")]
     public void ADetourThatStaysInsideTheRepositoryResolves(string relative)
     {
-        string? resolved = new PlanPathResolver().Resolve(relative, _root);
+        string? resolved = PhysicalPlanPaths.Create().Resolve(relative, _root);
 
         Assert.NotNull(resolved);
         Assert.Equal(Path.GetFullPath(Path.Combine(_root, "secret.md")), resolved);
@@ -115,7 +115,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [Fact]
     public void ARootedPathInsideTheRepositoryIsAccepted()
     {
-        string? resolved = new PlanPathResolver().Resolve(Path.Combine(_root, "docs", "plans", "plan.md"), _root);
+        string? resolved = PhysicalPlanPaths.Create().Resolve(Path.Combine(_root, "docs", "plans", "plan.md"), _root);
 
         Assert.NotNull(resolved);
     }
@@ -128,7 +128,7 @@ public sealed class PlanPathResolverTests : IDisposable
         Directory.CreateDirectory(sibling);
         try
         {
-            Assert.Null(new PlanPathResolver().Resolve(Path.Combine(sibling, "secret.md"), _root));
+            Assert.Null(PhysicalPlanPaths.Create().Resolve(Path.Combine(sibling, "secret.md"), _root));
         }
         finally
         {
@@ -142,7 +142,7 @@ public sealed class PlanPathResolverTests : IDisposable
     [InlineData("   ")]
     public void AnEmptyPlanFileResolvesToNothing(string? empty)
     {
-        Assert.Null(new PlanPathResolver().Resolve(empty, _root));
+        Assert.Null(PhysicalPlanPaths.Create().Resolve(empty, _root));
     }
 
     /// <summary>
@@ -159,7 +159,7 @@ public sealed class PlanPathResolverTests : IDisposable
         {
             Link(link, outside, directory: false);
 
-            Assert.Null(new PlanPathResolver().Resolve("docs/plans/linked.md", _root));
+            Assert.Null(PhysicalPlanPaths.Create().Resolve("docs/plans/linked.md", _root));
         }
         finally
         {
@@ -190,7 +190,7 @@ public sealed class PlanPathResolverTests : IDisposable
         {
             Link(link, outsideDirectory, directory: true);
 
-            Assert.Null(new PlanPathResolver().Resolve("docs/linked/stolen.md", _root));
+            Assert.Null(PhysicalPlanPaths.Create().Resolve("docs/linked/stolen.md", _root));
         }
         finally
         {
@@ -214,7 +214,7 @@ public sealed class PlanPathResolverTests : IDisposable
         {
             Link(link, Path.Combine(_root, "docs", "plans", "plan.md"), directory: false);
 
-            string? resolved = new PlanPathResolver().Resolve("docs/plans/alias.md", _root);
+            string? resolved = PhysicalPlanPaths.Create().Resolve("docs/plans/alias.md", _root);
 
             Assert.NotNull(resolved);
             Assert.True(File.Exists(resolved));
@@ -242,7 +242,7 @@ public sealed class PlanPathResolverTests : IDisposable
         Link(alias, _root, directory: true);
         try
         {
-            string? resolved = new PlanPathResolver().Resolve(
+            string? resolved = PhysicalPlanPaths.Create().Resolve(
                 Path.Combine(alias, "docs", "plans", "plan.md"), alias);
 
             Assert.NotNull(resolved);
