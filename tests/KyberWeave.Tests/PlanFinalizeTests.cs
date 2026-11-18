@@ -309,7 +309,7 @@ public sealed class PlanFinalizeTests
 
     private static PlanFinalize Finalizer(DocFixture fixture, Action<string>? afterActivePlanCheck = null) =>
         new(fixture.Root, KyberWeaveConfig.ProductDefaults,
-            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+            () => RealDocumentLoader.Create(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
             DocsPorts.Files, DocsPorts.Process, DocsTestCommands.SchemaGate)
         {
             AfterActivePlanCheck = afterActivePlanCheck

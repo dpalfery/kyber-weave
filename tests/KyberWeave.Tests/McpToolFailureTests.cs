@@ -135,7 +135,7 @@ public sealed class McpToolFailureTests : IDisposable
         DocumentIndexHost host = new(
             root,
             () => new UnreadableCodeGraph(),
-            () => new DocumentLoader(root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

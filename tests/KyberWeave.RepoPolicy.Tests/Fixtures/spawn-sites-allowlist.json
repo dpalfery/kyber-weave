@@ -806,18 +806,6 @@
       "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."
     },
     {
-      "file": "src/KyberWeave.Data/Docs/Mcp/GitCheckoutProbe.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started at CorpusProvenance.cs:133 with GitTimeout = 5 s."
-    },
-    {
-      "file": "src/KyberWeave.Data/Docs/Mcp/GitCheckoutProbe.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 5 s (CorpusProvenance.cs:31); the process tree is killed on expiry."
-    },
-    {
       "file": "src/KyberWeave.Mcp/CodeGraphFreshness.cs",
       "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
       "count": 1,
@@ -1149,18 +1137,6 @@
     },
     {
       "file": "src/KyberWeave.Kernel/VersionControl/CodeGraphIndexStaleness.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."
-    },
-    {
-      "file": "src/KyberWeave.Data/Docs/Mcp/GitWorktreeIdentity.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with GitTimeout; read-only git rev-parse argv."
-    },
-    {
-      "file": "src/KyberWeave.Data/Docs/Mcp/GitWorktreeIdentity.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
       "count": 1,
       "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."

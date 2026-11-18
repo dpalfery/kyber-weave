@@ -8,13 +8,13 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Governance view: doc-type coverage by component.</summary>
-public sealed class DocsCatalogCommand(IKyberWeaveConfigRepository configs) : Command<DocsSettings>
+public sealed class DocsCatalogCommand(IKyberWeaveConfigRepository configs, IDocumentSourceFactory documents) : Command<DocsSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, out DocumentLoader? loader))
+        if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, documents, out IDocumentSource? loader))
         {
             CommandHelpers.Finish(report, settings, "docs catalog", "Document");
             return 1;

@@ -357,12 +357,12 @@ public class OntologyConfigTests
         }
 
         public IReadOnlyList<DocumentModel> LoadSubjects() =>
-            new DocumentLoader(Root, _config).Load().Documents
+            RealDocumentLoader.Create(Root, _config).Load().Documents
                 .Where(d => d.RelativePath != $"{_config.DocsRoot}/catalog.md")
                 .ToList();
 
         public DiagnosticReport Validate() =>
-            new DocSpecValidator(Root, _config).Validate(new DocumentLoader(Root, _config).Load());
+            new DocSpecValidator(Root, _config).Validate(RealDocumentLoader.Create(Root, _config).Load());
 
         public void Dispose()
         {

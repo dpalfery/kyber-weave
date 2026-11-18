@@ -80,14 +80,16 @@ internal static class DocsCommandComposition
         IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
-        out DocumentLoader? loader) =>
-        TryCreateLoader(configs, settings, report, out loader, out _);
+        IDocumentSourceFactory documents,
+        out IDocumentSource? loader) =>
+        TryCreateLoader(configs, settings, report, documents, out loader, out _);
 
     public static bool TryCreateLoader(
         IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
-        out DocumentLoader? loader,
+        IDocumentSourceFactory documents,
+        out IDocumentSource? loader,
         out KyberWeaveConfig config)
     {
         if (!TryResolveConfig(configs, settings, report, out config, out OntologyConfig ontology))
@@ -96,7 +98,7 @@ internal static class DocsCommandComposition
             return false;
         }
 
-        loader = new DocumentLoader(settings.Path, ontology);
+        loader = documents.Create(settings.Path, ontology);
         return true;
     }
 

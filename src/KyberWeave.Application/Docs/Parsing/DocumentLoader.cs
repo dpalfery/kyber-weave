@@ -4,6 +4,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Parsing;
+using DomainDocsRootPath = KyberWeave.Domain.FileSystem.DocsRootPath;
 using Markdig;
 using Markdig.Extensions.AutoIdentifiers;
 using Markdig.Renderers.Html;
@@ -18,20 +19,23 @@ namespace KyberWeave.Core.Docs.Parsing;
 /// </summary>
 public sealed partial class DocumentLoader : IDocumentSource
 {
+    private readonly IRepositoryFileStore _files;
     private readonly string _catalogPath;
     private readonly OntologyConfig _config;
     private readonly IReadOnlyList<string> _docsRoots;
 
     private readonly string _repoRoot;
 
-    public DocumentLoader(string repoRoot, string docsRelativeRoot = OntologyConfig.DefaultDocsRoot)
-        : this(repoRoot, OntologyConfig.ProductDefaults.WithDocsRoot(docsRelativeRoot))
+    public DocumentLoader(IRepositoryFileStore files, string repoRoot, string docsRelativeRoot = OntologyConfig.DefaultDocsRoot)
+        : this(files, repoRoot, OntologyConfig.ProductDefaults.WithDocsRoot(docsRelativeRoot))
     {
     }
 
-    public DocumentLoader(string repoRoot, OntologyConfig config)
+    public DocumentLoader(IRepositoryFileStore files, string repoRoot, OntologyConfig config)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
+        _files = files;
         ArgumentNullException.ThrowIfNull(config);
         _repoRoot = Path.GetFullPath(repoRoot);
         _config = config;
@@ -41,10 +45,10 @@ public sealed partial class DocumentLoader : IDocumentSource
     }
 
     /// <summary>
-    ///     Path identity follows the same rules as <see cref="DocsRootPath.PathComparer" />,
+    ///     Path identity follows the same rules as <see cref="DomainDocsRootPath.PathComparer" />,
     ///     so a root the normalizer kept as distinct is not later collapsed when walking files.
     /// </summary>
-    private static StringComparer PathComparer => DocsRootPath.PathComparer;
+    private static StringComparer PathComparer => DomainDocsRootPath.PathComparer;
 
     /// <summary>
     ///     Walks every documentation root in configured order, then folds in the catalog when
@@ -63,13 +67,13 @@ public sealed partial class DocumentLoader : IDocumentSource
         foreach (string docsRoot in _docsRoots)
         {
             string absoluteRoot = Absolute(docsRoot);
-            if (!Directory.Exists(absoluteRoot)) continue;
+            if (!_files.DirectoryExists(absoluteRoot)) continue;
 
             // Use EnumerateContainedFiles to walk the tree manually one level at a time,
             // skipping symlinks entirely. Directory.EnumerateFiles with SearchOption.AllDirectories
             // invariably follows symlinked directories, creating the link-escaping vulnerability
-            // addressed by issue #124 / D3. See DocsRootPath.EnumerateContainedFiles for details.
-            foreach (string file in DocsRootPath
+            // addressed by issue #124 / D3. See IRepositoryFileStore.EnumerateContainedFiles for details.
+            foreach (string file in _files
                          .EnumerateContainedFiles(absoluteRoot, "*.md")
                          .OrderBy(p => p, StringComparer.Ordinal))
             {
@@ -140,11 +144,11 @@ public sealed partial class DocumentLoader : IDocumentSource
 
     /// <summary>
     ///     True when the configured catalog exists and neither it nor a directory beneath its
-    ///     root is a symbolic link; see <see cref="DocsRootPath.IsContainedFile" />.
+    ///     root is a symbolic link; see <see cref="IRepositoryFileStore.IsContainedFile" />.
     /// </summary>
     private bool IsCatalogContained()
     {
-        return DocsRootPath.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
+        return _files.IsContainedFile(_repoRoot, _config.ResolvedCatalogPath, _docsRoots);
     }
 
     /// <summary>
@@ -167,7 +171,7 @@ public sealed partial class DocumentLoader : IDocumentSource
         string normalized = relativePath.Replace('\\', '/');
         string absolute =
             Path.GetFullPath(Path.Combine(_repoRoot, normalized.Replace('/', Path.DirectorySeparatorChar)));
-        StringComparison comparison = ReferenceEquals(DocsRootPath.PathComparer, StringComparer.OrdinalIgnoreCase)
+        StringComparison comparison = ReferenceEquals(DomainDocsRootPath.PathComparer, StringComparer.OrdinalIgnoreCase)
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         if (!absolute.Equals(_repoRoot, comparison)
@@ -176,7 +180,7 @@ public sealed partial class DocumentLoader : IDocumentSource
                 ArchivedEntryRefusalReason.EscapesRepositoryRoot,
                 $"Archived entry '{relativePath}' escapes the repository root.");
 
-        if (!DocsRootPath.IsContainedFile(_repoRoot, normalized, _docsRoots))
+        if (!_files.IsContainedFile(_repoRoot, normalized, _docsRoots))
             throw new ArchivedEntryRefusalException(
                 ArchivedEntryRefusalReason.CrossesSymbolicLink,
                 $"Archived entry '{relativePath}' is not reachable without crossing a symbolic link.");
@@ -190,7 +194,7 @@ public sealed partial class DocumentLoader : IDocumentSource
     /// </summary>
     private DocumentModel Parse(string absolutePath, string relativePath)
     {
-        string raw = File.ReadAllText(absolutePath);
+        string raw = _files.ReadAllText(absolutePath);
         FrontmatterReadResult read = MarkdownFrontmatterReader.Read(raw);
 
         if (!read.HasFrontmatter)
@@ -409,7 +413,7 @@ public sealed partial class DocumentLoader : IDocumentSource
         // (D3: never follow a link).
         if (!IsCatalogContained()) return (components, owners);
 
-        foreach (string line in File.ReadLines(_catalogPath))
+        foreach (string line in _files.ReadLines(_catalogPath))
         {
             if (!line.StartsWith('|')) continue;
 

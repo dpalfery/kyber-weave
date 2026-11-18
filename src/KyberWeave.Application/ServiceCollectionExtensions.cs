@@ -5,6 +5,7 @@ using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Mcp;
 using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
@@ -23,6 +24,7 @@ using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
+using KyberWeave.Data.Docs.Mcp;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Review;
@@ -75,7 +77,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPlanTaskService>(),
             sp.GetRequiredService<IPacketHostFacts>(),
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<ICodeGraphPortsFactory>()));
+            sp.GetRequiredService<ICodeGraphPortsFactory>(),
+            sp.GetRequiredService<IDocumentSourceFactory>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
@@ -124,6 +127,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
+        services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(sp.GetRequiredService<IRepositoryFileStore>()));
+        services.TryAddSingleton<IGitWorktreeIdentity>(sp => new GitWorktreeIdentity(sp.GetRequiredService<IProcessRunner>()));
+        services.TryAddSingleton<IGitCheckoutProbe>(sp => new GitCheckoutProbe(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
         services.TryAddSingleton(sp => new ReviewBlockWriter(
             sp.GetRequiredService<IRepositoryFileStore>(),

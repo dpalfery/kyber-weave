@@ -78,7 +78,8 @@ internal static class DocsTestCommands
             provider.GetRequiredService<ICodeGraphPortsFactory>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
             provider.GetRequiredService<IGitRepositoryFacts>(),
-            provider.GetRequiredService<IKyberWeaveConfigRepository>());
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            provider.GetRequiredService<IDocumentSourceFactory>());
     }
 
     public static DocsTasksCommand Tasks(IServiceProvider? services = null)
@@ -111,7 +112,9 @@ internal static class DocsTestCommands
     public static DocsExportGraphCommand ExportGraph() => new(
         Services().GetRequiredService<IManagedGlossaryFactory>(),
         Services().GetRequiredService<ICodeGraphPortsFactory>(),
-        Services().GetRequiredService<IKyberWeaveConfigRepository>());
+        Services().GetRequiredService<IKyberWeaveConfigRepository>(),
+        Services().GetRequiredService<IWritableFileSystem>(),
+        Services().GetRequiredService<IDocumentSourceFactory>());
 
     public static DocsRootRegistry Registry(string root, Func<string, DocsTools> factory)
     {

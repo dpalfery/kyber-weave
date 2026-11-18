@@ -40,8 +40,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
-        services.TryAddSingleton<IDocumentSourceFactory>(_ => new DocumentLoaderFactory());
-        services.TryAddSingleton<IGitWorktreeIdentity>(_ => new GitWorktreeIdentity());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
@@ -49,7 +47,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
         services.TryAddSingleton(_ => StatusLineVersionProbeRunner.Create());
-        services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
         services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
         services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
         _ = services.AddWeaveSquadData();

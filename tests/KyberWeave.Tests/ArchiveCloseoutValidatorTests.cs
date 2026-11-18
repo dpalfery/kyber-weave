@@ -34,9 +34,9 @@ public sealed class ArchiveCloseoutValidatorTests
         return new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, config.Ontology),
+            () => RealDocumentLoader.Create(fixture.Root, config.Ontology),
             DocsPorts.Files).Validate(
-            new DocumentLoader(fixture.Root, config.Ontology).Load(), changes);
+            RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), changes);
     }
 
     private static string FindingText(Diagnostic finding)

@@ -195,7 +195,7 @@ public sealed class DocGraphProjectionTests
             .WithRoute("GET /billing", Node("route:billing", "GET /billing", "route"));
         using TempDirectory output = new();
 
-        DocGraphExportResult result = new DocGraphExporter(resolver).Export(FullRelationshipSet(), output.Path);
+        DocGraphExportResult result = RealDocGraphExporter.Create(resolver).Export(FullRelationshipSet(), output.Path);
         List<JsonElement> nodes = File.ReadAllLines(result.NodesPath).Select(Parse).ToList();
         List<JsonElement> edges = File.ReadAllLines(result.EdgesPath).Select(Parse).ToList();
 
@@ -225,7 +225,7 @@ public sealed class DocGraphProjectionTests
         StubContributor contributor = new([], edges);
         using TempDirectory output = new();
 
-        DocGraphExportResult result = new DocGraphExporter(FakeCodeGraphResolver.WithSymbols()).Export(
+        DocGraphExportResult result = RealDocGraphExporter.Create(FakeCodeGraphResolver.WithSymbols()).Export(
             new DocumentSet { Documents = [] },
             output.Path,
             [contributor]);

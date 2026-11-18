@@ -135,9 +135,9 @@ public sealed class ArchiveCloseoutScopeTests
         return new ArchiveCloseoutValidator(
                 repo.Root,
                 KyberWeaveConfig.ProductDefaults,
-                () => new DocumentLoader(repo.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+                () => RealDocumentLoader.Create(repo.Root, KyberWeaveConfig.ProductDefaults.Ontology),
                 DocsPorts.Files)
-            .Validate(new DocumentLoader(repo.Root).Load(), changes);
+            .Validate(RealDocumentLoader.Create(repo.Root).Load(), changes);
     }
 
     private static string FindingText(Diagnostic finding)
@@ -579,9 +579,9 @@ public sealed class ArchiveCloseoutScopeTests
         DiagnosticReport report = new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, handbook),
+            () => RealDocumentLoader.Create(fixture.Root, handbook),
             DocsPorts.Files).Validate(
-            new DocumentLoader(fixture.Root, handbook).Load(),
+            RealDocumentLoader.Create(fixture.Root, handbook).Load(),
             [new ChangedPath(HandbookPlan, ChangeKind.Added)]);
 
         Diagnostic finding = Assert.Single(report.Items);
@@ -613,9 +613,9 @@ public sealed class ArchiveCloseoutScopeTests
         DiagnosticReport report = new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, both),
+            () => RealDocumentLoader.Create(fixture.Root, both),
             DocsPorts.Files).Validate(
-            new DocumentLoader(fixture.Root, both).Load(),
+            RealDocumentLoader.Create(fixture.Root, both).Load(),
             [
                 new ChangedPath(PrimaryPlan, ChangeKind.Added),
                 new ChangedPath(HandbookPlan, ChangeKind.Added)

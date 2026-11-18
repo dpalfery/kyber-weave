@@ -90,7 +90,7 @@ public sealed class DocsTaskPromptToolTests
     private static DocumentIndexHost Host(DocFixture fixture, KyberWeaveConfig config) => new(
         fixture.Root,
         () => FakeCodeGraphResolver.WithSymbols(),
-        () => new DocumentLoader(fixture.Root, config.Ontology).Load(),
+        () => RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(),
         config.Ontology.DocsRoots,
         config.Ontology.ResolvedCatalogPath);
 

@@ -13,11 +13,13 @@ namespace KyberWeave.Core.Docs.Validation;
 /// <param name="hostFacts">Builds the host facts part, with the task's gates resolved by technology.</param>
 /// <param name="files">Reads the prior-results file a retry names.</param>
 /// <param name="codeGraph">Opens the CodeGraph ports over the checkout, so the standards lookup can resolve code joins.</param>
+/// <param name="documents">Opens the documentation corpus the standards lookup indexes.</param>
 public sealed class TaskPromptServiceFactory(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
     IFileSystem files,
-    ICodeGraphPortsFactory codeGraph) : ITaskPromptServiceFactory
+    ICodeGraphPortsFactory codeGraph,
+    IDocumentSourceFactory documents) : ITaskPromptServiceFactory
 {
     /// <inheritdoc />
     public ITaskPromptService ForRepository(string repositoryRoot, KyberWeaveConfig config)
@@ -27,7 +29,7 @@ public sealed class TaskPromptServiceFactory(
 
         string root = Path.GetFullPath(repositoryRoot);
         DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(root, config.Ontology).Load(),
+            documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
         return new TaskPromptService(tasks, hostFacts, files, index.StandardsFor);
     }

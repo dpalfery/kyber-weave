@@ -479,7 +479,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
         DocumentIndexHost host = new(
             root,
             resolverFactory,
-            () => new DocumentLoader(root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
         return DocsToolsComposition.Create(host);
