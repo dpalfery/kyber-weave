@@ -2,6 +2,7 @@ using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -15,7 +16,13 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterGlobalWiringTests : IDisposable
 {
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+
+    public ArbiterGlobalWiringTests()
+    {
+        _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+    }
 
     public void Dispose() => _fixture.Dispose();
 
@@ -26,7 +33,7 @@ public sealed class ArbiterGlobalWiringTests : IDisposable
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 30)).Prepared();
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 30)).Prepared(_fixture);
 
         SquadHarnessRenderContext context = new(
             new SquadHarnessSpec(
@@ -45,19 +52,19 @@ public sealed class ArbiterGlobalWiringTests : IDisposable
     [Fact]
     public async Task RenderAsync_EnabledArbiterUnderGlobalScope_RendersGlobalScopeFlagInHookCommandLines()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new CopilotRenderer()]);
         SquadRenderRequest projectRequest = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Project,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared();
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared(_fixture);
         SquadRenderRequest globalRequest = new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared();
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared(_fixture);
 
         SquadRenderResult project = await registry.RenderAsync(projectRequest);
         SquadRenderResult global = await registry.RenderAsync(globalRequest);
@@ -88,21 +95,21 @@ public sealed class ArbiterGlobalWiringTests : IDisposable
     [Fact]
     public async Task RenderAsync_DisabledArbiterUnderGlobalScope_RendersByteForByteAsOmittingTheWiring()
     {
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CopilotRenderer()]);
+        SquadRendererRegistry registry = _fixture.Registry([new CopilotRenderer()]);
 
         SquadRenderResult omitted = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: null).Prepared());
+            Arbiter: null).Prepared(_fixture));
 
         SquadRenderResult disabled = await registry.RenderAsync(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: new FixedGlobalRoots(_fixture.Path),
-            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5)).Prepared());
+            Arbiter: new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5)).Prepared(_fixture));
 
         Assert.Equal(
             omitted.Files.Select(file => (file.Target, file.RelativePath)).OrderBy(pair => pair.Target, StringComparer.Ordinal)

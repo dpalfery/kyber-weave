@@ -1,3 +1,9 @@
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.FileSystem;
+using KyberWeave.Testing.Squad;
+
 namespace KyberWeave.Tests.Fixtures;
 
 /// <summary>
@@ -21,17 +27,54 @@ internal sealed class ArbiterSquadFixture : IDisposable
     public const string DocsDev = "docs-dev";
     public const string ResearchAgent = "research-agent";
 
-    private readonly TempDirectory _tempDirectory = new();
+    private readonly TempDirectory? _tempDirectory;
+    private readonly InMemoryFileSystem? _files;
+    private readonly string _path;
 
-    private ArbiterSquadFixture()
+    private ArbiterSquadFixture(InMemoryFileSystem? files)
     {
+        _files = files;
+        if (files is null)
+        {
+            _tempDirectory = new TempDirectory();
+            _path = _tempDirectory.Path;
+        }
+        else
+        {
+            _path = ArbiterTestRoots.Under("squad");
+            files.CreateDirectory(_path);
+        }
     }
 
-    public string Path => _tempDirectory.Path;
+    public string Path => _path;
 
-    public static ArbiterSquadFixture Create()
+    /// <summary>Builds the corpus on the real disk, for the tests whose subject is what a render reads from a tree.</summary>
+    public static ArbiterSquadFixture Create() => Build(null);
+
+    /// <summary>Builds the corpus in <paramref name="files"/>, so a render needs no disk.</summary>
+    /// <param name="files">The in-memory file system the corpus is written to.</param>
+    public static ArbiterSquadFixture CreateInMemory(InMemoryFileSystem files) =>
+        Build(files ?? throw new ArgumentNullException(nameof(files)));
+
+    /// <summary>Builds a renderer registry that reads its render inputs from this fixture's file system.</summary>
+    /// <param name="renderers">The renderers the registry holds.</param>
+    public SquadRendererRegistry Registry(IEnumerable<ISquadRenderer> renderers) =>
+        _files is null
+            ? SquadTestRegistry.Create(renderers)
+            : new SquadRendererRegistry(renderers, new InMemorySquadServices(_files).RenderInputReader());
+
+    /// <summary>Reads the request's inputs the way the registry does before it renders, from this fixture's file system.</summary>
+    /// <param name="request">The request to prepare.</param>
+    public SquadRenderRequest Prepare(SquadRenderRequest request) =>
+        _files is null ? request.Prepared() : new InMemorySquadServices(_files).RenderInputReader().Prepare(request);
+
+    /// <summary>Loads the corpus this fixture holds.</summary>
+    public KyberWeave.Core.Squad.Model.SquadSource Load() =>
+        _files is null ? RealSquadServices.Load(Path) : new InMemorySquadServices(_files).Load(Path);
+
+    private static ArbiterSquadFixture Build(InMemoryFileSystem? files)
     {
-        ArbiterSquadFixture fixture = new();
+        ArbiterSquadFixture fixture = new(files);
         fixture.Write("squad.yml", """
             schema: kyber-squad.squad/v1
             name: arbiter-fixture
@@ -168,7 +211,7 @@ internal sealed class ArbiterSquadFixture : IDisposable
         return fixture;
     }
 
-    public void Dispose() => _tempDirectory.Dispose();
+    public void Dispose() => _tempDirectory?.Dispose();
 
     public void WriteAgent(string name, string description, string capabilityProfile, string delegatesTo)
     {
@@ -193,6 +236,17 @@ internal sealed class ArbiterSquadFixture : IDisposable
     {
         string fullPath = System.IO.Path.Combine(Path, relativePath);
         string? directory = System.IO.Path.GetDirectoryName(fullPath);
+        if (_files is not null)
+        {
+            if (directory is not null)
+            {
+                _files.CreateDirectory(directory);
+            }
+
+            _files.WriteAllText(fullPath, content);
+            return;
+        }
+
         if (directory is not null)
         {
             Directory.CreateDirectory(directory);
