@@ -123,7 +123,7 @@ internal static class DocsTestCommands
         return new DocsPacketCommand(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IWritableFileSystem>(),
             provider.GetRequiredService<IProcessEnvironment>(),
             provider.GetRequiredService<IPlanTaskTargetService>(),
             provider.GetRequiredService<ITaskGateSelectionService>(),

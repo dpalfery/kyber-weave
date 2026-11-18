@@ -107,7 +107,7 @@ public sealed class DocsTaskPromptToolTests
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IWritableFileSystem>(),
             Host(fixture, config).Current().StandardsFor,
             provider.GetRequiredService<IProcessEnvironment>());
     }

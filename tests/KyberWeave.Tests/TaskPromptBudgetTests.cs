@@ -134,7 +134,7 @@ public sealed class TaskPromptBudgetTests
         new TaskPromptService(
             DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
             DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),
-            DocsTestCommands.Services().GetRequiredService<IFileSystem>(),
+            DocsTestCommands.Services().GetRequiredService<IWritableFileSystem>(),
             Index(fixture, config).StandardsFor,
             DocsTestCommands.Services().GetRequiredService<IProcessEnvironment>())
         .Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", RetryText: retryText), config);
@@ -257,7 +257,7 @@ public sealed class TaskPromptBudgetTests
         TaskPromptService service = new(
             DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
             DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),
-            DocsTestCommands.Services().GetRequiredService<IFileSystem>(),
+            DocsTestCommands.Services().GetRequiredService<IWritableFileSystem>(),
             index.StandardsFor,
             DocsTestCommands.Services().GetRequiredService<IProcessEnvironment>());
 

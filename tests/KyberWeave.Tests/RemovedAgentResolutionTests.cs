@@ -292,7 +292,7 @@ public sealed class RemovedAgentResolutionTests
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IWritableFileSystem>(),
             _ => null,
             provider.GetRequiredService<IProcessEnvironment>());
     }
