@@ -200,14 +200,15 @@ internal static class SquadTestCommands
     /// <summary>
     /// The real lifecycle service over an in-memory Squad state: its file system, state store, planner, transactions and
     /// clock, with the release source and renderer a test supplies. Nothing touches the disk. A global-scope run supplies
-    /// <paramref name="globalRoots"/>, the per-target roots the renderer anchors absolute links to, and <paramref name="environmentReader"/> the variables it reads.
+    /// <paramref name="globalRoots"/>, the per-target roots the renderer anchors absolute links to, <paramref name="environmentReader"/> the variables it reads, and <paramref name="observer"/> sees each transaction step.
     /// </summary>
     public static SquadLifecycleService InMemoryLifecycle(
         InMemorySquadState state,
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
         ISquadGlobalRootResolver? globalRoots = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        ISquadTransactionObserver? observer = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         InMemorySquadServices services = new(state.Files);
@@ -227,6 +228,7 @@ internal static class SquadTestCommands
             new InMemorySquadFileAccess(state.Files),
             state.Semantics,
             state.Time,
+            observer: observer,
             globalRoots: globalRoots,
             environmentReader: environmentReader);
     }
