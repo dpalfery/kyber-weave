@@ -47,11 +47,4 @@ internal static class SquadCliServices
         services.TryAddSingleton(_ => KyberDashCapturePluginStep.CreateDefault());
         return services;
     }
-
-    /// <summary>
-    /// The Squad console over the process's own console, for the callers the container does not build yet (the Arbiter
-    /// install command and the static helpers it shares with the Squad commands).
-    /// </summary>
-    /// <returns>A console over <see cref="AnsiConsole.Console"/> and the standard streams.</returns>
-    internal static SquadConsole ProcessConsole() => new(AnsiConsole.Console, new SystemConsole());
 }

@@ -1718,13 +1718,6 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.Equal(expected, SquadCommandComposition.ResolveScope(isGlobal));
     }
 
-    [Fact]
-    public void SquadCommandComposition_IsInteractiveConsole_ReturnsBooleanWithoutThrowing()
-    {
-        bool isInteractive = SquadCommandComposition.IsInteractiveConsole();
-        Assert.True(isInteractive || !isInteractive);
-    }
-
     #endregion
 
     #region Program.cs Registration Tests

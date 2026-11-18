@@ -48,23 +48,6 @@ internal static class SquadCommandComposition
     private const string ProjectKeywordAll = "all";
     private const string ProjectKeywordNone = "none";
 
-    /// <summary>Indicates whether the console environment supports interactive input.</summary>
-    public static bool IsInteractiveConsole()
-    {
-        return SquadCliServices.ProcessConsole().IsInteractive;
-    }
-
-    /// <summary>
-    ///     Writes the exit-2 client-input error line without console folding. The hint names
-    ///     the operator's paths verbatim, and a redirected console folds at 80 columns,
-    ///     splitting a long path across lines — corrupting the one thing the hint exists
-    ///     for: a copy-pastable name for each of the conflicting forms.
-    /// </summary>
-    public static void WriteClientInputError(string message)
-    {
-        SquadCliServices.ProcessConsole().WriteClientInputError(message);
-    }
-
     /// <summary>
     ///     Resolves each selected target's physical global root — the directory a
     ///     <c>--global</c> lifecycle actually writes — through the same resolver (and
@@ -215,23 +198,6 @@ internal static class SquadCommandComposition
     }
 
     /// <summary>
-    ///     Writes the shared exit-1 operational error the preset verbs report when canonical model
-    ///     profiles resolve from neither a checkout nor the home snapshot store.
-    /// </summary>
-    /// <remarks>
-    ///     One message shape across use, clear, and show, so the remedy the operator learns from
-    ///     one verb holds for the others: a <c>squad update</c> re-renders from the active
-    ///     release and persists the snapshot the verbs read back.
-    /// </remarks>
-    public static void WriteCanonicalProfilesUnresolvedError()
-    {
-        WriteClientInputError(
-            "Could not resolve Squad model profiles from canonical source. " +
-            "Run `kyber-weave squad update` to refresh the profile snapshot; " +
-            "running from a kyber-weave checkout also works.");
-    }
-
-    /// <summary>
     ///     Formats a preset validation failure the way the documented strict-validation contract
     ///     requires: the validator's finding with the preset file path and line number.
     /// </summary>
@@ -363,25 +329,6 @@ internal static class SquadCommandComposition
                 $"Got '{version}'.");
     }
 
-    /// <summary>Writes one line of console output without folding, so a path in it stays copy-pastable.</summary>
-    public static void WriteLine(string markup)
-    {
-        SquadCliServices.ProcessConsole().WriteLine(markup);
-    }
-
-    /// <summary>
-    ///     Surfaces the warnings a committed transaction raised after its commit point. The deployment itself
-    ///     succeeded, so the command still exits 0, but the operator must learn that the registry is behind.
-    /// </summary>
-    /// <remarks>
-    ///     Each warning already names the command that rebuilds the registry, so it is printed as written rather
-    ///     than with a second instruction appended to it.
-    /// </remarks>
-    public static void WriteTransactionWarnings(IReadOnlyList<string>? warnings)
-    {
-        foreach (string warning in warnings ?? []) WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
-    }
-
     /// <summary>
     ///     True when a dry run found legacy state that a real run would migrate. The verb reports that and
     ///     stops, so it never reads a deployment the migration has not yet moved.
@@ -389,30 +336,6 @@ internal static class SquadCommandComposition
     public static bool IsPendingDryRunMigration(SquadMigrationReport report, bool dryRun)
     {
         return dryRun && (report.MigratedItems.Count > 0 || report.ImportedProjects.Count > 0);
-    }
-
-    /// <summary>
-    ///     Prints what the migration did and warns about, each line unfolded. Legacy roots that remain on disk
-    ///     are printed only when <paramref name="includeRetainedLegacyRoots" /> is set: after every successful
-    ///     migration they remain, so printing them from each verb would warn on every run. Doctor, which reports
-    ///     what was left behind, is the one caller that asks for them.
-    /// </summary>
-    public static void WriteMigrationNotes(SquadMigrationReport report, bool includeRetainedLegacyRoots = false)
-    {
-        ArgumentNullException.ThrowIfNull(report);
-
-        foreach (string item in report.MigratedItems) WriteLine($"[grey]info[/] {Markup.Escape(item)}");
-
-        foreach (string item in report.ImportedProjects) WriteLine($"[grey]info[/] {Markup.Escape(item)}");
-
-        foreach (string warning in report.Warnings) WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
-
-        if (!includeRetainedLegacyRoots) return;
-
-        foreach (SquadUnmigratedLegacyRoot root in report.UnmigratedLegacyRoots)
-            WriteLine(
-                $"[yellow]warning:[/] legacy global root '{Markup.Escape(root.Root)}' was not migrated: " +
-                $"{Markup.Escape(root.Reason)} {Markup.Escape(root.Guidance)}");
     }
 
     /// <summary>
