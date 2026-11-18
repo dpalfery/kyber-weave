@@ -25,9 +25,13 @@ namespace KyberWeave.Tests.Arbiter;
 /// real harness adapters (review 20.1, Major 1): the fact was declared but never
 /// supplied, so the shipped skip never fired on the only harness that needs it.
 /// </remarks>
-public sealed class ArbiterUnobservableReturnsTests
+public sealed class ArbiterUnobservableReturnsTests : IDisposable
 {
     private static readonly string[] NoPaths = [];
+
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
+
+    public void Dispose() => _host.Dispose();
     private static readonly string[] SrcA = ["src/a.cs"];
     private static readonly string[] TaskT1 = ["T1"];
 
@@ -139,15 +143,6 @@ public sealed class ArbiterUnobservableReturnsTests
     // shipped rules and real plan reader decide a dependent dispatch.
     // ---------------------------------------------------------------------
 
-    private sealed class WiringRepo : IDisposable
-    {
-        public TempDirectory Repo { get; } = new();
-
-        public string Path => Repo.Path;
-
-        public void Dispose() => Repo.Dispose();
-    }
-
     private static string[] NonReadyRuleIds =>
         ArbiterExpectedRuleIds.All.Where(id => id != "KW-ARB-READY-001").ToArray();
 
@@ -160,9 +155,9 @@ public sealed class ArbiterUnobservableReturnsTests
     private static string DispatchPrompt =>
         "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement the parser.";
 
-    private static HookCommand RealCommand(WiringRepo repo, string home, bool answerWaiting = false)
+    private HookCommand RealCommand(bool answerWaiting = false)
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
+        ArbiterHookDecisionEngine engine = _host.Engine(
             providerFactory: _ => answerWaiting
                 ? new FakeArbiterProvider
                 {
@@ -171,11 +166,10 @@ public sealed class ArbiterUnobservableReturnsTests
                     Confidence = 0.95,
                     Model = null,
                 }
-                : FakeArbiterProvider.None(),
-            homeDirectory: () => home);
-        return ArbiterTestServices.Command(
-            ArbiterTestServices.Registry(engine),
-            ArbiterTestServices.LoadHostConfig,
+                : FakeArbiterProvider.None());
+        return _host.HookCommand(
+            _host.Registry(engine),
+            _host.LoadHostConfig,
             () => "wiring-decision-1");
     }
 
@@ -213,22 +207,20 @@ public sealed class ArbiterUnobservableReturnsTests
     [Fact]
     public void Antigravity_DependentDispatchWithoutLedgerCompletion_Allows_AndLogsTheSkip()
     {
-        using WiringRepo repo = new();
-        using TempDirectory home = new();
-        WriteReadyOnlyConfig(repo.Path);
-        WritePlanWithDependency(repo.Path);
-        HookCommand command = RealCommand(repo, home.Path);
+        WriteReadyOnlyConfig();
+        WritePlanWithDependency();
+        HookCommand command = RealCommand();
 
         using StringWriter stdout = new();
         using StringWriter log = new();
         int exit = command.Run(
-            "antigravity", null, AntigravityPayload(repo.Path, DispatchPrompt), stdout, log);
+            "antigravity", null, AntigravityPayload(_host.RepoRoot, DispatchPrompt), stdout, log);
 
         Assert.Equal(0, exit);
         // Antigravity's documented allow document: the empty object, never 'allow'.
         Assert.Equal("{}", stdout.ToString().Trim());
         // The skip is logged: the decision record carries the shipped answer.
-        string decisions = File.ReadAllText(System.IO.Path.Combine(repo.Path, "artifacts", "arbiter", "decisions.jsonl"));
+        string decisions = string.Join("\n", _host.State.Log.LinesOf(_host.ArbiterDirectory, "decisions.jsonl"));
         Assert.Contains("KW-ARB-READY-001", decisions, StringComparison.Ordinal);
         Assert.Contains("returns-unobservable", decisions, StringComparison.Ordinal);
     }
@@ -236,16 +228,14 @@ public sealed class ArbiterUnobservableReturnsTests
     [Fact]
     public void Claude_SameDependentDispatchWithoutLedgerCompletion_AllowsWhenNoModelAnswers()
     {
-        using WiringRepo repo = new();
-        using TempDirectory home = new();
-        WriteReadyOnlyConfig(repo.Path);
-        WritePlanWithDependency(repo.Path);
-        HookCommand command = RealCommand(repo, home.Path);
+        WriteReadyOnlyConfig();
+        WritePlanWithDependency();
+        HookCommand command = RealCommand();
 
         using StringWriter stdout = new();
         using StringWriter log = new();
         int exit = command.Run(
-            "claude", "conductor", ClaudePayload(repo.Path, DispatchPrompt), stdout, log);
+            "claude", "conductor", ClaudePayload(_host.RepoRoot, DispatchPrompt), stdout, log);
 
         // ADR 0072: completion read from markers is prose; with no model answer the dispatch proceeds.
         Assert.Equal(0, exit);
@@ -255,16 +245,14 @@ public sealed class ArbiterUnobservableReturnsTests
     [Fact]
     public void Claude_SameDependentDispatch_ConfidentWaitingAnswer_Escalates()
     {
-        using WiringRepo repo = new();
-        using TempDirectory home = new();
-        WriteReadyOnlyConfig(repo.Path);
-        WritePlanWithDependency(repo.Path);
-        HookCommand command = RealCommand(repo, home.Path, answerWaiting: true);
+        WriteReadyOnlyConfig();
+        WritePlanWithDependency();
+        HookCommand command = RealCommand(answerWaiting: true);
 
         using StringWriter stdout = new();
         using StringWriter log = new();
         int exit = command.Run(
-            "claude", "conductor", ClaudePayload(repo.Path, DispatchPrompt), stdout, log);
+            "claude", "conductor", ClaudePayload(_host.RepoRoot, DispatchPrompt), stdout, log);
 
         Assert.Equal(0, exit);
         using JsonDocument doc = JsonDocument.Parse(stdout.ToString());
@@ -299,11 +287,9 @@ public sealed class ArbiterUnobservableReturnsTests
 
     private static KyberWeaveConfig DocsConfig() => new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
-    private static void WriteReadyOnlyConfig(string repoRoot)
+    private void WriteReadyOnlyConfig()
     {
-        Directory.CreateDirectory(System.IO.Path.Combine(repoRoot, ".kyber-weave"));
-        File.WriteAllText(
-            System.IO.Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml"),
+        _ = _host.WriteRepoConfig(
             "arbiter:\n" +
             "  enabled: true\n" +
             "  provider:\n" +
@@ -312,11 +298,10 @@ public sealed class ArbiterUnobservableReturnsTests
             ReadyOnlyRules() + "\n");
     }
 
-    private static void WritePlanWithDependency(string repoRoot)
+    private void WritePlanWithDependency()
     {
-        Directory.CreateDirectory(System.IO.Path.Combine(repoRoot, "docs", "plans"));
-        File.WriteAllText(
-            System.IO.Path.Combine(repoRoot, "docs", "plans", "plan.md"),
+        _ = _host.Write(
+            System.IO.Path.Combine(_host.RepoRoot, "docs", "plans", "plan.md"),
             "# Wiring plan\n\n" +
             "## Tasks\n\n" +
             "### T1 — First task\n" +

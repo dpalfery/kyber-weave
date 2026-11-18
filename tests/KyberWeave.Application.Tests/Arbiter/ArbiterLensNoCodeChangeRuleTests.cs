@@ -24,7 +24,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// fixtures below, which leave that fact absent, answer undecidable instead of their declared
 /// answers.
 /// </remarks>
-public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
+public sealed class ArbiterLensNoCodeChangeRuleTests
 {
     private const string NoCodeChangeRule = "KW-ARB-LENS-002";
     private const string PreExistingRule = "KW-ARB-PREEX-001";
@@ -53,19 +53,7 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
     private static readonly string[] NoPaths = [];
     private static readonly int[] ChangedLines = [3, 7, 8];
 
-    private readonly TempDirectory _temp = new();
-
-    public ArbiterLensNoCodeChangeRuleTests()
-    {
-        Directory.CreateDirectory(ArbiterDirectory);
-    }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
-
-    private string ArbiterDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _state = new();
 
     public static IEnumerable<object[]> SkippedLensNames() =>
         SkippedLenses.Select(lens => new object[] { lens });
@@ -222,17 +210,10 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
 
         RecordingProvider provider = new();
         List<(string Name, object Value)> review = ReviewPairs(MixedPaths, MarkdownOnlyPaths, hunksPresent: true);
-        ArbiterEvaluator evaluator = new(
+        ArbiterEvaluator evaluator = _state.Evaluator(
             provider,
-            _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
-            new FixedReviewFacts(review),
-            new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-            TimeProvider.System, new FakeIdGenerator());
+            planReader: new PassThroughPlanReader(),
+            gitFacts: new FixedReviewFacts(review));
         KyberWeaveConfig config = new()
         {
             Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfigDefaults.Product.Rules },

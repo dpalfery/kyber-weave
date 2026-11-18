@@ -15,7 +15,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// a step-0 path that allows. The prompts are the run's own, cut to their opening lines, with the worktree path
 /// replaced.
 /// </summary>
-public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
+public sealed class ArbiterHeaderlessDelegateIdentityTests
 {
     private const string DataLayerTask =
         """
@@ -77,16 +77,15 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
 
     private static readonly string[] NonTaskPlanReadAnswers = ["closeout", "not-a-task"];
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryArbiterState _state = new();
+    private readonly string _repo = ArbiterTestRoots.Under("repo");
 
     public ArbiterHeaderlessDelegateIdentityTests()
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, "docs", "plans"));
-        File.WriteAllText(Path.Combine(_repo.Path, "docs", "plans", "cards.md"), PlanText);
-        File.WriteAllText(Path.Combine(_repo.Path, "docs", "plans", "README.md"), "# Plans\n\n**Status: Ready**\n");
+        _state.Files.CreateDirectory(Path.Combine(_repo, "docs", "plans"));
+        _state.Files.WriteAllText(Path.Combine(_repo, "docs", "plans", "cards.md"), PlanText);
+        _state.Files.WriteAllText(Path.Combine(_repo, "docs", "plans", "README.md"), "# Plans\n\n**Status: Ready**\n");
     }
-
-    public void Dispose() => _repo.Dispose();
 
     [Theory]
     [InlineData("dev-medium", DataLayerTask, "T1")]
@@ -134,7 +133,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     [Fact]
     public void AHeaderlessDispatchWithNoActivePlan_IsAllowedWithoutAskingTheModel()
     {
-        File.Delete(Path.Combine(_repo.Path, "docs", "plans", "cards.md"));
+        _state.Files.DeleteFile(Path.Combine(_repo, "docs", "plans", "cards.md"));
 
         (_, ArbiterFactSet facts) = Facts("dev-medium", DataLayerTask);
 
@@ -145,7 +144,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
     [Fact]
     public void TwoActivePlans_LeaveThePlanUnknown()
     {
-        File.WriteAllText(Path.Combine(_repo.Path, "docs", "plans", "other.md"), PlanText);
+        _state.Files.WriteAllText(Path.Combine(_repo, "docs", "plans", "other.md"), PlanText);
 
         (_, ArbiterFactSet facts) = Facts("dev-medium", DataLayerTask);
 
@@ -215,7 +214,7 @@ public sealed class ArbiterHeaderlessDelegateIdentityTests : IDisposable
         KyberWeaveConfig config = KyberWeaveConfigDefaults.Product;
         ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, config);
         facts = facts.With("config.planning-dirs", new List<string> { "docs/plans/**" }, ArbiterFactLabel.Derived);
-        return (classification, RealPlanFacts.Create().Enrich(facts, classification, _repo.Path));
+        return (classification, _state.PlanFacts().Enrich(facts, classification, _repo));
     }
 
     private static ArbiterEvent Event(string target, string prompt, string harness = "copilot-cli", string phase = "pre") =>

@@ -17,9 +17,9 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 11, 12, 9, 0, 0, TimeSpan.Zero);
 
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _home.Dispose();
+    public void Dispose() => _host.Dispose();
 
     [Fact]
     public void Budget_DeniesTheCallAfterTheToolCallLimit()
@@ -164,14 +164,14 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     [Fact]
     public void StalledCall_ReadsTheShippedLimitFromACounterFileWrittenBeforeIt()
     {
-        string directory = Path.Combine(_home.Path, ".kyber-weave", "arbiter", "budgets");
+        string directory = Path.Combine(_host.HomeDirectory, ".kyber-weave", "arbiter", "budgets");
         ArbiterDispatchBudgetConfig budget = new(Minutes: 15, ToolCalls: 1000, CallMinutes: 14);
         Assert.Empty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start, budget));
-        string file = Assert.Single(Directory.GetFiles(directory));
-        string[] lines = File.ReadAllLines(file);
+        string file = Assert.Single(_host.Files.EnumerateFiles(directory, "*", recursive: false));
+        string[] lines = [.. _host.Files.ReadLines(file)];
         string[] header = lines[0].Split(' ');
         Assert.Equal("14", header[4]);
-        File.WriteAllLines(file, [string.Join(' ', header[..4]), .. lines[1..]]);
+        _host.Files.WriteAllText(file, string.Join("\n", [string.Join(' ', header[..4]), .. lines[1..]]) + "\n");
 
         Assert.NotEmpty(Guard("copilot-cli", Copilot("dev-medium", "agent-1"), Start.AddMinutes(6), budget));
     }
@@ -247,12 +247,12 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
 
         string write = JsonSerializer.Serialize(new
         {
-            cwd = _home.Path,
+            cwd = _host.HomeDirectory,
             agentId = "seat-2",
             parentAgentId = "root",
             agentType = "review-lens",
             toolName = "create",
-            toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(_home.Path, "seats", "correctness.md") }),
+            toolArgs = JsonSerializer.Serialize(new { path = Path.Combine(_host.HomeDirectory, "seats", "correctness.md") }),
         });
         Assert.Empty(SeatGuard(write, Start.AddSeconds(20), seatBudget));
     }
@@ -286,21 +286,21 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     private string SeatGuard(string json, DateTimeOffset now, ArbiterDispatchBudgetConfig seatBudget)
     {
         using StringWriter stdout = new();
-        ArbiterTestServices.Get<IWorkerGuard>().Run(
-            "copilot-cli", json, stdout, TextWriter.Null, _home.Path, () => now, _ => ArbiterDispatchBudgetConfig.Defaults, _ => seatBudget);
+        _host.Get<IWorkerGuard>().Run(
+            "copilot-cli", json, stdout, TextWriter.Null, _host.HomeDirectory, () => now, _ => ArbiterDispatchBudgetConfig.Defaults, _ => seatBudget);
         return stdout.ToString();
     }
 
     private string Guard(string harness, string json, DateTimeOffset now, ArbiterDispatchBudgetConfig? budget)
     {
         using StringWriter stdout = new();
-        ArbiterTestServices.Get<IWorkerGuard>().Run(harness, json, stdout, TextWriter.Null, _home.Path, () => now, _ => budget);
+        _host.Get<IWorkerGuard>().Run(harness, json, stdout, TextWriter.Null, _host.HomeDirectory, () => now, _ => budget);
         return stdout.ToString();
     }
 
     private string Copilot(string agentType, string agentId) => JsonSerializer.Serialize(new
     {
-        cwd = _home.Path,
+        cwd = _host.HomeDirectory,
         agentId,
         parentAgentId = "root",
         agentType,
@@ -312,7 +312,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     private string TurnEnd(string agentType, string agentId) => JsonSerializer.Serialize(new
     {
         sessionId = "c232d9cc-6701-4a48-a2e9-03bfd9f8ccf2",
-        cwd = _home.Path,
+        cwd = _host.HomeDirectory,
         agentId,
         agentType,
         agentName = agentType,
@@ -324,7 +324,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
 
     private string Claude(string agentType, string agentId) => JsonSerializer.Serialize(new
     {
-        cwd = _home.Path,
+        cwd = _host.HomeDirectory,
         hook_event_name = "PreToolUse",
         agent_id = agentId,
         agent_type = agentType,

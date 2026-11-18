@@ -35,11 +35,11 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
         "id: nit-1\nseverity: Minor\nfile: src/Widget.cs\nline: 12\nclaim: naming\n" +
         "id: nit-2\nseverity: Minor\nfile: src/Widget.cs\nline: 40\nclaim: naming";
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _repo.Dispose();
+    public void Dispose() => _host.Dispose();
 
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => _host.ArbiterDirectory;
 
     private sealed class PassThroughGitFacts : IArbiterGitFacts
     {
@@ -69,15 +69,15 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
 
     private static ArbiterRule Enforced(string id) => Shipped(id) with { Shadow = false };
 
-    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => ArbiterTestServices.Engine(
+    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => _host.Engine(
         providerFactory: _ => provider,
         gitFactsFactory: _ => new PassThroughGitFacts(),
         planReaderFactory: _ => new PassThroughPlanReader(),
-        homeDirectory: () => _repo.Path);
+        homeDirectory: () => _host.RepoRoot);
 
-    private HookContext Context() => new(_repo.Path, () => "decision-hook", TextWriter.Null);
+    private HookContext Context() => new(_host.RepoRoot, () => "decision-hook", TextWriter.Null);
 
-    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => _host.Decisions;
 
     private static string Marked(string body) => "KYBER-ARBITER: true\n\n" + body;
 
@@ -189,7 +189,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public async Task AnEnforcedDuplicateDeniesTheRefuterWithItsDuplicateLine()
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, TimeProvider.System);
+        ArbiterRunStore store = _host.State.RunStore(ArbiterDirectory, null, _host.Clock);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
         HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
@@ -209,7 +209,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public async Task AShadowDuplicateLetsTheRefuterRun()
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, TimeProvider.System);
+        ArbiterRunStore store = _host.State.RunStore(ArbiterDirectory, null, _host.Clock);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
         HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(

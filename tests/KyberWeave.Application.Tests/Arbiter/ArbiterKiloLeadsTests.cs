@@ -36,30 +36,28 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterKiloLeadsTests : IDisposable
 {
-    private readonly TempDirectory _sandbox = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _sandbox.Dispose();
+    public void Dispose() => _host.Dispose();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
-    private static IArbiterSectionSelectionService SelectorFor() =>
-        new ArbiterSectionSelectionService(new FileBoundedFileReader());
+    private IArbiterSectionSelectionService SelectorFor() => _host.Get<IArbiterSectionSelectionService>();
 
-    /// <summary>Holds a file open with no sharing, so a read of it fails with an I/O error while the file still exists.</summary>
-    private static FileStream LockAgainstReads(string path)
+    /// <summary>Makes every read of a file fail with an I/O error while the file still exists, as a read of a file held with no sharing does.</summary>
+    private void LockAgainstReads(string path)
     {
-        FileStream holder = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        Assert.Throws<IOException>(() => File.OpenRead(path).Dispose());
-        return holder;
+        _host.Files.FailWhen(
+            operation => operation.Path == path
+                && operation.Name is "OpenRead" or "ReadAllText" or "ReadAllBytes" or "ReadLines" or "GetLength",
+            new IOException("the file is in use by another process"));
+        Assert.Throws<IOException>(() => _host.Files.OpenRead(path).Dispose());
     }
 
-    private async Task<string> WriteCitedFileAsync(string relative, string? content = null)
-    {
-        string full = Path.Combine(_sandbox.Path, relative);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        await File.WriteAllTextAsync(full, content ?? string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
-        return full;
-    }
+    private string WriteCitedFile(string relative, string? content = null) =>
+        _host.Write(
+            Path.Combine(_host.RepoRoot, relative),
+            content ?? string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
 
     /// <summary>A finding whose id line has no value is not a finding; it must not become one with an empty id.</summary>
     /// <remarks>Kilo 4537885270: the id pattern is <c>\S*</c>, so <c>id:</c> with nothing after it matches.</remarks>
@@ -75,12 +73,12 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     /// <summary>A cited file that exists but cannot be opened reads as absent evidence, not as an exception.</summary>
     /// <remarks>Kilo 4537885280: <c>File.OpenRead</c> sits outside any try, so an I/O failure escapes the reader.</remarks>
     [Fact]
-    public async Task AnUnreadableCitedFileReadsAsAbsentNotAsAThrow()
+    public void AnUnreadableCitedFileReadsAsAbsentNotAsAThrow()
     {
-        string full = await WriteCitedFileAsync("src/Locked.cs");
-        using FileStream holder = LockAgainstReads(full);
+        string full = WriteCitedFile("src/Locked.cs");
+        LockAgainstReads(full);
 
-        FileExcerpt? excerpt = RealFileTextFacts.Create().ReadExcerpt(_sandbox.Path, "src/Locked.cs", 12);
+        FileExcerpt? excerpt = _host.Get<IFileTextFacts>().ReadExcerpt(_host.RepoRoot, "src/Locked.cs", 12);
 
         Assert.Null(excerpt);
     }
@@ -90,10 +88,10 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     [Fact]
     public async Task AnUnreadableCitedFileKeepsTheCommentReal()
     {
-        string full = await WriteCitedFileAsync("src/Locked.cs");
-        using FileStream holder = LockAgainstReads(full);
+        string full = WriteCitedFile("src/Locked.cs");
+        LockAgainstReads(full);
         FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick");
-        CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
+        CommentTriageService service = new(provider, _host.RepoRoot, _host.ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), _host.Get<IFileTextFacts>(), _host.Get<IArbiterStateFactory>());
 
         CommentTriageResult result = await service.ClassifyAsync(new CommentTriageRequest("src/Locked.cs", 12, "Rename this.", null));
 
@@ -136,8 +134,8 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     [Fact]
     public async Task AnUnreadableDocumentFailsSafeToEverySection()
     {
-        string full = await WriteCitedFileAsync("docs/locked.md", "# Guide\nIntro.\n## Install\nSteps.\n");
-        using FileStream holder = LockAgainstReads(full);
+        string full = WriteCitedFile("docs/locked.md", "# Guide\nIntro.\n## Install\nSteps.\n");
+        LockAgainstReads(full);
 
         SectionSelection selection = await SelectorFor()
             .SelectAsync(full, "Change the install steps.", new NoneProvider());
@@ -150,11 +148,11 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     [Fact]
     public async Task AnOversizedRetentionPeriodStillStoresTheAppend()
     {
-        string arbiterDirectory = Path.Combine(_sandbox.Path, "artifacts", "arbiter");
-        ArbiterRunStore seeded = RealArbiterState.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 14), new FakeTimeProvider(Now));
+        string arbiterDirectory = _host.ArbiterDirectory;
+        ArbiterRunStore seeded = _host.State.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 14), new FakeTimeProvider(Now));
         Assert.Equal(ArbiterStoreStatus.Stored, await seeded.AppendFindingAsync("run-1", "id: first"));
 
-        ArbiterRunStore oversized = RealArbiterState.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 20_000_000), new FakeTimeProvider(Now));
+        ArbiterRunStore oversized = _host.State.RunStore(arbiterDirectory, new ArbiterStoreOptions(RetainDays: 20_000_000), new FakeTimeProvider(Now));
         ArbiterStoreStatus status = await oversized.AppendFindingAsync("run-1", "id: second");
 
         Assert.Equal(ArbiterStoreStatus.Stored, status);
@@ -165,8 +163,8 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     [Fact]
     public async Task AnAbsentSessionDoesNotShareItsFailureStoreWithAnEmptySession()
     {
-        string arbiterDirectory = Path.Combine(_sandbox.Path, "artifacts", "arbiter");
-        ArbiterRunStore store = RealArbiterState.RunStore(arbiterDirectory, null, new FakeTimeProvider(Now));
+        string arbiterDirectory = _host.ArbiterDirectory;
+        ArbiterRunStore store = _host.State.RunStore(arbiterDirectory, null, new FakeTimeProvider(Now));
         await store.AppendFailureAsync(null, null, null, "failure from an unnamed session");
 
         IReadOnlyList<string> readBack = store.ReadFailures(null, null, string.Empty);
@@ -177,19 +175,12 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     /// <summary>A bot comment with a null body is classed through the tool as an error answer, not a thrown exception.</summary>
     /// <remarks>Kilo 4537885372: <c>body.Length</c> dereferences a null body in <c>ClassifyBotReviewComment</c>.</remarks>
     [Fact]
-    public async Task AClassifyCallWithANullBodyReturnsAnErrorAnswer()
+    public void AClassifyCallWithANullBodyReturnsAnErrorAnswer()
     {
-        using TempDirectory home = new();
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null },
-            homeDirectory: () => home.Path);
-        ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
-            _sandbox.Path,
-            engine,
-            TextWriter.Null,
-            ArbiterTestServices.LoadHostConfig,
-            _ => true));
-        await WriteCitedFileAsync("docs/guide.md");
+        ArbiterHookDecisionEngine engine = _host.Engine(
+            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null });
+        ArbiterTools tools = _host.Tools(engine);
+        _ = WriteCitedFile("docs/guide.md");
 
         string json = tools.ClassifyBotReviewComment("docs/guide.md", 2, null!, null);
 
