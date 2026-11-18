@@ -15,7 +15,8 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsCloseoutCommand(
     IPlanCloseoutService closeout,
     IRepositoryFileStore files,
-    IKyberWeaveConfigRepository configs) : Command<DocsCloseoutSettings>
+    IKyberWeaveConfigRepository configs,
+    PlanArguments plans) : Command<DocsCloseoutSettings>
 {
     /// <summary>The <c>--date</c> value is not a date.</summary>
     public const string InvalidDate = "KW-DOC-CLOSEOUT-005";
@@ -45,7 +46,7 @@ public sealed class DocsCloseoutCommand(
         }
 
         string typed = settings.Path;
-        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
+        string root = plans.RepositoryRootFor(typed, settings.WorkingDirectory);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
@@ -54,13 +55,13 @@ public sealed class DocsCloseoutCommand(
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
+        if (!plans.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
         {
             CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
             return 1;
         }
 
-        PlanArguments.Announce(report, settings, relative);
+        plans.Announce(report, settings, relative);
         PlanCloseoutOutcome outcome = closeout.Run(root, effective, relative, date, settings.Archive && !settings.DryRun);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("archived", outcome.Archived);

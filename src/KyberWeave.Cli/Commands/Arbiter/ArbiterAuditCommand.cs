@@ -17,7 +17,8 @@ public sealed class ArbiterAuditCommand(
     IArbiterRepositoryLocator locator,
     IArbiterAuditService audits,
     IRepositoryFileStore files,
-    IAnsiConsole console) : Command<ArbiterSettings>
+    IAnsiConsole console,
+    PlanArguments plans) : Command<ArbiterSettings>
 {
     /// <summary>A ledger event with no decision: the hook was killed, timed out or crashed after recording the event.</summary>
     public const string MissingDecision = ArbiterAuditService.MissingDecision;
@@ -91,7 +92,7 @@ public sealed class ArbiterAuditCommand(
         {
             // --plan takes the spellings the plan commands accept, so an agent that types a slug or a bare file name
             // still matches the repository-relative path the dispatch header carried.
-            if (!PlanArguments.TryResolve(repositoryRoot, config, files, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
+            if (!plans.TryResolve(repositoryRoot, config, files, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
             {
                 CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
                 return 1;

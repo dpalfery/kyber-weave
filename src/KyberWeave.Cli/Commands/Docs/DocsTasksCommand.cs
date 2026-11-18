@@ -22,7 +22,8 @@ public sealed class DocsTasksCommand(
     IArbiterKeyService arbiterKeys,
     IArbiterDryRunService arbiterDryRun,
     IRepositoryFileStore files,
-    IKyberWeaveConfigRepository configs) : Command<DocsTasksSettings>
+    IKyberWeaveConfigRepository configs,
+    PlanArguments plans) : Command<DocsTasksSettings>
 {
     /// <summary>Both <c>--write</c> and <c>--check</c> were given; they ask for opposite things.</summary>
     public const string ConflictingModes = "KW-DOC-TASKS-CLI-001";
@@ -74,7 +75,7 @@ public sealed class DocsTasksCommand(
         }
 
         string typed = settings.Path;
-        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
+        string root = plans.RepositoryRootFor(typed, settings.WorkingDirectory);
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
@@ -83,7 +84,7 @@ public sealed class DocsTasksCommand(
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs tasks", report, out string relative))
+        if (!plans.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs tasks", report, out string relative))
         {
             CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
             return 1;
@@ -91,7 +92,7 @@ public sealed class DocsTasksCommand(
 
         if (!settings.List)
         {
-            PlanArguments.Announce(report, settings, relative);
+            plans.Announce(report, settings, relative);
         }
 
         PlanTaskFileMode mode = settings.Write ? PlanTaskFileMode.Write

@@ -30,7 +30,9 @@ public sealed class DocsPacketCommand(
     IRepositoryFileStore repositoryFiles,
     IGitRepositoryFacts git,
     IKyberWeaveConfigRepository configs,
-    IDocumentSourceFactory documents) : Command<DocsPacketSettings>
+    IDocumentSourceFactory documents,
+    PlanArguments plans,
+    ArbiterRepoRoot roots) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -56,7 +58,7 @@ public sealed class DocsPacketCommand(
     {
         DiagnosticReport report = new();
         string current = Path.GetFullPath(settings.WorkingDirectory ?? environment.CurrentDirectory);
-        string root = settings.Plan is null ? ArbiterRepoRoot.Find(current) : PlanArguments.RepositoryRootFor(settings.Plan, current);
+        string root = settings.Plan is null ? roots.Find(current) : plans.RepositoryRootFor(settings.Plan, current);
         if (!CommandHelpers.TryLoadConfig(configs, root, settings.Config, report, out KyberWeaveConfig config))
         {
             return Fail(report);
@@ -183,7 +185,7 @@ public sealed class DocsPacketCommand(
     {
         if (settings.Plan is not null)
         {
-            return PlanArguments.TryResolve(root, config, repositoryFiles, settings.Plan, current, "docs packet", report, out string relative)
+            return plans.TryResolve(root, config, repositoryFiles, settings.Plan, current, "docs packet", report, out string relative)
                 ? relative
                 : null;
         }
