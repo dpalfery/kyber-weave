@@ -937,7 +937,7 @@ retired watchdog (`scripts/proc-guard.sh`) used to wrap `ts-test` and reap its p
 away with the Node engine, which no longer spawns recursive children
 ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md)). A gate that runs
 away is stopped by its own `timeout-seconds`, and the council reports it as any other non-zero exit.
-`test`, `integration-test` and `ts-test` keep `full-suite: true` so `kyber-weave review gates` still refuses dev
+`test`, `integration-test`, `ts-test` and `cargo-test` keep `full-suite: true` so `kyber-weave review gates` still refuses dev
 agents unless `--council` is passed; the integration suite is CI's safety net, not a developer agent's run.
 
 Gates run one after another unless marked `concurrent`, and `review.parallelism` bounds the ones
