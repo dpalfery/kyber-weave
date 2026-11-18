@@ -182,4 +182,24 @@ public sealed class TestTempRootTests
         Assert.Contains(TestTempRoot.OverrideVariable, exception.Message, StringComparison.Ordinal);
         Assert.Contains(TestTempRoot.PipeDirectoryVariable, exception.Message, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    ///     A checkout key too short for the default form falls back to the 8-character one instead of
+    ///     failing on the slice: the short form still resolves a root that fits the socket budget.
+    /// </summary>
+    [Fact]
+    public void ShortCheckoutKeyUsesShortKeyFallback()
+    {
+        string root = TestTempRoot.ResolveRoot("/tmp", "abcdef12", 4242);
+
+        Assert.Equal("/tmp/kw-abcdef12/4242", root);
+    }
+
+    /// <summary>A checkout key shorter than the minimum length throws <see cref="InvalidOperationException"/>.</summary>
+    [Fact]
+    public void TooShortCheckoutKeyThrowsInvalidOperation()
+    {
+        _ = Assert.Throws<InvalidOperationException>(
+            () => TestTempRoot.ResolveRoot("/tmp", "abc", 4242));
+    }
 }

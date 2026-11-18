@@ -110,7 +110,7 @@ internal static class TestTempRoot
         string? parent = Path.GetDirectoryName(root);
         if (parent is not null)
         {
-            RemoveDeadSiblings(parent, Environment.ProcessId, IsProcessAlive);
+            RemoveDeadSiblings(parent, Environment.ProcessId, IsProcessAlive, minAge: TimeSpan.FromMinutes(5));
         }
 
         // A recycled PID may find the previous run's leftovers (kill -9 skips the exit cleanup).
@@ -193,6 +193,12 @@ internal static class TestTempRoot
         string? defaultBasePath = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(checkoutKey);
+        if (checkoutKey.Length < ShortKeyLength)
+        {
+            throw new InvalidOperationException(
+                $"Checkout key '{checkoutKey}' is shorter than the minimum {ShortKeyLength} characters.");
+        }
+
         string pid = processId.ToString(CultureInfo.InvariantCulture);
 
         string basePath = "/tmp";
@@ -213,6 +219,11 @@ internal static class TestTempRoot
 
         foreach (int keyLength in new[] { DefaultKeyLength, ShortKeyLength })
         {
+            if (checkoutKey.Length < keyLength)
+            {
+                continue;
+            }
+
             string root = Path.Combine(basePath, "kw-" + checkoutKey[..keyLength], pid);
             if (!socketBudgetApplies || root.Length <= MaxRootLength)
             {
@@ -234,10 +245,15 @@ internal static class TestTempRoot
     /// <param name="parentDirectory">The checkout's <c>kw-&lt;key&gt;</c> directory.</param>
     /// <param name="ownProcessId">This process's folder, which is left alone.</param>
     /// <param name="isProcessAlive">Answers whether a PID still names a running process.</param>
+    /// <param name="minAge">
+    ///     Optional minimum age a sibling folder must have before deletion, preventing a recycled-PID
+    ///     race from removing a freshly created concurrent run's folder.
+    /// </param>
     internal static void RemoveDeadSiblings(
         string parentDirectory,
         int ownProcessId,
-        Func<int, bool> isProcessAlive)
+        Func<int, bool> isProcessAlive,
+        TimeSpan? minAge = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(parentDirectory);
         ArgumentNullException.ThrowIfNull(isProcessAlive);
@@ -259,6 +275,27 @@ internal static class TestTempRoot
             }
 
             if (processId == ownProcessId || isProcessAlive(processId))
+            {
+                continue;
+            }
+
+            if (minAge is { } threshold)
+            {
+                try
+                {
+                    if (DateTime.UtcNow - Directory.GetLastWriteTimeUtc(sibling) < threshold)
+                    {
+                        continue;
+                    }
+                }
+                catch (Exception ex) when (ex is DirectoryNotFoundException or IOException or UnauthorizedAccessException)
+                {
+                    continue;
+                }
+            }
+
+            // Re-check liveness right before deletion so a PID recycled during the age check is not removed.
+            if (isProcessAlive(processId))
             {
                 continue;
             }

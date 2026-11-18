@@ -39,9 +39,10 @@ jobs:
   # Anything that is not a pull request runs everything. A change to this workflow
   # or to the CodeQL config also runs everything, so an edit to the filters is itself fully exercised.
   #
-  # build-test, gitleaks and the skill and docs gate always run: the .NET tests read
-  # files under docs/, products/, .kyber-weave/, .github/, scripts/ and a few under
-  # dash/, so no path set can prove they are irrelevant.
+  # build-test, integration-test, gitleaks and skill-docs-gate (the skill and docs gate) carry
+  # no path filter and always run: the .NET tests read files under docs/, products/,
+  # .kyber-weave/, .github/, scripts/ and a few under dash/, so no path set can prove them
+  # irrelevant.
   changes:
     name: Detect changed areas
     runs-on: ubuntu-latest
@@ -292,13 +293,12 @@ jobs:
     # programs, and file-system work beyond a test's own scratch folder. It is separated from
     # "Build and test" so the unit project there stays inside its 120-second budget; the unit
     # job still proves the in-memory behaviour, and this job proves it again through the real
-    # disk and the real programs. Developer agents do not run it; the review council's
-    # integration-test gate and this job do. It is required for merge: CI Summary lists it in
-    # `needs` and fails when it fails or is cancelled (a skipped run, when no .NET file changed, passes).
+    # disk and the real programs. Developer agents do not run it; this job does. It is required for
+    # merge: CI Summary lists it in `needs` and fails when it fails or is cancelled. It runs on every
+    # pull request, docs-only ones included: the integration project holds tests that read files under
+    # `docs/` and the other non-C# paths, so no single `changes` filter proves it irrelevant.
     name: Integration tests
     runs-on: ubuntu-latest
-    needs: changes
-    if: needs.changes.outputs.dotnet == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
