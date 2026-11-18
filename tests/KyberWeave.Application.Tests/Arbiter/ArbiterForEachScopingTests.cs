@@ -4,15 +4,16 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using static KyberWeave.Tests.Arbiter.ArbiterEvaluatorFixtures;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review finding 589-2: two <c>ForEach</c> rules in one event must each read their own items. The
 /// per-item fact was keyed <c>candidate[index]</c> with no rule in the key, so the second rule's item
 /// overwrote the first rule's and a question was sent with another rule's value.
 /// </summary>
-public sealed class ArbiterForEachScopingTests : IDisposable
+public sealed class ArbiterForEachScopingTests
 {
     private const string WithinTask = "within-task";
     private const string RuleA = "KW-ARB-FOREACH-A";
@@ -20,16 +21,7 @@ public sealed class ArbiterForEachScopingTests : IDisposable
     private static readonly string[] FilesA = ["a.cs", "b.cs"];
     private static readonly string[] FilesB = ["x.cs", "y.cs"];
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-foreach-scope-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
+    private readonly InMemoryArbiterState _arbiter = new();
 
     /// <summary>The file value each expansion of <paramref name="ruleId"/> resolves to, in the facts the batch was sent with.</summary>
     private static List<string> ValuesAskedFor(ScriptedProvider provider, ArbiterFactSet facts, string ruleId) =>
@@ -51,7 +43,8 @@ public sealed class ArbiterForEachScopingTests : IDisposable
             .With("plan.files", FilesA, ArbiterFactLabel.Derived)
             .With("plan.other", FilesB, ArbiterFactLabel.Derived));
 
-        await Evaluator(_root, provider, planReader: plan).EvaluateAsync(DelegateEvent(), config);
+        await _arbiter.Evaluator(
+            provider, planReader: plan).EvaluateAsync(DelegateEvent(), config);
 
         ArbiterFactSet facts = Assert.Single(provider.FactsSent);
         Assert.Equal(FilesA, ValuesAskedFor(provider, facts, RuleA));

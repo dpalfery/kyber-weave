@@ -4,29 +4,21 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using static KyberWeave.Tests.Arbiter.ArbiterEvaluatorFixtures;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review finding 589-5: a secondary trigger is delivered when its primary reaches the family's
 /// allow-equivalent, which is the family's neutral effect. The check compared the primary against
 /// <c>allow</c> only, so a gate primary at <c>applies</c> (its neutral) suppressed every secondary.
 /// </summary>
-public sealed class ArbiterSecondaryAllowEquivalentTests : IDisposable
+public sealed class ArbiterSecondaryAllowEquivalentTests
 {
     private const string GateRuleId = "KW-ARB-GATE-905";
     private const string SecondaryRuleId = "KW-ARB-MODEL-905";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-allow-equiv-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
+    private readonly InMemoryArbiterState _arbiter = new();
 
     [Fact]
     public async Task GatePrimaryAtNeutralApplies_DeliversItsSecondary()
@@ -44,8 +36,7 @@ public sealed class ArbiterSecondaryAllowEquivalentTests : IDisposable
             AskRule(SecondaryRuleId, "delegate.model", "retarget", RuleEffects.Retarget),
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(
-            _root,
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
             provider,
             (trigger, ev) => string.Equals(trigger, "gate.select", StringComparison.Ordinal) ? ["delegate.model"] : [])
             .EvaluateAsync(DelegateEvent(target: "gate"), config);

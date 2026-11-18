@@ -5,7 +5,7 @@ using KyberWeave.Core.Diagnostics;
 using Xunit;
 using YamlDotNet.Core;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review finding 589-A: a for-each question is keyed <c>{rule id}@{index}</c>. A host rule whose own id

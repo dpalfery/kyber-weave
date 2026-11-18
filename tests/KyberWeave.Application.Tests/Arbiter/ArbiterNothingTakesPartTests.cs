@@ -4,29 +4,21 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using static KyberWeave.Tests.Arbiter.ArbiterEvaluatorFixtures;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review finding 589-D: when no rule takes part in the combination, the outcome is the family's neutral
 /// effect, the same effect the record shows for a not-evaluated or shadow entry. For a gate that is
 /// <c>applies</c> (run the gate), not <c>not-applicable</c>, which the combine of an empty set gave before.
 /// </summary>
-public sealed class ArbiterNothingTakesPartTests : IDisposable
+public sealed class ArbiterNothingTakesPartTests
 {
     private const string GateRuleId = "KW-ARB-GATE-NE-D";
     private const string ConductorRuleId = "KW-ARB-ASK-D";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-nothing-takes-part-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
+    private readonly InMemoryArbiterState _arbiter = new();
 
     [Fact]
     public async Task GateWhoseOnlyQuestionIsNotEvaluated_OutcomeIsNeutralApplies()
@@ -42,7 +34,8 @@ public sealed class ArbiterNothingTakesPartTests : IDisposable
             AskRule(GateRuleId, "gate.select", "applies", RuleEffects.Applies),
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(_root, provider)
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
+            provider)
             .EvaluateAsync(DelegateEvent(target: "gate"), config);
 
         Assert.Equal(RuleEffects.Applies, result.Outcome);
@@ -56,7 +49,8 @@ public sealed class ArbiterNothingTakesPartTests : IDisposable
             AskRule(GateRuleId, "gate.select", "applies", RuleEffects.Applies) with { Enabled = false },
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(_root, new ScriptedProvider())
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
+            new ScriptedProvider())
             .EvaluateAsync(DelegateEvent(target: "gate"), config);
 
         Assert.Equal(RuleEffects.Applies, result.Outcome);
@@ -76,7 +70,8 @@ public sealed class ArbiterNothingTakesPartTests : IDisposable
             AskRule(ConductorRuleId, "delegate", "within-task", RuleEffects.Allow),
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(_root, provider).EvaluateAsync(DelegateEvent(), config);
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
+            provider).EvaluateAsync(DelegateEvent(), config);
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
     }

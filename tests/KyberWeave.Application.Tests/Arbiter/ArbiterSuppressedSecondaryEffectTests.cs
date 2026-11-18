@@ -4,30 +4,22 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using static KyberWeave.Tests.Arbiter.ArbiterEvaluatorFixtures;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review finding 589-1: a suppressed secondary rule records its own family's neutral effect. The
 /// secondary base used to return <c>keep</c> for every family, so a suppressed <c>shortcut</c> rule
 /// was recorded as <c>keep</c>, which is not an effect the shortcut family may record.
 /// </summary>
-public sealed class ArbiterSuppressedSecondaryEffectTests : IDisposable
+public sealed class ArbiterSuppressedSecondaryEffectTests
 {
     private const string PrimaryTrigger = "delegate";
     private const string PrimaryRuleId = "KW-ARB-ASK-901";
     private const string SecondaryRuleId = "KW-ARB-SHORT-901";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-suppressed-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
+    private readonly InMemoryArbiterState _arbiter = new();
 
     /// <summary>The secondary trigger a <c>delegate</c> primary carries in these tests.</summary>
     public static TheoryData<string, string> SecondaryTriggerAndAnswerEffect => new()
@@ -57,13 +49,13 @@ public sealed class ArbiterSuppressedSecondaryEffectTests : IDisposable
             AskRule(SecondaryRuleId, "shortcut", "answer", RuleEffects.Answer),
         ]);
 
-        ArbiterEvaluationResult result = await Evaluator(
-            _root, provider, (trigger, ev) => SecondaryFor(trigger, "shortcut", ev))
+        ArbiterEvaluationResult result = await _arbiter.Evaluator(
+            provider, (trigger, ev) => SecondaryFor(trigger, "shortcut", ev))
             .EvaluateAsync(DelegateEvent(), config);
 
         ArbiterSecondaryEvaluation secondary = Assert.Single(result.Dispatches[0].Secondary);
         Assert.Equal(RuleEffects.Spawn, secondary.Outcome);
-        ArbiterDecisionRule rule = Records(_root).Single(record => record.Trigger == "shortcut").Rules.Single();
+        ArbiterDecisionRule rule = _arbiter.Records.Single(record => record.Trigger == "shortcut").Rules.Single();
         Assert.Equal(RuleEffects.Spawn, rule.Effect);
         Assert.Equal("suppressed: primary " + RuleEffects.Escalate, rule.Evidence);
     }
@@ -85,10 +77,11 @@ public sealed class ArbiterSuppressedSecondaryEffectTests : IDisposable
             AskRule(SecondaryRuleId, secondary, "answer", answerEffect),
         ]);
 
-        await Evaluator(_root, provider, (trigger, ev) => SecondaryFor(trigger, secondary, ev))
+        await _arbiter.Evaluator(
+            provider, (trigger, ev) => SecondaryFor(trigger, secondary, ev))
             .EvaluateAsync(DelegateEvent(), config);
 
-        ArbiterDecisionRule rule = Records(_root).Single(record => record.Trigger == secondary).Rules.Single();
+        ArbiterDecisionRule rule = _arbiter.Records.Single(record => record.Trigger == secondary).Rules.Single();
         IReadOnlySet<string> allowed = ArbiterTriggerFamilies.AllowedEffects(ArbiterTriggerFamilies.ForTrigger(secondary));
         Assert.True(allowed.Contains(rule.Effect), $"{secondary} recorded '{rule.Effect}', which its family does not allow.");
     }

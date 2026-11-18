@@ -2,7 +2,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using Xunit;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// The four review questions <c>review seats</c> and <c>review verdict</c> now ask are answered from step 0 on the hook,
