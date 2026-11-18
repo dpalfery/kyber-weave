@@ -63,4 +63,12 @@ public sealed class FileCitedSourceFilesTests
         Assert.Equal(["two", "three"], _sources.ReadWindow(path, firstLine: 2, count: 2));
         Assert.Equal(["four"], _sources.ReadWindow(path, firstLine: 4, count: 10));
     }
+
+    [Fact]
+    public void ReadWindowBeyondTheLastIndexableLineReturnsNoLines()
+    {
+        string path = Path.Combine(Root, "src", "a.cs");
+
+        Assert.Empty(_sources.ReadWindow(path, firstLine: (long)int.MaxValue + 2, count: 1));
+    }
 }
