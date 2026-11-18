@@ -139,6 +139,39 @@ public class DocsInitTemplateChoiceTests : IDisposable
     }
 
     /// <summary>
+    /// <c>--standards</c> names folders, and only the folders it names get a shipped template. A
+    /// technology the host already declared keeps the stub its folder would have been given without
+    /// the flag, so asking for one folder does not restyle every other one.
+    /// </summary>
+    [Fact]
+    public void NamingOneTechnologyDoesNotGiveAPreexistingTechnologyItsTemplate()
+    {
+        string configPath = PathOf(".kyber-weave/kyber-weave.yml");
+        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
+        File.WriteAllText(configPath, """
+            ontology:
+              docs-root: docs
+              technologies:
+                - csharp
+            """);
+        string folder = PathOf("docs/standards/csharp");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(
+            Path.Combine(folder, "csharp.standards.md"),
+            "---\nid: standards/csharp\ntitle: Mine\n---\n\n# Mine\n");
+
+        Scaffolding.Scaffold(_temp.Path, standards: ["python"]);
+
+        string today = DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        string rules = File.ReadAllText(PathOf("docs/standards/csharp/csharp.rules.md"));
+        Assert.NotEqual(
+            KyberStandardsTemplates.RenderPart("csharp", KyberStandardsTemplates.Part.Rules, "unassigned", today),
+            rules);
+        Assert.Contains("technology: csharp", rules, StringComparison.Ordinal);
+        Assert.Contains("doc-type: rule", rules, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// Asking for every shipped technology and for one role folder in the same run has to do
     /// both: the second choice is not a replacement for the first.
     /// </summary>

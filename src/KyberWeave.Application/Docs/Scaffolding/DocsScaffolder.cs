@@ -108,19 +108,26 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             .Ontology.WithDocsRoot(resolvedDocsRoot);
 
         // The two choices add to each other rather than replace each other: an operator may ask
-        // for every shipped technology and one role folder in the same run.
+        // for every shipped technology and one role folder in the same run. Only the technology
+        // folders this run was asked for are remembered: naming one folder is not a request to
+        // restyle a technology the host already declared, and that folder keeps the stub it would
+        // have been given without either flag.
+        HashSet<string> templatedTechnologies = new(StringComparer.Ordinal);
         if (kyberStandards)
         {
             IReadOnlyList<string> mergedTechnologies = ontology.Technologies
                 .Union(KyberStandardsTemplates.All, StringComparer.Ordinal)
                 .ToList();
             ontology = ontology.Clone(technologies: mergedTechnologies);
+            templatedTechnologies.UnionWith(KyberStandardsTemplates.All);
         }
 
         bool writesShippedTemplates = kyberStandards;
         if (standards is { Count: > 0 })
         {
             ontology = WithChosenStandards(ontology, standards);
+            templatedTechnologies.UnionWith(standards.Where(
+                name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
             writesShippedTemplates = true;
         }
 
@@ -169,7 +176,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 }
 
                 string content =
-                    writesShippedTemplates
+                    templatedTechnologies.Contains(technology)
                     && KyberStandardsTemplates.TryRenderPart(
                         technology, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
