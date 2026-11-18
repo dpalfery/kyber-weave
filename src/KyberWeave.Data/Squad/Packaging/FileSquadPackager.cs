@@ -4,8 +4,9 @@ using KyberWeave.Core.Squad.Parsing;
 
 namespace KyberWeave.Core.Squad.Packaging;
 
-/// <summary>Writes the Squad archives to disk through <see cref="SquadPacker"/>, and checks the composed tree in a scratch folder.</summary>
-public sealed class FileSquadPackager : ISquadPackager
+/// <summary>Writes the Squad archives through <see cref="ISquadArchiveWriter"/>, and checks the composed tree in a scratch folder.</summary>
+/// <param name="archives">Writes the archives from the canonical source.</param>
+public sealed class FileSquadPackager(ISquadArchiveWriter archives) : ISquadPackager
 {
     /// <inheritdoc />
     public void ValidateSource(string sourcePath)
@@ -26,7 +27,7 @@ public sealed class FileSquadPackager : ISquadPackager
         string scratch = Path.Combine(Path.GetTempPath(), $"kyber-squad-pack-{Guid.NewGuid():N}");
         try
         {
-            string archive = SquadPacker.PackApm(sourcePath, scratch, version, companionSkillsRoot);
+            string archive = archives.PackApm(sourcePath, scratch, version, companionSkillsRoot);
             string tree = Path.Combine(scratch, "tree");
             ZipFile.ExtractToDirectory(archive, tree);
             _ = SquadSourceLoader.Load(tree);
@@ -39,11 +40,11 @@ public sealed class FileSquadPackager : ISquadPackager
 
     /// <inheritdoc />
     public string PackApm(string sourcePath, string outDirectory, string version, string? companionSkillsRoot) =>
-        SquadPacker.PackApm(sourcePath, outDirectory, version, companionSkillsRoot);
+        archives.PackApm(sourcePath, outDirectory, version, companionSkillsRoot);
 
     /// <inheritdoc />
     public string PackPlugins(string sourcePath, string outDirectory, string version, string? companionSkillsRoot) =>
-        SquadPacker.PackPlugins(sourcePath, outDirectory, version, companionSkillsRoot);
+        archives.PackPlugins(sourcePath, outDirectory, version, companionSkillsRoot);
 
     /// <inheritdoc />
     public (string ApmArchivePath, string PluginsArchivePath, string ChecksumFilePath) PackAll(
@@ -51,7 +52,7 @@ public sealed class FileSquadPackager : ISquadPackager
         string outDirectory,
         string version,
         string? companionSkillsRoot) =>
-        SquadPacker.PackAll(sourcePath, outDirectory, version, companionSkillsRoot);
+        archives.PackAll(sourcePath, outDirectory, version, companionSkillsRoot);
 
     /// <summary>
     /// Removes the scratch folder without letting a cleanup failure replace the pack's own result or error. A folder

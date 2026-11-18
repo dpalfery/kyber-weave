@@ -13,6 +13,7 @@ using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Testing.Squad;
 
 namespace KyberWeave.Integration.Tests.Squad;
 
@@ -741,7 +742,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         File.WriteAllBytes(archivePath, previous);
 
         SquadSourceValidationException failure = Assert.Throws<SquadSourceValidationException>(() =>
-            SquadPacker.PackApm(
+            RealSquadPacker.Create().PackApm(
                 Path.Combine(repository, "products", "kyber-squad"),
                 outDirectory,
                 PackedVersion,
@@ -774,7 +775,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         ];
 
         IOException failure = Assert.Throws<IOException>(() =>
-            SquadPacker.WriteArchive(archivePath, entries, beforeEntry: name =>
+            RealSquadPacker.Create().WriteArchive(archivePath, entries, beforeEntry: name =>
             {
                 if (name == "second.md")
                 {

@@ -14,6 +14,7 @@ using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Testing.Squad;
 
 namespace KyberWeave.Tests;
 
@@ -185,7 +186,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_Apm_CanonicalSourceShipsTaskGateAndNoRetiredTaskReviewer()
     {
         string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "task-gate-inventory");
+        string archivePath = RealSquadPacker.Create().PackApm(productRoot, _temp.Path, "task-gate-inventory");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
 
@@ -202,7 +203,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     public void Pack_Apm_CanonicalSourceShipsNoRetiredSecondBrain()
     {
         string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "no-second-brain");
+        string archivePath = RealSquadPacker.Create().PackApm(productRoot, _temp.Path, "no-second-brain");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
 

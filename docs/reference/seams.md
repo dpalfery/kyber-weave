@@ -350,7 +350,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileSquadPackager` (`Squad/Packaging/FileSquadPackager.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadCompanionSkills` (`Squad/Packaging/SquadCompanionSkills.cs`) | file system, paths | 3.5 |
 | `SquadPackSourceLocator` (`Squad/Packaging/SquadPackSourceLocator.cs`) | file system, paths | 3.5 |
-| `SquadPacker` (`Squad/Packaging/SquadPacker.cs`) | file system, identifiers | 3.5 |
 | `SquadSourceLoader` (`Squad/Parsing/SquadSourceLoader.cs`) | file system, paths | 3.5 |
 | `SquadCanonicalProfileStore` (`Squad/Presets/SquadCanonicalProfileStore.cs`) | file system, identifiers | 3.5 |
 | `SquadModelPresetSelectionStore` (`Squad/Presets/SquadModelPresetSelectionStore.cs`) | file system, identifiers | 3.5 |
@@ -435,20 +434,20 @@ the behaviour: where a test observes the value, the seam still wraps it.
 | Type | Why it stays | Where the code uses it | What a test controls |
 |---|---|---|---|
 | `JsonDocument` | Parses a string or byte payload the caller already holds. It opens no resource and holds no state a test needs to replace | 32 files, 53 sites; most in `Application/Docs/Mcp` and `Data/Squad` | The input text or bytes; the parse result is deterministic |
-| `ZipArchive` | A sealed reader and writer over a stream. The stream is the resource, not the archive | 3 files, 8 sites: `Data/Squad/Release/GitHubSquadReleaseSource.cs`, `Data/Squad/Packaging/SquadPacker.cs`, `Data/Skills/ZipSkillArchiveWriter.cs` | The stream: a `MemoryStream` holding a fixture archive |
+| `ZipArchive` | A sealed reader and writer over a stream. The stream is the resource, not the archive | 3 files, 8 sites: `Data/Squad/Release/GitHubSquadReleaseSource.cs`, `Application/Squad/Packaging/SquadPacker.cs`, `Data/Skills/ZipSkillArchiveWriter.cs` | The stream: a `MemoryStream` holding a fixture archive |
 | `SHA256` | A pure hash over bytes. Two calls on the same bytes return the same digest, so a test never needs to replace it | 40 files, 51 sites, from `Arbiter` through `Squad` to `SelfUpdater` | The bytes hashed; the digest is asserted directly |
 | `ProcessStartInfo` | A sealed data transfer object handed to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a delegate. It starts nothing by itself; the runner does | 39 files, 66 sites; production process starts remain in `Kernel/Processes/ProcessRunner.cs` and `StdioSession` | A scripted fake asserts the program, arguments, working directory and environment it receives |
 | `HttpClient` | A sealed network client. The transport is the seam: an injected `HttpMessageHandler` or `IArbiterHttpHandlers`, or a named network adapter | 9 files, 16 sites: the four network adapters (`SystemOneClient`, `GitHubReleaseClient`, `GitHubSquadReleaseSource`, `OpenAiCompatibleEmbeddingGenerator`), `OllamaProbe` over `IArbiterHttpHandlers`, `SelfUpdater` over an injected handler, and two factories that pass the handler on | The handler or the network adapter; no test opens a socket |
 | `FileStream` | The stream type at the bottom of the file-system adapter. It is an exception only **inside** an adapter, where it is the adapter's whole job | 27 files, 37 sites. Adapter uses: `PhysicalFileSystem`, `PhysicalDoctorFileSystem`, `ExclusiveFileWriter`, `FileBoundedFileReader`, `FileCodeGraphIndexWorkspace` (lease) and Kernel `BoundedFileReader`; `TransactionLease` is adapter-shaped but task 3.4 moves it onto `ILease` | The file-system seam: `InMemoryFileSystem`, proven by the file-system contract suite |
 
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
-does not yet meet that: 19 non-adapter classes open a `FileStream` directly. They are
+does not yet meet that: 18 non-adapter classes open a `FileStream` directly. They are
 `Application/Docs/Scaffolding/StandardsFolderMigration.cs`, `Application/Update/SelfUpdater.cs`,
 `Data/Arbiter/Facts/FileTextFacts.cs` and `GateReportFacts.cs`,
 `Data/Arbiter/Ledger/InFlightLedger.cs`, `Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and
 `FileWorkerBudgetStore.cs`, `Data/Squad/Deployment/SquadStateMigration.cs`, `SquadStateStore.cs`,
 `SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
-`Data/Squad/Packaging/SquadPacker.cs`, `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
+`Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`, `Data/Squad/Release/GitHubSquadReleaseSource.cs`,
 `Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.

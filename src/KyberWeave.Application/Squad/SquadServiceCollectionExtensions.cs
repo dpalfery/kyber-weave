@@ -6,6 +6,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,6 +37,7 @@ public static class SquadServiceCollectionExtensions
                 ? new LocalCheckoutSquadReleaseSource(local)
                 : sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadPackService, SquadPackService>();
+        services.TryAddSingleton<ISquadArchiveWriter>(sp => new SquadPacker(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IArbiterRefreshTargets, CliArbiterRefreshTargets>();
         services.TryAddSingleton<IArbiterHookRefresherFactory, ArbiterHookRefresherFactory>();
         services.TryAddSingleton<ISelfUpdateService>(sp => new SelfUpdateService(
