@@ -104,7 +104,50 @@ public class FileSystemPathResolver : IPathResolver
             return true;
         }
 
-        return HasPathPrefix(Canonicalize(normalizedRoot), Canonicalize(normalizedCandidate));
+        string canonicalRoot = Canonicalize(normalizedRoot);
+        string canonicalCandidate = Canonicalize(normalizedCandidate);
+        return HasPathPrefix(canonicalRoot, canonicalCandidate) ||
+               FoldsBelowTheDeepestEntry(canonicalRoot, canonicalCandidate);
+    }
+
+    /// <summary>
+    ///     Whether two canonical spellings that agree only by the volume's case rule name one path because nothing
+    ///     exists at the segment where they differ.
+    /// </summary>
+    /// <remarks>
+    ///     Folding a segment that names an entry is what lets a link into a case-distinct sibling look contained, so
+    ///     the rule here is narrower: the two spellings fold, and neither of them names an entry in the parent. No
+    ///     directory can hold a name below a segment that does not exist, so the rest of the candidate cannot be
+    ///     anything but the tail a deployment is about to create.
+    /// </remarks>
+    private bool FoldsBelowTheDeepestEntry(string canonicalRoot, string canonicalCandidate)
+    {
+        string filesystemRoot = FilesystemRoot(canonicalRoot, nameof(canonicalRoot));
+        string[] rootSegments = Segments(canonicalRoot, filesystemRoot);
+        string[] candidateSegments = Segments(canonicalCandidate, filesystemRoot);
+        if (candidateSegments.Length <= rootSegments.Length)
+        {
+            return false;
+        }
+
+        string parent = filesystemRoot;
+        for (int index = 0; index < rootSegments.Length; index++)
+        {
+            string rootSegment = rootSegments[index];
+            string candidateSegment = candidateSegments[index];
+            if (string.Equals(rootSegment, candidateSegment, StringComparison.Ordinal))
+            {
+                parent = Path.Combine(parent, rootSegment);
+                continue;
+            }
+
+            return string.Equals(rootSegment, candidateSegment, _nameComparison) &&
+                   ResolveActualEntry(parent, rootSegment) is null &&
+                   ResolveActualEntry(parent, candidateSegment) is null;
+        }
+
+        // The loop left no segment to differ at, so the exact comparison above already answered.
+        return false;
     }
 
     /// <inheritdoc />
