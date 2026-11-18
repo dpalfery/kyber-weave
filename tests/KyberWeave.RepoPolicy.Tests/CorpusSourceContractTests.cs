@@ -50,6 +50,24 @@ public abstract class InMemoryCorpusContractTests : CorpusSourceContractTests
     /// <inheritdoc />
     protected override (string Directory, string Pattern) BuildOutputProbe => ("products/kyber-squad", "*");
 
+    /// <summary>
+    /// An empty directory the fixture declares answers as the checkout answers one it ships, while its file listing
+    /// stays empty because it holds no files.
+    /// </summary>
+    [Fact]
+    public void ReportsAnEmptyDirectoryTheFixtureDeclares()
+    {
+        ICorpusSource corpus = new InMemoryCorpusSource()
+            .AddDirectory("products/kyber-squad/templates/empty");
+
+        Assert.True(corpus.DirectoryExists("products/kyber-squad/templates/empty"));
+        Assert.True(corpus.DirectoryExists("products/kyber-squad/templates"));
+        Assert.Contains(
+            "products/kyber-squad/templates/empty",
+            corpus.EnumerateDirectories("products/kyber-squad/templates"));
+        Assert.Empty(corpus.EnumerateFiles("products/kyber-squad/templates/empty"));
+    }
+
     [Fact]
     public void DoesNotKeepTheArrayTheFixtureSupplied()
     {

@@ -9,6 +9,7 @@ using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -23,6 +24,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterCommandAllowListTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly DateTimeOffset Start = new(2026, 11, 17, 9, 0, 0, TimeSpan.Zero);
 
     private const string DispatchSession = "sess-1";
@@ -320,12 +323,36 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             return;
         }
 
-        string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", technology);
         string target = Path.Combine(root, "docs", "standards", technology);
         Directory.CreateDirectory(target);
-        foreach (string file in Directory.EnumerateFiles(source))
+        CopyShippedStandards(technology, target);
+    }
+
+    /// <summary>
+    /// A technology with no shipped standards folder fails at the copy, as the directory read this replaced did,
+    /// instead of leaving an empty folder for the guard to grade.
+    /// </summary>
+    [Fact]
+    public void CopyingAStandardsFolderThatIsNotShippedFailsLoudly()
+    {
+        Assert.Throws<DirectoryNotFoundException>(() => CopyShippedStandards(
+            "no-such-technology",
+            Path.Combine(_repository.Path, "docs", "standards", "no-such-technology")));
+    }
+
+    /// <summary>Copies the shipped standards folder for one technology into a scratch repository, byte for byte.</summary>
+    private static void CopyShippedStandards(string technology, string target)
+    {
+        string source = $"products/kyber-squad/standards/{technology}";
+
+        // A corpus listing reports a missing directory as empty, so a misspelt technology would copy nothing and leave
+        // the guard grading an empty folder; the directory read this replaced raised instead, and so does this.
+        if (!Corpus.DirectoryExists(source))
+            throw new DirectoryNotFoundException($"The shipped standards folder is missing: '{source}'.");
+
+        foreach (string file in Corpus.EnumerateFiles(source, "*", recursive: false))
         {
-            File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+            File.WriteAllBytes(Path.Combine(target, Path.GetFileName(file)), Corpus.ReadBytes(file));
         }
     }
 
@@ -342,13 +369,9 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
 
         foreach (string technology in technologies)
         {
-            string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", technology);
             string target = Path.Combine(root, "docs", "standards", technology);
             Directory.CreateDirectory(target);
-            foreach (string file in Directory.EnumerateFiles(source))
-            {
-                File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
-            }
+            CopyShippedStandards(technology, target);
         }
     }
 
@@ -501,6 +524,5 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     }
 
     private static string ShippedStandardsFile(string relativePath) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", relativePath));
+        Corpus.ReadText($"products/kyber-squad/standards/{relativePath}");
 }

@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.Squad.Validation;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
@@ -37,8 +38,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ClaudeRendererContractTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly string[] SkillFrontmatterKeys = ["name", "description", "license"];
     private static readonly string[] PrimaryAgentDegradationCodes = ["permission-not-expressible", "role-skill-fallback"];
@@ -1239,8 +1242,9 @@ internal sealed class ClaudeNoPrimaryAgentFixture : IDisposable
     internal static ClaudeNoPrimaryAgentFixture Create(string noPrimaryAgentValue)
     {
         ClaudeNoPrimaryAgentFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
+        PiCorpusFixtureHelpers.CopyDirectory(
+            Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad"),
+            fixture.ProductRoot);
 
         string fallbacksPath = Path.Combine(fixture.ProductRoot, "profiles", "fallbacks.yml");
         string original = File.ReadAllText(fallbacksPath);

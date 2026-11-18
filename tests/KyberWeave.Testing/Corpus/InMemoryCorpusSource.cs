@@ -11,6 +11,7 @@ namespace KyberWeave.Tests.Corpus;
 public sealed class InMemoryCorpusSource : ICorpusSource
 {
     private readonly Dictionary<string, byte[]> _files;
+    private readonly HashSet<string> _directories;
     private readonly StringComparer _names;
 
     /// <summary>Creates an empty corpus.</summary>
@@ -23,6 +24,7 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         CaseSensitive = caseSensitive ?? OperatingSystem.IsLinux();
         _names = CaseSensitive ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
         _files = new Dictionary<string, byte[]>(_names);
+        _directories = new HashSet<string>(_names);
     }
 
     /// <summary>Gets whether names are compared case-sensitively in this corpus.</summary>
@@ -51,8 +53,34 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         return this;
     }
 
+    /// <summary>Adds a directory, including an empty one, which a file-added path implies but cannot express.</summary>
+    /// <param name="relativeDirectory">The directory's path relative to the corpus root, with forward slashes.</param>
+    /// <returns>This corpus, so a fixture can be built in one expression.</returns>
+    public InMemoryCorpusSource AddDirectory(string relativeDirectory)
+    {
+        string directory = CorpusPath.NormalizeDirectory(relativeDirectory);
+        if (directory.Length > 0)
+            _directories.Add(directory);
+
+        return this;
+    }
+
     /// <inheritdoc />
     public bool Exists(string relativePath) => _files.ContainsKey(CorpusPath.Normalize(relativePath));
+
+    /// <inheritdoc />
+    public bool DirectoryExists(string relativeDirectory)
+    {
+        string directory = CorpusPath.NormalizeDirectory(relativeDirectory);
+        if (directory.Length == 0)
+            return true;
+
+        if (_directories.Contains(directory))
+            return true;
+
+        string prefix = directory + "/";
+        return _files.Keys.Concat(_directories).Any(path => path.StartsWith(prefix, Comparison));
+    }
 
     /// <inheritdoc />
     public string ReadText(string relativePath)
@@ -101,11 +129,21 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         string directory = CorpusPath.NormalizeDirectory(relativeDirectory);
         string prefix = directory.Length == 0 ? string.Empty : directory + "/";
 
-        return _files.Keys
+        // A file implies the directories above it; a declared directory names one even when it holds no file.
+        IEnumerable<string> fromFiles = _files.Keys
             .Where(path => path.StartsWith(prefix, Comparison))
             .Select(path => path[prefix.Length..])
-            .Select(rest => rest.IndexOf('/', StringComparison.Ordinal) is int slash and >= 0 ? prefix + rest[..slash] : null)
-            .OfType<string>()
+            .Where(rest => rest.Contains('/', StringComparison.Ordinal))
+            .Select(rest => prefix + rest[..rest.IndexOf('/', StringComparison.Ordinal)]);
+
+        IEnumerable<string> fromDirectories = _directories
+            .Where(path => path.StartsWith(prefix, Comparison))
+            .Select(path => path[prefix.Length..])
+            .Where(rest => rest.Length > 0)
+            .Select(rest => prefix + (rest.IndexOf('/', StringComparison.Ordinal) is int slash and >= 0 ? rest[..slash] : rest));
+
+        return fromFiles
+            .Concat(fromDirectories)
             .Distinct(_names)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();

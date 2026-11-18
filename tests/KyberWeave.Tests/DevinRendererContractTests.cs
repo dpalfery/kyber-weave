@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
@@ -37,8 +38,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class DevinRendererContractTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly (string Capability, string[] Tools)[] CapabilityToolContract =
     [
@@ -684,8 +687,9 @@ internal sealed class DevinModelOverrideFixture : IDisposable
     internal static DevinModelOverrideFixture Create()
     {
         DevinModelOverrideFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-        PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
+        PiCorpusFixtureHelpers.CopyDirectory(
+            Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad"),
+            fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
         string original = File.ReadAllText(modelsPath).Replace("\r\n", "\n", StringComparison.Ordinal);

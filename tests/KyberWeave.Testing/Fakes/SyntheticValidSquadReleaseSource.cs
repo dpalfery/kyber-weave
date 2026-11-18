@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -65,7 +66,7 @@ public sealed class SyntheticValidSquadReleaseSource : ISquadReleaseSource
 
     private static string BuildSyntheticCorpusTemplate()
     {
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string productRoot = Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad");
         string templateRoot = Path.Combine(
             Path.GetTempPath(),
             "kyber-weave-synthetic-squad-" + Guid.NewGuid().ToString("N"));

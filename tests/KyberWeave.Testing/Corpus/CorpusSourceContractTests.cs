@@ -106,6 +106,17 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void ReportsWhetherADirectoryExists()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        Assert.True(corpus.DirectoryExists(string.Empty), "The corpus root is itself a directory.");
+        Assert.True(corpus.DirectoryExists(SampleDirectory));
+        Assert.False(corpus.DirectoryExists(SampleDirectory + "/no-such-directory"));
+        Assert.False(corpus.DirectoryExists(SampleFile), "A file is not a directory.");
+    }
+
+    [Fact]
     public void ThrowsWhenAFileIsMissing()
     {
         ICorpusSource corpus = CreateCorpus();
@@ -230,14 +241,27 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void RefusesAMissingDirectoryName()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        Assert.ThrowsAny<ArgumentException>(() => corpus.DirectoryExists(null!));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists(" "));
+        Assert.Throws<ArgumentException>(() => corpus.EnumerateFiles(" "));
+        Assert.Throws<ArgumentException>(() => corpus.EnumerateDirectories(" "));
+    }
+
+    [Fact]
     public void RefusesARootedPath()
     {
         ICorpusSource corpus = CreateCorpus();
 
         Assert.Throws<ArgumentException>(() => corpus.ReadText("/" + SampleFile));
         Assert.Throws<ArgumentException>(() => corpus.Exists("/" + SampleFile));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists("/" + SampleDirectory));
         Assert.Throws<ArgumentException>(() => corpus.EnumerateFiles("/" + SampleDirectory));
         Assert.Throws<ArgumentException>(() => corpus.ReadText("C:/" + SampleFile));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists("C:/" + SampleDirectory));
         Assert.Throws<ArgumentException>(() => corpus.ReadText(@"C:\" + SampleFile.Replace('/', '\\')));
     }
 
@@ -248,6 +272,8 @@ public abstract class CorpusSourceContractTests
 
         Assert.Throws<ArgumentException>(() => corpus.ReadText("../outside.md"));
         Assert.Throws<ArgumentException>(() => corpus.ReadText("products/../../outside.md"));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists("../outside"));
         Assert.Throws<ArgumentException>(() => corpus.EnumerateFiles(".."));
+        Assert.Throws<ArgumentException>(() => corpus.EnumerateDirectories(".."));
     }
 }

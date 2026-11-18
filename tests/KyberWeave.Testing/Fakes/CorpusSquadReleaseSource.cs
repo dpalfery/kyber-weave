@@ -1,4 +1,5 @@
 using KyberWeave.Core.Squad.Release;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -22,8 +23,7 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
 {
     private const string AssetSha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-    private static readonly string CorpusRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static readonly Lazy<List<(string RelativePath, byte[] Content)>> PreloadedCorpus = new(LoadCorpus);
 
@@ -64,10 +64,10 @@ public sealed class CorpusSquadReleaseSource : ISquadReleaseSource
     private static List<(string RelativePath, byte[] Content)> LoadCorpus()
     {
         List<(string RelativePath, byte[] Content)> files = [];
-        foreach (string sourceFilePath in Directory.EnumerateFiles(CorpusRoot, "*", SearchOption.AllDirectories))
+        foreach (string sourceFilePath in Corpus.EnumerateFiles("products/kyber-squad"))
         {
-            string relativePath = Path.GetRelativePath(CorpusRoot, sourceFilePath).Replace(Path.DirectorySeparatorChar, '/');
-            files.Add((relativePath, File.ReadAllBytes(sourceFilePath)));
+            string relativePath = sourceFilePath["products/kyber-squad/".Length..];
+            files.Add((relativePath, Corpus.ReadBytes(sourceFilePath)));
         }
 
         files.Sort((a, b) => string.CompareOrdinal(a.RelativePath, b.RelativePath));

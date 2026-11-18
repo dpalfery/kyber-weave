@@ -52,12 +52,19 @@ internal static class CorpusPath
     /// Canonicalizes a directory path relative to the corpus root, where the empty string and <c>.</c> name the root
     /// itself, so a listing can start there.
     /// </summary>
-    /// <param name="relativeDirectory">The directory a caller supplied, with either slash.</param>
+    /// <param name="relativeDirectory">
+    /// The directory a caller supplied, with either slash. Only the empty string and <c>.</c> name the root: a missing
+    /// name, including a whitespace-only one, is a caller error, as it is for a file path.
+    /// </param>
     /// <returns>The canonical directory path, or the empty string for the corpus root.</returns>
-    /// <exception cref="ArgumentException">The path is rooted, or climbs above the root with <c>..</c>.</exception>
+    /// <exception cref="ArgumentException">
+    /// The name is null or whitespace, the path is rooted, or it climbs above the root with <c>..</c>.
+    /// </exception>
     public static string NormalizeDirectory(string relativeDirectory)
     {
-        if (string.IsNullOrWhiteSpace(relativeDirectory))
+        ArgumentNullException.ThrowIfNull(relativeDirectory);
+
+        if (relativeDirectory.Length == 0)
             return string.Empty;
 
         string candidate = relativeDirectory.Replace('\\', '/');

@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
@@ -38,8 +39,10 @@ public sealed class ArbiterHookWiringTests : IDisposable
 
     private const string DegradationCode = "arbiter-not-enforced";
 
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ShippedProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
 

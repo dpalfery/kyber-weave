@@ -4,6 +4,7 @@ using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -15,7 +16,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DocLinkFragmentValidationTests
 {
-    private static readonly string RepositoryRoot = KyberWeaveTestPaths.ToolRoot;
+    private static readonly string RepositoryRoot = CheckoutCorpusSource.Checkout.Root;
 
     [Fact]
     public void KnownBrokenCorpusFragmentsReportKWDOCLINK001()

@@ -37,6 +37,10 @@ public sealed class CheckoutCorpusSource : ICorpusSource
     }
 
     /// <inheritdoc />
+    public bool DirectoryExists(string relativeDirectory) =>
+        _files.DirectoryExists(CorpusPath.Resolve(Root, CorpusPath.NormalizeDirectory(relativeDirectory)));
+
+    /// <inheritdoc />
     public string ReadText(string relativePath) => _files.ReadAllText(ResolveFile(relativePath));
 
     /// <inheritdoc />

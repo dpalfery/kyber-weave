@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -15,8 +16,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class CommandCodeRendererContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>Command Code built-in tool names the lowering may emit.</summary>
     private static readonly string[] CommandCodeTools =

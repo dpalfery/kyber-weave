@@ -4,6 +4,7 @@ using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -34,7 +35,7 @@ public sealed class ArbiterModelTargetsFileTests : IDisposable
 
     private static SquadSource Canonical => TestSquadCorpus.CanonicalSource;
 
-    private static string CorpusRoot => Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static string CorpusRoot => Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad");
 
     private static SquadRendererRegistry Registry() =>
         new([new ClaudeRenderer(), new OpenCodeRenderer()]);
