@@ -25,13 +25,14 @@
     <InternalsVisibleTo Include="KyberWeave.Data.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.RepoPolicy.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.PromptContent.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Content.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Architecture.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
+    <PackageReference Include="Spectre.Console.Testing" Version="0.57.2" />
     <PackageReference Include="xunit.v3.assert" Version="4.0.3" />
     <PackageReference Include="xunit.v3.extensibility.core" Version="4.0.3" />
   </ItemGroup>

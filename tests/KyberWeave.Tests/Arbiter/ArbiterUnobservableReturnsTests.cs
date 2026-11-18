@@ -149,7 +149,7 @@ public sealed class ArbiterUnobservableReturnsTests
     }
 
     private static string[] NonReadyRuleIds =>
-        ArbiterConfigTests.ExpectedRuleIds.Where(id => id != "KW-ARB-READY-001").ToArray();
+        ArbiterExpectedRuleIds.All.Where(id => id != "KW-ARB-READY-001").ToArray();
 
     private static string ReadyOnlyRules() =>
         string.Join(

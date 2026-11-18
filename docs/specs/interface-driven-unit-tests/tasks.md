@@ -279,7 +279,7 @@ from this file when it is marked Ready.
   - **Depends on:** 3.3
   - _Requirements: 2.1, 2.4, 2.5, 2.8, 10.2_
 
-- [ ] 3.5 The other static classes in Data onto seams
+- [x] 3.5 The other static classes in Data onto seams
   - **Objective:** the 32 static classes in `KyberWeave.Data` that hold logic (`SquadSourceLoader`,
     `SquadPacker`, `SquadInstanceLinkSync`, `DocsRootPath` and the rest in the data inventory) become
     instance classes behind interfaces.
@@ -295,7 +295,7 @@ Each task below is one folder; split further where the inventory shows more than
 - [x] 4.1 `KyberWeave.Application/Update` (`SelfUpdater`, 29 sites)
 - [x] 4.2 `KyberWeave.Application/Docs` (56 sites: `StandardsFolderMigration`, `TaskPromptService`, `DocumentIndexHost` and the rest)
 - [x] 4.3 `KyberWeave.Application/Review` and `Arbiter` (71 sites: `GateRunService` deadline onto `TimeProvider`, `ReviewVerdictService` paths)
-- [ ] 4.4 `KyberWeave.Data` outside `Squad/` (`Arbiter`, `Review`, `Hooks`, `Docs`, `Configuration` and the rest: about 630 sites)
+- [x] 4.4 `KyberWeave.Data` outside `Squad/` (`Arbiter`, `Review`, `Hooks`, `Docs`, `Configuration` and the rest: about 630 sites)
 - [x] 4.5 `KyberWeave.Cli` (181 sites; `CommandHelpers`, `PlanArguments` and `SquadCommandComposition` first)
 - [x] 4.6 `KyberWeave.Mcp` (32 sites; `CodeGraphFreshness` first)
 - [x] 4.7 `KyberWeave.Arbiter` and `KyberWeave.Hooks` (6 sites)
@@ -312,7 +312,7 @@ For every task in phase 4:
 
 ## Phase 5: Tests
 
-- [ ] 5.1 Create one unit test project per product project
+- [x] 5.1 Create one unit test project per product project
   - **Objective:** `<Project>.Tests` for every product project with logic, per D5.
   - **Files:** `tests/**`, the solution file, CI workflows
   - **Acceptance criteria:** each project exists, builds and runs in CI; empty product projects

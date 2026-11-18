@@ -35,7 +35,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.Application.Test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.Hooks.Tests", "tests\KyberWeave.Hooks.Tests\KyberWeave.Hooks.Tests.csproj", "{8C7E8EFB-E0F5-4B82-82C3-CEE4627259F0}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.PromptContent.Tests", "tests\KyberWeave.PromptContent.Tests\KyberWeave.PromptContent.Tests.csproj", "{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.Content.Tests", "tests\KyberWeave.Content.Tests\KyberWeave.Content.Tests.csproj", "{C2BDA7C6-25FC-4739-9441-EFD8CDF6BEC3}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KyberWeave.Testing", "tests\KyberWeave.Testing\KyberWeave.Testing.csproj", "{D4839F3A-6906-49CE-A594-19DFD21425C9}"
 EndProject

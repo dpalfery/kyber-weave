@@ -391,22 +391,6 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     }
 
     /// <summary>
-    /// The file-reading port the global-root and harness inspectors use. Absent or unreadable is not an
-    /// error: the inspector falls back to that target's default, matching what the harness itself does.
-    /// </summary>
-    private string? ReadFileTextOrNull(string path)
-    {
-        try
-        {
-            return _files.FileExists(path) ? _files.ReadAllText(path) : null;
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
     /// Reports whether the ZCode installation declares the MCP servers the canonical toolchain
     /// requires.
     /// </summary>
@@ -466,8 +450,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ZCodeMcpConfigurationReport report = _zcodeMcp.Inspect(
             required,
             zcodeRoot,
-            workingDirectory,
-            ReadFileTextOrNull);
+            workingDirectory);
 
         if (report.MissingServers.Count == 0)
         {
@@ -526,8 +509,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         DevinImportOverlapReport report = _devinOverlap.Inspect(
             workingDirectory,
-            devinUserRoot,
-            ReadFileTextOrNull);
+            devinUserRoot);
 
         if (report.Overlaps.Count == 0)
         {

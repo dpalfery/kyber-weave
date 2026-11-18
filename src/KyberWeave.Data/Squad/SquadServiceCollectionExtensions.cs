@@ -45,10 +45,15 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ICopilotMcpServerProbe>(sp => new CopilotMcpServerProbe(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ISquadOperatorChannelOverlayFile>(sp => new SquadOperatorChannelOverlayFile(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ISquadWorkerBaselineFile>(sp => new SquadWorkerBaselineFile(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadRenderInputReader>(sp => new FileSquadRenderInputReader(
             sp.GetRequiredService<ISquadSourceLoader>(),
             sp.GetRequiredService<ICopilotMcpServerProbe>(),
             sp.GetRequiredService<ISquadOperatorChannelOverlayFile>(),
+            sp.GetRequiredService<ISquadWorkerBaselineFile>(),
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadModelPresetValidator>(sp => new SquadModelPresetValidator(sp.GetRequiredService<IFileSystem>()));
@@ -86,9 +91,21 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<IDevinImportOverlapInspector, FileDevinImportOverlapInspector>();
-        services.TryAddSingleton<IZCodeMcpInspector, FileZCodeMcpInspector>();
-        services.TryAddSingleton<ISquadHookJsonFile, FileSquadHookJsonFile>();
+        services.TryAddSingleton<IDevinImportOverlapInspector>(sp => new DevinImportOverlap(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<IZCodeMcpInspector>(sp => new ZCodeMcpConfiguration(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadWorktreeMcp>(sp => new SquadWorktreeMcp(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadHookJsonFile>(sp => new SquadHookJsonFile(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadHarnessStartInfoBuilder>(sp => new SquadHarnessLauncher(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));

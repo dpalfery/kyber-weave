@@ -257,7 +257,7 @@ public sealed class SquadHookBlockReviewFixTests
         string viaPlan = Read(fixture.Path, SquadHookJsonBlock.RelativePath(format));
 
         string filePath = Path.Combine(fixture.Path, "direct", "hooks.json");
-        SquadHookJsonFile.SpliceFile(
+        RealSquadServices.HookJsonFile().SpliceFile(
             format,
             filePath,
             [.. block.Entries.Select(e => e.Entry!.DeepClone())],

@@ -1,11 +1,12 @@
-using System.Runtime.Versioning;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Covers the Devin duplicate-import check <c>squad doctor</c> warns on.
+/// Covers the Devin duplicate-import check <c>squad doctor</c> warns on, through the in-memory file system.
 /// </summary>
 /// <remarks>
 /// Devin loads <c>.agents/</c> natively and, by default, imports <c>.claude/</c>,
@@ -13,44 +14,47 @@ namespace KyberWeave.Tests;
 /// (docs.devin.ai/cli/reference/configuration/read-config-from, read 2026-09-27), so a Squad
 /// identity deployed for Devin and for one of those targets loads twice.
 /// </remarks>
-public sealed class DevinImportOverlapTests : IDisposable
+public sealed class DevinImportOverlapTests
 {
-    private readonly TempDirectory _temp = new();
+    private static readonly string Base = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "devin-overlap");
 
-    public void Dispose() => _temp.Dispose();
+    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+
+    private DevinImportOverlap Overlap => new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Base));
 
     private string Workspace()
     {
-        string root = Path.Combine(_temp.Path, "ws");
-        Directory.CreateDirectory(root);
+        string root = Path.Combine(Base, "ws");
+        _files.CreateDirectory(root);
         return root;
     }
 
-    private static void Skill(string workspace, string root, string name)
+    private void Config(string path, string content)
     {
-        string directory = Path.Combine(workspace, root, name);
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "SKILL.md"), $"---\nname: {name}\n---\n");
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, content);
     }
 
-    private static void DirectoryAgent(string workspace, string root, string name)
+    private void Skill(string workspace, string root, string name)
     {
         string directory = Path.Combine(workspace, root, name);
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "AGENT.md"), $"---\nname: {name}\n---\n");
+        _files.CreateDirectory(directory);
+        _files.WriteAllText(Path.Combine(directory, "SKILL.md"), $"---\nname: {name}\n---\n");
     }
 
-    private static void FlatAgent(string workspace, string root, string name)
+    private void DirectoryAgent(string workspace, string root, string name)
+    {
+        string directory = Path.Combine(workspace, root, name);
+        _files.CreateDirectory(directory);
+        _files.WriteAllText(Path.Combine(directory, "AGENT.md"), $"---\nname: {name}\n---\n");
+    }
+
+    private void FlatAgent(string workspace, string root, string name)
     {
         string directory = Path.Combine(workspace, root);
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, $"{name}.md"), $"---\nname: {name}\n---\n");
+        _files.CreateDirectory(directory);
+        _files.WriteAllText(Path.Combine(directory, $"{name}.md"), $"---\nname: {name}\n---\n");
     }
-
-    private static Func<string, string?> Files(Dictionary<string, string> byPath) =>
-        path => byPath.TryGetValue(path, out string? content) ? content : null;
-
-    private static Func<string, string?> NoFiles => _ => null;
 
     [Fact]
     public void Inspect_ClaudeAndCopilotSkillsSharingDevinNames_ReportsEachImport()
@@ -62,7 +66,7 @@ public sealed class DevinImportOverlapTests : IDisposable
         Skill(ws, ".claude/skills", "unrelated");
         Skill(ws, ".github/skills", "test-dev");
 
-        DevinImportOverlapReport report = DevinImportOverlap.Inspect(ws, devinUserRoot: null, NoFiles);
+        DevinImportOverlapReport report = Overlap.Inspect(ws, devinUserRoot: null);
 
         Assert.Collection(
             report.Overlaps,
@@ -90,7 +94,7 @@ public sealed class DevinImportOverlapTests : IDisposable
         DirectoryAgent(ws, ".agents/agents", "architect");
         Skill(ws, ".agents/skills", "conductor");
 
-        DevinImportOverlapReport report = DevinImportOverlap.Inspect(ws, devinUserRoot: null, NoFiles);
+        DevinImportOverlapReport report = Overlap.Inspect(ws, devinUserRoot: null);
 
         Assert.Equal([".agents/agents", ".agents/skills"], report.Overlaps.Select(o => o.SourceRoot));
         Assert.All(report.Overlaps, overlap => Assert.Null(overlap.ImportSetting));
@@ -104,7 +108,7 @@ public sealed class DevinImportOverlapTests : IDisposable
         DirectoryAgent(ws, ".devin/agents", "code-reviewer");
         FlatAgent(ws, ".claude/agents", "code-reviewer");
 
-        DevinImportOverlapReport report = DevinImportOverlap.Inspect(ws, devinUserRoot: null, NoFiles);
+        DevinImportOverlapReport report = Overlap.Inspect(ws, devinUserRoot: null);
 
         DevinImportOverlapEntry overlap = Assert.Single(report.Overlaps);
         Assert.Equal(".claude/agents", overlap.SourceRoot);
@@ -119,13 +123,9 @@ public sealed class DevinImportOverlapTests : IDisposable
         Skill(ws, ".claude/skills", "code-review");
         Skill(ws, ".github/skills", "code-review");
 
-        Dictionary<string, string> files = new(StringComparer.Ordinal)
-        {
-            [Path.Combine(ws, ".devin", "config.json")] =
-                "{\n  // Squad deploys Devin natively here.\n  \"read_config_from\": { \"claude\": false, },\n}\n"
-        };
+        Config(Path.Combine(ws, ".devin", "config.json"), "{\n  // Squad deploys Devin natively here.\n  \"read_config_from\": { \"claude\": false, },\n}\n");
 
-        DevinImportOverlapReport report = DevinImportOverlap.Inspect(ws, devinUserRoot: null, Files(files));
+        DevinImportOverlapReport report = Overlap.Inspect(ws, devinUserRoot: null);
 
         DevinImportOverlapEntry overlap = Assert.Single(report.Overlaps);
         Assert.Equal(".github/skills", overlap.SourceRoot);
@@ -135,21 +135,16 @@ public sealed class DevinImportOverlapTests : IDisposable
     public void Inspect_LocalConfigOutranksProjectAndProjectOutranksUser()
     {
         string ws = Workspace();
-        string userRoot = Path.Combine(_temp.Path, "user-devin");
+        string userRoot = Path.Combine(Base, "user-devin");
         Skill(ws, ".devin/skills", "code-review");
         Skill(ws, ".claude/skills", "code-review");
         Skill(ws, ".github/skills", "code-review");
 
-        Dictionary<string, string> files = new(StringComparer.Ordinal)
-        {
-            // Local re-enables what the project turned off.
-            [Path.Combine(ws, ".devin", "config.local.json")] = "{\"read_config_from\":{\"claude\":true}}",
-            [Path.Combine(ws, ".devin", "config.json")] = "{\"read_config_from\":{\"claude\":false,\"copilot\":true}}",
-            // The project's explicit copilot: true outranks the user's false.
-            [Path.Combine(userRoot, "config.json")] = "{\"read_config_from\":{\"copilot\":false}}"
-        };
+        Config(Path.Combine(ws, ".devin", "config.local.json"), "{\"read_config_from\":{\"claude\":true}}");
+        Config(Path.Combine(ws, ".devin", "config.json"), "{\"read_config_from\":{\"claude\":false,\"copilot\":true}}");
+        Config(Path.Combine(userRoot, "config.json"), "{\"read_config_from\":{\"copilot\":false}}");
 
-        DevinImportOverlapReport report = DevinImportOverlap.Inspect(ws, userRoot, Files(files));
+        DevinImportOverlapReport report = Overlap.Inspect(ws, userRoot);
 
         Assert.Equal([".claude/skills", ".github/skills"], report.Overlaps.Select(o => o.SourceRoot));
     }
@@ -158,17 +153,15 @@ public sealed class DevinImportOverlapTests : IDisposable
     public void Inspect_UserConfigTurningAnImportOff_AppliesWhenTheProjectIsSilent()
     {
         string ws = Workspace();
-        string userRoot = Path.Combine(_temp.Path, "user-devin");
+        string userRoot = Path.Combine(Base, "user-devin");
         Skill(ws, ".devin/skills", "code-review");
         Skill(ws, ".windsurf/skills", "code-review");
 
-        Dictionary<string, string> files = new(StringComparer.Ordinal)
-        {
-            [Path.Combine(userRoot, "config.json")] = "{\"read_config_from\":{\"windsurf\":false}}"
-        };
+        Assert.Single(Overlap.Inspect(ws, userRoot).Overlaps);
 
-        Assert.Empty(DevinImportOverlap.Inspect(ws, userRoot, Files(files)).Overlaps);
-        Assert.Single(DevinImportOverlap.Inspect(ws, userRoot, NoFiles).Overlaps);
+        Config(Path.Combine(userRoot, "config.json"), "{\"read_config_from\":{\"windsurf\":false}}");
+
+        Assert.Empty(Overlap.Inspect(ws, userRoot).Overlaps);
     }
 
     [Fact]
@@ -178,48 +171,52 @@ public sealed class DevinImportOverlapTests : IDisposable
         Skill(ws, ".devin/skills", "code-review");
         Skill(ws, ".claude/skills", "code-review");
 
-        Dictionary<string, string> files = new(StringComparer.Ordinal)
-        {
-            [Path.Combine(ws, ".devin", "config.json")] = "{ not json",
-            [Path.Combine(ws, ".devin", "config.local.json")] = "{\"read_config_from\":{\"claude\":\"no\"}}"
-        };
+        Config(Path.Combine(ws, ".devin", "config.json"), "{ not json");
+        Config(Path.Combine(ws, ".devin", "config.local.json"), "{\"read_config_from\":{\"claude\":\"no\"}}");
 
         DevinImportOverlapEntry overlap = Assert.Single(
-            DevinImportOverlap.Inspect(ws, devinUserRoot: null, Files(files)).Overlaps);
+            Overlap.Inspect(ws, devinUserRoot: null).Overlaps);
         Assert.Equal("claude", overlap.ImportSetting);
+    }
+
+    [Fact]
+    public void Inspect_UnreadableConfig_DeclaresNothingRatherThanThrowing()
+    {
+        string ws = Workspace();
+        Skill(ws, ".devin/skills", "code-review");
+        Skill(ws, ".claude/skills", "code-review");
+        string config = Path.Combine(ws, ".devin", "config.json");
+        Config(config, "{\"read_config_from\":{\"claude\":false}}");
+        Assert.Empty(Overlap.Inspect(ws, devinUserRoot: null).Overlaps);
+
+        _files.FailWhen(
+            operation => operation.Name == "ReadAllText" && string.Equals(operation.Path, config, StringComparison.Ordinal),
+            new UnauthorizedAccessException());
+
+        Assert.Single(Overlap.Inspect(ws, devinUserRoot: null).Overlaps);
     }
 
     /// <summary>
     /// Enumeration is lazy, so an unreadable tree throws mid-loop; the check reports what it
-    /// could read instead of taking <c>squad doctor</c> down with it. Unix-only, because the
-    /// unreadable directory is made with a file mode.
+    /// could read instead of taking <c>squad doctor</c> down with it.
     /// </summary>
     [Fact]
-    [UnsupportedOSPlatform("windows")]
     public void Inspect_UnreadableImportedTree_ReportsTheRestInsteadOfThrowing()
     {
-        Assert.SkipWhen(
-            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
-            "Unix file modes are not enforced on Windows, so an unreadable directory cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
-
         string ws = Workspace();
         Skill(ws, ".devin/skills", "code-review");
         Skill(ws, ".claude/skills", "code-review");
         Skill(ws, ".github/skills", "code-review");
         string unreadable = Path.Combine(ws, ".claude", "skills");
-        UnixFileMode original = File.GetUnixFileMode(unreadable);
-        File.SetUnixFileMode(unreadable, UnixFileMode.None);
-        try
-        {
-            DevinImportOverlapReport report = DevinImportOverlap.Inspect(ws, devinUserRoot: null, NoFiles);
+        _files.FailWhen(
+            operation => string.Equals(operation.Path, unreadable, StringComparison.Ordinal)
+                         && operation.Name.StartsWith("Enumerate", StringComparison.Ordinal),
+            new UnauthorizedAccessException());
 
-            DevinImportOverlapEntry overlap = Assert.Single(report.Overlaps);
-            Assert.Equal(".github/skills", overlap.SourceRoot);
-        }
-        finally
-        {
-            File.SetUnixFileMode(unreadable, original);
-        }
+        DevinImportOverlapReport report = Overlap.Inspect(ws, devinUserRoot: null);
+
+        DevinImportOverlapEntry overlap = Assert.Single(report.Overlaps);
+        Assert.Equal(".github/skills", overlap.SourceRoot);
     }
 
     [Fact]
@@ -227,9 +224,9 @@ public sealed class DevinImportOverlapTests : IDisposable
     {
         string ws = Workspace();
         Skill(ws, ".devin/skills", "code-review");
-        Directory.CreateDirectory(Path.Combine(ws, ".claude", "skills", "code-review"));
+        _files.CreateDirectory(Path.Combine(ws, ".claude", "skills", "code-review"));
 
-        Assert.Empty(DevinImportOverlap.Inspect(ws, devinUserRoot: null, NoFiles).Overlaps);
+        Assert.Empty(Overlap.Inspect(ws, devinUserRoot: null).Overlaps);
     }
 
     [Fact]
@@ -239,6 +236,6 @@ public sealed class DevinImportOverlapTests : IDisposable
         Skill(ws, ".claude/skills", "code-review");
         Skill(ws, ".agents/skills", "code-review");
 
-        Assert.Empty(DevinImportOverlap.Inspect(ws, devinUserRoot: null, NoFiles).Overlaps);
+        Assert.Empty(Overlap.Inspect(ws, devinUserRoot: null).Overlaps);
     }
 }

@@ -34,10 +34,23 @@ internal sealed class ReleaseArchiveExtractor(
 
     private void ExtractZip(Stream archive, string destination)
     {
+        (string root, string prefix, StringComparison comparison) = Containment(destination);
         using ZipArchive zip = new(archive, ZipArchiveMode.Read, leaveOpen: true);
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
-            string target = planner.Resolve(destination, entry.FullName);
+            // Spelling first (no rooted or '..' name), then lexical containment with Path.GetFullPath and a prefix check
+            // in this loop (the form code scanners recognise), then the planner's link-aware check on the checked path.
+            string name = ArchiveEntryPlanner.ValidateName(entry.FullName);
+            string full = Path.GetFullPath(name.Replace('/', Path.DirectorySeparatorChar), root);
+            if (!full.StartsWith(prefix, comparison))
+            {
+                if (string.Equals(full, root, comparison))
+                    continue;
+
+                throw Escaped(entry.FullName);
+            }
+
+            string target = planner.Resolve(root, Path.GetRelativePath(root, full));
             if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
             {
                 files.CreateDirectory(target);
@@ -51,6 +64,7 @@ internal sealed class ReleaseArchiveExtractor(
 
     private void ExtractTarGz(Stream archive, string destination)
     {
+        (string root, string prefix, StringComparison comparison) = Containment(destination);
         using GZipStream gzip = new(archive, CompressionMode.Decompress, leaveOpen: true);
         using TarReader reader = new(gzip, leaveOpen: true);
         while (reader.GetNextEntry() is { } entry)
@@ -58,7 +72,19 @@ internal sealed class ReleaseArchiveExtractor(
             if (entry.EntryType == TarEntryType.GlobalExtendedAttributes)
                 continue;
 
-            string target = planner.Resolve(destination, entry.Name);
+            // Spelling first (no rooted or '..' name), then lexical containment with Path.GetFullPath and a prefix check
+            // in this loop (the form code scanners recognise), then the planner's link-aware check on the checked path.
+            string name = ArchiveEntryPlanner.ValidateName(entry.Name);
+            string full = Path.GetFullPath(name.Replace('/', Path.DirectorySeparatorChar), root);
+            if (!full.StartsWith(prefix, comparison))
+            {
+                if (string.Equals(full, root, comparison))
+                    continue;
+
+                throw Escaped(entry.Name);
+            }
+
+            string target = planner.Resolve(root, Path.GetRelativePath(root, full));
             switch (entry.EntryType)
             {
                 case TarEntryType.Directory:
@@ -74,6 +100,20 @@ internal sealed class ReleaseArchiveExtractor(
             }
         }
     }
+
+    private static (string Root, string Prefix, StringComparison Comparison) Containment(string destination)
+    {
+        // The destination is fully qualified (the planner requires it), so this GetFullPath reads no working directory.
+        string root = Path.GetFullPath(destination);
+        string prefix = Path.EndsInDirectorySeparator(root) ? root : root + Path.DirectorySeparatorChar;
+        StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return (root, prefix, comparison);
+    }
+
+    private static SelfUpdateException Escaped(string entryName) =>
+        new($"the archive entry '{entryName}' was refused: it resolves outside the extraction directory.");
 
     private void WriteFile(string target, Stream content)
     {

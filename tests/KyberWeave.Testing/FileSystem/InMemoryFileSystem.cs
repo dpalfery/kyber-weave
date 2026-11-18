@@ -58,6 +58,12 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     /// <summary>Gets whether names are compared case-sensitively in this instance.</summary>
     public bool CaseSensitive { get; }
 
+    /// <summary>
+    ///     Gets the platform root every path resolves under: <c>/</c> on Unix and <c>C:\</c> on Windows. A test
+    ///     derives its roots from this, so its literals stay valid on every platform.
+    /// </summary>
+    public string Root => _rootPath;
+
     /// <summary>Gets how many seam calls this instance has seen. Fault ordinals count this number.</summary>
     public int OperationCount { get; private set; }
 

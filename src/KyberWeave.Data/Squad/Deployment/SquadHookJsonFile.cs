@@ -1,10 +1,19 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
-/// <summary>Applies <see cref="SquadHookJsonBlock"/> edits to hook files on disk.</summary>
-public static class SquadHookJsonFile
+/// <summary>Applies <see cref="SquadHookJsonBlock"/> edits to hook files.</summary>
+/// <remarks>
+/// The hook file is the user's own, and a harness may reach it through a symbolic link, so it is rewritten in
+/// place with a plain overwrite as before; an atomic rename would replace the link with a regular file.
+/// </remarks>
+/// <param name="files">Reads and rewrites the hook files.</param>
+/// <param name="environment">Supplies the base directory a relative hook file path resolves against.</param>
+public sealed class SquadHookJsonFile(
+    IWritableFileSystem files,
+    IProcessEnvironment environment) : ISquadHookJsonFile
 {
     /// <summary>
     /// Replaces Squad's entries in <paramref name="filePath"/> with <paramref name="preToolUse"/>,
@@ -12,7 +21,7 @@ public static class SquadHookJsonFile
     /// them at the end of each owned container (or setting the Antigravity group key). A missing
     /// or blank file starts from the minimal document. Returns the owned entries written.
     /// </summary>
-    public static IReadOnlyList<SquadHookOwnedEntry> SpliceFile(
+    public IReadOnlyList<SquadHookOwnedEntry> SpliceFile(
         SquadHookBlockFormat format,
         string filePath,
         IReadOnlyList<JsonNode> preToolUse,
@@ -24,7 +33,8 @@ public static class SquadHookJsonFile
         ArgumentNullException.ThrowIfNull(postToolUse);
         SquadHookJsonBlock.RefuseForeignSubagentStop(format, subagentStop);
 
-        string? existing = File.Exists(filePath) ? File.ReadAllText(filePath) : null;
+        string fullPath = FullPath(filePath);
+        string? existing = files.FileExists(fullPath) ? files.ReadAllText(fullPath) : null;
         string content;
         IReadOnlyList<SquadHookOwnedEntry> owned;
         try
@@ -38,13 +48,13 @@ public static class SquadHookJsonFile
                 ex);
         }
 
-        string? directory = Path.GetDirectoryName(Path.GetFullPath(filePath));
+        string? directory = Path.GetDirectoryName(fullPath);
         if (directory is not null)
         {
-            Directory.CreateDirectory(directory);
+            files.CreateDirectory(directory);
         }
 
-        File.WriteAllText(filePath, content);
+        files.WriteAllText(fullPath, content);
         return owned;
     }
 
@@ -52,16 +62,17 @@ public static class SquadHookJsonFile
     /// Removes Squad's entries from <paramref name="filePath"/>, restoring the user's content.
     /// A missing file needs no work; an unparsable file fails and is left untouched.
     /// </summary>
-    public static void RemoveFile(SquadHookBlockFormat format, string filePath)
+    public void RemoveFile(SquadHookBlockFormat format, string filePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
 
-        if (!File.Exists(filePath))
+        string fullPath = FullPath(filePath);
+        if (!files.FileExists(fullPath))
         {
             return;
         }
 
-        string existing = File.ReadAllText(filePath);
+        string existing = files.ReadAllText(fullPath);
         string content;
         try
         {
@@ -74,6 +85,13 @@ public static class SquadHookJsonFile
                 ex);
         }
 
-        File.WriteAllText(filePath, content);
+        files.WriteAllText(fullPath, content);
     }
+
+    /// <summary>
+    ///     Returns the path as given when it is rooted, otherwise joined onto the working directory. The spelling is
+    ///     kept as is, because a decomposed Unicode folder name must still name the folder that holds the file.
+    /// </summary>
+    private string FullPath(string filePath) =>
+        Path.IsPathRooted(filePath) ? filePath : Path.Combine(environment.CurrentDirectory, filePath);
 }

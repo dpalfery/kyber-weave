@@ -50,12 +50,12 @@
 # class list or filter as the product suite. A C#-only edit runs only the two policy tests that
 # read source text (POLICY_SOURCE_SCANS): the rest read scripts, workflows, project files and docs.
 #
-# THE PROMPT-CONTENT TESTS
+# THE CONTENT TESTS
 #
-# tests/KyberWeave.PromptContent.Tests holds the tests that assert the wording of skills, agents and
-# instructions. They run with the policy tests, under the same condition. The class list does not name
-# them, so with no filter the whole project runs; a --class or --method filter applies to it as it does
-# to the others.
+# tests/KyberWeave.Content.Tests holds the tests that check the content we ship (agents, skills,
+# standards, documents and workflows), reading it through the corpus seam. They write nothing and
+# start no program, so they run whole with the unit projects on every .NET loop, whatever --class or
+# --method names a legacy project.
 #
 # WHAT MAKES THE EXCLUDED CLASSES SLOW
 #
@@ -83,8 +83,7 @@ CONFIGURATION=Release
 TEST_DLL="tests/KyberWeave.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Tests.dll"
 INTEGRATION_TEST_DLL="tests/KyberWeave.Integration.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Integration.Tests.dll"
 POLICY_TEST_DLL="tests/KyberWeave.RepoPolicy.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.RepoPolicy.Tests.dll"
-PROMPT_TEST_DLL="tests/KyberWeave.PromptContent.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.PromptContent.Tests.dll"
-# The unit projects (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data, Architecture): pure or fake-backed, so they run whole
+# The unit projects (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data, Architecture) and the content tests: pure or fake-backed, so they run whole
 # on every .NET loop, whatever --class / --method names a legacy project.
 LAYER_TEST_DLLS=(
   "tests/KyberWeave.Application.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Application.Tests.dll"
@@ -95,6 +94,7 @@ LAYER_TEST_DLLS=(
   "tests/KyberWeave.Cli.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Cli.Tests.dll"
   "tests/KyberWeave.Data.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Data.Tests.dll"
   "tests/KyberWeave.Architecture.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Architecture.Tests.dll"
+  "tests/KyberWeave.Content.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Content.Tests.dll"
 )
 CLASS_LIST="scripts/fast-loop-classes.txt"
 # The policy tests that read source text. A C#-only edit can trip them (an unlisted process
@@ -329,9 +329,6 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
   step "build (Release, warnings-as-errors, AnalysisMode=all)"
   dotnet build KyberWeave.sln -c "${CONFIGURATION}"
 
-  # The user's filter, if any, before the class list is added: the prompt-content project takes it
-  # alone, so with the class list it runs whole.
-  prompt_args=("${test_args[@]+"${test_args[@]}"}")
   if [[ "${touched}" -eq 1 && ${#test_args[@]} -eq 0 ]]; then
     # A changed file's own types, found by name in the product test sources. It is a heuristic over text, not a
     # call graph: it can miss a test that reaches the type only indirectly, which is why CI still runs everything.
@@ -427,9 +424,8 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
     dotnet "${INTEGRATION_TEST_DLL}" "${integration_test_args[@]}" | tee -a "${test_log}" || integration_status=$?
   fi
   if [[ "${needs_policy}" -eq 1 ]]; then
-    step "repository-policy and prompt-content tests (same filter)"
+    step "repository-policy tests (same filter)"
     dotnet "${POLICY_TEST_DLL}" "${test_args[@]+"${test_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
-    dotnet "${PROMPT_TEST_DLL}" "${prompt_args[@]+"${prompt_args[@]}"}" | tee -a "${test_log}" || policy_status=$?
   else
     # Checked on its own: the product suite's total must not stand in for a scan run that matched nothing.
     step "repository-policy source scans"
@@ -441,7 +437,7 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       policy_status=1
     fi
   fi
-  step "unit tests (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data, Architecture)"
+  step "unit and content tests (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data, Architecture, Content)"
   # The projects are independent and small, so they run at the same time. Each is its own background
   # process and its status comes back through `wait <pid>`: a variable set inside a backgrounded command
   # never reaches this shell, which is how a failing project would otherwise read as a pass.
