@@ -80,7 +80,7 @@ public sealed class ArbiterReadersTests : IDisposable
         RunGit(repo, "add", "staged.txt");
         File.WriteAllText(Path.Combine(repo, "untracked.txt"), "untracked\n");
 
-        IReadOnlyDictionary<string, string> dirty = new GitFacts().GetDirtyStatuses(repo);
+        IReadOnlyDictionary<string, string> dirty = RealGitFacts.Create().GetDirtyStatuses(repo);
 
         Assert.Contains("tracked.txt", dirty.Keys);
         Assert.Contains("staged.txt", dirty.Keys);
@@ -93,14 +93,14 @@ public sealed class ArbiterReadersTests : IDisposable
         string repo = InitRepoWithCommit();
         Own(repo);
 
-        string? head = new GitFacts().GetHead(repo);
+        string? head = RealGitFacts.Create().GetHead(repo);
         Assert.False(string.IsNullOrWhiteSpace(head));
 
         File.WriteAllText(Path.Combine(repo, "second.txt"), "two\n");
         RunGit(repo, "add", "second.txt");
         RunGit(repo, "commit", "-m", "second");
 
-        IReadOnlySet<string> changed = new GitFacts().GetChangedPathsSinceBase(repo, head!);
+        IReadOnlySet<string> changed = RealGitFacts.Create().GetChangedPathsSinceBase(repo, head!);
 
         Assert.Contains("second.txt", changed);
     }
@@ -111,12 +111,12 @@ public sealed class ArbiterReadersTests : IDisposable
         string repo = InitRepoWithCommit();
         Own(repo);
 
-        string? head = new GitFacts().GetHead(repo);
+        string? head = RealGitFacts.Create().GetHead(repo);
         Assert.False(string.IsNullOrWhiteSpace(head));
 
         RunGit(repo, "mv", "tracked.txt", "renamed.txt");
 
-        IReadOnlySet<string> changed = new GitFacts().GetChangedPathsSinceBase(repo, head!);
+        IReadOnlySet<string> changed = RealGitFacts.Create().GetChangedPathsSinceBase(repo, head!);
 
         Assert.Contains("renamed.txt", changed);
         Assert.DoesNotContain("tracked.txt", changed);
@@ -128,7 +128,7 @@ public sealed class ArbiterReadersTests : IDisposable
         string repo = InitRepoWithCommit();
         Own(repo);
 
-        GitSnapshot? snapshot = new GitFacts().CaptureSnapshot(repo);
+        GitSnapshot? snapshot = RealGitFacts.Create().CaptureSnapshot(repo);
         Assert.NotNull(snapshot);
         Assert.False(string.IsNullOrWhiteSpace(snapshot!.Head));
 
@@ -144,7 +144,7 @@ public sealed class ArbiterReadersTests : IDisposable
         Directory.CreateDirectory(Path.Combine(repo, "artifacts"));
         File.WriteAllText(Path.Combine(repo, "artifacts", "gates.json"), "{}\n");
 
-        IReadOnlySet<string> changed = new GitFacts().GetChangedPathsSinceSnapshot(repo, snapshot);
+        IReadOnlySet<string> changed = RealGitFacts.Create().GetChangedPathsSinceSnapshot(repo, snapshot);
 
         Assert.Contains("tracked.txt", changed);
         Assert.Contains("moved.txt", changed);
@@ -157,14 +157,14 @@ public sealed class ArbiterReadersTests : IDisposable
         string repo = InitRepoWithCommit(fileName: "code.txt", content: "a\nb\nc\nd\n");
         Own(repo);
 
-        string? head = new GitFacts().GetHead(repo);
+        string? head = RealGitFacts.Create().GetHead(repo);
         Assert.False(string.IsNullOrWhiteSpace(head));
 
         File.WriteAllText(Path.Combine(repo, "code.txt"), "a\nB\nc\nd\ne\n");
         RunGit(repo, "add", "code.txt");
         RunGit(repo, "commit", "-m", "edit");
 
-        IReadOnlyList<HunkRange> hunks = new GitFacts().GetHunkRanges(repo, head!);
+        IReadOnlyList<HunkRange> hunks = RealGitFacts.Create().GetHunkRanges(repo, head!);
 
         Assert.NotEmpty(hunks);
         Assert.All(hunks, h => Assert.Equal("code.txt", h.Path));
@@ -181,7 +181,7 @@ public sealed class ArbiterReadersTests : IDisposable
             string outside = Path.Combine(Path.GetDirectoryName(repo)!, "outside.txt");
             File.WriteAllText(outside, "outside\n");
 
-            IReadOnlyDictionary<string, string> blobs = new GitFacts().GetBlobIds(
+            IReadOnlyDictionary<string, string> blobs = RealGitFacts.Create().GetBlobIds(
                 repo,
                 ["inside.txt", "/etc/passwd", outside, "../outside.txt", "a\nb", "a\0b", ".. /outside.txt", "C:/outside.txt"]);
 
@@ -216,18 +216,18 @@ public sealed class ArbiterReadersTests : IDisposable
         Exception? failure = null;
         try
         {
-            root = new GitFacts().GetRoot(plain);
-            head = new GitFacts().GetHead(plain);
-            dirty = new GitFacts().GetDirtyStatuses(plain);
-            blobs = new GitFacts().GetBlobIds(plain, ["nope.txt"]);
-            sinceBase = new GitFacts().GetChangedPathsSinceBase(plain, "HEAD");
-            hunks = new GitFacts().GetHunkRanges(plain, "HEAD");
-            snapshot = new GitFacts().CaptureSnapshot(plain);
+            root = RealGitFacts.Create().GetRoot(plain);
+            head = RealGitFacts.Create().GetHead(plain);
+            dirty = RealGitFacts.Create().GetDirtyStatuses(plain);
+            blobs = RealGitFacts.Create().GetBlobIds(plain, ["nope.txt"]);
+            sinceBase = RealGitFacts.Create().GetChangedPathsSinceBase(plain, "HEAD");
+            hunks = RealGitFacts.Create().GetHunkRanges(plain, "HEAD");
+            snapshot = RealGitFacts.Create().CaptureSnapshot(plain);
 
             // A missing git binary is the same absent fact, not a crash.
-            head = new GitFacts().GetHead(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? head;
-            root = new GitFacts().GetRoot(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? root;
-            sinceSnapshot = new GitFacts().GetChangedPathsSinceSnapshot(
+            head = RealGitFacts.Create().GetHead(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? head;
+            root = RealGitFacts.Create().GetRoot(plain, gitExecutable: "definitely-missing-git-binary-xyz") ?? root;
+            sinceSnapshot = RealGitFacts.Create().GetChangedPathsSinceSnapshot(
                 plain,
                 new GitSnapshot("deadbeef", new Dictionary<string, string>(), new Dictionary<string, string>()));
         }

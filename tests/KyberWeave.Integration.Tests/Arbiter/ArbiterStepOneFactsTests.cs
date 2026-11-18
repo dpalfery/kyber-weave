@@ -62,7 +62,7 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
         string baseCommit = _probe.GitOutput("rev-parse", "HEAD").Trim();
         Write("query.sql", "++ one\n  keep\n  keep\n  keep\n++ two\n");
 
-        string? summary = new GitFacts().GetDiffSummary(_probe.Root, baseCommit, ["query.sql"]);
+        string? summary = RealGitFacts.Create().GetDiffSummary(_probe.Root, baseCommit, ["query.sql"]);
 
         Assert.Equal("query.sql\n@@ -1 +1 @@\n@@ -5 +5 @@", summary);
     }
@@ -76,7 +76,7 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
         string baseCommit = _probe.GitOutput("rev-parse", "HEAD").Trim();
         _probe.Git("rm", "gone.txt");
 
-        string? summary = new GitFacts().GetDiffSummary(_probe.Root, baseCommit, ["gone.txt"]);
+        string? summary = RealGitFacts.Create().GetDiffSummary(_probe.Root, baseCommit, ["gone.txt"]);
 
         Assert.Equal("gone.txt\n@@ -1 +0,0 @@", summary);
     }
@@ -84,7 +84,7 @@ public sealed class ArbiterStepOneFactsTests : IDisposable
     [Fact]
     public void DiffSummaryStaysAbsentWhenTheBaseCannotBeRead()
     {
-        Assert.Null(new GitFacts().GetDiffSummary(_probe.Root, "no-such-ref", ["a.cs"]));
+        Assert.Null(RealGitFacts.Create().GetDiffSummary(_probe.Root, "no-such-ref", ["a.cs"]));
     }
 
     [Fact]

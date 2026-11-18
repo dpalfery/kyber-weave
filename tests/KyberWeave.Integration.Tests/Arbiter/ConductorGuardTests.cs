@@ -381,7 +381,7 @@ public sealed class ConductorGuardTests
     }
 
     private static string GitRoot(string directory) =>
-        new GitFacts().GetRoot(directory) ?? throw new InvalidOperationException("no git root");
+        RealGitFacts.Create().GetRoot(directory) ?? throw new InvalidOperationException("no git root");
 
     private static void Git(string directory, params string[] arguments)
     {

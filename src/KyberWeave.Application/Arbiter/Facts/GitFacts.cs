@@ -1,21 +1,19 @@
 using System.ComponentModel;
-using System.Diagnostics;
 using System.Text;
 using KyberWeave.Contracts.Repositories;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>Reads the facts the Arbiter derives itself from git.</summary>
 /// <remarks>
-/// Every call goes through <see cref="ProcessRunner.Run"/> with argv only: arguments
-/// travel in <see cref="ProcessStartInfo.ArgumentList"/>, never a shell string, so a
-/// hostile path or base cannot re-enable the shell. Outside a repository, or without
-/// git on <c>PATH</c>, every fact is absent and nothing throws — the Arbiter rules on
+/// Every git call goes through the process seam with argv only: arguments travel as one element
+/// each, never a shell string, so a hostile path or base cannot re-enable the shell. The one file
+/// read — an untracked file's lines — goes through the file-system seam. Outside a repository, or
+/// without git on <c>PATH</c>, every fact is absent and nothing throws — the Arbiter rules on
 /// fewer facts rather than failing the dispatch.
 /// </remarks>
-public sealed class GitFacts : IGitRepositoryFacts
+public sealed class GitFacts(IProcessRunner process, IFileSystem files) : IGitRepositoryFacts
 {
 
     /// <summary>Resolves the repository root for a working directory.</summary>
@@ -443,11 +441,11 @@ public sealed class GitFacts : IGitRepositoryFacts
     }
 
 
-    private static bool ExistsInRepo(string workingDirectory, string path)
+    private bool ExistsInRepo(string workingDirectory, string path)
     {
         try
         {
-            return File.Exists(Path.Combine(workingDirectory, path));
+            return files.FileExists(Path.Combine(workingDirectory, path));
         }
         catch (ArgumentException)
         {
@@ -456,7 +454,7 @@ public sealed class GitFacts : IGitRepositoryFacts
     }
 
 
-    private static string? RunGit(
+    private string? RunGit(
         string workingDirectory,
         string gitExecutable,
         string standardInput,
@@ -464,17 +462,16 @@ public sealed class GitFacts : IGitRepositoryFacts
     {
         try
         {
-            ProcessStartInfo startInfo = new(gitExecutable)
+            ProcessRunRequest request = new()
             {
+                Program = gitExecutable,
+                Arguments = args,
                 WorkingDirectory = workingDirectory,
-                UseShellExecute = false,
-                RedirectStandardInput = true,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
+                StandardInput = standardInput,
             };
-            foreach (string arg in args)
-                startInfo.ArgumentList.Add(arg);
-            ProcessResult result = ProcessRunner.Run(startInfo, standardInput);
+            // The facts interface is synchronous and every caller is a synchronous rule evaluation; the seam's
+            // own adapter runs the child off the calling thread, so there is no context to deadlock on.
+            ProcessRunResult result = process.RunAsync(request).GetAwaiter().GetResult();
             return result.ExitCode == 0 ? result.StandardOutput : null;
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is Win32Exception or InvalidOperationException)
@@ -502,22 +499,22 @@ public sealed class GitFacts : IGitRepositoryFacts
     /// before any read so a huge file is never loaded. The read itself is bounded too, because a file
     /// can grow between the size check and the read.
     /// </remarks>
-    private static List<string>? ReadUntrackedLines(string fullPath)
+    private List<string>? ReadUntrackedLines(string fullPath)
     {
         try
         {
-            FileInfo info = new(fullPath);
-            if (info.LinkTarget is not null || (info.Attributes & FileAttributes.ReparsePoint) != 0)
+            if (files.GetLinkTarget(fullPath) is not null
+                || (files.GetAttributes(fullPath) & FileAttributes.ReparsePoint) != 0)
             {
                 return null;
             }
 
-            if (info.Length > UntrackedFileByteLimit)
+            if (files.GetLength(fullPath) > UntrackedFileByteLimit)
             {
                 return null;
             }
 
-            using FileStream stream = new(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using Stream stream = files.OpenRead(fullPath);
             using MemoryStream bytes = new();
             byte[] chunk = new byte[81920];
             int read;

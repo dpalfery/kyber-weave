@@ -27,7 +27,8 @@ public sealed class DocsPacketCommand(
     IPlanTaskTargetService targets,
     ITaskGateSelectionService taskGates,
     ICodeGraphPortsFactory codeGraph,
-    IRepositoryFileStore repositoryFiles) : Command<DocsPacketSettings>
+    IRepositoryFileStore repositoryFiles,
+    IGitRepositoryFacts git) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -210,7 +211,7 @@ public sealed class DocsPacketCommand(
     {
         string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
         List<(string Worktree, string Plan)> matches = [];
-        foreach (string worktree in (settings.ListWorktrees ?? (dir => new GitFacts().ListWorktrees(dir)))(root))
+        foreach (string worktree in (settings.ListWorktrees ?? (dir => git.ListWorktrees(dir)))(root))
         {
             string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
             if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))

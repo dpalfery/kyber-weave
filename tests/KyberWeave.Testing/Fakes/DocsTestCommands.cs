@@ -71,7 +71,8 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IPlanTaskTargetService>(),
             provider.GetRequiredService<ITaskGateSelectionService>(),
             provider.GetRequiredService<ICodeGraphPortsFactory>(),
-            provider.GetRequiredService<IRepositoryFileStore>());
+            provider.GetRequiredService<IRepositoryFileStore>(),
+            provider.GetRequiredService<IGitRepositoryFacts>());
     }
 
     public static DocsTasksCommand Tasks(IServiceProvider? services = null)
