@@ -1,4 +1,5 @@
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Tests.Fakes;
@@ -46,4 +47,10 @@ internal sealed class InMemoryArbiterState(InMemoryFileSystem files)
             new FakeProcessEnvironment(
                 currentDirectory: ArbiterTestRoots.Under("work"),
                 isFileSystemCaseInsensitive: !files.CaseSensitive));
+
+    /// <summary>The plan facts reader over the plans in <paramref name="files"/>.</summary>
+    internal PlanFacts PlanFacts() =>
+        new(
+            new PlanPathResolver(Paths, new FakeProcessEnvironment(currentDirectory: ArbiterTestRoots.Under("work"))),
+            files);
 }
