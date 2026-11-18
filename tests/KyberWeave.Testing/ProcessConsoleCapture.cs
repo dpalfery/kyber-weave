@@ -57,7 +57,7 @@ internal static class ProcessConsoleCapture
     }
 
     /// <summary>
-    /// Supplies the lines subsequent reads in this asynchronous context return, leaving the input of every other
+    /// Adds the lines to the ones subsequent reads in this asynchronous context return, leaving the input of every other
     /// context, and of the process, untouched.
     /// </summary>
     /// <param name="text">The input text, one line per line break.</param>
@@ -67,7 +67,11 @@ internal static class ProcessConsoleCapture
     {
         ArgumentNullException.ThrowIfNull(text);
         EnsureInstalled();
-        CurrentInput.Value = new StringReader(text);
+
+        // Append to the lines nobody has read yet, as writing to a real standard input would: a second feed must not
+        // throw away input the code under test has not asked for.
+        string unread = CurrentInput.Value?.ReadToEnd() ?? string.Empty;
+        CurrentInput.Value = new StringReader(unread + text);
     }
 
     /// <summary>

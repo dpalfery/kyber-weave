@@ -100,6 +100,18 @@ public sealed class ProcessConsoleCaptureTests
     }
 
     [Fact]
+    public void FeedingInputTwiceKeepsTheLinesNobodyHasRead()
+    {
+        ProcessConsoleCapture.FeedInput("first\nsecond\n");
+        ProcessConsoleCapture.FeedInput("third\n");
+
+        Assert.Equal("first", Console.ReadLine());
+        Assert.Equal("second", Console.ReadLine());
+        Assert.Equal("third", Console.ReadLine());
+        Assert.Null(Console.ReadLine());
+    }
+
+    [Fact]
     public void UncapturedExecutionRoutesToOriginalFallbackConsole()
     {
         // Outside Run, AnsiConsole and Console.Out route to fallback without throwing.
