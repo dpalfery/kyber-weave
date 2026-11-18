@@ -1,5 +1,6 @@
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -12,11 +13,9 @@ namespace KyberWeave.Tests.CopilotPrompt;
 /// The embedded text is what <c>squad copilot-prompt install</c> writes, so its shape is a contract with
 /// VS Code: one top-level <c>systemPrompt</c> key, bounded size, and the instruction sources it must cite.
 /// </remarks>
-public sealed class CopilotPromptFileTests : IDisposable
+public sealed class CopilotPromptFileTests
 {
-    private readonly TempDirectory _home = new();
-
-    public void Dispose() => _home.Dispose();
+    private static readonly string Home = Path.Combine(new InMemoryFileSystem().Root, "home");
 
     private static YamlMappingNode ParseRoot(string text)
     {
@@ -97,27 +96,38 @@ public sealed class CopilotPromptFileTests : IDisposable
     [Fact]
     public void InstalledPath_IsUnderHomeKyberWeaveCopilotFolder()
     {
-        string expected = Path.Combine(_home.Path, ".kyber-weave", "copilot", "system-prompt.yaml");
+        string expected = Path.Combine(Home, ".kyber-weave", "copilot", "system-prompt.yaml");
 
-        Assert.Equal(expected, CopilotPromptFile.InstalledPath(_home.Path));
+        Assert.Equal(expected, CopilotPromptFile.InstalledPath(Home));
     }
 
     [Fact]
     public void SamePath_RelativeSideIsResolvedAgainstTheGivenBaseDirectory()
     {
         FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+        string home = Path.Combine(Home, "same-path");
+        string other = Path.Combine(Home, "other");
 
-        Assert.True(CopilotPromptFile.SamePath(paths, "/kw/home", "prompts/system-prompt.yaml", "/kw/home/prompts/system-prompt.yaml"));
-        Assert.False(CopilotPromptFile.SamePath(paths, "/kw/other", "prompts/system-prompt.yaml", "/kw/home/prompts/system-prompt.yaml"));
+        Assert.True(CopilotPromptFile.SamePath(paths, home, "prompts/system-prompt.yaml", Path.Combine(home, "prompts", "system-prompt.yaml")));
+        Assert.False(CopilotPromptFile.SamePath(paths, other, "prompts/system-prompt.yaml", Path.Combine(home, "prompts", "system-prompt.yaml")));
     }
 
     [Fact]
     public void SamePath_IgnoresATrailingSeparatorAndDotSegmentsButNotADifferentFile()
     {
         FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+        string home = Path.Combine(Home, "dot-segments");
 
-        Assert.True(CopilotPromptFile.SamePath(paths, "/kw/home", "/kw/home/a/../p.yaml", "/kw/home/p.yaml"));
-        Assert.False(CopilotPromptFile.SamePath(paths, "/kw/home", "/kw/home/p.yaml", "/kw/home/q.yaml"));
+        Assert.True(CopilotPromptFile.SamePath(
+            paths,
+            home,
+            Path.Combine(home, "a", "..", "p.yaml"),
+            Path.Combine(home, "p.yaml")));
+        Assert.False(CopilotPromptFile.SamePath(
+            paths,
+            home,
+            Path.Combine(home, "p.yaml"),
+            Path.Combine(home, "q.yaml")));
     }
 
     [Fact]
@@ -125,6 +135,6 @@ public sealed class CopilotPromptFileTests : IDisposable
     {
         FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
 
-        Assert.False(CopilotPromptFile.SamePath(paths, "/kw/home", "", "/kw/home/p.yaml"));
+        Assert.False(CopilotPromptFile.SamePath(paths, Home, "", Path.Combine(Home, "p.yaml")));
     }
 }
