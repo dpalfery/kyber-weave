@@ -7,9 +7,11 @@ using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Analysis.Review;
+using KyberWeave.Tests;
 using Xunit;
+using static KyberWeave.Tests.ReviewExchangeFixtures;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Docs;
 
 /// <summary>
 /// Pins the content-addressed agent review exchange. Import validation must remain ahead
@@ -17,8 +19,6 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class DocumentationReviewExchangeTests
 {
-    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
-
     [Fact]
     public void ExportPendingCandidatesUsesVersionedSchemaAndCompleteBoundedEvidence()
     {
@@ -358,57 +358,6 @@ public sealed class DocumentationReviewExchangeTests
     }
 
     [Fact]
-    public void ImportRealSqliteAfterCurrentExportPersistsClaimsFingerprintsAndVerdictAtomically()
-    {
-        RequireSqlite();
-        using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
-        AnalysisCandidate candidate = Candidate("sqlite-round-trip", AnalysisRuleKind.Conflict);
-        DocumentationReviewExchange exchange = new DocumentationReviewExchange(persistence);
-        ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;
-        ReviewVerdictBundle bundle = VerdictBundle(
-            exported,
-            VerdictItem(exported.Candidates[0], AnalysisVerdictLabel.Benign));
-
-        ReviewImportResult imported = exchange.Import(Serialize(bundle), [candidate]);
-
-        Assert.True(imported.Success, Join(imported.Diagnostics));
-        Assert.Equal(2, persistence.LoadClaims(CurrentClaimIds(persistence)).Count);
-        Assert.Equal(
-            candidate.Id,
-            Assert.Single(persistence.LoadCandidateFingerprints([candidate.Id])).Value.CandidateId);
-        Assert.Equal(
-            AnalysisVerdictLabel.Benign,
-            Assert.Single(persistence.LoadVerdicts([candidate.Id])).Value.Label);
-    }
-
-    [Fact]
-    public void ImportRealSqliteWhenVerdictWriteFailsRollsBackClaimsFingerprintsAndVerdicts()
-    {
-        RequireSqlite();
-        using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
-        AnalysisCandidate candidate = Candidate("sqlite-rollback", AnalysisRuleKind.Conflict);
-        DocumentationReviewExchange exchange = new DocumentationReviewExchange(persistence);
-        ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;
-        RunSqlite(
-            persistence.DatabasePath,
-            "CREATE TRIGGER reject_review BEFORE INSERT ON analysis_verdicts " +
-            "BEGIN SELECT RAISE(ABORT, 'forced review failure'); END;");
-
-        ReviewImportResult imported = exchange.Import(
-            Serialize(VerdictBundle(
-                exported,
-                VerdictItem(exported.Candidates[0], AnalysisVerdictLabel.Benign))),
-            [candidate]);
-
-        Assert.False(imported.Success);
-        Assert.Equal("0", QuerySqlite(persistence.DatabasePath, "SELECT COUNT(*) FROM analysis_claims;").Trim());
-        Assert.Empty(persistence.LoadCandidateFingerprints([candidate.Id]));
-        Assert.Empty(persistence.LoadVerdicts([candidate.Id]));
-    }
-
-    [Fact]
     public void ImportNullVerdictsCollectionRejectsWithoutThrowing()
     {
         AnalysisCandidate candidate = Candidate("review", AnalysisRuleKind.Duplicate);
@@ -481,78 +430,11 @@ public sealed class DocumentationReviewExchangeTests
         double confidence = 0.80) =>
         new(persistence ?? new RecordingPersistence(), confidence);
 
-    private static AnalysisCandidate Candidate(
-        string id,
-        AnalysisRuleKind kind,
-        bool isExact = false,
-        string? term = null,
-        string claimText = "The runner emits the configured documentation review evidence.",
-        IReadOnlyList<CandidateSourceKind>? sources = null,
-        CandidateScore? score = null)
-    {
-        Claim[] claims =
-        [
-            Claim(id + "-left", "hash-" + id + "-left", claimText, 10),
-            Claim(id + "-right", "hash-" + id + "-right", claimText + " Related context.", 20)
-        ];
-        return new AnalysisCandidate(
-            id,
-            kind,
-            claims,
-            score ?? new CandidateScore(0.72, null, 1),
-            isExact,
-            term,
-            sources ?? [CandidateSourceKind.Graph]);
-    }
-
-    private static Claim Claim(string id, string contentHash, string text, int line) =>
-        new(
-            ClaimKind.Paragraph,
-            text,
-            "Behavior\n" + text,
-            contentHash,
-            "context-" + id,
-            "docs/" + id,
-            "Runtime",
-            "Behavior",
-            "/repo/docs/" + id + ".md",
-            line,
-            line + 1,
-            IgnoreRule.None);
-
     private static AnalysisVerdict Verdict(
         AnalysisCandidate candidate,
         AnalysisVerdictLabel label,
         double confidence) =>
         new(candidate.Id, label, confidence, "Reviewer disposition.");
-
-    private static ReviewVerdictBundle VerdictBundle(
-        ReviewCandidateBundle export,
-        params ReviewVerdictItem[] verdicts) =>
-        new(
-            "kyber-weave.docs-review.verdicts/v1",
-            export.AnalyzerVersion,
-            export.RubricVersion,
-            export.CandidateSetHash,
-            verdicts);
-
-    private static ReviewVerdictItem VerdictItem(
-        ReviewCandidateItem candidate,
-        AnalysisVerdictLabel label,
-        double confidence = 0.90,
-        IReadOnlyList<ProposedGlossarySense>? senses = null) =>
-        new(
-            candidate.CandidateId,
-            label,
-            confidence,
-            "Reviewer evaluated every supplied evidence location.",
-            candidate.ClaimContentHashes,
-            candidate.Evidence.Select(evidence => evidence.Id).ToArray(),
-            null,
-            senses);
-
-    private static string Serialize(ReviewVerdictBundle bundle) =>
-        JsonSerializer.Serialize(bundle, JsonOptions);
 
     private static string VerdictEnvelope(ReviewCandidateBundle export, string verdictsJson) =>
         $$"""
@@ -605,35 +487,6 @@ public sealed class DocumentationReviewExchangeTests
         Assert.Equal("KW-DOC-REVIEW-001", finding.Code);
         Assert.Equal(Severity.Error, finding.Severity);
         Assert.Contains(expectedMessage, finding.Message, StringComparison.Ordinal);
-    }
-
-    private static string Join(DiagnosticReport diagnostics) =>
-        string.Join(Environment.NewLine, diagnostics.Items);
-
-    private static IReadOnlyCollection<string> CurrentClaimIds(IAnalysisPersistence persistence)
-    {
-        if (persistence is not SqliteAnalysisPersistence sqlite)
-            throw new InvalidOperationException("A SQLite persistence adapter is required.");
-        return QuerySqlite(sqlite.DatabasePath, "SELECT CAST(id AS TEXT) FROM analysis_claims;")
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-    }
-
-    private static TempDirectory SafeRepository() => SqliteTestFixture.SafeRepository();
-
-    private static void RequireSqlite() =>
-        SqliteTestFixture.RequireSqlite("sqlite3 is unavailable; SQLite review import parity was not run.");
-
-    private static string QuerySqlite(string databasePath, string sql) =>
-        SqliteTestFixture.QuerySqlite(databasePath, sql);
-
-    private static void RunSqlite(string databasePath, string sql) =>
-        SqliteTestFixture.RunSqlite(databasePath, sql);
-
-    private static JsonSerializerOptions CreateJsonOptions()
-    {
-        JsonSerializerOptions options = new JsonSerializerOptions(JsonSerializerDefaults.Web);
-        options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-        return options;
     }
 
     private sealed class RecordingPersistence(params AnalysisVerdict[] verdicts) : IAnalysisPersistence
