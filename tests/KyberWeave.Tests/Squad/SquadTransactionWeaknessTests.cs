@@ -162,6 +162,24 @@ public sealed class SquadTransactionWeaknessTests
         Assert.Null(SquadTreeComparison.Difference(oldTree, fixture.Capture()));
     }
 
+    [Fact]
+    public void AForeignFileThatAppearsAfterThePreconditionCheckIsRefusedAndLeftAlone()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Install);
+        SquadDeploymentPlan plan = fixture.Plan(SquadCrashFlow.Install);
+        string foreign = Path.Combine(fixture.Root, SquadCrashSafetyFixture.ConductorPath);
+        Assert.False(fixture.Files.FileExists(foreign));
+
+        // The callback runs under the lease after the preconditions passed and before the intent captures the files.
+        Exception? refused = Record.Exception(() => fixture.Transaction().Execute(
+            plan,
+            _ => fixture.Files.WriteAllText(foreign, "a file someone else just wrote")));
+
+        Assert.IsType<SquadDeploymentConflictException>(refused);
+        Assert.Equal("a file someone else just wrote", fixture.Files.ReadAllText(foreign));
+    }
+
     private static bool IsTransactionDelete(FileSystemOperation operation) =>
         operation.Name.StartsWith("Delete", StringComparison.Ordinal)
         && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);

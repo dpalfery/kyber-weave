@@ -204,6 +204,10 @@ public sealed class SquadTransaction : ISquadTransaction
                 journalDirectoriesCreated,
                 stateDirectoriesCreated,
                 stateAuthorityRoot);
+
+            // The callback and the capture ran after the first check, so a file that appeared in between would be
+            // captured as an original and then overwritten. Checking again, with nothing written yet, refuses it.
+            ValidatePreconditions(plan);
             int sequence = 0;
             int checkpointSequence = 0;
             try
