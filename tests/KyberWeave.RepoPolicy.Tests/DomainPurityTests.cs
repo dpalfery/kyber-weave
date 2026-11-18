@@ -36,6 +36,14 @@ public sealed class DomainPurityTests
 
         foreach (string relative in Corpus.EnumerateFiles("src/KyberWeave.Domain", "*.cs"))
         {
+            // The corpus already leaves build output out of a recursive listing; this second check keeps the audit
+            // correct if that listing rule ever changes.
+            if (relative.Contains("/bin/", StringComparison.Ordinal) ||
+                relative.Contains("/obj/", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             if (Pending.Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal)))
                 continue;
 
