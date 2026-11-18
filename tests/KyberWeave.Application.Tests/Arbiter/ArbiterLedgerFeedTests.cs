@@ -9,6 +9,8 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -18,7 +20,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// completes its task for the tasks that depend on it, and an unfinished dispatch holds
 /// its files.
 /// </summary>
-public sealed class ArbiterLedgerFeedTests : IDisposable
+public sealed class ArbiterLedgerFeedTests
 {
     private static readonly FakeIdGenerator Ids = new();
 
@@ -27,14 +29,24 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     private const string PassReport =
         "All done.\nSTATUS: PASS\nRESULT: PASS\n";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-ledger-feed-" + Guid.NewGuid().ToString("N"));
+    private static readonly DateTimeOffset Now = new(2026, 11, 18, 12, 0, 0, TimeSpan.Zero);
 
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly string _root = ArbiterTestRoots.Under("repo");
+    private readonly StampClock _stamp = new() { Now = Now };
+    private readonly FakeTimeProvider _clock = new(Now);
+    private readonly InMemoryArbiterState _state;
 
-    public ArbiterLedgerFeedTests() => Directory.CreateDirectory(ArbiterDirectory);
+    public ArbiterLedgerFeedTests() => _state = new InMemoryArbiterState(new InMemoryFileSystem(_stamp));
 
-    public void Dispose() => Directory.Delete(_root, recursive: true);
+    private string ArbiterDirectory => InMemoryArbiterState.Directory;
+
+    /// <summary>The clock the file system stamps each write with, which a test sets to give a report an age.</summary>
+    private sealed class StampClock : TimeProvider
+    {
+        internal DateTimeOffset Now { get; set; }
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
 
     /// <summary>
     /// The answer a rule records when step 0 could not decide it from the ledger and the question went to a model
@@ -77,17 +89,12 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         }
     }
 
-    private ArbiterEvaluator Evaluator() => new(
-        _provider,
-        _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
-        new NoGitFacts(),
-        new PlanFacts(),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-        TimeProvider.System, new FakeIdGenerator());
+    /// <summary>An evaluator for the next call; time moves on a second first, as it does between two real hook calls, so no two events share an id.</summary>
+    private ArbiterEvaluator Evaluator()
+    {
+        _clock.Advance(TimeSpan.FromSeconds(1));
+        return _state.Evaluator(_provider, planReader: new PlanFacts(), gitFacts: new NoGitFacts(), clock: _clock);
+    }
 
     private static KyberWeaveConfig Config() => new()
     {
@@ -128,7 +135,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     /// after it, so reading the newest record alone would look at the secondary, not the primary.
     /// </summary>
     private ArbiterDecisionRecord LastPrimary() =>
-        RealArbiterState.Decisions(ArbiterDirectory).ReadAll().Last(record => record.Trigger != "delegate.model");
+        _state.Records.Last(record => record.Trigger != "delegate.model");
 
     private void AssertLastAllowed()
     {
@@ -177,7 +184,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
 
         string stores = Path.Combine(ArbiterDirectory, "stores");
         Assert.False(
-            Directory.Exists(stores) && Directory.EnumerateDirectories(stores, "returns-*").Any(),
+            _state.Files.DirectoryExists(stores) && _state.Files.EnumerateDirectories(stores).Any(directory => Path.GetFileName(directory).StartsWith("returns-", StringComparison.Ordinal)),
             "A dry run must not store a report tail.");
     }
 
@@ -239,8 +246,8 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     [Fact]
     public async Task AnAttestationNamingNoPlan_CountsForNoPlan()
     {
-        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
-        DateTimeOffset at = DateTimeOffset.UtcNow;
+        InFlightLedger ledger = _state.Ledger(ArbiterDirectory);
+        DateTimeOffset at = _clock.GetUtcNow();
         await ledger.AppendAsync(
             new ArbiterLedgerEvent(Ids.NewSortableId(at), at, ArbiterSources.Hook, "factory", "s1", ArbiterLedgerPhases.Post)
             {
@@ -328,10 +335,11 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     private string WriteReport(string name, string summary, DateTime writtenAt)
     {
         string folder = Path.Combine(_root, ".agent_scratchpad", "T5");
-        Directory.CreateDirectory(folder);
+        _state.Files.CreateDirectory(folder);
         string path = Path.Combine(folder, name);
-        File.WriteAllText(path, ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [new GateResult("tests", true, 0, summary)])));
-        File.SetLastWriteTimeUtc(path, writtenAt);
+        _stamp.Now = new DateTimeOffset(writtenAt, TimeSpan.Zero);
+        _state.Files.WriteAllText(path, ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [new GateResult("tests", true, 0, summary)])));
+        _stamp.Now = Now;
         return path;
     }
 
