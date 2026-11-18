@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Testing.Squad;
 using Xunit;
 
@@ -14,6 +16,7 @@ public sealed class SquadDeploymentPlannerTests
 {
     private const string ConductorPath = ".codex/agents/conductor.toml";
     private const string SecondPath = ".codex/agents/second.toml";
+    private const string CodexHookPath = ".codex/hooks.json";
 
     private readonly InMemorySquadState _state = new();
 
@@ -179,6 +182,180 @@ public sealed class SquadDeploymentPlannerTests
         Assert.Equal(ConductorPath, collision.RelativePath);
     }
 
+    [Fact]
+    public void CreateInstallSplicesARenderedBlockIntoAHookFileSquadCreates()
+    {
+        string root = _state.CreateRoot("block-install");
+
+        SquadDeploymentPlan plan = Planner.CreateInstall(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [],
+            [],
+            adopt: false,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+
+        SquadFileMutation mutation = Assert.Single(plan.FileMutations);
+        Assert.Equal(CodexHookPath, mutation.RelativePath);
+        Assert.Contains("probe-one", Encoding.UTF8.GetString(mutation.Content!.Value.Span), StringComparison.Ordinal);
+        SquadOwnedBlock owned = Assert.Single(plan.Receipt.Blocks);
+        Assert.True(owned.CreatedFile);
+        Assert.Single(owned.Entries);
+        Assert.Equal(SquadFilePreconditionKind.Missing, Assert.Single(plan.FilePreconditions).Kind);
+    }
+
+    [Fact]
+    public void CreateInstallSplicesABlockIntoAUserHookFileAndKeepsTheUsersEntries()
+    {
+        string root = _state.CreateRoot("block-install-user-file");
+        Write(
+            root,
+            CodexHookPath,
+            """
+            {"hooks":{"PreToolUse":[{"matcher":"operator","hooks":[{"type":"command","command":"operator-hook"}]}]}}
+            """);
+
+        SquadDeploymentPlan plan = Planner.CreateInstall(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [],
+            [],
+            adopt: false,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+
+        SquadFileMutation mutation = Assert.Single(plan.FileMutations);
+        string spliced = Encoding.UTF8.GetString(mutation.Content!.Value.Span);
+        Assert.Contains("operator-hook", spliced, StringComparison.Ordinal);
+        Assert.Contains("probe-one", spliced, StringComparison.Ordinal);
+        Assert.False(Assert.Single(plan.Receipt.Blocks).CreatedFile);
+        Assert.Equal(SquadFilePreconditionKind.ExactFile, Assert.Single(plan.FilePreconditions).Kind);
+    }
+
+    [Fact]
+    public void CreateUpdateKeepsADriftedBlockWhenItIsNotReplacingManagedFiles()
+    {
+        string root = _state.CreateRoot("block-update-keep");
+        SquadDeploymentPlan install = Planner.CreateInstall(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [],
+            [],
+            adopt: false,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+        Write(
+            root,
+            CodexHookPath,
+            Encoding.UTF8.GetString(Assert.Single(install.FileMutations).Content!.Value.Span)
+                .Replace("probe-one", "operator-edit", StringComparison.Ordinal));
+
+        SquadDeploymentPlan update = Planner.CreateUpdate(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.5"),
+            [],
+            install.Receipt,
+            [],
+            replaceManaged: false,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+
+        Assert.NotEmpty(update.BlockDrifts);
+        Assert.DoesNotContain(update.FileMutations, mutation => mutation.RelativePath == CodexHookPath);
+    }
+
+    [Fact]
+    public void CreateUpdateReplacesADriftedBlockWhenItIsAskedTo()
+    {
+        string root = _state.CreateRoot("block-update-replace");
+        SquadDeploymentPlan install = Planner.CreateInstall(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [],
+            [],
+            adopt: false,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+        Write(
+            root,
+            CodexHookPath,
+            Encoding.UTF8.GetString(Assert.Single(install.FileMutations).Content!.Value.Span)
+                .Replace("probe-one", "operator-edit", StringComparison.Ordinal));
+
+        SquadDeploymentPlan update = Planner.CreateUpdate(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.5"),
+            [],
+            install.Receipt,
+            [],
+            replaceManaged: true,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+
+        Assert.Empty(update.BlockDrifts);
+        Assert.Contains(update.FileMutations, mutation => mutation.RelativePath == CodexHookPath);
+    }
+
+    [Fact]
+    public void CreateUninstallDeletesAHookFileSquadCreatedOnceItsOwnedEntriesAreRemoved()
+    {
+        string root = _state.CreateRoot("block-uninstall-created");
+        SquadDeploymentPlan install = Planner.CreateInstall(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [],
+            [],
+            adopt: false,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+        Write(root, CodexHookPath, Encoding.UTF8.GetString(Assert.Single(install.FileMutations).Content!.Value.Span));
+
+        SquadDeploymentPlan uninstall = Planner.CreateUninstall(root, SquadDeploymentScope.Project, install.Receipt);
+
+        SquadFileMutation mutation = Assert.Single(uninstall.FileMutations);
+        Assert.Equal(SquadFileMutationKind.Delete, mutation.Kind);
+        Assert.Empty(uninstall.Receipt.Blocks);
+    }
+
+    [Fact]
+    public void CreateUninstallKeepsAUserHookFileAndRemovesOnlyTheOwnedEntries()
+    {
+        string root = _state.CreateRoot("block-uninstall-user-file");
+        Write(
+            root,
+            CodexHookPath,
+            """
+            {"hooks":{"PreToolUse":[{"matcher":"operator","hooks":[{"type":"command","command":"operator-hook"}]}]}}
+            """);
+        SquadDeploymentPlan install = Planner.CreateInstall(
+            root,
+            SquadDeploymentScope.Project,
+            Lock("1.2.4"),
+            [],
+            [],
+            adopt: false,
+            _state.Time,
+            blocks: [CodexBlock("one")]);
+        Write(root, CodexHookPath, Encoding.UTF8.GetString(Assert.Single(install.FileMutations).Content!.Value.Span));
+
+        SquadDeploymentPlan uninstall = Planner.CreateUninstall(root, SquadDeploymentScope.Project, install.Receipt);
+
+        SquadFileMutation mutation = Assert.Single(uninstall.FileMutations);
+        Assert.Equal(SquadFileMutationKind.Write, mutation.Kind);
+        string retained = Encoding.UTF8.GetString(mutation.Content!.Value.Span);
+        Assert.Contains("operator-hook", retained, StringComparison.Ordinal);
+        Assert.DoesNotContain("probe-one", retained, StringComparison.Ordinal);
+        Assert.Empty(uninstall.Receipt.Blocks);
+    }
+
     private void Write(string root, string relativePath, string content)
     {
         CreateDirectory(root, relativePath);
@@ -190,6 +367,26 @@ public sealed class SquadDeploymentPlannerTests
         string fullPath = Path.Combine(root, relativePath);
         _state.Files.CreateDirectory(Path.GetDirectoryName(fullPath)!);
     }
+
+    private static SquadRenderedBlock CodexBlock(string marker) =>
+        new(
+            "codex",
+            CodexHookPath,
+            SquadHookBlockFormat.Codex,
+            [new SquadRenderedBlockEntry("PreToolUse", MatcherGroup("kyber-weave-arbiter hook --harness codex", $"probe-{marker}"))]);
+
+    private static JsonObject MatcherGroup(string command, string matcher) =>
+        new()
+        {
+            ["matcher"] = matcher,
+            ["hooks"] = new JsonArray(
+                new JsonObject
+                {
+                    ["type"] = "command",
+                    ["command"] = command,
+                    ["timeout"] = 5
+                })
+        };
 
     private static SquadDeploymentFile Rendered(string relativePath, string content) =>
         new(relativePath, Encoding.UTF8.GetBytes(content), "codex");
