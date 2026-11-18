@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -12,8 +13,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed partial class CodeQlConfigTests
 {
-    private static readonly string ConfigPath = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, ".github", "codeql", "codeql-config.yml");
+    private const string ConfigPath = ".github/codeql/codeql-config.yml";
+
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     [Fact]
     public void CodeQlConfigHasNoRuleFilters()
@@ -37,7 +39,7 @@ public sealed partial class CodeQlConfigTests
     [Fact]
     public void CodeQlConfigRecordsOwnerAndReviewDate()
     {
-        string text = File.ReadAllText(ConfigPath);
+        string text = Corpus.ReadText(ConfigPath);
 
         Assert.Contains("Owner: dpalfery", text, StringComparison.Ordinal);
 
@@ -58,7 +60,7 @@ public sealed partial class CodeQlConfigTests
 
     private static YamlMappingNode LoadRoot()
     {
-        string text = File.ReadAllText(ConfigPath);
+        string text = Corpus.ReadText(ConfigPath);
         YamlStream stream = new();
         using StringReader reader = new(text);
         stream.Load(reader);

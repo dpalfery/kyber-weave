@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -11,13 +12,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadAutonomyContractTests
 {
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private const string ProductRoot = "products/kyber-squad";
 
-    private static string Read(params string[] relative)
-    {
-        return File.ReadAllText(Path.Combine([ProductRoot, .. relative]));
-    }
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static string Read(params string[] relative) =>
+        Corpus.ReadText(ProductRoot + "/" + string.Join('/', relative));
 
     private static string ConductorContract()
     {

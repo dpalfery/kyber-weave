@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -9,20 +10,19 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReviewCouncilLoopContractTests
 {
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     /// <summary>
     /// Every file under the product root, and the root <c>AGENTS.md</c>.
     /// </summary>
     private static IEnumerable<string> ScannedFiles()
     {
-        foreach (string file in Directory.EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories))
+        foreach (string file in Corpus.EnumerateFiles("products/kyber-squad", "*"))
         {
             yield return file;
         }
 
-        yield return Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md");
+        yield return "AGENTS.md";
     }
 
     [Theory]
@@ -33,8 +33,7 @@ public sealed class ReviewCouncilLoopContractTests
         Assert.NotEmpty(files);
 
         string[] offenders = files
-            .Where(file => File.ReadAllText(file).Contains(retiredPhrase, StringComparison.Ordinal))
-            .Select(file => Path.GetRelativePath(KyberWeaveTestPaths.ToolRoot, file))
+            .Where(file => Corpus.ReadText(file).Contains(retiredPhrase, StringComparison.Ordinal))
             .ToArray();
 
         Assert.True(

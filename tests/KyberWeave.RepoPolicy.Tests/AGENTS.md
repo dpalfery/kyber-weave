@@ -11,8 +11,10 @@ scans such as the spawn-site audit and the root instruction pointers. Read
 - The project references `KyberWeave.Core` only, for `ProcessRunner`. Needing another product
   assembly means the test is a behaviour test.
 - Classes keep the `KyberWeave.Tests` namespace, so a fully-qualified class name means the same
-  test in either project. `KyberWeaveTestPaths`, `TempDirectory` and `TestTempRoot` are linked
-  from `KyberWeave.Tests`, not copied.
+  test in either project. `KyberWeaveTestPaths`, `TempDirectory` and `TestTempRoot` come from the
+  shared `KyberWeave.Testing` library, not copies. A test that reads shipped content reads it
+  through `KyberWeave.Tests.Corpus.ICorpusSource` (`CheckoutCorpusSource.Checkout`), never by
+  walking the tree or by reading `KyberWeaveTestPaths.ToolRoot` with `File.ReadAllText`.
 - It runs as the `test-policy` gate, its own CI step, and in `scripts/fast-loop.sh` whenever a
   change is more than C# under `src/` or `tests/KyberWeave.Tests/`. The tests that read source
   text run on every .NET loop; they are named in `POLICY_SOURCE_SCANS` in that script.

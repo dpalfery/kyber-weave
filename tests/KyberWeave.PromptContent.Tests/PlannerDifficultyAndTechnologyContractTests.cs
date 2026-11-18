@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -9,6 +10,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class PlannerDifficultyAndTechnologyContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     public static IEnumerable<object[]> PlannerFiles()
     {
         yield return ["products/kyber-squad/agents/architect.md"];
@@ -20,7 +23,7 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
     [MemberData(nameof(PlannerFiles))]
     public void EveryPlannerRequiresBothTaskLines(string relativePath)
     {
-        string text = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+        string text = Corpus.ReadText(relativePath);
 
         Assert.Contains("Difficulty:", text, StringComparison.Ordinal);
         Assert.Contains("Technology:", text, StringComparison.Ordinal);
@@ -33,7 +36,7 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
     [MemberData(nameof(PlannerFiles))]
     public void EveryPlannerGivesOneLineOfGuidanceForEachDifficulty(string relativePath)
     {
-        string text = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+        string text = Corpus.ReadText(relativePath);
 
         Assert.Contains("small, local change", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("several files", text, StringComparison.OrdinalIgnoreCase);
@@ -44,7 +47,7 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
     [MemberData(nameof(PlannerFiles))]
     public void EveryPlannerSplitsTwoUnrelatedTechnologiesWithTheEndpointExample(string relativePath)
     {
-        string text = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+        string text = Corpus.ReadText(relativePath);
 
         Assert.Contains("two tasks", text, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("endpoint", text, StringComparison.OrdinalIgnoreCase);
@@ -55,7 +58,7 @@ public sealed class PlannerDifficultyAndTechnologyContractTests
     [MemberData(nameof(PlannerFiles))]
     public void EveryPlannerFetchesAStandardThroughTheToolUnlessItIsUnavailable(string relativePath)
     {
-        string text = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+        string text = Corpus.ReadText(relativePath);
 
         Assert.Contains("docs_get_coding_standard_for_technology", text, StringComparison.Ordinal);
         Assert.True(

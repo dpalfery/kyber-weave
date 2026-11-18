@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -29,17 +30,16 @@ public sealed class ArbiterFallbackContractTests
         "pi",
     ];
 
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static string ConductorContract =>
-        File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        Corpus.ReadText("products/kyber-squad/agents/conductor.md");
 
     private static string ReviewerContract =>
-        File.ReadAllText(Path.Combine(ProductRoot, "agents", "code-reviewer.md"));
+        Corpus.ReadText("products/kyber-squad/agents/code-reviewer.md");
 
     private static string SkillContract =>
-        File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        Corpus.ReadText("products/kyber-squad/skills/code-review/SKILL.md");
 
     [Fact]
     public void ConductorFallback_NamesArbiterEvaluate()

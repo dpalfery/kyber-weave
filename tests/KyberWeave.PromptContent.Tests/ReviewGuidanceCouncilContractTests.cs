@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -29,17 +30,11 @@ public sealed class ReviewGuidanceCouncilContractTests
     private static readonly Regex TypeScriptFileToken = new(@"\.ts\b", RegexOptions.CultureInvariant);
     private static readonly Regex CSharpFileToken = new(@"\.cs\b", RegexOptions.CultureInvariant);
 
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private const string ProductRoot = "products/kyber-squad";
+    private const string ChecklistRoot = ProductRoot + "/skills/code-review/references";
+    private const string LensesRoot = ChecklistRoot + "/lenses";
 
-    private static string ChecklistRoot =>
-        Path.Combine(ProductRoot, "skills", "code-review", "references");
-
-    private static string LensesRoot =>
-        Path.Combine(ChecklistRoot, "lenses");
-
-    private static string ReviewGuidancePath =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, GuidanceFileName);
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     /// <summary>
     /// Prevents a language or framework the council meets from being reviewed with no checklist at
@@ -53,10 +48,10 @@ public sealed class ReviewGuidanceCouncilContractTests
     [InlineData("go.md")]
     public void ALanguageChecklistExistsAndPointsAtItsDeclaredStandard(string fileName)
     {
-        string path = Path.Combine(ChecklistRoot, fileName);
-        Assert.True(File.Exists(path), $"Review checklist '{path}' is missing.");
+        string path = $"{ChecklistRoot}/{fileName}";
+        Assert.True(Corpus.Exists(path), $"Review checklist '{path}' is missing.");
 
-        string text = File.ReadAllText(path);
+        string text = Corpus.ReadText(path);
         Assert.True(
             text.Contains("coding-standard>", StringComparison.Ordinal),
             $"'{fileName}' must point at a declared <...-coding-standard> rather than state its own rules.");
@@ -77,11 +72,10 @@ public sealed class ReviewGuidanceCouncilContractTests
     [InlineData("go")]
     public void ATechnologyDeclaresItsCodingStandardInTheRegistryAndItsChecklistExists(string technology)
     {
-        string agentsText = ConfigRegBlock(
-            File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "AGENTS.md")));
+        string agentsText = ConfigRegBlock(Corpus.ReadText("AGENTS.md"));
         string declaration = $"- **<{technology}-coding-standard>**: `docs/standards/{technology}/{technology}.standards.md`";
-        string standardPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", technology, $"{technology}.standards.md");
-        string checklistPath = Path.Combine(ChecklistRoot, $"{technology}.md");
+        string standardPath = $"docs/standards/{technology}/{technology}.standards.md";
+        string checklistPath = $"{ChecklistRoot}/{technology}.md";
 
         List<string> gaps = [];
 
@@ -90,13 +84,13 @@ public sealed class ReviewGuidanceCouncilContractTests
             gaps.Add($"'AGENTS.md' Config Reg block does not declare '{declaration}'.");
         }
 
-        if (!File.Exists(standardPath))
+        if (!Corpus.Exists(standardPath))
         {
             gaps.Add($"Coding standard '{standardPath}' is missing.");
         }
         else
         {
-            string[] frontMatter = FrontMatterLines(File.ReadAllText(standardPath));
+            string[] frontMatter = FrontMatterLines(Corpus.ReadText(standardPath));
             foreach (string expected in new[]
                          { "doc-type: coding-standard", $"technology: {technology}", "status: current" })
             {
@@ -107,11 +101,11 @@ public sealed class ReviewGuidanceCouncilContractTests
             }
         }
 
-        if (!File.Exists(checklistPath))
+        if (!Corpus.Exists(checklistPath))
         {
             gaps.Add($"Review checklist '{checklistPath}' is missing.");
         }
-        else if (!File.ReadAllText(checklistPath).Contains($"<{technology}-coding-standard>", StringComparison.Ordinal))
+        else if (!Corpus.ReadText(checklistPath).Contains($"<{technology}-coding-standard>", StringComparison.Ordinal))
         {
             gaps.Add($"'{technology}.md' does not name its own '<{technology}-coding-standard>' token.");
         }
@@ -244,12 +238,12 @@ public sealed class ReviewGuidanceCouncilContractTests
     [Fact]
     public void TheCodeReviewSkillAndLensNameTheStrictnessSettingAndLevels()
     {
-        string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        string skill = Corpus.ReadText($"{ProductRoot}/skills/code-review/SKILL.md");
         Assert.True(
             skill.Contains("review.policy.strictness", StringComparison.Ordinal),
             "The code-review skill must document review.policy.strictness.");
 
-        string lens = File.ReadAllText(Path.Combine(ProductRoot, "agents", "review-lens.md"));
+        string lens = Corpus.ReadText($"{ProductRoot}/agents/review-lens.md");
         Assert.True(
             lens.Contains("`lenient`", StringComparison.Ordinal) &&
             lens.Contains("`balanced`", StringComparison.Ordinal) &&
@@ -265,16 +259,16 @@ public sealed class ReviewGuidanceCouncilContractTests
     [Fact]
     public void ATestInfrastructureLensExistsIsCataloguedAndMapped()
     {
-        string lensPath = Path.Combine(LensesRoot, "test-infrastructure.md");
-        Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+        string lensPath = $"{LensesRoot}/test-infrastructure.md";
+        Assert.True(Corpus.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
 
         // The lens catalogue lives in the first-review reference, beside the lens files it links.
-        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "references", "first-review.md"));
+        string catalogue = Corpus.ReadText($"{ProductRoot}/skills/code-review/references/first-review.md");
         Assert.True(
             catalogue.Contains("(lenses/test-infrastructure.md)", StringComparison.Ordinal),
             "The code-review skill catalogue must list the test-infrastructure lens.");
 
-        string guidance = File.ReadAllText(ReviewGuidancePath);
+        string guidance = Corpus.ReadText(GuidanceFileName);
         Assert.True(
             Regex.IsMatch(guidance, @"^\| test-infrastructure \| 4, 10, 14 \|$", RegexOptions.Multiline),
             $"{GuidanceFileName} lens map must route the test-infrastructure lens to sections 4, 10, 14.");
@@ -291,16 +285,16 @@ public sealed class ReviewGuidanceCouncilContractTests
     [Fact]
     public void ADocumentationAccuracyLensExistsIsCataloguedAndMapped()
     {
-        string lensPath = Path.Combine(LensesRoot, "documentation-accuracy.md");
-        Assert.True(File.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+        string lensPath = $"{LensesRoot}/documentation-accuracy.md";
+        Assert.True(Corpus.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
 
         // The lens catalogue lives in the first-review reference, beside the lens files it links.
-        string catalogue = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "references", "first-review.md"));
+        string catalogue = Corpus.ReadText($"{ProductRoot}/skills/code-review/references/first-review.md");
         Assert.True(
             catalogue.Contains("(lenses/documentation-accuracy.md)", StringComparison.Ordinal),
             "The code-review skill catalogue must list the documentation-accuracy lens.");
 
-        string guidance = File.ReadAllText(ReviewGuidancePath);
+        string guidance = Corpus.ReadText(GuidanceFileName);
         Assert.True(
             Regex.IsMatch(guidance, @"^\| documentation-accuracy \| 11, Scope discipline \|$", RegexOptions.Multiline),
             $"{GuidanceFileName} lens map must route the documentation-accuracy lens to section 11 and Scope discipline.");
@@ -318,12 +312,12 @@ public sealed class ReviewGuidanceCouncilContractTests
     public void ReviewGuidanceLensMapNamesOnlyLensesThatExist()
     {
         HashSet<string> lensNames = new(StringComparer.Ordinal);
-        foreach (string file in Directory.GetFiles(LensesRoot, "*.md"))
+        foreach (string file in Corpus.EnumerateFiles(LensesRoot, "*.md", recursive: false))
         {
             lensNames.Add(Path.GetFileNameWithoutExtension(file) ?? string.Empty);
         }
 
-        string[] lines = File.ReadAllLines(ReviewGuidancePath);
+        string[] lines = Corpus.ReadText(GuidanceFileName).ReplaceLineEndings("\n").Split('\n');
         int start = Array.FindIndex(lines, line => line.Trim() == LensMapHeading);
         Assert.True(start >= 0, $"{GuidanceFileName} must keep its '{LensMapHeading}' section.");
 
@@ -397,10 +391,7 @@ public sealed class ReviewGuidanceCouncilContractTests
         return [];
     }
 
-    private static string ReadProduct(string relativePath)
-    {
-        return File.ReadAllText(Path.Combine(ProductRoot, relativePath));
-    }
+    private static string ReadProduct(string relativePath) => Corpus.ReadText($"{ProductRoot}/{relativePath}");
 
     private static void AssertClosingLinesFollow(string text, string source, string anchor, string discovery, string attestation)
     {

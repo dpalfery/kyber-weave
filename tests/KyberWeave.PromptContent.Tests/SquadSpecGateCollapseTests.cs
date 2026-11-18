@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -11,11 +12,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadSpecGateCollapseTests
 {
-    private static string SpecPath()
-    {
-        return File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents", "conductor", "references", "spec-path.md"));
-    }
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static string SpecPath() =>
+        Corpus.ReadText("products/kyber-squad/agents/conductor/references/spec-path.md");
 
     /// <summary>
     /// The collapse condition names the tasks-phase <c>READY_FOR_REVIEW</c> digest with no gaps

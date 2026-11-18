@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -10,6 +11,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class CoreAssemblySplitTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>Each engine project and the only repository projects it may reference.</summary>
     public static TheoryData<string, string[]> AllowedReferences => new()
     {
@@ -22,10 +25,10 @@ public sealed class CoreAssemblySplitTests
     [MemberData(nameof(AllowedReferences))]
     public void EngineProjectsReferenceOnlyWhatTheSplitAllows(string project, string[] allowed)
     {
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", project, $"{project}.csproj");
+        string path = $"src/{project}/{project}.csproj";
         string[] references =
         [
-            .. XDocument.Load(path)
+            .. XDocument.Parse(Corpus.ReadText(path))
                 .Descendants("ProjectReference")
                 .Select(element => element.Attribute("Include")?.Value ?? string.Empty)
                 .Select(include => Path.GetFileNameWithoutExtension(include.Replace('\\', '/')))

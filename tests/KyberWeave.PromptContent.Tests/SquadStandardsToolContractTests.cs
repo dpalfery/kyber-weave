@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -48,8 +49,9 @@ public sealed class SquadStandardsToolContractTests
         @"<[a-z][a-z-]*-coding-standard>",
         RegexOptions.CultureInvariant);
 
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private const string ProductRoot = "products/kyber-squad";
+
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     /// <summary>
     /// A developer agent reaches its stack's standard through the tool, so the standard arrives
@@ -72,8 +74,7 @@ public sealed class SquadStandardsToolContractTests
     [Fact]
     public void DevopsAsksForItsPlatformStandardThroughTheTool()
     {
-        string path = Path.Combine(ProductRoot, "agents", "devops.md");
-        string text = File.ReadAllText(path);
+        string text = Corpus.ReadText($"{ProductRoot}/agents/devops.md");
 
         Assert.Contains(ToolName, text, StringComparison.Ordinal);
     }
@@ -106,7 +107,7 @@ public sealed class SquadStandardsToolContractTests
         List<string> missing = new();
         foreach (string relativePath in AgentAndSkillPaths())
         {
-            string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath));
+            string text = Corpus.ReadText($"{ProductRoot}/{relativePath}");
             if (!RegistryProperty.IsMatch(text)) missing.Add(relativePath);
         }
 
@@ -130,10 +131,10 @@ public sealed class SquadStandardsToolContractTests
     /// </summary>
     private static void AssertRoutesThroughTheTool(string relativePath)
     {
-        string path = Path.Combine(ProductRoot, relativePath);
-        Assert.True(File.Exists(path), $"Expected the canonical product file '{relativePath}' at '{path}'.");
+        string path = $"{ProductRoot}/{relativePath}";
+        Assert.True(Corpus.Exists(path), $"Expected the canonical product file '{relativePath}' at '{path}'.");
 
-        string text = File.ReadAllText(path);
+        string text = Corpus.ReadText(path);
         Assert.True(
             text.Contains(ToolName, StringComparison.Ordinal),
             $"'{relativePath}' must reach its coding standard through {ToolName}; it does not name it.");

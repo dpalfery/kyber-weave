@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -11,8 +12,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterConductorContractTests
 {
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static string ConductorContract => ReadConductorContract();
 
@@ -99,20 +99,17 @@ public sealed class ArbiterConductorContractTests
 
     private static string ReadConductorContract()
     {
-        string agentRoot = Path.Combine(ProductRoot, "agents");
-        string principal = Path.Combine(agentRoot, "conductor.md");
-        string referencesRoot = Path.Combine(agentRoot, "conductor", "references");
-        string[] files =
-        [
-            principal,
-            Path.Combine(referencesRoot, "plan-path.md"),
-            Path.Combine(referencesRoot, "spec-path.md"),
-            Path.Combine(referencesRoot, "intake-path.md"),
-            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md"),
-        ];
-
-        return string.Join("\n", files.Select(path => StripFrontmatter(File.ReadAllText(path))));
+        return string.Join("\n", ContractFiles.Select(path => StripFrontmatter(Corpus.ReadText(path))));
     }
+
+    private static readonly string[] ContractFiles =
+    [
+        "products/kyber-squad/agents/conductor.md",
+        "products/kyber-squad/agents/conductor/references/plan-path.md",
+        "products/kyber-squad/agents/conductor/references/spec-path.md",
+        "products/kyber-squad/agents/conductor/references/intake-path.md",
+        "products/kyber-squad/skills/delivery-execution/SKILL.md",
+    ];
 
     private static string StripFrontmatter(string text)
     {

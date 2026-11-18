@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -16,13 +17,14 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class KyberWeaveDocsSkillVocabularyTests
 {
-    private static string SkillRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills", "kyber-docs-authoring");
+    private const string SkillRoot = ".apm/skills/kyber-docs-authoring";
+
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     [Fact]
     public void TheSkillReadsTheClosedDocTypeSetFromTheOntology()
     {
-        string skill = File.ReadAllText(Path.Combine(SkillRoot, "SKILL.md"));
+        string skill = Corpus.ReadText($"{SkillRoot}/SKILL.md");
 
         Assert.Contains("<documentation-ontology>", skill, StringComparison.Ordinal);
         Assert.Contains("`todo`", skill, StringComparison.Ordinal);
@@ -35,7 +37,7 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
     [Fact]
     public void RetrofitDoesNotSendAStandardPathToReference()
     {
-        string retrofit = File.ReadAllText(Path.Combine(SkillRoot, "references", "retrofit.md"));
+        string retrofit = Corpus.ReadText($"{SkillRoot}/references/retrofit.md");
 
         Assert.Contains("`standards/<scope>/<scope>.standards.md` | `coding-standard`", retrofit, StringComparison.Ordinal);
         Assert.Contains("`todo/` | `todo`", retrofit, StringComparison.Ordinal);
@@ -45,7 +47,7 @@ public sealed class KyberWeaveDocsSkillVocabularyTests
     [Fact]
     public void TheLoadedRuleReferenceCoversAMisplacedTechnology()
     {
-        string rules = File.ReadAllText(Path.Combine(SkillRoot, "references", "rules.md"));
+        string rules = Corpus.ReadText($"{SkillRoot}/references/rules.md");
 
         Assert.Contains("### `KW-DOC-SPEC-007`", rules, StringComparison.Ordinal);
         Assert.Contains("ontology.technologies", rules, StringComparison.Ordinal);

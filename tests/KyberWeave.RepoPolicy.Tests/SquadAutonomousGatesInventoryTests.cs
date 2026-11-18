@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -9,13 +10,11 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadAutonomousGatesInventoryTests
 {
-    private static string InventoryPath =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "reference", "autonomous-gates.md");
+    private const string InventoryPath = "docs/reference/autonomous-gates.md";
 
-    private static string ReadInventory()
-    {
-        return File.ReadAllText(InventoryPath);
-    }
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static string ReadInventory() => Corpus.ReadText(InventoryPath);
 
     private static void AssertInventoryContains(string text, string phrase)
     {
@@ -26,7 +25,7 @@ public sealed class SquadAutonomousGatesInventoryTests
     public void AutonomousGatesInventoryPageExists()
     {
         Assert.True(
-            File.Exists(InventoryPath),
+            Corpus.Exists(InventoryPath),
             $"Gate audit inventory is missing: {InventoryPath}");
     }
 

@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -13,6 +14,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DomainPurityTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     // The prefix excludes a member access such as `error.File.Length`, which is data, not I/O.
     private static readonly Regex AmbientIo = new(
         @"(?<![\w.])File\.|(?<![\w.])Directory\.|(?<![\w.])Environment\.|(?<![\w.])Process\.|DateTime\.UtcNow|(?<![\w.])Console\.",
@@ -29,13 +32,12 @@ public sealed class DomainPurityTests
     [Fact]
     public void DomainUsesNoAmbientIoOutsideTheFoldersTheOtherWaveFourPackagesOwn()
     {
-        string repoRoot = KyberWeaveTestPaths.ToolRoot;
-        string domainRoot = Path.Combine(repoRoot, "src", "KyberWeave.Domain");
         List<string> violations = [];
 
-        foreach (string file in Directory.EnumerateFiles(domainRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (string relative in Corpus.EnumerateFiles("src/KyberWeave.Domain", "*.cs"))
         {
-            string relative = Path.GetRelativePath(repoRoot, file).Replace('\\', '/');
+            // The corpus already leaves build output out of a recursive listing; this second check keeps the audit
+            // correct if that listing rule ever changes.
             if (relative.Contains("/bin/", StringComparison.Ordinal) ||
                 relative.Contains("/obj/", StringComparison.Ordinal))
             {
@@ -45,7 +47,7 @@ public sealed class DomainPurityTests
             if (Pending.Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal)))
                 continue;
 
-            string[] lines = File.ReadAllLines(file);
+            string[] lines = Corpus.ReadText(relative).ReplaceLineEndings("\n").Split('\n');
             for (int index = 0; index < lines.Length; index++)
             {
                 string line = lines[index];
