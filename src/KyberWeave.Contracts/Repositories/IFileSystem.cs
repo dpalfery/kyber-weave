@@ -45,6 +45,10 @@ public interface IFileSystem
     IEnumerable<string> ReadLines(string path);
 
     /// <summary>Opens a file for reading.</summary>
+    /// <remarks>
+    /// Reading does not lock out a program that is still writing the file: a build log or a file an editor holds
+    /// open is readable. A reader that needs an exclusive snapshot takes it another way.
+    /// </remarks>
     /// <param name="path">The absolute path.</param>
     /// <returns>A stream the caller disposes.</returns>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
