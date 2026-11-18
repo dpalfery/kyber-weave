@@ -86,6 +86,52 @@ public sealed class InMemoryFileSystemBehaviourTests
     }
 
     [Fact]
+    public void AskingAnExistingDirectoryForExactNamesChangesHowItMatchesThem()
+    {
+        InMemoryFileSystem files = new(caseSensitive: false);
+        string root = files.CreateTemporaryDirectory("kw-memfs-exact-");
+        string folder = At(root, "Folder");
+        files.CreateDirectory(folder);
+        files.WriteAllText(At(folder, "Name.txt"), "one");
+
+        files.CreateDirectory(folder, caseSensitiveNames: true);
+        files.WriteAllText(At(folder, "name.txt"), "two");
+
+        Assert.Equal(2, files.EnumerateEntries(folder).Count());
+        Assert.Equal("one", files.ReadAllText(At(folder, "Name.txt")));
+        Assert.Equal("two", files.ReadAllText(At(folder, "name.txt")));
+        Assert.False(files.FileExists(At(folder, "NAME.TXT")));
+    }
+
+    [Fact]
+    public void AskingAnExistingDirectoryForFoldedNamesRefusesNamesThatWouldCollide()
+    {
+        InMemoryFileSystem files = new(caseSensitive: false);
+        string root = files.CreateTemporaryDirectory("kw-memfs-exact-");
+        files.CreateDirectory(root, caseSensitiveNames: true);
+        files.WriteAllText(At(root, "Name.txt"), "one");
+        files.WriteAllText(At(root, "name.txt"), "two");
+
+        _ = Assert.Throws<IOException>(() => files.CreateDirectory(root, caseSensitiveNames: false));
+
+        Assert.Equal("one", files.ReadAllText(At(root, "Name.txt")));
+        Assert.Equal("two", files.ReadAllText(At(root, "name.txt")));
+    }
+
+    [Fact]
+    public void CreatingAnExistingDirectoryAgainKeepsTheNamesItMatches()
+    {
+        InMemoryFileSystem files = new(caseSensitive: false);
+        string root = files.CreateTemporaryDirectory("kw-memfs-exact-");
+        files.CreateDirectory(root, caseSensitiveNames: true);
+        files.WriteAllText(At(root, "Name.txt"), "one");
+
+        files.CreateDirectory(root);
+
+        Assert.False(files.FileExists(At(root, "NAME.TXT")));
+    }
+
+    [Fact]
     public void ARenameTakesTheDestinationSpelling()
     {
         InMemoryFileSystem files = new(caseSensitive: false);

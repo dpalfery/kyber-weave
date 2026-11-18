@@ -9,8 +9,9 @@ namespace KyberWeave.Tests.FileSystem;
 /// <para>
 /// The fake reproduces the semantics the product relies on: an atomic rename that may replace its
 /// destination, an exclusive create, case-preserving names with a case-insensitive or a
-/// case-sensitive lookup chosen per instance, file and directory links resolved one hop or to the
-/// final target, deletion that removes a link instead of following it, enumeration with and
+/// case-sensitive lookup chosen per instance, and per directory for a directory that asks for
+/// exact names, file and directory links resolved one hop or to the final target, deletion that
+/// removes a link instead of following it, enumeration with and
 /// without following links, length, attributes and a last-write time taken from the injected
 /// <see cref="TimeProvider"/>.
 /// </para>
@@ -244,7 +245,31 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     public void CreateDirectory(string path)
     {
         Enter(nameof(CreateDirectory), path);
-        CreateDirectoryCore(Full(path));
+        CreateDirectoryCore(Full(path), caseSensitiveNames: null);
+    }
+
+    /// <summary>Gives the directory the name rule the caller names, creating it when it is not there.</summary>
+    /// <param name="path">The absolute path of the directory.</param>
+    /// <param name="caseSensitiveNames">
+    /// True to match this directory's children exactly, as a Windows directory with case sensitivity turned on does
+    /// even when the volume folds names; false for the volume's own rule.
+    /// </param>
+    /// <remarks>
+    /// <para>
+    /// The setting belongs to this directory alone and is not inherited by the directories created beneath it, so it
+    /// models the per-directory flag rather than a second volume-wide rule. Asking an existing directory for a rule
+    /// it does not have changes it, as turning the flag on and off does, and asking for folded names when two of them
+    /// differ only in case is refused: one entry cannot carry both.
+    /// </para>
+    /// <para>
+    /// <see cref="CreateDirectory(string)" /> leaves an existing directory's rule alone, so a caller that only needs
+    /// the directory never disturbs the one a test set up.
+    /// </para>
+    /// </remarks>
+    public void CreateDirectory(string path, bool caseSensitiveNames)
+    {
+        Enter(nameof(CreateDirectory), path);
+        CreateDirectoryCore(Full(path), caseSensitiveNames);
     }
 
     /// <inheritdoc />
@@ -415,7 +440,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
         Enter(nameof(CreateTemporaryDirectory), prefix);
         string root = Path.Combine(_rootPath, "kw-memfs-tmp");
-        CreateDirectoryCore(root);
+        CreateDirectoryCore(root, caseSensitiveNames: null);
 
         string path;
         do
@@ -424,7 +449,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         }
         while (ResolveFull(path, followFinal: false) is not null);
 
-        CreateDirectoryCore(path);
+        CreateDirectoryCore(path, caseSensitiveNames: null);
         return path;
     }
 
@@ -604,13 +629,13 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         return final;
     }
 
-    private Node NewDirectory(string name, Node parent) =>
-        new(name, parent, isDirectory: true, _names, Now);
+    private Node NewDirectory(string name, Node parent, bool caseSensitiveNames = false) =>
+        new(name, parent, isDirectory: true, _names, Now, caseSensitiveNames);
 
     private Node NewFile(string name, Node parent, byte[] content) =>
         new(name, parent, isDirectory: false, _names, Now) { Content = content };
 
-    private void CreateDirectoryCore(string fullPath)
+    private void CreateDirectoryCore(string fullPath, bool? caseSensitiveNames)
     {
         string relative = Path.GetRelativePath(_rootPath, fullPath);
         if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
@@ -620,8 +645,9 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
         string[] segments = relative == "." ? [] : relative.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
         Node current = _root;
-        foreach (string segment in segments)
+        for (int index = 0; index < segments.Length; index++)
         {
+            string segment = segments[index];
             if (current.LinkTarget is not null)
             {
                 current = Follow(current)
@@ -633,12 +659,17 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
                 throw new IOException($"A file is in the way of the directory '{fullPath}'.");
             }
 
+            bool lastSegment = index == segments.Length - 1;
             Node? next = Child(current, segment);
             if (next is null)
             {
-                Node created = NewDirectory(segment, current);
+                Node created = NewDirectory(segment, current, lastSegment && caseSensitiveNames is true);
                 current.Children[segment] = created;
                 next = created;
+            }
+            else if (lastSegment && caseSensitiveNames is not null)
+            {
+                ApplyNameRule(next, caseSensitiveNames.Value);
             }
 
             current = next;
@@ -654,6 +685,38 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         {
             throw new IOException($"A file is in the way of the directory '{fullPath}'.");
         }
+    }
+
+    /// <summary>
+    ///     Gives an existing directory another name rule by rebuilding the lookup its children live in, which is the
+    ///     only way a comparer changes. The tree is untouched when two names would fold together.
+    /// </summary>
+    private void ApplyNameRule(Node directory, bool caseSensitiveNames)
+    {
+        if (!directory.IsDirectory || directory.LinkTarget is not null)
+        {
+            throw new IOException(
+                $"'{CanonicalPath(directory)}' is not a directory whose name rule this file system can change.");
+        }
+
+        StringComparer rule = caseSensitiveNames ? StringComparer.Ordinal : _names;
+        if (directory.Children.Comparer.Equals(rule))
+        {
+            return;
+        }
+
+        Dictionary<string, Node> rekeyed = new(rule);
+        foreach (string name in directory.Children.Keys)
+        {
+            if (!rekeyed.TryAdd(name, directory.Children[name]))
+            {
+                throw new IOException(
+                    $"The directory '{CanonicalPath(directory)}' holds names that fold to '{name}', " +
+                    "so it cannot match names by the volume's rule.");
+            }
+        }
+
+        directory.Children = rekeyed;
     }
 
     private void WriteContent(string path, byte[] content)
@@ -719,7 +782,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         string full = Full(path);
         string? parentPath = Path.GetDirectoryName(full)
             ?? throw new InvalidOperationException($"The path '{path}' has no parent directory.");
-        CreateDirectoryCore(parentPath);
+        CreateDirectoryCore(parentPath, caseSensitiveNames: null);
 
         Node? existing = ResolveFull(full, followFinal: false);
         if (existing is not null && existing.LinkTarget is not null)
@@ -795,7 +858,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         string? parentPath = Path.GetDirectoryName(full);
         if (parentPath is not null)
         {
-            CreateDirectoryCore(parentPath);
+            CreateDirectoryCore(parentPath, caseSensitiveNames: null);
         }
 
         Node parent = ResolveParent(linkPath, out string name);
@@ -920,12 +983,19 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
     private sealed class Node
     {
-        internal Node(string name, Node? parent, bool isDirectory, StringComparer names, DateTime lastWriteTimeUtc)
+        internal Node(
+            string name,
+            Node? parent,
+            bool isDirectory,
+            StringComparer names,
+            DateTime lastWriteTimeUtc,
+            bool caseSensitiveNames = false)
         {
             Name = name;
             Parent = parent;
             IsDirectory = isDirectory;
-            Children = new Dictionary<string, Node>(names);
+            Children = new Dictionary<string, Node>(
+                caseSensitiveNames ? StringComparer.Ordinal : names);
             Attributes = isDirectory ? FileAttributes.Directory : FileAttributes.Normal;
             LastWriteTimeUtc = lastWriteTimeUtc;
         }
@@ -936,7 +1006,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
         internal bool IsDirectory { get; }
 
-        internal Dictionary<string, Node> Children { get; }
+        internal Dictionary<string, Node> Children { get; set; }
 
         internal byte[] Content { get; set; } = [];
 
