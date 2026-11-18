@@ -148,6 +148,21 @@ public abstract class PathResolverContractTests : IDisposable
     }
 
     [Fact]
+    public void IsWithinRefusesAParentSegmentThatClimbsOutOfALink()
+    {
+        Starting(out IWritableFileSystem files, out IPathResolver resolver, out string root);
+        string outside = AnotherDirectory(files, "kw-path-outside-");
+        string link = Path.Combine(root, "link");
+        files.CreateDirectoryLink(link, outside);
+        string candidate = Path.Combine(link, "..", "evil.md");
+
+        Assert.False(resolver.IsWithin(root, candidate));
+        Assert.Equal(
+            Path.Combine(Path.GetDirectoryName(resolver.Canonicalize(outside))!, "evil.md"),
+            resolver.Canonicalize(candidate));
+    }
+
+    [Fact]
     public void IsWithinContainsAChildAndRefusesASiblingTheParentAndItself()
     {
         Starting(out _, out IPathResolver resolver, out string root);

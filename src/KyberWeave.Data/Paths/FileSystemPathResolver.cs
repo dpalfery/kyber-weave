@@ -82,14 +82,19 @@ public class FileSystemPathResolver : IPathResolver
     /// <inheritdoc />
     public bool IsWithin(string root, string candidate)
     {
-        string normalizedRoot = NormalizeLexical(root, nameof(root));
-        string normalizedCandidate = NormalizeLexical(candidate, nameof(candidate));
+        string normalizedRoot = RequireFullyQualified(root, nameof(root));
+        string normalizedCandidate = RequireFullyQualified(candidate, nameof(candidate));
         if (string.Equals(normalizedRoot, normalizedCandidate, _nameComparison))
         {
             return false;
         }
 
-        if (HasPathPrefix(normalizedRoot, normalizedCandidate) && !ContainsLink(normalizedCandidate))
+        // A parent segment climbs from wherever it appears, so it may only be collapsed once the links before it are
+        // resolved: "link/.." is the parent of what the link points at, not the directory the link sits in.
+        if (!HasParentSegment(normalizedRoot) &&
+            !HasParentSegment(normalizedCandidate) &&
+            HasPathPrefix(normalizedRoot, normalizedCandidate) &&
+            !ContainsLink(normalizedCandidate))
         {
             return true;
         }
@@ -105,22 +110,31 @@ public class FileSystemPathResolver : IPathResolver
     /// <inheritdoc />
     public string Canonicalize(string path)
     {
-        string fullPath = NormalizeLexical(path, nameof(path));
-        string filesystemRoot = Path.GetPathRoot(fullPath)
-            ?? throw new ArgumentException(
-                $"The path '{path}' does not have a filesystem root.",
-                nameof(path));
+        string fullPath = RequireFullyQualified(path, nameof(path));
+        string filesystemRoot = FilesystemRoot(fullPath, path);
         string current = filesystemRoot;
         string[] segments = Segments(fullPath, filesystemRoot);
 
         for (int index = 0; index < segments.Length; index++)
         {
-            FileSystemEntry? actualEntry = ResolveActualEntry(current, segments[index]);
+            string segment = segments[index];
+            if (IsCurrentDirectory(segment))
+            {
+                continue;
+            }
+
+            if (IsParentDirectory(segment))
+            {
+                current = ParentOf(current, filesystemRoot);
+                continue;
+            }
+
+            FileSystemEntry? actualEntry = ResolveActualEntry(current, segment);
             if (actualEntry is null)
             {
                 for (; index < segments.Length; index++)
                 {
-                    current = Path.Combine(current, segments[index]);
+                    current = WalkInto(current, segments[index], filesystemRoot);
                 }
 
                 break;
@@ -145,7 +159,7 @@ public class FileSystemPathResolver : IPathResolver
     /// <inheritdoc />
     public string ResolvePhysicalRoot(string targetRoot)
     {
-        string fullPath = NormalizeLexical(targetRoot, nameof(targetRoot));
+        string fullPath = Canonicalize(targetRoot);
         if (!_files.DirectoryExists(fullPath))
         {
             throw new DirectoryNotFoundException($"'{targetRoot}' must be an existing directory.");
@@ -269,13 +283,21 @@ public class FileSystemPathResolver : IPathResolver
     /// <summary>Rewrites every segment that is a link to the segment its final target names.</summary>
     private string ResolveLinks(string path)
     {
-        string filesystemRoot = Path.GetPathRoot(path)
-            ?? throw new ArgumentException(
-                $"The path '{path}' does not have a filesystem root.",
-                nameof(path));
+        string filesystemRoot = FilesystemRoot(path, path);
         string current = filesystemRoot;
         foreach (string segment in Segments(path, filesystemRoot))
         {
+            if (IsCurrentDirectory(segment))
+            {
+                continue;
+            }
+
+            if (IsParentDirectory(segment))
+            {
+                current = ParentOf(current, filesystemRoot);
+                continue;
+            }
+
             current = Path.Combine(current, segment);
             string? target = FinalTargetOf(current);
             if (target is not null)
@@ -285,6 +307,57 @@ public class FileSystemPathResolver : IPathResolver
         }
 
         return NormalizeLexical(current, nameof(path));
+    }
+
+    private static string FilesystemRoot(string fullPath, string path) =>
+        Path.GetPathRoot(fullPath)
+        ?? throw new ArgumentException(
+            $"The path '{path}' does not have a filesystem root.",
+            nameof(path));
+
+    private static bool IsCurrentDirectory(string segment) =>
+        segment is "." or "";
+
+    private static bool IsParentDirectory(string segment) => segment == "..";
+
+    /// <summary>
+    ///     The parent of a directory the walk has already resolved. It is the real parent even when the directory was
+    ///     reached through a link, because the walk replaced the link with its target before it arrived here.
+    /// </summary>
+    private static string ParentOf(string directory, string filesystemRoot) =>
+        Path.GetDirectoryName(directory) ?? filesystemRoot;
+
+    /// <summary>
+    ///     Descends one segment without reading the file system. A parent segment still climbs from the resolved
+    ///     directory, so the tail of a path that does not exist yet keeps climbing the same way the prefix did.
+    /// </summary>
+    private static string WalkInto(string directory, string segment, string filesystemRoot)
+    {
+        if (IsCurrentDirectory(segment))
+        {
+            return directory;
+        }
+
+        return IsParentDirectory(segment) ? ParentOf(directory, filesystemRoot) : Path.Combine(directory, segment);
+    }
+
+    private static bool HasParentSegment(string path)
+    {
+        string? filesystemRoot = Path.GetPathRoot(path);
+        if (filesystemRoot is null)
+        {
+            return false;
+        }
+
+        foreach (string segment in Segments(path, filesystemRoot))
+        {
+            if (IsParentDirectory(segment))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -315,19 +388,40 @@ public class FileSystemPathResolver : IPathResolver
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
             StringSplitOptions.RemoveEmptyEntries);
 
+    /// <summary>
+    ///     Normalizes a path that names no link segment left to resolve: any parent segment that remains is collapsed
+    ///     lexically, the trailing separator is trimmed and the spelling is normalized to Unicode form C.
+    /// </summary>
     private static string NormalizeLexical(string path, string parameterName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path, parameterName);
         if (!Path.IsPathFullyQualified(path))
         {
-            throw new ArgumentException(
-                $"'{path}' is not a fully qualified path; resolve it against an explicit base directory with " +
-                $"{nameof(GetFullPath)}.",
-                parameterName);
+            throw new ArgumentException(NotFullyQualified(path), parameterName);
         }
 
         return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)).Normalize(NormalizationForm.FormC);
     }
+
+    /// <summary>
+    ///     Refuses a relative path and returns a fully qualified one with its trailing separator trimmed and its
+    ///     spelling normalized to Unicode form C. Parent segments are left in place, because collapsing one before
+    ///     the links before it are resolved would move the path somewhere it does not go.
+    /// </summary>
+    private static string RequireFullyQualified(string path, string parameterName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path, parameterName);
+        if (!Path.IsPathFullyQualified(path))
+        {
+            throw new ArgumentException(NotFullyQualified(path), parameterName);
+        }
+
+        return Path.TrimEndingDirectorySeparator(path).Normalize(NormalizationForm.FormC);
+    }
+
+    private static string NotFullyQualified(string path) =>
+        $"'{path}' is not a fully qualified path; resolve it against an explicit base directory with " +
+        $"{nameof(GetFullPath)}.";
 
     private sealed class ListingScope(
         Dictionary<IFileSystem, Dictionary<string, FileSystemEntry[]>>? prior) : IDisposable
