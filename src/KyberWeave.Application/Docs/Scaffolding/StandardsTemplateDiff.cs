@@ -131,19 +131,24 @@ public sealed class StandardsTemplateDiff
     /// to start with one of them is authored content: scoping the strip to the block is what
     /// keeps an edit to that line visible as a change.
     /// </summary>
-    private static string Normalize(string text)
+    /// <remarks>
+    /// The block is a frontmatter block only when the file's first line opens it. A <c>---</c>
+    /// further down is a horizontal rule or a YAML example the author wrote; opening a block there
+    /// would drop every line beneath it from the comparison, hiding an edit to one of them.
+    /// </remarks>
+    internal static string Normalize(string text)
     {
         string[] lines = text.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n');
         List<string> kept = [];
         bool frontmatterOpen = false;
-        bool frontmatterSeen = false;
 
-        foreach (string line in lines)
+        for (int index = 0; index < lines.Length; index++)
         {
+            string line = lines[index];
             bool delimiter = line.Trim() == "---";
-            if (!frontmatterSeen && delimiter)
+
+            if (index == 0 && delimiter)
             {
-                frontmatterSeen = true;
                 frontmatterOpen = true;
                 kept.Add(line);
                 continue;
