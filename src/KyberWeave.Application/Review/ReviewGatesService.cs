@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
@@ -30,7 +31,8 @@ namespace KyberWeave.Application.Review;
 /// <param name="graphs">Reads the CodeGraph index the duplicate report is computed over.</param>
 /// <param name="worktreeIndex">Makes sure the tree has a CodeGraph index before any gate starts.</param>
 /// <param name="files">Reads and writes the report, the logs and the cycle folder.</param>
-/// <param name="environment">Names the temporary directory the index lock lives in.</param>
+/// <param name="environment">Names the temporary directory the index lock lives in, and the working directory a relative path resolves against.</param>
+/// <param name="paths">Resolves the paths the caller spelled, relative ones against the working directory.</param>
 /// <param name="selector">Finds the review folder and the prior cycle's findings.</param>
 /// <param name="configs">Loads the host's configuration.</param>
 /// <param name="taskGates">Checks and expands one agent's task gates.</param>
@@ -48,6 +50,7 @@ public sealed class ReviewGatesService(
     IWorktreeIndexGuard worktreeIndex,
     IWritableFileSystem files,
     IProcessEnvironment environment,
+    IPathResolver paths,
     IReviewCycleSelector selector,
     IConfigLoadService configs,
     ITaskGateSelectionService taskGates,
@@ -75,7 +78,7 @@ public sealed class ReviewGatesService(
         ReviewGatesRequest request, IProcessExecutor indexExecutor, TextWriter output)
     {
         DiagnosticReport report = new();
-        string root = Path.GetFullPath(request.Path);
+        string root = FullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResultFactory.Reported(1, report);
@@ -335,12 +338,13 @@ public sealed class ReviewGatesService(
         string? folder = null;
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, null);
-        if (request.Out is not null && ReviewCycleView.TryFromOutPath(request.Out, out string fromOut, out int number))
+        if (request.Out is not null
+            && ReviewCycleView.TryFromOutPath(paths, environment, request.Out, out string fromOut, out int number))
         {
             reviewFolder = fromOut;
             thisCycle = number;
-            folder = Path.GetDirectoryName(Path.GetFullPath(request.Out));
-            if (!ReviewCycleView.IsUnder(tree, fromOut))
+            folder = Path.GetDirectoryName(FullPath(request.Out));
+            if (!ReviewCycleView.IsUnder(paths, environment, tree, fromOut))
                 notes.Add($"worktree: --out is outside {tree}, so this review writes to {folder}; use {ReviewWorkTree.Scratchpad(tree)} for this worktree's review folders.");
         }
         else if (choice.Chosen)
@@ -518,13 +522,15 @@ public sealed class ReviewGatesService(
         return ReviewGateReporting.MergedWithExisting(declared, ran, existing);
     }
 
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
+
     private static string? BaseRef(string? baseRef) =>
         string.IsNullOrWhiteSpace(baseRef) ? null : baseRef.Trim();
 
     private ReviewCommandResult ExecuteAgentGates(ReviewGatesRequest request, TextWriter output)
     {
         DiagnosticReport report = new();
-        string root = Path.GetFullPath(request.Path);
+        string root = FullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResultFactory.Reported(1, report);

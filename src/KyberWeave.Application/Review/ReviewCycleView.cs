@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -71,11 +72,24 @@ public static class ReviewCycleView
     ///     The review folder and cycle number a gate report written to <paramref name="outPath"/> belongs to, when the path
     ///     is <c>.../review/cycle-&lt;n&gt;/&lt;file&gt;</c>.
     /// </summary>
-    public static bool TryFromOutPath(string outPath, out string reviewFolder, out int cycle)
+    /// <param name="paths">Resolves the caller's spelling of the report path.</param>
+    /// <param name="environment">Names the working directory a relative report path resolves against.</param>
+    /// <param name="outPath">The path the caller gave.</param>
+    /// <param name="reviewFolder">The review folder the path belongs to, when it belongs to one.</param>
+    /// <param name="cycle">The cycle number the path belongs to, when it belongs to one.</param>
+    public static bool TryFromOutPath(
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        string outPath,
+        out string reviewFolder,
+        out int cycle)
     {
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+
         reviewFolder = string.Empty;
         cycle = 0;
-        string? cycleFolder = Path.GetDirectoryName(Path.GetFullPath(outPath));
+        string? cycleFolder = Path.GetDirectoryName(paths.GetFullPath(outPath, environment.CurrentDirectory));
         string? name = cycleFolder is null ? null : Path.GetFileName(cycleFolder);
         string? parent = cycleFolder is null ? null : Path.GetDirectoryName(cycleFolder);
         if (name is null || parent is null
@@ -178,9 +192,18 @@ public static class ReviewCycleView
         ignored.Select(cycle => $"ignored: {Relative(root, cycle.Record.Folder)} — {cycle.Reason}");
 
     /// <summary>Whether <paramref name="path"/> is inside <paramref name="folder"/>.</summary>
-    public static bool IsUnder(string folder, string path)
+    /// <param name="paths">Resolves each spelling to a full path.</param>
+    /// <param name="environment">Names the working directory a relative path resolves against.</param>
+    /// <param name="folder">The folder to test against.</param>
+    /// <param name="path">The path that may lie inside the folder.</param>
+    public static bool IsUnder(IPathResolver paths, IProcessEnvironment environment, string folder, string path)
     {
-        string relative = Path.GetRelativePath(Path.GetFullPath(folder), Path.GetFullPath(path));
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+
+        string relative = Path.GetRelativePath(
+            paths.GetFullPath(folder, environment.CurrentDirectory),
+            paths.GetFullPath(path, environment.CurrentDirectory));
         return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
                                 && !Path.IsPathRooted(relative);
     }

@@ -258,6 +258,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IWorktreeIndexGuard>(),
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IReviewCycleSelector>(),
             sp.GetRequiredService<IConfigLoadService>(),
             sp.GetRequiredService<ITaskGateSelectionService>(),
