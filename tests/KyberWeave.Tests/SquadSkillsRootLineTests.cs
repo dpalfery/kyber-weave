@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -17,6 +18,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadSkillsRootLineTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string SampleWorker = "dev-medium";
     private const string SampleSkill = "task-gate";
 
@@ -108,7 +111,7 @@ public sealed class SquadSkillsRootLineTests
         ISquadGlobalRootResolver? roots)
     {
         SquadRenderRequest request = new SquadRenderRequest(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad"),
+            Path.Combine(Corpus.Root, "products", "kyber-squad"),
             [target],
             scope,
             GlobalRoots: roots,

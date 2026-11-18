@@ -3,6 +3,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -13,6 +14,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class TieredAgentRenderTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The five agents the tiered roster adds.</summary>
     private static readonly string[] TieredAgents =
     [
@@ -91,13 +94,16 @@ public sealed class TieredAgentRenderTests
     {
         string[] renderingRoots =
         [
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain", "Squad", "Rendering"),
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Application", "Squad", "Rendering")
+            "src/KyberWeave.Domain/Squad/Rendering",
+            "src/KyberWeave.Application/Squad/Rendering"
         ];
 
         string[] offenders = renderingRoots
-            .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
-            .SelectMany(file => File.ReadLines(file).Select(line => (File: file, Line: line)))
+            .SelectMany(root => Corpus.EnumerateFiles(root, "*.cs"))
+            .SelectMany(file => Corpus.ReadText(file)
+                .ReplaceLineEndings("\n")
+                .Split('\n')
+                .Select(line => (File: file, Line: line)))
             .Where(entry => NamesADeveloperAgent(entry.Line))
             .Select(entry => $"{Path.GetFileName(entry.File)}: {entry.Line.Trim()}")
             .ToArray();

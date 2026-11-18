@@ -1,5 +1,6 @@
 using KyberWeave.Core.Review;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -11,14 +12,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SeatOutputParserTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static string Fixture(string name) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "tests",
-            "KyberWeave.Tests",
-            "Fixtures",
-            "review-seats",
-            name));
+        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/review-seats/{name}");
 
     [Theory]
     [InlineData("589-prior-art-performance.md", "prior-art-performance", 5, SeatOutputKind.Findings)]

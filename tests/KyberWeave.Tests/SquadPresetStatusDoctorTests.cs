@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -18,6 +19,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadPresetStatusDoctorTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string SamplePresetYaml = """
                                             schema: kyber-squad.model-preset/v1
                                             profiles:
@@ -215,7 +218,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            KyberWeaveTestPaths.ToolRoot,
+            Corpus.Root,
             globalRoots,
             renderer,
             stateStore);
@@ -224,7 +227,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -274,7 +277,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             userPaths,
-            KyberWeaveTestPaths.ToolRoot,
+            Corpus.Root,
             globalRoots,
             renderer,
             stateStore);
@@ -283,7 +286,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 

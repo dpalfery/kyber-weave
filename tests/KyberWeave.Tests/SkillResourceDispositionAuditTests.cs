@@ -8,6 +8,7 @@ using Markdig.Extensions.Tables;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -31,6 +32,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SkillResourceDispositionAuditTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string RelativeAuditPath = "docs/kyber-squad/skill-resource-dispositions.md";
     private const string NoDestination = "—";
     private const string DestinationSeparator = " § ";
@@ -64,11 +67,10 @@ public sealed class SkillResourceDispositionAuditTests
     private static readonly Regex CodingStandardToken = new("<([a-z][a-z0-9-]*)-coding-standard>", RegexOptions.None);
     private static readonly Regex UriScheme = new(@"^[a-zA-Z][a-zA-Z0-9+.\-]*:", RegexOptions.None);
 
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private const string ProductRoot = "products/kyber-squad";
 
-    private static string AuditDocumentPath =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "kyber-squad", "skill-resource-dispositions.md");
+    /// <summary>The same product root as an absolute path, for the product APIs that read a real directory.</summary>
+    private static string ProductRootPath => Path.Combine(Corpus.Root, ProductRoot);
 
     /// <summary>
     /// Prevents a resource from being silently dropped, duplicated, or invented in the audit: the
@@ -80,14 +82,14 @@ public sealed class SkillResourceDispositionAuditTests
     {
         string[] onDisk = OnDiskSkillResourcePaths();
 
-        if (!File.Exists(AuditDocumentPath))
+        if (!Corpus.Exists(RelativeAuditPath))
         {
             Assert.Fail(
                 $"Audit document '{RelativeAuditPath}' is missing. Expected {onDisk.Length} resource rows:\n" +
                 string.Join("\n", onDisk));
         }
 
-        IReadOnlyList<DispositionRow> rows = ParseDispositionRows(File.ReadAllText(AuditDocumentPath));
+        IReadOnlyList<DispositionRow> rows = ParseDispositionRows(Corpus.ReadText(RelativeAuditPath));
 
         string[] duplicates = rows
             .Select(row => row.Resource)
@@ -124,13 +126,13 @@ public sealed class SkillResourceDispositionAuditTests
     public void DispositionsUseClosedVocabulariesAndAgreeWithTheLedger()
     {
         List<string> findings = [];
-        if (!File.Exists(AuditDocumentPath))
+        if (!Corpus.Exists(RelativeAuditPath))
         {
             findings.Add($"Audit document '{RelativeAuditPath}' is missing.");
         }
         else
         {
-            string markdown = File.ReadAllText(AuditDocumentPath);
+            string markdown = Corpus.ReadText(RelativeAuditPath);
             IReadOnlyList<DispositionRow> dispositions = ParseDispositionRows(markdown);
             IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(markdown);
 
@@ -227,14 +229,14 @@ public sealed class SkillResourceDispositionAuditTests
     public void DeliveryColumnMatchesTheRenderedResourceClosure()
     {
         List<string> findings = [];
-        if (!File.Exists(AuditDocumentPath))
+        if (!Corpus.Exists(RelativeAuditPath))
         {
             findings.Add($"Audit document '{RelativeAuditPath}' is missing.");
         }
         else
         {
-            IReadOnlyList<DispositionRow> dispositions = ParseDispositionRows(File.ReadAllText(AuditDocumentPath));
-            SquadSource source = SquadSourceLoader.Load(ProductRoot);
+            IReadOnlyList<DispositionRow> dispositions = ParseDispositionRows(Corpus.ReadText(RelativeAuditPath));
+            SquadSource source = SquadSourceLoader.Load(ProductRootPath);
             Dictionary<string, HashSet<string>> renderedBySkill = source.Skills.ToDictionary(
                 skill => skill.Name,
                 skill => skill.Resources.Select(resource => resource.RelativePath).ToHashSet(StringComparer.Ordinal),
@@ -267,13 +269,13 @@ public sealed class SkillResourceDispositionAuditTests
     public void LedgerDestinationsNameExistingTemplateSectionsContainingTheirAnchor()
     {
         List<string> findings = [];
-        if (!File.Exists(AuditDocumentPath))
+        if (!Corpus.Exists(RelativeAuditPath))
         {
             findings.Add($"Audit document '{RelativeAuditPath}' is missing.");
         }
         else
         {
-            IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(File.ReadAllText(AuditDocumentPath));
+            IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(Corpus.ReadText(RelativeAuditPath));
             Dictionary<string, Section[]?> sectionsByTechnology = new(StringComparer.Ordinal);
 
             foreach (LedgerRow row in ledger)
@@ -286,8 +288,8 @@ public sealed class SkillResourceDispositionAuditTests
 
                 if (!sectionsByTechnology.TryGetValue(technology, out Section[]? sections))
                 {
-                    string standardPath = Path.Combine(ProductRoot, "standards", technology, $"{technology}.standards.md");
-                    sections = File.Exists(standardPath) ? HeadingSections(File.ReadAllText(standardPath)) : null;
+                    string standardPath = $"{ProductRoot}/standards/{technology}/{technology}.standards.md";
+                    sections = Corpus.Exists(standardPath) ? HeadingSections(Corpus.ReadText(standardPath)) : null;
                     sectionsByTechnology[technology] = sections;
                 }
 
@@ -337,13 +339,13 @@ public sealed class SkillResourceDispositionAuditTests
     public void MovedAndSupersededExcerptsAreGoneAndRetainedExcerptsRemain()
     {
         List<string> findings = [];
-        if (!File.Exists(AuditDocumentPath))
+        if (!Corpus.Exists(RelativeAuditPath))
         {
             findings.Add($"Audit document '{RelativeAuditPath}' is missing.");
         }
         else
         {
-            IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(File.ReadAllText(AuditDocumentPath));
+            IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(Corpus.ReadText(RelativeAuditPath));
             Dictionary<string, string?> sourceContent = new(StringComparer.Ordinal);
 
             foreach (LedgerRow row in ledger)
@@ -351,7 +353,7 @@ public sealed class SkillResourceDispositionAuditTests
                 if (!sourceContent.TryGetValue(row.Source, out string? content))
                 {
                     string sourcePath = ResourceFilePath(row.Source);
-                    content = File.Exists(sourcePath) ? File.ReadAllText(sourcePath) : null;
+                    content = Corpus.Exists(sourcePath) ? Corpus.ReadText(sourcePath) : null;
                     sourceContent[row.Source] = content;
                 }
 
@@ -392,13 +394,13 @@ public sealed class SkillResourceDispositionAuditTests
     public void PolicyBearingResourcesPointAtEveryDestinationStandard()
     {
         List<string> findings = [];
-        if (!File.Exists(AuditDocumentPath))
+        if (!Corpus.Exists(RelativeAuditPath))
         {
             findings.Add($"Audit document '{RelativeAuditPath}' is missing.");
         }
         else
         {
-            string markdown = File.ReadAllText(AuditDocumentPath);
+            string markdown = Corpus.ReadText(RelativeAuditPath);
             IReadOnlyList<DispositionRow> dispositions = ParseDispositionRows(markdown);
             IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(markdown);
             ILookup<string, LedgerRow> ledgerBySource = ledger.ToLookup(row => row.Source, StringComparer.Ordinal);
@@ -415,7 +417,7 @@ public sealed class SkillResourceDispositionAuditTests
                     continue;
                 }
 
-                string content = File.ReadAllText(ResourceFilePath(row.Resource));
+                string content = Corpus.ReadText(ResourceFilePath(row.Resource));
                 foreach (string technology in technologies)
                 {
                     string token = $"<{technology}-coding-standard>";
@@ -443,6 +445,7 @@ public sealed class SkillResourceDispositionAuditTests
         string[] markdownFiles = OnDiskSkillResourcePaths()
             .Where(path => path.EndsWith(".md", StringComparison.Ordinal))
             .Select(ResourceFilePath)
+            .Select(path => Path.Combine(Corpus.Root, path.Replace('/', Path.DirectorySeparatorChar)))
             .ToArray();
 
         IReadOnlyList<string> findings = DanglingLocalLinks(markdownFiles);
@@ -502,13 +505,13 @@ public sealed class SkillResourceDispositionAuditTests
     public void DocsInitSeedsEveryLedgerTemplateAnchor()
     {
         List<string> findings = [];
-        if (!File.Exists(AuditDocumentPath))
+        if (!Corpus.Exists(RelativeAuditPath))
         {
             findings.Add($"Audit document '{RelativeAuditPath}' is missing.");
         }
         else
         {
-            IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(File.ReadAllText(AuditDocumentPath));
+            IReadOnlyList<LedgerRow> ledger = ParseLedgerRows(Corpus.ReadText(RelativeAuditPath));
             Dictionary<string, string> rendered = new(StringComparer.Ordinal);
 
             foreach (LedgerRow row in ledger.Where(candidate => candidate.Anchor.Length > 0))
@@ -550,17 +553,14 @@ public sealed class SkillResourceDispositionAuditTests
 
     private static string[] OnDiskSkillResourcePaths()
     {
-        return Directory.EnumerateFiles(Path.Combine(ProductRoot, "skills"), "*", SearchOption.AllDirectories)
+        return [.. Corpus.EnumerateFiles($"{ProductRoot}/skills")
             .Where(path => !string.Equals(Path.GetFileName(path), "SKILL.md", StringComparison.Ordinal))
-            .Select(path => Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/'))
-            .Order(StringComparer.Ordinal)
-            .ToArray();
+            .Select(path => path[(ProductRoot.Length + 1)..])
+            .Order(StringComparer.Ordinal)];
     }
 
-    private static string ResourceFilePath(string productRelativeResource)
-    {
-        return Path.Combine(ProductRoot, productRelativeResource.Replace('/', Path.DirectorySeparatorChar));
-    }
+    private static string ResourceFilePath(string productRelativeResource) =>
+        $"{ProductRoot}/{productRelativeResource}";
 
     // The parts of the code-review procedure split out of SKILL.md are procedure, not technology checklists.
     private static readonly HashSet<string> CodeReviewProcedureParts = new(StringComparer.Ordinal)
@@ -627,14 +627,13 @@ public sealed class SkillResourceDispositionAuditTests
     private static IReadOnlyList<string> DanglingCodingStandardTokens()
     {
         List<string> findings = [];
-        foreach (string file in Directory.EnumerateFiles(Path.Combine(ProductRoot, "skills"), "*",
-                     SearchOption.AllDirectories))
+        foreach (string file in Corpus.EnumerateFiles($"{ProductRoot}/skills"))
         {
-            string relativePath = Path.GetRelativePath(ProductRoot, file).Replace(Path.DirectorySeparatorChar, '/');
-            foreach (Match match in CodingStandardToken.Matches(File.ReadAllText(file)))
+            string relativePath = file[(ProductRoot.Length + 1)..];
+            foreach (Match match in CodingStandardToken.Matches(Corpus.ReadText(file)))
             {
                 string technology = match.Groups[1].Value;
-                if (!Directory.Exists(Path.Combine(ProductRoot, "standards", technology)))
+                if (!CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/standards/{technology}"))
                 {
                     findings.Add(
                         $"{relativePath}: token '<{technology}-coding-standard>' names no " +

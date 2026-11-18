@@ -9,6 +9,7 @@ using KyberWeave.Data.CodeGraph;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -33,6 +34,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class McpAgentCodingStandardsTests : IDisposable
 {
+    private static readonly ICorpusSource Shipped = CheckoutCorpusSource.Checkout;
+
     private const string ToolName = "docs_get_coding_standard_for_technology";
     private const string CsharpStandardPath = "6-Docs/standards/csharp/README.md";
     private const string TestStandardPath = "6-Docs/standards/test/README.md";
@@ -753,8 +756,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         // a renamed heading (slice 7 renamed `## Commands` to `## Completion`) would otherwise make
         // this pin fail for the rename rather than for a lost omission line. What must hold is that
         // every omitted section is named, whatever the headings are called today.
-        string standard = File.ReadAllText(
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "standards", "test", "test.standards.md"));
+        string standard = Shipped.ReadText("docs/standards/test/test.standards.md");
         int namesAt = omission.IndexOf(':', StringComparison.Ordinal);
         string named = namesAt >= 0 ? omission[(namesAt + 1)..] : omission;
         named = named.TrimEnd(']', '\r', '\n', ' ');
@@ -1010,7 +1012,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     /// </summary>
     private static DocsTools BuildRepositorySurface()
     {
-        string root = KyberWeaveTestPaths.ToolRoot;
+        string root = Shipped.Root;
         KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
         DocumentIndexHost host = new(
             root,

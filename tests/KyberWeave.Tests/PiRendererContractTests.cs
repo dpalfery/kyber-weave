@@ -8,6 +8,7 @@ using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -41,8 +42,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class PiRendererContractTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>
     /// The capability→tool lowering this suite pins, transcribed independently from plan
@@ -1231,6 +1234,8 @@ public sealed class PiRendererContractTests : IDisposable
 /// </summary>
 internal sealed class PiModelOverrideFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     internal const string OverriddenProfile = "general";
     internal const string OverriddenAgentName = "dev-medium";
     internal const string OverrideModel = "acme/pi-test-model";
@@ -1249,7 +1254,7 @@ internal sealed class PiModelOverrideFixture : IDisposable
     internal static PiModelOverrideFixture Create()
     {
         PiModelOverrideFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
@@ -1282,6 +1287,8 @@ internal sealed class PiModelOverrideFixture : IDisposable
 /// </summary>
 internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private readonly TempDirectory _temp = new();
 
     private PiPrimaryIdentityCollisionFixture()
@@ -1294,7 +1301,7 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
     internal static PiPrimaryIdentityCollisionFixture Create(string primaryAgentName)
     {
         PiPrimaryIdentityCollisionFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string skillDirectory = Path.Combine(fixture.ProductRoot, "skills", primaryAgentName);
@@ -1329,6 +1336,8 @@ internal sealed class PiPrimaryIdentityCollisionFixture : IDisposable
 /// </summary>
 internal sealed class PiOverlayOnlyFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     internal const string TestAgentName = "review-lens";
 
     private readonly TempDirectory _temp = new();
@@ -1343,7 +1352,7 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
     internal static PiOverlayOnlyFixture Create()
     {
         PiOverlayOnlyFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string capabilitiesPath = Path.Combine(fixture.ProductRoot, "profiles", "capabilities.yml");
@@ -1398,6 +1407,8 @@ internal sealed class PiOverlayOnlyFixture : IDisposable
 /// </summary>
 internal sealed class PiFileReadDeniedFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     internal const string TestAgentName = "review-triage";
     internal const string DeniedProfileName = "pi-file-read-denied";
 
@@ -1413,7 +1424,7 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
     internal static PiFileReadDeniedFixture Create()
     {
         PiFileReadDeniedFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string capabilitiesPath = Path.Combine(fixture.ProductRoot, "profiles", "capabilities.yml");
@@ -1463,6 +1474,8 @@ internal sealed class PiFileReadDeniedFixture : IDisposable
 /// </summary>
 internal sealed class PiThinkingSuffixFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     internal const string TestAgentName = "dev-medium";
 
     private readonly TempDirectory _temp = new();
@@ -1480,7 +1493,7 @@ internal sealed class PiThinkingSuffixFixture : IDisposable
         string? thinkingLevel)
     {
         PiThinkingSuffixFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         PiCorpusFixtureHelpers.CopyDirectory(canonicalRoot, fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");

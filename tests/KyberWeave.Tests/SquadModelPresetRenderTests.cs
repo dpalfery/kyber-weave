@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -17,10 +18,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadModelPresetRenderTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ProbeModel = "preset-probe-model";
 
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly ConcurrentDictionary<SquadTarget, Task<SquadRenderResult>> UnpresetRenders = new();
     private static readonly ConcurrentDictionary<SquadTarget, Task<SquadRenderResult>> ProbePresetRenders = new();
@@ -340,8 +343,7 @@ public sealed class SquadModelPresetRenderTests
         SquadModelPreset probePreset = CreateUniversalProbePreset(source);
         SquadRendererRegistry registry = CreateRegistry();
 
-        string modelsPath = Path.Combine(ProductRoot, "profiles", "models.yml");
-        byte[] beforeBytes = await File.ReadAllBytesAsync(modelsPath);
+        byte[] beforeBytes = Corpus.ReadBytes("products/kyber-squad/profiles/models.yml");
 
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
@@ -353,7 +355,7 @@ public sealed class SquadModelPresetRenderTests
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        byte[] afterBytes = await File.ReadAllBytesAsync(modelsPath);
+        byte[] afterBytes = Corpus.ReadBytes("products/kyber-squad/profiles/models.yml");
         Assert.Equal(beforeBytes, afterBytes);
     }
 

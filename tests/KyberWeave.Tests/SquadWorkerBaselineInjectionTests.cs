@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -32,15 +33,14 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadWorkerBaselineInjectionTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string BaselineOpenTag = "<worker-baseline";
 
     /// <summary>The worker whose rendered body every harness carries, as an agent file or a role skill.</summary>
     private const string SampleWorker = "dev-medium";
 
-    private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
-
-    private static readonly string BaselineSourcePath = Path.Combine(ProductRoot, "shared", "worker-baseline.md");
+    private const string BaselineSourcePath = "products/kyber-squad/shared/worker-baseline.md";
 
     /// <summary>
     /// The protocol tokens the one source carries: the Discovery tool and the plan-index lookup.
@@ -62,10 +62,10 @@ public sealed class SquadWorkerBaselineInjectionTests
     public void TheBaselineTextLivesInOneSharedSourceFile()
     {
         Assert.True(
-            File.Exists(BaselineSourcePath),
+            Corpus.Exists(BaselineSourcePath),
             $"The shared baseline must live at '{BaselineSourcePath}', the one source every worker render injects.");
 
-        string baseline = File.ReadAllText(BaselineSourcePath);
+        string baseline = Corpus.ReadText(BaselineSourcePath);
         foreach (string token in BaselineRuleTokens)
         {
             Assert.True(

@@ -7,6 +7,7 @@ using KyberWeave.Core.Skills.Validation;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -15,10 +16,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class McpPackagingTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [Fact]
     public void McpProjectIsPackableAsDotnetToolWithKyberWeaveMcpCommand()
     {
-        XDocument doc = XDocument.Load(KyberWeaveTestPaths.McpProjectPath);
+        XDocument doc = XDocument.Parse(Corpus.ReadText("src/KyberWeave.Mcp/KyberWeave.Mcp.csproj"));
         XNamespace ns = doc.Root!.Name.Namespace;
 
         Assert.Equal("true", PropertyValue(doc, ns, "PackAsTool"));
@@ -30,7 +33,7 @@ public class McpPackagingTests
     public void PackagedMcpConfigurationBindsTheServerToTheCurrentRepository()
     {
         using JsonDocument document = JsonDocument.Parse(
-            File.ReadAllText(KyberWeaveTestPaths.SquadMcpConfigurationPath));
+            Corpus.ReadText("products/kyber-squad/mcp.json"));
         JsonElement server = document.RootElement
             .GetProperty("mcpServers")
             .GetProperty("kw-docs");
@@ -43,7 +46,7 @@ public class McpPackagingTests
     [Fact]
     public void McpToolDescriptionsDoNotHardRequireMotorcycleRAG()
     {
-        string source = File.ReadAllText(KyberWeaveTestPaths.McpDocsToolsSourcePath);
+        string source = Corpus.ReadText("src/KyberWeave.Mcp/DocsTools.cs");
 
         Assert.DoesNotContain("MotorcycleRAG", source, StringComparison.Ordinal);
     }
@@ -51,7 +54,7 @@ public class McpPackagingTests
     [Fact]
     public void McpToolDescriptionsUseGenericRepositoryDocumentationWording()
     {
-        string source = File.ReadAllText(KyberWeaveTestPaths.McpDocsToolsSourcePath);
+        string source = Corpus.ReadText("src/KyberWeave.Mcp/DocsTools.cs");
 
         Assert.Contains("repository documentation", source, StringComparison.OrdinalIgnoreCase);
     }
@@ -134,8 +137,7 @@ public class McpPackagingTests
     [Fact]
     public void McpServerHostRegistersTheDocumentationInstructions()
     {
-        string program = File.ReadAllText(
-            Path.Combine(Path.GetDirectoryName(KyberWeaveTestPaths.McpDocsToolsSourcePath)!, "Program.cs"));
+        string program = Corpus.ReadText("src/KyberWeave.Mcp/Program.cs");
 
         Assert.Contains("AddMcpServer(DocsServerInstructions.Configure)", program, StringComparison.Ordinal);
     }

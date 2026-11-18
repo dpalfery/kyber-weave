@@ -6,11 +6,14 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
 public sealed class SquadCanonicalContentTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>
     /// The shared worker execution contract, relative to the canonical product root. It is a canonical
     /// skill rather than a conductor reference so a fallback target receives it, and so bug-crusher can
@@ -190,7 +193,9 @@ public sealed class SquadCanonicalContentTests
         SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "kyber-weave-docs");
-        Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "kyber-weave-docs")));
+        Assert.False(
+            CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/skills/kyber-weave-docs"),
+            "The retired kyber-weave-docs skill folder still exists.");
     }
 
     /// <summary>
@@ -243,12 +248,14 @@ public sealed class SquadCanonicalContentTests
     public void LoadFullProductTreeContainsNoSecondBrainInBundleOrRoster()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        string bundleText = File.ReadAllText(Path.Combine(ProductRoot, "bundles", "full.yml"));
+        string bundleText = Corpus.ReadText("products/kyber-squad/bundles/full.yml");
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "second-brain");
         Assert.DoesNotContain("second-brain", source.Bundle.SkillNames);
         Assert.DoesNotContain("second-brain", bundleText, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "second-brain")));
+        Assert.False(
+            CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/skills/second-brain"),
+            "The retired second-brain skill folder still exists.");
     }
 
     /// <summary>
@@ -257,7 +264,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void ProductReadmeRosterLacksSecondBrain()
     {
-        string readme = File.ReadAllText(Path.Combine(ProductRoot, "README.md"));
+        string readme = Corpus.ReadText("products/kyber-squad/README.md");
 
         Assert.DoesNotContain("second-brain", readme, StringComparison.Ordinal);
     }
@@ -276,11 +283,11 @@ public sealed class SquadCanonicalContentTests
     [InlineData("skills/bug-crusher/SKILL.md")]
     public void EveryHumanFacingEntryCarriesExactlyOneResponsePreferencesBlock(string relativePath)
     {
-        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string path = $"{ProductRoot}/{relativePath}";
 
-        Assert.True(File.Exists(path), $"Expected the canonical entry source at '{path}'.");
+        Assert.True(Corpus.Exists(path), $"Expected the canonical entry source at '{path}'.");
         int blocks = Regex.Count(
-            File.ReadAllText(path),
+            Corpus.ReadText(path),
             "<response-preferences>.*?</response-preferences>",
             RegexOptions.Singleline);
         Assert.True(
@@ -295,10 +302,9 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void NoProductFileNamesTheRetiredResponseFormatSkill()
     {
-        string[] offenders = Directory
-            .EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
-            .Where(path => File.ReadAllText(path).Contains("response-format", StringComparison.Ordinal))
-            .Select(RelativeSourcePath)
+        string[] offenders = Corpus
+            .EnumerateFiles(ProductRoot)
+            .Where(path => Corpus.ReadText(path).Contains("response-format", StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
 
@@ -314,10 +320,8 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void TheArchitectureDocumentCarriesTheSessionTitleMatrix()
     {
-        string path = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "docs", "kyber-squad", "architecture.md");
         string matrix = ParagraphStartingWith(
-            File.ReadAllText(path),
+            Corpus.ReadText("docs/kyber-squad/architecture.md"),
             "**Session-title matrix (reference).**");
 
         Assert.True(
@@ -336,10 +340,10 @@ public sealed class SquadCanonicalContentTests
         string defaultPath = ResponseGuidanceDefaultPath;
 
         Assert.True(
-            File.Exists(defaultPath),
+            Corpus.Exists(defaultPath),
             $"The shipped response-guidance default must live at '{defaultPath}'.");
         Assert.False(
-            string.IsNullOrWhiteSpace(File.ReadAllText(defaultPath)),
+            string.IsNullOrWhiteSpace(Corpus.ReadText(defaultPath)),
             $"The shipped response-guidance default at '{defaultPath}' must not be empty.");
     }
 
@@ -353,12 +357,13 @@ public sealed class SquadCanonicalContentTests
     public void TheBuildEmbedsTheDefaultGuidanceAsTheCanonicalProductFile()
     {
         string defaultPath = ResponseGuidanceDefaultPath;
+        string defaultFullPath = Path.Combine(Corpus.Root, defaultPath);
         Assert.True(
-            File.Exists(defaultPath),
+            Corpus.Exists(defaultPath),
             $"The shipped response-guidance default must live at '{defaultPath}' before the build can own it.");
-        string corePath = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Domain");
+        string corePath = Path.Combine(Corpus.Root, "src", "KyberWeave.Domain");
         string areasPath = Path.Combine(corePath, "Areas");
-        XDocument project = XDocument.Load(Path.Combine(areasPath, "Squad.props"));
+        XDocument project = XDocument.Parse(Corpus.ReadText("src/KyberWeave.Domain/Areas/Squad.props"));
 
         string? canonical = project
             .Descendants("CanonicalResponseGuidance")
@@ -373,12 +378,12 @@ public sealed class SquadCanonicalContentTests
         Assert.NotNull(canonical);
         Assert.NotNull(embedded);
         Assert.Equal(
-            defaultPath,
+            defaultFullPath,
             Path.GetFullPath(ResolveProjectPath(areasPath, canonical)));
         Assert.True(
-            File.ReadAllBytes(Path.GetFullPath(ResolveProjectPath(corePath, embedded)))
+            Corpus.ReadBytes(CorpusRelativePath(ResolveProjectPath(corePath, embedded)))
                 .AsSpan()
-                .SequenceEqual(File.ReadAllBytes(defaultPath)),
+                .SequenceEqual(Corpus.ReadBytes(defaultPath)),
             "The copy embedded as 'Squad.response-guidance.md' must be byte-identical to the shipped default " +
             $"at '{defaultPath}'.");
     }
@@ -390,7 +395,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void ConductorNamesTheIntakeAssessmentProperty()
     {
-        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string conductor = Corpus.ReadText("products/kyber-squad/agents/conductor.md");
 
         Assert.True(
             conductor.Contains("<intake-assessment>", StringComparison.Ordinal),
@@ -404,8 +409,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void IntakePathNamesTheIntakeAssessmentProperty()
     {
-        string intakePath = File.ReadAllText(
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+        string intakePath = Corpus.ReadText($"{ProductRoot}/agents/conductor/references/intake-path.md");
 
         Assert.True(
             intakePath.Contains("<intake-assessment>", StringComparison.Ordinal),
@@ -427,16 +431,12 @@ public sealed class SquadCanonicalContentTests
         string[] extensions = [".cs", ".csproj", ".props", ".targets"];
         string[] offenders =
         [
-            .. Directory
-                .EnumerateFiles(Path.Combine(KyberWeaveTestPaths.ToolRoot, "src"), "*", SearchOption.AllDirectories)
-                .Concat(Directory.EnumerateFiles(
-                    Path.Combine(KyberWeaveTestPaths.ToolRoot, "tests"),
-                    "*",
-                    SearchOption.AllDirectories))
+            .. Corpus.EnumerateFiles("src")
+                .Concat(Corpus.EnumerateFiles("tests"))
                 .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.Ordinal))
-                .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(segment =>
+                .Where(path => !path.Split('/').Any(segment =>
                     segment is "bin" or "obj" or ".agent_scratchpad"))
-                .Where(path => retired.IsMatch(File.ReadAllText(path)))
+                .Where(path => retired.IsMatch(Corpus.ReadText(path)))
                 .Order(StringComparer.Ordinal)
         ];
 
@@ -448,13 +448,13 @@ public sealed class SquadCanonicalContentTests
     {
         string[] reviewSurfaces =
         [
-            Path.Combine(ProductRoot, "agents", "code-reviewer.md"),
-            Path.Combine(ProductRoot, "agents", "review-lens.md"),
-            Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"),
-            Path.Combine(ProductRoot, "skills", "dp-code-reviewer", "SKILL.md"),
-            Path.Combine(ProductRoot, "skills", "bug-crusher", "SKILL.md"),
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"),
-            Path.Combine(ProductRoot, "skills", "delivery-execution", "SKILL.md")
+            $"{ProductRoot}/agents/code-reviewer.md",
+            $"{ProductRoot}/agents/review-lens.md",
+            $"{ProductRoot}/skills/code-review/SKILL.md",
+            $"{ProductRoot}/skills/dp-code-reviewer/SKILL.md",
+            $"{ProductRoot}/skills/bug-crusher/SKILL.md",
+            $"{ProductRoot}/agents/conductor/references/autonomy.md",
+            $"{ProductRoot}/skills/delivery-execution/SKILL.md"
         ];
 
         string[] forbiddenPhrases =
@@ -469,19 +469,19 @@ public sealed class SquadCanonicalContentTests
 
         Assert.All(
             reviewSurfaces,
-            path => Assert.True(File.Exists(path), $"Expected the review surface at '{path}'."));
+            path => Assert.True(Corpus.Exists(path), $"Expected the review surface at '{path}'."));
 
         foreach (string surface in reviewSurfaces)
         {
-            string fileText = File.ReadAllText(surface);
+            string fileText = Corpus.ReadText(surface);
             foreach (string phrase in forbiddenPhrases)
             {
                 Assert.DoesNotContain(phrase, fileText, StringComparison.OrdinalIgnoreCase);
             }
         }
 
-        string codeReviewer = File.ReadAllText(Path.Combine(ProductRoot, "agents", "code-reviewer.md"));
-        string codeReviewSkill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "code-review", "SKILL.md"));
+        string codeReviewer = Corpus.ReadText("products/kyber-squad/agents/code-reviewer.md");
+        string codeReviewSkill = Corpus.ReadText("products/kyber-squad/skills/code-review/SKILL.md");
 
         Assert.Contains("APPROVE", codeReviewer, StringComparison.Ordinal);
         Assert.Contains("REQUEST_CHANGES", codeReviewer, StringComparison.Ordinal);
@@ -720,7 +720,7 @@ public sealed class SquadCanonicalContentTests
         Assert.Contains("CHOICE: PLAN | SPEC | UNSTATED", contract, StringComparison.Ordinal);
 
         string assessment =
-            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "intake-assessment.md"));
+            Corpus.ReadText("products/kyber-squad/agents/architect/references/intake-assessment.md");
         Assert.Contains("STATUS: INTENT_STATED", assessment, StringComparison.Ordinal);
         Assert.Contains("STATUS: DEFECT", assessment, StringComparison.Ordinal);
         Assert.DoesNotContain("STATUS: BLOCKED", assessment, StringComparison.Ordinal);
@@ -731,9 +731,9 @@ public sealed class SquadCanonicalContentTests
     public void ReadyTaskDefectsRequiringArchitectureHaveAnExplicitAssessmentHandoff()
     {
         string intake =
-            File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor", "references", "intake-path.md"));
+            Corpus.ReadText("products/kyber-squad/agents/conductor/references/intake-path.md");
         string assessment =
-            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "intake-assessment.md"));
+            Corpus.ReadText("products/kyber-squad/agents/architect/references/intake-assessment.md");
 
         Assert.Contains("NEEDS_ARCHITECT", intake, StringComparison.Ordinal);
         Assert.Contains("TASK_ASSESSED", intake, StringComparison.Ordinal);
@@ -745,7 +745,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void ProductOwnerReportsDiscoveryInItsStructuredDigest()
     {
-        string skill = File.ReadAllText(Path.Combine(ProductRoot, "skills", "product-owner", "SKILL.md"));
+        string skill = Corpus.ReadText("products/kyber-squad/skills/product-owner/SKILL.md");
         AssertDiscoveryContract(skill, "product-owner");
         Assert.Contains("\nDiscovery: codegraph N, docs N, direct reads N\n", skill, StringComparison.Ordinal);
     }
@@ -799,8 +799,8 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void CapabilityProfilesSchemaAllowsTheTargetScopedVocabulary()
     {
-        string schemaPath = Path.Combine(ProductRoot, "schemas", "capability-profiles.schema.json");
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        using JsonDocument document = JsonDocument.Parse(
+            Corpus.ReadText($"{ProductRoot}/schemas/capability-profiles.schema.json"));
         JsonElement target = document.RootElement
             .GetProperty("properties")
             .GetProperty("profiles")
@@ -857,7 +857,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void DeliveryAgentBodyNamesTheTaskGateSkillAndEmitsItsDigest()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = SquadSourceLoader.Load(ProductRootPath);
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == "devops");
 
         Assert.Contains("task-gate", agent.InstructionBody, StringComparison.Ordinal);
@@ -907,9 +907,9 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void TaskGateSkillDefinesTheDeterministicReviewGateContract()
     {
-        string path = Path.Combine(ProductRoot, "skills", "task-gate", "SKILL.md");
-        Assert.True(File.Exists(path), $"Canonical task-gate skill is missing: {path}");
-        string skill = File.ReadAllText(path);
+        string path = $"{ProductRoot}/skills/task-gate/SKILL.md";
+        Assert.True(Corpus.Exists(path), $"Canonical task-gate skill is missing: {path}");
+        string skill = Corpus.ReadText(path);
 
         Assert.Contains("review gates", skill, StringComparison.Ordinal);
         Assert.Contains("--agent", skill, StringComparison.Ordinal);
@@ -928,13 +928,13 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void TaskReviewerAgentAndReferenceFolderAreRemoved()
     {
-        string agentsRoot = Path.Combine(ProductRoot, "agents");
+        string agentsRoot = $"{ProductRoot}/agents";
 
         Assert.False(
-            File.Exists(Path.Combine(agentsRoot, "task-reviewer.md")),
+            Corpus.Exists($"{agentsRoot}/task-reviewer.md"),
             "The retired task-reviewer agent body must be deleted.");
         Assert.False(
-            Directory.Exists(Path.Combine(agentsRoot, "task-reviewer")),
+            CorpusTree.DirectoryExists(Corpus, $"{agentsRoot}/task-reviewer"),
             "The retired task-reviewer reference folder must be deleted.");
     }
 
@@ -945,13 +945,11 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void NoSquadSourceEntryNamesOrQuotesRetiredTaskReviewer()
     {
-        string[] nameOffenders = Directory.EnumerateFileSystemEntries(ProductRoot, "*", SearchOption.AllDirectories)
+        string[] nameOffenders = CorpusTree.Entries(Corpus, ProductRoot)
             .Where(path => Path.GetFileName(path).Contains("task-reviewer", StringComparison.Ordinal))
-            .Select(RelativeSourcePath)
             .ToArray();
-        string[] textOffenders = Directory.EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
-            .Where(path => File.ReadAllText(path).Contains("task-reviewer", StringComparison.Ordinal))
-            .Select(RelativeSourcePath)
+        string[] textOffenders = Corpus.EnumerateFiles(ProductRoot)
+            .Where(path => Corpus.ReadText(path).Contains("task-reviewer", StringComparison.Ordinal))
             .ToArray();
 
         Assert.Empty(nameOffenders.Concat(textOffenders).Order(StringComparer.Ordinal));
@@ -963,7 +961,7 @@ public sealed class SquadCanonicalContentTests
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent codeReviewer = Assert.Single(source.Agents, agent => agent.Name == "code-reviewer");
         string planAuthoring =
-            File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "plan-authoring.md"));
+            Corpus.ReadText("products/kyber-squad/agents/architect/references/plan-authoring.md");
 
         Assert.False(
             codeReviewer.InstructionBody.Contains("task-reviewer", StringComparison.Ordinal),
@@ -1000,30 +998,27 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void ProductOwnerTextFollowsTheSpecificationTaskFileForm()
     {
-        string ownerBody = Path.Combine(ProductRoot, "agents", "product-owner.md");
-        string ownerSkill = Path.Combine(ProductRoot, "skills", "product-owner");
+        string ownerBody = $"{ProductRoot}/agents/product-owner.md";
+        string ownerSkill = $"{ProductRoot}/skills/product-owner";
 
-        Assert.True(File.Exists(ownerBody), $"expected the product-owner body at '{ownerBody}'.");
-        Assert.True(Directory.Exists(ownerSkill), $"expected the product-owner skill at '{ownerSkill}'.");
+        Assert.True(Corpus.Exists(ownerBody), $"expected the product-owner body at '{ownerBody}'.");
+        Assert.True(
+            CorpusTree.DirectoryExists(Corpus, ownerSkill),
+            $"expected the product-owner skill at '{ownerSkill}'.");
 
         string[] surfaces =
         [
             ownerBody,
-            .. Directory.EnumerateFiles(ownerSkill, "*.md", SearchOption.AllDirectories).Order(StringComparer.Ordinal)
+            .. Corpus.EnumerateFiles(ownerSkill, "*.md").Order(StringComparer.Ordinal)
         ];
 
         string? carrier = surfaces.FirstOrDefault(
-            surface => File.ReadAllText(surface).Contains("<spec-folder>/tasks.yml", StringComparison.Ordinal));
+            surface => Corpus.ReadText(surface).Contains("<spec-folder>/tasks.yml", StringComparison.Ordinal));
 
         Assert.True(
             carrier is not null,
             "the product-owner text must name `<spec-folder>/tasks.yml` as the specification form of the " +
             "tracked task file. Searched: " + string.Join(", ", surfaces));
-    }
-
-    private static string RelativeSourcePath(string path)
-    {
-        return Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
     }
 
     /// <summary>
@@ -1055,7 +1050,7 @@ public sealed class SquadCanonicalContentTests
     public void RunStartSurfacesStopTheRunWhenTheDocsToolingCannotBeEnsured(string relativePath)
     {
         string text =
-            File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            Corpus.ReadText($"{ProductRoot}/{relativePath}");
 
         Assert.Contains("kyber-weave doctor --ensure", text, StringComparison.Ordinal);
         Assert.Contains(".kyber-weave/kyber-weave.yml", text, StringComparison.Ordinal);
@@ -1070,7 +1065,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void ConductorRunStartDoctorStepIsInSharedLifecycleInvariants()
     {
-        string conductor = File.ReadAllText(Path.Combine(ProductRoot, "agents", "conductor.md"));
+        string conductor = Corpus.ReadText("products/kyber-squad/agents/conductor.md");
         int invariants = conductor.IndexOf("## Shared lifecycle invariants", StringComparison.Ordinal);
         int handoffs = conductor.IndexOf("## Structured specialist handoffs", StringComparison.Ordinal);
         int doctor = conductor.IndexOf("kyber-weave doctor --ensure", StringComparison.Ordinal);
@@ -1158,14 +1153,14 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void EveryAgentFileNamesTheShellDiscoveryCommand()
     {
-        string[] agents = Directory.GetFiles(Path.Combine(ProductRoot, "agents"), "*.md");
+        string[] agents = [.. Corpus.EnumerateFiles($"{ProductRoot}/agents", "*.md", recursive: false)];
 
         Assert.NotEmpty(agents);
 
         string[] offenders =
         [
             .. agents
-                .Select(path => (Path: path, Text: File.ReadAllText(path)))
+                .Select(path => (Path: path, Text: Corpus.ReadText(path)))
                 .Where(file => !file.Text.Contains("codegraph explore", StringComparison.Ordinal))
                 .Select(file => $"{Path.GetFileName(file.Path)}: no 'codegraph explore' discovery order")
         ];
@@ -1184,8 +1179,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void ConductorAutonomyContractListsToolFailureAmongTheHardStops()
     {
-        string autonomy = File.ReadAllText(
-            Path.Combine(ProductRoot, "agents", "conductor", "references", "autonomy.md"));
+        string autonomy = Corpus.ReadText($"{ProductRoot}/agents/conductor/references/autonomy.md");
         int hardStops = autonomy.IndexOf("## Hard stops", StringComparison.Ordinal);
         int toolFailure = autonomy.IndexOf("STATUS: TOOL_FAILURE", StringComparison.Ordinal);
 
@@ -1209,8 +1203,7 @@ public sealed class SquadCanonicalContentTests
     [InlineData("agents/architect/references/plan-authoring.md")]
     public void ArchitectSurfacesCompareTheRepositoryRatherThanTheRoot(string relativePath)
     {
-        string text = File.ReadAllText(
-            Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        string text = Corpus.ReadText($"{ProductRoot}/{relativePath}");
 
         Assert.Contains("repo=", text, StringComparison.Ordinal);
     }
@@ -1227,7 +1220,7 @@ public sealed class SquadCanonicalContentTests
     [InlineData("skills/bug-crusher/SKILL.md")]
     public void RunStartSurfacesNameTheRunStartCommand(string relativePath)
     {
-        string text = File.ReadAllText(Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        string text = Corpus.ReadText($"{ProductRoot}/{relativePath}");
 
         Assert.Matches(RunStartCommand, text);
     }
@@ -1240,12 +1233,17 @@ public sealed class SquadCanonicalContentTests
         @"kyber-weave\s+run\s+start\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private const string ProductRoot = "products/kyber-squad";
+
+    /// <summary>The same product root as an absolute path, for the product APIs that read a real directory.</summary>
+    private static string ProductRootPath => Path.Combine(Corpus.Root, ProductRoot);
 
     /// <summary>The shipped default response guidance: the one owner of the response shape.</summary>
-    private static string ResponseGuidanceDefaultPath =>
-        Path.Combine(ProductRoot, "response-guidance.default.md");
+    private const string ResponseGuidanceDefaultPath = "products/kyber-squad/response-guidance.default.md";
+
+    /// <summary>Turns an absolute path inside the checkout into the corpus-relative path the seam reads by.</summary>
+    private static string CorpusRelativePath(string absolutePath) =>
+        Path.GetRelativePath(Corpus.Root, absolutePath).Replace('\\', '/');
 
     /// <summary>
     /// Resolves an MSBuild item path relative to the project directory, expanding the
@@ -1297,32 +1295,33 @@ public sealed class SquadCanonicalContentTests
 
     private static string ReadAgentContract(string name)
     {
-        string agentRoot = Path.Combine(ProductRoot, "agents");
-        string principal = File.ReadAllText(Path.Combine(agentRoot, $"{name}.md"));
-        string referencesRoot = Path.Combine(agentRoot, name, "references");
+        string agentRoot = $"{ProductRoot}/agents";
+        string principalPath = $"{agentRoot}/{name}.md";
+        string principal = Corpus.ReadText(principalPath);
+        string referencesRoot = $"{agentRoot}/{name}/references";
         Assert.True(
-            Directory.Exists(referencesRoot),
+            CorpusTree.DirectoryExists(Corpus, referencesRoot),
             $"Agent '{name}' must progressively disclose its conditional contract from '{referencesRoot}'.");
 
-        string[] references = Directory.EnumerateFiles(referencesRoot, "*.md", SearchOption.AllDirectories)
+        string[] references = Corpus.EnumerateFiles(referencesRoot, "*.md")
             .Order(StringComparer.Ordinal)
             .ToArray();
         Assert.NotEmpty(references);
         Assert.All(
             references,
             path => Assert.Contains(
-                Path.GetRelativePath(agentRoot, path).Replace(Path.DirectorySeparatorChar, '/'),
+                path[(agentRoot.Length + 1)..],
                 principal,
                 StringComparison.Ordinal));
 
-        return string.Join("\n", references.Prepend(Path.Combine(agentRoot, $"{name}.md")).Select(File.ReadAllText));
+        return string.Join("\n", references.Prepend(principalPath).Select(Corpus.ReadText));
     }
 
     private static string[] ReadCapabilityProfileTargets()
     {
-        string path = Path.Combine(ProductRoot, "profiles", "capabilities.yml");
+        string path = $"{ProductRoot}/profiles/capabilities.yml";
         YamlStream yaml = new();
-        yaml.Load(new StringReader(File.ReadAllText(path)));
+        yaml.Load(new StringReader(Corpus.ReadText(path)));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
         YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
 
@@ -1346,12 +1345,12 @@ public sealed class SquadCanonicalContentTests
 
     private static string ReadSkillContract(string name)
     {
-        string skillRoot = Path.Combine(ProductRoot, "skills", name);
+        string skillRoot = $"{ProductRoot}/skills/{name}";
         return string.Join(
             "\n",
-            Directory.EnumerateFiles(skillRoot, "*.md", SearchOption.AllDirectories)
+            Corpus.EnumerateFiles(skillRoot, "*.md")
                 .Order(StringComparer.Ordinal)
-                .Select(File.ReadAllText));
+                .Select(Corpus.ReadText));
     }
 
     /// <summary>
@@ -1360,9 +1359,9 @@ public sealed class SquadCanonicalContentTests
     /// </summary>
     private static string ReadProductFile(string relativePath)
     {
-        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Assert.True(File.Exists(path), $"Expected the canonical product file at '{path}'.");
-        return File.ReadAllText(path);
+        string path = $"{ProductRoot}/{relativePath}";
+        Assert.True(Corpus.Exists(path), $"Expected the canonical product file at '{path}'.");
+        return Corpus.ReadText(path);
     }
 
     /// <summary>The blank-line separated blocks of a document, so an assertion reads a whole instruction.</summary>
@@ -1415,9 +1414,9 @@ public sealed class SquadCanonicalContentTests
 
     private static RoleSkillProfile ReadRoleSkillProfile()
     {
-        string path = Path.Combine(ProductRoot, "profiles", "fallbacks.yml");
+        string path = $"{ProductRoot}/profiles/fallbacks.yml";
         YamlStream yaml = new();
-        yaml.Load(new StringReader(File.ReadAllText(path)));
+        yaml.Load(new StringReader(Corpus.ReadText(path)));
         YamlMappingNode root = RequireMapping(yaml.Documents.Single().RootNode, "root", path);
         YamlMappingNode profiles = RequireMapping(RequireNode(root, "profiles", path), "profiles", path);
         YamlMappingNode roleSkill = RequireMapping(RequireNode(profiles, "role-skill", path), "role-skill", path);

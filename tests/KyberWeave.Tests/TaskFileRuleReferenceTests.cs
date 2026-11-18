@@ -1,6 +1,7 @@
 using System.Reflection;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -10,13 +11,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class TaskFileRuleReferenceTests
 {
-    private static string RuleReferencePath =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "ci-pipelines", "rule-reference.md");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     [Fact]
     public void EveryTaskFileRuleIdIsDocumentedInTheRuleReference()
     {
-        string reference = File.ReadAllText(RuleReferencePath);
+        string reference = Corpus.ReadText("docs/ci-pipelines/rule-reference.md");
 
         string[] ids = [.. typeof(PlanTaskFileRules)
             .GetFields(BindingFlags.Public | BindingFlags.Static)

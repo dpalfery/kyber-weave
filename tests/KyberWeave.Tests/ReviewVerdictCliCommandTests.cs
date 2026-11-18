@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -11,6 +12,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReviewVerdictCliCommandTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>
     /// The <c>review verdict</c> command description registered in <c>Program.cs</c> must not
     /// cite the retired <c>needs-human</c> verdict option, and must state the binary verdict contract.
@@ -18,11 +21,7 @@ public sealed class ReviewVerdictCliCommandTests
     [Fact]
     public void ProgramRegistersReviewVerdictWithoutNeedsHumanInDescription()
     {
-        string program = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Cli",
-            "CliApplication.cs"));
+        string program = Corpus.ReadText("src/KyberWeave.Cli/CliApplication.cs");
 
         int verdictIndex = program.IndexOf("AddCommand<ReviewVerdictCommand>(\"verdict\")", StringComparison.Ordinal);
         Assert.True(verdictIndex >= 0, "Program.cs must register the review verdict command.");
@@ -48,11 +47,7 @@ public sealed class ReviewVerdictCliCommandTests
     [Fact]
     public void ProgramVerdictExampleShowsTheSeatFolderNotTheDeprecatedFindingsFlag()
     {
-        string program = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Cli",
-            "CliApplication.cs"));
+        string program = Corpus.ReadText("src/KyberWeave.Cli/CliApplication.cs");
 
         int verdictIndex = program.IndexOf("AddCommand<ReviewVerdictCommand>(\"verdict\")", StringComparison.Ordinal);
         Assert.True(verdictIndex >= 0, "Program.cs must register the review verdict command.");

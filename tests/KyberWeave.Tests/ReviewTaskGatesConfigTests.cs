@@ -23,6 +23,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
 using YamlDotNet.Core;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -34,6 +35,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReviewTaskGatesConfigTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string FormatRun =
         "run: [dotnet, format, KyberWeave.sln, whitespace, --verify-no-changes, --include, \"{changed}\"]";
 
@@ -624,7 +627,7 @@ public sealed class ReviewTaskGatesConfigTests
     [Fact]
     public void ReviewBuildGateCarriesNoNodeReuseAndNoSharedCompilation()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         ReviewGate build = Assert.Single(result.Config!.Review.Gates, gate => gate.Id == "build");
@@ -983,7 +986,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> RepositoryTaskGates()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.TaskGates;
@@ -991,7 +994,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     private static IReadOnlyDictionary<string, IReadOnlyList<ReviewTaskGate>> RepositoryTechnologyGates()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.TechnologyGates;
@@ -999,7 +1002,7 @@ public sealed class ReviewTaskGatesConfigTests
 
     private static IReadOnlyList<ReviewGate> RepositoryReviewGates()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         return result.Config!.Review.Gates;

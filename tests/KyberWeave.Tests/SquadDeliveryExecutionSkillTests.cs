@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -21,6 +22,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadDeliveryExecutionSkillTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ProductRootRelativePath = "products/kyber-squad";
 
     private const string DeliveryExecutionSkillName = "delivery-execution";
@@ -96,9 +99,6 @@ public sealed class SquadDeliveryExecutionSkillTests
         @"(?i)\b(?:grep|greps|grepping|ripgrep|rg)\b[^\r\n.;]{0,40}\bplan\b[^\r\n.;]{0,20}\bstatus\b|\bsearch(?:es|ing)?\b[^\r\n.;]{0,30}\bplan'?s?\s+status\b",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, ProductRootRelativePath);
-
     [Fact]
     public void TheCanonicalRosterLoadsTheSharedExecutionSkill()
     {
@@ -136,10 +136,10 @@ public sealed class SquadDeliveryExecutionSkillTests
     [Fact]
     public void TheRetiredExecutionReferenceIsRemoved()
     {
-        string retired = Path.Combine(ProductRoot, ToRelativePath(RetiredExecutionReferencePath));
+        string retired = $"{ProductRootRelativePath}/{RetiredExecutionReferencePath}";
 
         Assert.False(
-            File.Exists(retired),
+            Corpus.Exists(retired),
             $"'{RetiredExecutionReferencePath}' must be removed: the contract lives at " +
             $"'{DeliveryExecutionSkillPath}' now, and a second copy is what drifted.");
     }
@@ -150,11 +150,10 @@ public sealed class SquadDeliveryExecutionSkillTests
         string[] extensions = [".md", ".json", ".yaml", ".yml"];
         string[] offenders =
         [
-            .. Directory
-                .EnumerateFiles(ProductRoot, "*", SearchOption.AllDirectories)
+            .. Corpus
+                .EnumerateFiles(ProductRootRelativePath, "*")
                 .Where(path => extensions.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase))
-                .Where(path => File.ReadAllText(path).Contains(RetiredExecutionReferenceName, StringComparison.Ordinal))
-                .Select(RelativeProductPath)
+                .Where(path => Corpus.ReadText(path).Contains(RetiredExecutionReferenceName, StringComparison.Ordinal))
                 .Order(StringComparer.Ordinal)
         ];
 
@@ -258,19 +257,9 @@ public sealed class SquadDeliveryExecutionSkillTests
 
     private static string ReadProductFile(string relativePath)
     {
-        string path = Path.Combine(ProductRoot, ToRelativePath(relativePath));
-        Assert.True(File.Exists(path), $"Expected the canonical product file at '{path}'.");
-        return File.ReadAllText(path);
-    }
-
-    private static string ToRelativePath(string relativePath)
-    {
-        return relativePath.Replace('/', Path.DirectorySeparatorChar);
-    }
-
-    private static string RelativeProductPath(string path)
-    {
-        return Path.GetRelativePath(ProductRoot, path).Replace(Path.DirectorySeparatorChar, '/');
+        string path = $"{ProductRootRelativePath}/{relativePath}";
+        Assert.True(Corpus.Exists(path), $"Expected the canonical product file at '{path}'.");
+        return Corpus.ReadText(path);
     }
 
     private static string Joined(IEnumerable<string> names)

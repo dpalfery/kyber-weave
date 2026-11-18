@@ -1,4 +1,5 @@
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -10,13 +11,13 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadAutonomyRemediationTests
 {
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static string Read(params string[] relative)
-    {
-        return File.ReadAllText(Path.Combine([ProductRoot, .. relative]));
-    }
+    private static string ProductRoot =>
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
+
+    private static string Read(params string[] relative) =>
+        Corpus.ReadText($"products/kyber-squad/{string.Join('/', relative)}");
 
     /// <summary>
     /// The council loop lives in the shared execution contract both entry points load,

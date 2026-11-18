@@ -9,6 +9,7 @@ using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 using YamlDotNet.Core;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -19,6 +20,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class TaskPromptBudgetTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>A task prompt also carries these two parts, each capped at 6,000 characters by the packet.</summary>
     private const int TaskAndHostFactsBudget = 12000;
 
@@ -226,21 +229,21 @@ public sealed class TaskPromptBudgetTests
     [Fact]
     public void EveryShippedTemplateWithItsParentFitsTheDefaultBudgetWithoutACut()
     {
-        string templates = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards");
+        const string Templates = "products/kyber-squad/standards";
         List<string> technologies =
         [
-            .. Directory.EnumerateDirectories(templates)
+            .. Corpus.EnumerateDirectories(Templates)
                 .Select(folder => Path.GetFileName(folder))
-                .Where(name => File.Exists(Path.Combine(templates, name, name + ".standards.md")))
+                .Where(name => Corpus.Exists($"{Templates}/{name}/{name}.standards.md"))
                 .Order(StringComparer.Ordinal)
         ];
         Assert.NotEmpty(technologies);
 
         using DocFixture fixture = new DocFixture();
-        foreach (string file in Directory.EnumerateFiles(templates, "*.md", SearchOption.AllDirectories))
+        foreach (string file in Corpus.EnumerateFiles(Templates, "*.md"))
         {
-            string relative = Path.GetRelativePath(templates, file).Replace('\\', '/');
-            fixture.Write("6-Docs/standards/" + relative, File.ReadAllText(file));
+            string relative = file[(Templates.Length + 1)..];
+            fixture.Write("6-Docs/standards/" + relative, Corpus.ReadText(file));
         }
 
         KyberWeaveConfig config = Config();

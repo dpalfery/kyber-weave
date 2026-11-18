@@ -1,4 +1,5 @@
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class PortableContentTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>Roots whose contents ship to every host that installs this product.</summary>
     private static readonly string[] PortableRoots = ["products/kyber-squad", ".apm/skills"];
 
@@ -38,12 +41,12 @@ public sealed class PortableContentTests
 
         foreach (string root in PortableRoots)
         {
-            foreach (string file in Files(Path.Combine(KyberWeaveTestPaths.ToolRoot, root)))
+            foreach (string file in Files(root))
             {
-                string relative = Path.GetRelativePath(KyberWeaveTestPaths.ToolRoot, file).Replace('\\', '/');
+                string relative = Path.GetRelativePath(Corpus.Root, file).Replace('\\', '/');
                 scanned.Add(relative);
 
-                string[] lines = ReadLines(file);
+                string[] lines = ReadLines(relative);
                 for (int index = 0; index < lines.Length; index++)
                 {
                     foreach (string marker in ProjectMarkers)
@@ -77,10 +80,11 @@ public sealed class PortableContentTests
     /// </summary>
     private static IEnumerable<string> Files(string root)
     {
-        if (!Directory.Exists(root))
+        string rootPath = Path.Combine(Corpus.Root, root);
+        if (!Directory.Exists(rootPath))
             yield break;
 
-        Stack<string> pending = new([root]);
+        Stack<string> pending = new([rootPath]);
         while (pending.Count > 0)
         {
             DirectoryInfo directory = new(pending.Pop());
@@ -95,7 +99,7 @@ public sealed class PortableContentTests
 
                     FileSystemInfo? target = entry.ResolveLinkTarget(true);
                     string targetPath = target?.FullName ?? Path.GetFullPath(entry.FullName);
-                    if (!targetPath.StartsWith(Path.GetFullPath(root) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    if (!targetPath.StartsWith(Path.GetFullPath(rootPath) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
                     {
                         Assert.Fail($"File symlink '{entry.FullName}' targets outside portable root '{root}': {targetPath}");
                     }
@@ -116,18 +120,18 @@ public sealed class PortableContentTests
     /// The lines of a file, or none when it is not text. A binary file has no instruction lines to check, and
     /// reading one could decode to nonsense that matches a marker by accident.
     /// </summary>
-    private static string[] ReadLines(string path)
+    private static string[] ReadLines(string relativePath)
     {
         try
         {
-            string content = File.ReadAllText(path);
+            string content = Corpus.ReadText(relativePath);
             return content.Any(character => character == '\0')
                 ? []
                 : content.Split('\n').Select(line => line.TrimEnd('\r')).ToArray();
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Assert.Fail($"Unreadable portable file '{path}': {ex.Message}");
+            Assert.Fail($"Unreadable portable file '{relativePath}': {ex.Message}");
             return [];
         }
     }
