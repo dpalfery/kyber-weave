@@ -1,5 +1,4 @@
 using KyberWeave.Core.Docs.Model;
-using KyberWeave.Domain.FileSystem;
 
 namespace KyberWeave.Core.Configuration;
 
@@ -150,23 +149,6 @@ public sealed class OntologyConfig
             return false;
 
         return keys.Contains(key, StringComparer.Ordinal);
-    }
-
-    public OntologyConfig WithDocsRoot(string docsRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(docsRoot);
-        return WithDocsRoots([docsRoot]);
-    }
-
-    /// <summary>
-    /// Replaces the configured roots. Paths are canonicalized and checked for containment
-    /// here as well as at load, so an operator-supplied <c>--docs-root</c> cannot reach a
-    /// tree that the same value in <c>kyber-weave.yml</c> would have been refused.
-    /// </summary>
-    public OntologyConfig WithDocsRoots(IReadOnlyList<string> docsRoots)
-    {
-        ArgumentNullException.ThrowIfNull(docsRoots);
-        return Clone(docsRoots: DocsRootPath.NormalizeRoots(docsRoots, "docs-root"));
     }
 
     internal OntologyConfig Clone(
