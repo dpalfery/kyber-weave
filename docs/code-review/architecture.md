@@ -969,7 +969,7 @@ id, a non-slug id, a missing or empty `run`, a non-positive timeout, or an unrec
 ### The shipped gate catalogue
 
 `kyber-weave docs init` does not invent per-technology gates. It renders them
-(`ReviewBlockWriter`, planned from `GateCatalogue`) from five embedded families, one per
+(`ReviewBlockWriter`, planned from `GateCatalogueRenderer`) from five embedded families, one per
 version-1 technology set:
 
 | Family | Technologies | Root marker | Nesting | Notes |
