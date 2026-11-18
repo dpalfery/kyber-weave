@@ -260,13 +260,13 @@
       "bound": "Raw start by design (ReadToEnd is the subject under test). CaptureWithinTimeout (30 s) kills the tree if the drain does not return. The child is a fixed /bin/sh script that exits."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/ProjectRootDetectorTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/ProjectRootDetectorGitAndSymlinkTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/ProjectRootDetectorTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/ProjectRootDetectorGitAndSymlinkTests.cs",
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."

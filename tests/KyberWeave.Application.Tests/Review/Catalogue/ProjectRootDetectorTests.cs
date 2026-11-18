@@ -1,13 +1,13 @@
-using System.Diagnostics;
 using System.Text;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review.Catalogue;
 using KyberWeave.Data.Review;
 using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Review.Catalogue;
 
 /// <summary>
 /// <see cref="ProjectRootDetection"/> finds the project roots of one family in a repository tree. The
@@ -15,7 +15,7 @@ namespace KyberWeave.Integration.Tests;
 /// root so the generated gate ids stay lookup-safe. Dependency and build-output directories and
 /// git-ignored paths are never roots, because a gate pointed at them would check code nobody owns.
 /// </summary>
-public sealed class ProjectRootDetectorTests : IDisposable
+public sealed class ProjectRootDetectorTests
 {
     private static readonly string[] GoModuleMarkers = ["go.mod"];
 
@@ -27,22 +27,30 @@ public sealed class ProjectRootDetectorTests : IDisposable
 
     private static readonly string[] CsprojFallback = ["*.csproj"];
 
-    private readonly TempDirectory _fixture = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly string _repo;
+    private readonly FileRepositoryFileLister _lister;
 
-    public void Dispose()
+    public ProjectRootDetectorTests()
     {
-        _fixture.Dispose();
+        _repo = Path.Combine(_files.Root, "repo");
+        _files.CreateDirectory(_repo);
+
+        // The in-memory tree is not a git work tree, so the lister walks it, which is the path these cases exercise.
+        ScriptedProcessRunner git = new();
+        _ = git.WithMissingProgram("git");
+        _lister = new FileRepositoryFileLister(git, _files);
     }
 
     /// <summary>Detects one family's roots in <paramref name="repositoryRoot"/>, as the renderer does.</summary>
-    private static ProjectRootSet Detect(
+    private ProjectRootSet Detect(
         string repositoryRoot,
         string[] markers,
         ProjectRootNesting nesting,
         bool pair = false,
         string[]? fallback = null) =>
         ProjectRootDetection.Detect(
-            RealRepositoryFileLister.Create().List(repositoryRoot),
+            _lister.List(repositoryRoot),
             markers,
             nesting,
             pair,
@@ -52,7 +60,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ATreeWithoutAMarkerHasNoRoots()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "src/program.cs");
 
         ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
@@ -68,7 +76,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void EachGoModuleIsARootInOrdinalPathOrder()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "b/go.mod");
         Touch(repo, "a/go.mod");
 
@@ -86,7 +94,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ACargoWorkspaceRootCoversItsMembers()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "Cargo.toml");
         Touch(repo, "crates/x/Cargo.toml");
 
@@ -104,7 +112,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void APackageInsideNodeModulesIsNeverARoot()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "node_modules/left-pad/package.json");
         Touch(repo, "node_modules/left-pad/tsconfig.json");
         Touch(repo, "web/package.json");
@@ -120,55 +128,13 @@ public sealed class ProjectRootDetectorTests : IDisposable
     }
 
     /// <summary>
-    /// A directory that version control ignores is not part of the repository, so a module left there
-    /// as scratch output is not gated. This case needs real git, because the ignore rules come from git.
-    /// </summary>
-    [Fact]
-    public void AGitIgnoredDirectoryIsNeverARoot()
-    {
-        string repo = _fixture.Path;
-        Git(repo, "init", "-q");
-        File.WriteAllText(Path.Combine(repo, ".gitignore"), "scratch/\n", new UTF8Encoding(false));
-        Touch(repo, "scratch/go.mod");
-        Touch(repo, "app/go.mod");
-
-        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
-
-        Assert.Equal(["app"], set.Roots.Select(root => root.RootDirectory).ToArray());
-    }
-
-    /// <summary>
-    /// A vendored tree that was committed is still vendored code. Git lists it as tracked, so the
-    /// directory exclusion must apply on top of the git listing, not only to untracked files.
-    /// </summary>
-    [Fact]
-    public void ACommittedVendorDirectoryIsNeverARoot()
-    {
-        string repo = _fixture.Path;
-        Git(repo, "init", "-q");
-        Touch(repo, "vendor/go.mod");
-        Touch(repo, "app/go.mod");
-        Git(repo, "add", "-A");
-        Git(
-            repo,
-            "-c", "user.name=kyber-weave-tests",
-            "-c", "user.email=tests@example.invalid",
-            "-c", "commit.gpgsign=false",
-            "commit", "-q", "-m", "fixture");
-
-        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
-
-        Assert.Equal(["app"], set.Roots.Select(root => root.RootDirectory).ToArray());
-    }
-
-    /// <summary>
     /// Nine roots would write nine copies of every root-bound gate. The detector reports the cap so
     /// the gate writer can comment those gates out and list the roots for the operator to pick from.
     /// </summary>
     [Fact]
     public void NineGoModulesCapTheFamily()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         for (int i = 1; i <= 9; i++)
             Touch(repo, $"m{i}/go.mod");
 
@@ -182,7 +148,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void EightGoModulesAreNotCapped()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         for (int i = 1; i <= 8; i++)
             Touch(repo, $"m{i}/go.mod");
 
@@ -201,7 +167,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void SlugsLowercaseSeparatorsAndSuffixCollisions()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "go.mod");
         Touch(repo, "apps/Web API/go.mod");
         Touch(repo, "apps/web-api/go.mod");
@@ -225,7 +191,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ATsconfigAloneIsNotAPairRoot()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "web/tsconfig.json");
 
         ProjectRootSet set = Detect(
@@ -244,7 +210,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ADirectoryHoldingEveryPairMarkerIsARootNamedByItsFirstMarker()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "web/package.json");
         Touch(repo, "web/tsconfig.json");
 
@@ -266,7 +232,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ASingleCsprojWithoutASolutionIsTheFallbackRoot()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "src/App.csproj");
 
         ProjectRootSet set = Detect(
@@ -287,7 +253,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void TwoCsprojWithoutASolutionAreNotAFallbackRoot()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "a/A.csproj");
         Touch(repo, "b/B.csproj");
 
@@ -307,7 +273,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ASecondCallOverTheSameTreeReturnsTheSameResult()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "b/go.mod");
         Touch(repo, "a/go.mod");
         Touch(repo, "apps/Web API/go.mod");
@@ -326,7 +292,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ARootDirectoryNamedRootDoesNotTakeTheRepositoryRootSlug()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "go.mod");
         Touch(repo, "root/go.mod");
 
@@ -344,7 +310,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ALongPathSlugIsCappedAtFortyCharactersWithoutATrailingHyphen()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, $"{new string('a', 39)}/{new string('b', 10)}/go.mod");
 
         ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
@@ -362,7 +328,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void AFallbackCsprojIsIgnoredWhenASolutionDeclaresARoot()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "app/app.sln");
         Touch(repo, "other/Only.csproj");
 
@@ -384,7 +350,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ANaturalSlugThatMatchesAGeneratedSuffixGetsItsOwnSuffix()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "p q/go.mod");
         Touch(repo, "p-q/go.mod");
         Touch(repo, "p-q-2/go.mod");
@@ -402,54 +368,13 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void ADirectoryWithNoUsableCharactersFallsBackToProject()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "___/go.mod");
 
         ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
 
         ProjectRoot root = Assert.Single(set.Roots);
         Assert.Equal("project", root.Slug);
-    }
-
-    /// <summary>
-    /// A marker reached only through a symlink is not a regular file, so the walk skips it. A gate
-    /// pointed at a link would check whatever the link happens to target rather than the tree.
-    /// </summary>
-    [Fact]
-    public void ASymlinkedMarkerIsNeverARoot()
-    {
-        string repo = _fixture.Path;
-        Touch(repo, "real/go.mod");
-        Directory.CreateDirectory(Path.Combine(repo, "linked"));
-        File.CreateSymbolicLink(Path.Combine(repo, "linked", "go.mod"), Path.Combine(repo, "real", "go.mod"));
-
-        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
-
-        Assert.Equal(["real"], set.Roots.Select(root => root.RootDirectory).ToArray());
-    }
-
-    /// <summary>
-    /// Git still lists a deleted-but-tracked file, so the detector checks the file exists before
-    /// treating it as a marker. Otherwise a removed module keeps its gate until someone commits.
-    /// </summary>
-    [Fact]
-    public void ADeletedButTrackedMarkerIsNeverARoot()
-    {
-        string repo = _fixture.Path;
-        Git(repo, "init", "-q");
-        Touch(repo, "app/go.mod");
-        Git(repo, "add", "-A");
-        Git(
-            repo,
-            "-c", "user.name=kyber-weave-tests",
-            "-c", "user.email=tests@example.invalid",
-            "-c", "commit.gpgsign=false",
-            "commit", "-q", "-m", "fixture");
-        File.Delete(Path.Combine(repo, "app", "go.mod"));
-
-        ProjectRootSet set = Detect(repo, GoModuleMarkers, ProjectRootNesting.Each);
-
-        Assert.Empty(set.Roots);
     }
 
     /// <summary>
@@ -460,7 +385,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void BuildOutputDirectoriesAreNeverRootsOutsideGit()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         Touch(repo, "bin/go.mod");
         Touch(repo, "obj/go.mod");
         Touch(repo, "target/go.mod");
@@ -478,7 +403,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void AMissingRepositoryRootThrows()
     {
-        string missing = Path.Combine(_fixture.Path, "missing");
+        string missing = Path.Combine(_repo, "missing");
 
         Assert.Throws<DirectoryNotFoundException>(() =>
         {
@@ -493,7 +418,7 @@ public sealed class ProjectRootDetectorTests : IDisposable
     [Fact]
     public void NinePairRootsUnderOutermostNestingCapTheFamily()
     {
-        string repo = _fixture.Path;
+        string repo = _repo;
         for (int i = 1; i <= 9; i++)
         {
             Touch(repo, $"m{i}/package.json");
@@ -514,34 +439,10 @@ public sealed class ProjectRootDetectorTests : IDisposable
     private static (string RootDirectory, string MarkerPath, string Slug)[] Project(ProjectRootSet set) =>
         set.Roots.Select(root => (root.RootDirectory, root.MarkerPath, root.Slug)).ToArray();
 
-    private static void Touch(string repo, string relativePath)
+    private void Touch(string repo, string relativePath)
     {
         string path = Path.Combine(repo, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        string? directory = Path.GetDirectoryName(path);
-        if (directory is not null)
-            Directory.CreateDirectory(directory);
-
-        File.WriteAllText(path, string.Empty, new UTF8Encoding(false));
-    }
-
-    private static void Git(string repo, params string[] arguments)
-    {
-        ProcessStartInfo startInfo = new("git")
-        {
-            WorkingDirectory = repo,
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true
-        };
-
-        foreach (string argument in arguments)
-            startInfo.ArgumentList.Add(argument);
-
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));
-        Assert.True(
-            result.ExitCode == 0,
-            $"git {string.Join(' ', arguments)} exited with {result.ExitCode}: {result.StandardError.Trim()}");
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, string.Empty);
     }
 }
