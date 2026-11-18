@@ -349,7 +349,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         McpWiringRepairReport report = McpWiringTestServices.Wiring.Repair(
             Repo,
             config,
-            new LaunchCommandResolver(Repo, []),
+            PhysicalLaunchCommands.Over(Repo, []),
             [Factory]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
@@ -1031,7 +1031,7 @@ public sealed class McpWiringRepairerTests : IDisposable
         params string[] targets) =>
         McpWiringTestServices.Wiring.Repair(Repo, config, resolver, targets, dryRun: false);
 
-    private LaunchCommandResolver ResolverOver(params string[] searchPaths) => new(searchPaths);
+    private LaunchCommandResolver ResolverOver(params string[] searchPaths) => PhysicalLaunchCommands.Over(searchPaths);
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);

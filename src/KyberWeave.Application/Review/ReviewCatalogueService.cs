@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -12,10 +13,14 @@ namespace KyberWeave.Application.Review;
 /// <param name="configs">Loads the host's configuration.</param>
 /// <param name="lister">Lists the repository files the project roots are detected over.</param>
 /// <param name="files">Reads the files a gate's condition names.</param>
+/// <param name="paths">Resolves the path the caller spelled.</param>
+/// <param name="environment">Names the working directory a relative path resolves against.</param>
 public sealed class ReviewCatalogueService(
     IConfigLoadService configs,
     IRepositoryFileLister lister,
-    IFileSystem files) : IReviewCatalogueService
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewCatalogueService
 {
     /// <inheritdoc />
     public ReviewCommandResult Run(
@@ -30,7 +35,7 @@ public sealed class ReviewCatalogueService(
         string root;
         try
         {
-            root = Path.GetFullPath(request.Path);
+            root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)

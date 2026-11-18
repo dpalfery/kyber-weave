@@ -1,5 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -14,8 +15,20 @@ public sealed class FileTextFactsOverSeamsTests
     private const string Root = "/repo";
 
     private readonly InMemoryFileSystem _files = new();
+    private readonly FakePathResolver _paths;
+    private readonly FakeProcessEnvironment _environment;
 
-    private FileTextFacts Facts() => new(new InMemoryRepositoryFileStore(_files));
+    public FileTextFactsOverSeamsTests()
+    {
+        _paths = new FakePathResolver(_files);
+        // The environment's case rule is the file system's, so a case-divergent containment answer is the one the
+        // volume would give rather than an artefact of two defaults that disagree.
+        _environment = new FakeProcessEnvironment(
+            currentDirectory: "/kw/work",
+            isFileSystemCaseInsensitive: !_files.CaseSensitive);
+    }
+
+    private FileTextFacts Facts() => new(new InMemoryRepositoryFileStore(_files), _paths, _environment);
 
     private void Write(string relative, string content)
     {
@@ -36,6 +49,17 @@ public sealed class FileTextFactsOverSeamsTests
         Assert.StartsWith("line 40\n", excerpt.Text, StringComparison.Ordinal);
         Assert.EndsWith("line 60", excerpt.Text, StringComparison.Ordinal);
         Assert.False(excerpt.Truncated);
+    }
+
+    [Fact]
+    public void ARelativeRepositoryRootResolvesAgainstTheInjectedCurrentDirectory()
+    {
+        _files.CreateDirectory("/kw/work/repo/src");
+        _files.WriteAllText("/kw/work/repo/src/Widget.cs", "one\ntwo\nthree");
+
+        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(Facts().ReadExcerpt("repo", "src/Widget.cs", 2));
+
+        Assert.Equal("one\ntwo\nthree", excerpt.Text);
     }
 
     [Fact]
@@ -94,6 +118,34 @@ public sealed class FileTextFactsOverSeamsTests
         _files.CreateDirectoryLink("/repo/docs", "/elsewhere");
 
         Assert.Null(Facts().ReadExcerpt(Root, "docs/leak.txt", 1));
+    }
+
+    [Fact]
+    public void TheContainmentGateRefusesAPathReachedThroughALink()
+    {
+        _files.CreateDirectory("/elsewhere");
+        _files.WriteAllText("/elsewhere/leak.txt", "secret");
+        _files.CreateDirectory(Root);
+        _files.CreateDirectoryLink("/repo/docs", "/elsewhere");
+
+        Assert.Null(Facts().ResolveWithinRoot(Root, "docs/leak.txt"));
+        Assert.Null(Facts().ResolveContainedFile(Root, "docs/leak.txt"));
+    }
+
+    [Fact]
+    public void TheContainmentGateStillAnswersAPlainPathUnderTheRoot()
+    {
+        Write("src/Widget.cs", "one");
+
+        Assert.Equal("/repo/src/Widget.cs", Facts().ResolveWithinRoot(Root, "src/Widget.cs"));
+    }
+
+    [Fact]
+    public void AMalformedCitedPathIsRefusedRatherThanThrown()
+    {
+        Assert.Null(Facts().ResolveWithinRoot(Root, "a\0b"));
+        Assert.Null(Facts().ResolveContainedFile(Root, "a\0b"));
+        Assert.Null(Facts().ReadExcerpt(Root, "a\0b", 1));
     }
 
     [Fact]

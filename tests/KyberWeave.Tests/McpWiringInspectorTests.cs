@@ -139,7 +139,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     {
         McpWiringFixture.WriteExecutable(Bin, BinaryName);
 
-        LaunchCommandResolver resolver = new([Bin]);
+        LaunchCommandResolver resolver = PhysicalLaunchCommands.Over([Bin]);
 
         Assert.NotNull(resolver.Resolve(BinaryName));
     }
@@ -147,7 +147,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void TheResolverReportsNoPathForACommandNoSearchPathHolds()
     {
-        LaunchCommandResolver resolver = new([EmptyBin]);
+        LaunchCommandResolver resolver = PhysicalLaunchCommands.Over([EmptyBin]);
 
         Assert.Null(resolver.Resolve(BinaryName));
     }
@@ -165,7 +165,7 @@ public sealed class McpWiringInspectorTests : IDisposable
         Directory.CreateDirectory(second);
         File.WriteAllText(Path.Combine(second, BinaryName), string.Empty);
 
-        LaunchCommandResolver resolver = new([Bin, second]);
+        LaunchCommandResolver resolver = PhysicalLaunchCommands.Over([Bin, second]);
 
         string? resolved = resolver.Resolve(BinaryName);
 
@@ -207,7 +207,7 @@ public sealed class McpWiringInspectorTests : IDisposable
 
         McpWiringFixture.WriteText(Repo, ".mcp.json", McpServersDocument(".", UrlCommand));
 
-        Assert.Null(new LaunchCommandResolver([EmptyBin]).Resolve(UrlCommand));
+        Assert.Null(PhysicalLaunchCommands.Over([EmptyBin]).Resolve(UrlCommand));
 
         // Third-party, because a server Kyber-Weave ships is one whose command runs its own binary:
         // this case is about the shape of a name, not about which side installed it.
@@ -244,7 +244,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     /// </para>
     /// <para>
     /// The rootless contrast is asserted for the same command so the case has teeth: reverting the
-    /// overload to <see cref="LaunchCommandResolver.FromEnvironment()"/> restores
+    /// overload to <see cref="PhysicalLaunchCommands.FromEnvironment()"/> restores
     /// <c>KW-MCP-WIRE-003</c> here, and the resolver-level assertion names what the revert broke
     /// even if the inspector's wording moves.
     /// </para>
@@ -259,14 +259,14 @@ public sealed class McpWiringInspectorTests : IDisposable
         // The fixture is a temp directory, so the process cannot be standing in it. Without this
         // the contrast below would prove nothing on a machine that happened to be rooted there.
         Assert.NotEqual(Repo, Directory.GetCurrentDirectory());
-        Assert.Null(LaunchCommandResolver.FromEnvironment().Resolve(relativeCommand));
+        Assert.Null(PhysicalLaunchCommands.FromEnvironment().Resolve(relativeCommand));
 
         McpConfig declared = McpWiringFixture.Declare(RepositoryRelativeServer(relativeCommand));
 
         McpWiringReport rootless = McpWiringTestServices.Wiring.Inspect(
             Repo,
             declared,
-            LaunchCommandResolver.FromEnvironment());
+            PhysicalLaunchCommands.FromEnvironment());
         Assert.Contains(
             FindingsFor(rootless, ClaudeCode),
             finding => finding.Code == BinaryAbsentCode);
@@ -981,7 +981,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     }
 
     private McpWiringReport Inspect(McpConfig config, params string[] searchPaths) =>
-        McpWiringTestServices.Wiring.Inspect(Repo, config, new LaunchCommandResolver(searchPaths));
+        McpWiringTestServices.Wiring.Inspect(Repo, config, PhysicalLaunchCommands.Over(searchPaths));
 
     private static RequiredMcpServer FirstPartyServer(
         string repoRootArgument = ".",

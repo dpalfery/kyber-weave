@@ -102,6 +102,12 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public string? GetLinkTarget(string path) => _inner.GetLinkTarget(path);
 
     /// <inheritdoc />
+    public Stream OpenExclusive(string path) => _inner.OpenExclusive(path);
+
+    /// <inheritdoc />
+    public Stream OpenAppendShared(string path) => _inner.OpenAppendShared(path);
+
+    /// <inheritdoc />
     public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
 
     /// <inheritdoc />

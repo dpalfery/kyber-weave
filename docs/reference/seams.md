@@ -33,7 +33,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 
 | Seam | Interface(s) | Covers | Adapter (project, file) | Fake (`tests/KyberWeave.Testing`) | Contract suite |
 |---|---|---|---|---|---|
-| File system | `IFileSystem`, `IWritableFileSystem` (`Contracts/Repositories`) | Text, bytes, lines, streams, length, last-write time, attributes; enumerate with a no-follow option; create directory; write; atomic write; atomic move with and without overwrite; exclusive create; open a new file for writing; move a directory; delete file and tree without following links; create link; one-hop and final link target; temporary directory | `PhysicalFileSystem` (`KyberWeave.Data`, `Hooks/PhysicalFileSystem.cs`) | `InMemoryFileSystem` (`FileSystem/InMemoryFileSystem.cs`) | `FileSystemContractTests` and `FileSystemFaultContractTests`: fake in `KyberWeave.Tests/FileSystem/InMemoryFileSystemTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalFileSystemContractTests.cs` |
+| File system | `IFileSystem`, `IWritableFileSystem` (`Contracts/Repositories`) | Text, bytes, lines, streams, length, last-write time, attributes; enumerate with a no-follow option; create directory; write; atomic write; atomic move with and without overwrite; exclusive create; open a new file for writing; open a file exclusively (a lock file); open a file for a shared append; move a directory; delete file and tree without following links; create link; one-hop and final link target; temporary directory | `PhysicalFileSystem` (`KyberWeave.Data`, `Hooks/PhysicalFileSystem.cs`) | `InMemoryFileSystem` (`FileSystem/InMemoryFileSystem.cs`) | `FileSystemContractTests` and `FileSystemFaultContractTests`: fake in `KyberWeave.Tests/FileSystem/InMemoryFileSystemTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalFileSystemContractTests.cs` |
 | Paths | `IPathResolver` (`Contracts/Paths`) | Full path against an explicit base; are-same; is-within; canonical spelling (case and links); physical root. No member reads the process working directory | `PhysicalPathResolver` (`KyberWeave.Data`, `Paths/PhysicalPathResolver.cs`) over `FileSystemPathResolver` | `FakePathResolver` (`Fakes/FakePathResolver.cs`) | `PathResolverContractTests`: fake in `KyberWeave.Tests/Paths/InMemoryPathResolverTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalPathResolverContractTests.cs` |
 | Process | `IProcessRunner`; `IProcessExecutor`, `IProgramRunner` and `IBoundedProcessExecutor` stay as role views | Run with arguments, working directory, environment, timeout and input; captured output; is-alive; find on path | `KernelProcessRunner` (`KyberWeave.Data`, `Hooks/KernelProcessRunner.cs`) over `KyberWeave.Kernel/Processes/ProcessRunner.cs` | `ScriptedProcessRunner` (`Fakes/ScriptedProcessRunner.cs`); `ScriptedProcessExecutor` (`Fakes/ScriptedProcessExecutor.cs`) for the role view | `ProcessRunnerContractTests`: fake in `KyberWeave.Tests/Processes/ScriptedProcessRunnerContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/KernelProcessRunnerContractTests.cs` |
 | Environment and platform | `IProcessEnvironment` (`Contracts/Repositories`) | Environment variables; current, home and temporary directories; user and machine name; operating-system kind; case-insensitive file system; input redirected | `ProcessEnvironment` (`KyberWeave.Data`, `Host/ProcessEnvironment.cs`) | `FakeProcessEnvironment` (`Fakes/FakeProcessEnvironment.cs`) | `ProcessEnvironmentContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
@@ -168,13 +168,13 @@ clock and no task would track the fix.
 |---|---|---|---|
 | `KyberWeave.Application` | 68 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
-| `KyberWeave.Data` | 81 | 714 | 3.3, 3.4, 3.5, 4.4, 4.9 |
+| `KyberWeave.Data` | 73 | 663 | 3.3, 3.4, 3.5, 4.4, 4.9 |
 | `KyberWeave.Domain` | 24 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 3 | 22 | 4.9 |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
-| **Total** | **228** | **1,187** | |
+| **Total** | **220** | **1,136** | |
 
 The totals before adapters and roots are taken out are 68 classes and 212 sites in Application,
 52 and 183 in Cli, 111 and 955 in Data, 28 and 49 in Domain, 2 and 3 in Hooks, 6 and 47 in Kernel,
@@ -193,17 +193,13 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
 | `ArbiterPlanService` (`Arbiter/ArbiterPlanService.cs`) | paths | 4.3 |
-| `ArbiterRepositoryLocator` (`Arbiter/ArbiterRepositoryLocator.cs`) | file system, paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
-| `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
-| `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths | 4.3 |
 | `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
 | `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
-| `ArbiterRootResolver` (`Arbiter/Mcp/ArbiterRootResolver.cs`) | paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
 | `ManagedGlossary` (`Docs/Analysis/Glossary/ManagedGlossary.cs`) | paths | 4.2 |
 | `PlanCloseout` (`Docs/Closeout/PlanCloseout.cs`) | paths | 4.2 |
@@ -222,18 +218,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
-| `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
 | `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
-| `ReviewCycleView` (`Review/ReviewCycleView.cs`) | paths | 4.3 |
-| `ReviewDuplicatesService` (`Review/ReviewDuplicatesService.cs`) | paths | 4.3 |
 | `ReviewEvidenceService` (`Review/ReviewEvidenceService.cs`) | paths | 4.3 |
-| `ReviewGatesService` (`Review/ReviewGatesService.cs`) | file system, paths | 4.3 |
-| `ReviewReportWriter` (`Review/ReviewReportWriter.cs`) | paths | 4.3 |
 | `ReviewSeatsService` (`Review/ReviewSeatsService.cs`) | paths | 4.3 |
-| `ReviewSuppressionsService` (`Review/ReviewSuppressionsService.cs`) | paths | 4.3 |
-| `ReviewVerdictService` (`Review/ReviewVerdictService.cs`) | paths | 4.3 |
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
-| `SuppressionScanService` (`Review/SuppressionScanService.cs`) | paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
 | `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
@@ -258,11 +246,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
-#### KyberWeave.Data (80 classes)
+#### KyberWeave.Data (72 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `PlanPathResolver` (`Arbiter/Plans/PlanPathResolver.cs`) | file system, paths | 4.4 |
 | `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
 | `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
 | `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
@@ -271,19 +258,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
-| `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
-| `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
-| `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
-| `FileFactoryTranscriptSource` (`Hooks/Arbiter/FileFactoryTranscriptSource.cs`) | file system | 4.4 |
-| `FileHookSnapshotStore` (`Hooks/Arbiter/FileHookSnapshotStore.cs`) | file system, clock, identifiers | 4.4 |
-| `FileWorkerBudgetStore` (`Hooks/Arbiter/FileWorkerBudgetStore.cs`) | file system | 4.4 |
-| `CheckoutProductRootLocator` (`Host/CheckoutProductRootLocator.cs`) | paths | 4.4 |
 | `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
-| `FileProjectFileLocator` (`Review/FileProjectFileLocator.cs`) | file system, paths | 4.4 |
-| `FileReviewDecisionCacheStore` (`Review/FileReviewDecisionCacheStore.cs`) | file system, paths | 4.4 |
-| `FileReviewEvidenceStore` (`Review/FileReviewEvidenceStore.cs`) | file system | 4.4 |
-| `FileSeatFolder` (`Review/FileSeatFolder.cs`) | file system | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
 | `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
@@ -314,6 +290,28 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 | `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
 | `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
+
+Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
+
+- `FileHookSnapshotStore` and `FileWorkerBudgetStore` are converted: the file-system seam gained
+  `OpenExclusive` (a read-write open that keeps every other opener out until disposed) and
+  `OpenAppendShared` (an append that other appenders and readers share), proven on the fake and on
+  `PhysicalFileSystem` by the file-system contract suite.
+- `SelfUpdateSystem` replaces the running binary and extracts archives, so requirement 10.2 applies: it
+  moves with crash-safety contract tests and a second reviewer, with task 4.1's `SelfUpdater`.
+- `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are built with `new` or
+  held as a static delegate by `KyberWeave.Cli` and `KyberWeave.Application` callers, so converting them
+  edits those projects' composition code (tasks 4.5 and 4.2).
+- `SystemOneClient`, `SocketArbiterHttpHandlers`, `SystemOneProviderFactory` and
+  `OpenAiCompatibleEmbeddingGenerator` reach the network; no network seam exists yet.
+- `PresentFile` and `DocsRootWalk` are static helpers of the adapter `PhysicalRepositoryFileStore`
+  (the bounded one-step read and the link-refusing walk). `DocsRootWalk` is also called as a static by
+  `Application/Docs/Delivery/PullRequestDescription.cs` and `Application/Docs/Search/DocumentIndexHost.cs`,
+  so converting it edits `Application/Docs`, which another task owns.
+- `FileCoverageReportSource` lives in `Application/Review`, which another task owns.
+- `ZipSkillArchiveWriter` is the adapter of `ISkillArchiveWriter`. `ZipFile.CreateEntryFromFile` records the
+  source file's Unix permission bits in the archive; the file-system seam has no member that reads them, so
+  reading entries through `OpenRead` would change the archive's contents.
 
 #### KyberWeave.Domain (24 classes)
 
@@ -363,7 +361,6 @@ the behaviour: where a test observes the value, the seam still wraps it.
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
 `Application/Update/SelfUpdater.cs`,
-`Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and `FileWorkerBudgetStore.cs`,
 `Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,

@@ -1,20 +1,23 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
+using KyberWeave.Data.Paths;
 
 namespace KyberWeave.Data.Review;
 
 /// <summary>Keeps one review cycle's decision-model answers in a JSON file.</summary>
-public sealed class FileReviewDecisionCacheStore : IReviewDecisionCacheStore
+public sealed class FileReviewDecisionCacheStore(IWritableFileSystem files, IPathResolver paths, IProcessEnvironment environment)
+    : IReviewDecisionCacheStore
 {
     /// <inheritdoc />
     public IReadOnlyDictionary<string, ReviewCachedAnswer> Load(string path)
     {
         try
         {
-            if (File.Exists(path)
-                && JsonSerializer.Deserialize<Dictionary<string, ReviewCachedAnswer>>(File.ReadAllText(path)) is { } read)
+            if (files.FileExists(path)
+                && JsonSerializer.Deserialize<Dictionary<string, ReviewCachedAnswer>>(files.ReadAllText(path)) is { } read)
             {
                 return read;
             }
@@ -32,8 +35,8 @@ public sealed class FileReviewDecisionCacheStore : IReviewDecisionCacheStore
     {
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
-            File.WriteAllText(path, JsonSerializer.Serialize(answers));
+            files.CreateDirectory(Path.GetDirectoryName(TrailingSeparator.Keep(path, paths.GetFullPath(path, environment.CurrentDirectory)))!);
+            files.WriteAllText(path, JsonSerializer.Serialize(answers));
             return true;
         }
         catch (Exception ex) when (FileFailure.Is(ex))

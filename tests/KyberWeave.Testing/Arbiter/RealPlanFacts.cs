@@ -13,5 +13,5 @@ internal static class RealPlanFacts
     /// <summary>The plan reader over the plan path resolver and the real file system.</summary>
     /// <param name="planPaths">The plan path resolver; the production one when null.</param>
     internal static PlanFacts Create(IPlanFileResolver? planPaths = null) =>
-        new(planPaths ?? new PlanPathResolver(), new PhysicalFileSystem());
+        new(planPaths ?? PhysicalPlanPaths.Create(), new PhysicalFileSystem());
 }
