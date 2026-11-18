@@ -28,13 +28,15 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="process">The operator's home.</param>
 /// <param name="clock">The clock the budget window is measured on.</param>
 /// <param name="state">Opens the ledgers whose dispatch headers the command allow-list reads.</param>
+/// <param name="files">Probes for the <c>.git</c> entry that marks a repository root.</param>
 public sealed class WorkerGuard(
     IWorkerBudgetStore budgets,
     IRunCheckout checkouts,
     IHostConfigLoader hostConfig,
     IProcessEnvironment process,
     TimeProvider clock,
-    IArbiterStateFactory state) : IWorkerGuard
+    IArbiterStateFactory state,
+    IFileSystem files) : IWorkerGuard
 {
     /// <summary>The rule id a stray write is refused under.</summary>
     public const string CheckoutRuleId = WorkerGuardRules.CheckoutRuleId;
@@ -259,8 +261,8 @@ public sealed class WorkerGuard(
         string full = Path.GetFullPath(cwd, process.CurrentDirectory);
         for (DirectoryInfo? directory = new(full); directory is not null; directory = directory.Parent)
         {
-            if (Directory.Exists(Path.Combine(directory.FullName, ".git"))
-                || File.Exists(Path.Combine(directory.FullName, ".git")))
+            string git = Path.Combine(directory.FullName, ".git");
+            if (files.DirectoryExists(git) || files.FileExists(git))
             {
                 return directory.FullName;
             }

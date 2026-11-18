@@ -20,7 +20,7 @@ namespace KyberWeave.Core.Docs.Validation;
 public sealed class TaskPromptServiceFactory(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
-    IFileSystem files,
+    IWritableFileSystem files,
     ICodeGraphPortsFactory codeGraph,
     IDocumentSourceFactory documents,
     IPathResolver paths,

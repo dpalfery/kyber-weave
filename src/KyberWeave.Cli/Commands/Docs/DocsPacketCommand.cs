@@ -25,7 +25,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsPacketCommand(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
-    IFileSystem files,
+    IWritableFileSystem files,
     IProcessEnvironment environment,
     IPlanTaskTargetService targets,
     ITaskGateSelectionService taskGates,
