@@ -11,11 +11,13 @@ namespace KyberWeave.Application.Tests.Review;
 /// </summary>
 public sealed class ReviewCycleViewTests
 {
+    private readonly InMemoryFileSystem _files = new();
+
     private readonly FakePathResolver _paths;
 
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/work");
 
-    public ReviewCycleViewTests() => _paths = new FakePathResolver(new InMemoryFileSystem());
+    public ReviewCycleViewTests() => _paths = new FakePathResolver(_files);
 
     [Fact]
     public void AReasonablySpelledCycleReportIsPlacedInTheCycleFolderUnderTheInjectedWorkingDirectory()
@@ -74,5 +76,31 @@ public sealed class ReviewCycleViewTests
     {
         Assert.False(ReviewCycleView.IsUnder(
             _paths, _environment, "/repo/review", "/repo/review-backup/gates.json"));
+    }
+
+    [Fact]
+    public void AFolderIsUnderItself()
+    {
+        Assert.True(ReviewCycleView.IsUnder(_paths, _environment, "/repo/review", "/repo/review"));
+    }
+
+    [Fact]
+    public void AChildSpelledInAnotherCaseIsUnderItsFolderOnACaseInsensitiveVolume()
+    {
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem(caseSensitive: false);
+
+        Assert.True(ReviewCycleView.IsUnder(
+            paths, _environment, "/repo/Review", "/repo/review/cycle-1/gates.json"));
+    }
+
+    [Fact]
+    public void ALinkedFolderThatPointsOutsideTheTreeIsNotUnderIt()
+    {
+        _files.CreateDirectory("/repo/tree");
+        _files.CreateDirectory("/tmp/evil/review");
+        _files.CreateDirectoryLink("/repo/tree/review", "/tmp/evil/review");
+
+        Assert.False(ReviewCycleView.IsUnder(
+            _paths, _environment, "/repo/tree", "/repo/tree/review/gates.json"));
     }
 }

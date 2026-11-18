@@ -192,7 +192,7 @@ public static class ReviewCycleView
         ignored.Select(cycle => $"ignored: {Relative(root, cycle.Record.Folder)} — {cycle.Reason}");
 
     /// <summary>Whether <paramref name="path"/> is inside <paramref name="folder"/>.</summary>
-    /// <param name="paths">Resolves each spelling to a full path.</param>
+    /// <param name="paths">The seam that decides identity and containment, following links and the volume's case rule.</param>
     /// <param name="environment">Names the working directory a relative path resolves against.</param>
     /// <param name="folder">The folder to test against.</param>
     /// <param name="path">The path that may lie inside the folder.</param>
@@ -201,11 +201,9 @@ public static class ReviewCycleView
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(environment);
 
-        string relative = Path.GetRelativePath(
-            paths.GetFullPath(folder, environment.CurrentDirectory),
-            paths.GetFullPath(path, environment.CurrentDirectory));
-        return relative != ".." && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
-                                && !Path.IsPathRooted(relative);
+        string fullFolder = paths.GetFullPath(folder, environment.CurrentDirectory);
+        string fullPath = paths.GetFullPath(path, environment.CurrentDirectory);
+        return paths.AreSame(fullFolder, fullPath) || paths.IsWithin(fullFolder, fullPath);
     }
 
     /// <summary>
