@@ -221,7 +221,7 @@ public sealed class DocumentSectionGraph
 
         string? resolved = string.IsNullOrEmpty(combined)
             ? source.RelativePath
-            : DocGraphProjection.ResolveLink(source.RelativePath, combined);
+            : DocumentLinkPaths.Resolve(source.RelativePath, combined);
         if (resolved is null)
         {
             return;
@@ -310,7 +310,7 @@ public sealed class DocumentSectionGraph
                 fragment = targetRaw[(hash + 1)..];
             }
 
-            string? resolved = DocGraphProjection.ResolveLink(document.RelativePath, path);
+            string? resolved = DocumentLinkPaths.Resolve(document.RelativePath, path);
             if (resolved is null || !byPath.ContainsKey(resolved))
             {
                 rowIndex++;

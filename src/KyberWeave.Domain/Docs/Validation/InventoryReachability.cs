@@ -62,7 +62,7 @@ internal static class InventoryReachability
         string link,
         Dictionary<string, DocumentModel> byPath)
     {
-        string? target = DocGraphProjection.ResolveLink(fromRelativePath, link);
+        string? target = DocumentLinkPaths.Resolve(fromRelativePath, link);
         if (target is null)
             return null;
 

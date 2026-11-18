@@ -122,7 +122,7 @@ public sealed class DuplicateDetectionService(IContainedFileReader files, IRepos
                 symbol.EndLine)));
         }
 
-        IReadOnlyList<DuplicateCluster> clusters = DuplicateReport.Merge(measured);
+        IReadOnlyList<DuplicateCluster> clusters = DuplicateClusters.Merge(measured);
 
         return new DuplicateReport(
             DuplicateReport.CurrentSchema,

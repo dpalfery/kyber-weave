@@ -56,7 +56,7 @@ public sealed class DocLinkFragmentValidationTests
 
         string targetPath = string.IsNullOrEmpty(link.Path)
             ? source.RelativePath
-            : DocGraphProjection.ResolveLink(source.RelativePath, link.Path)
+            : DocumentLinkPaths.Resolve(source.RelativePath, link.Path)
               ?? throw new InvalidOperationException(
                   $"Could not resolve link target from {source.RelativePath}.");
 
