@@ -187,9 +187,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | Class (file) | Calls directly | Task |
 |---|---|---|
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
-| `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
-| `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system | 4.2 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
