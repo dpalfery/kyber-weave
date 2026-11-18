@@ -4,7 +4,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
-using KyberWeave.Tests.Corpus;
+using KyberWeave.Testing.Squad;
 
 namespace KyberWeave.Tests;
 
@@ -22,11 +22,6 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadRootWrapperAgentTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static string ProductRoot =>
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
     private static readonly string[] RootWrapperIdentities = ["bug-crusher", "product-owner"];
 
     public static TheoryData<SquadTarget, string?, string> TargetProjections()
@@ -62,8 +57,8 @@ public sealed class SquadRootWrapperAgentTests
         string? agentPathTemplate,
         string skillPathTemplate)
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+        SquadSource source = CanonicalSquadTree.SharedSource;
+        SquadRenderResult result = await CanonicalSquadTree.RenderSharedProjectAsync(target);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -143,7 +138,7 @@ public sealed class SquadRootWrapperAgentTests
     [Fact]
     public void RootWrappersArePrimarySharedIdentitiesWithThinWrapperBodies()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSquadTree.SharedSource;
         HashSet<string> shared = source.FallbackProfiles.Profiles["role-skill"].SharedIdentities
             .ToHashSet(StringComparer.Ordinal);
 
@@ -177,7 +172,7 @@ public sealed class SquadRootWrapperAgentTests
     [InlineData(SquadTarget.Factory)]
     public async Task DualEntryPointTargetsDoNotDoubleEmitTheSkill(SquadTarget target)
     {
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+        SquadRenderResult result = await CanonicalSquadTree.RenderSharedProjectAsync(target);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -204,14 +199,25 @@ public sealed class SquadRootWrapperAgentTests
     [Fact]
     public async Task NonSharedPrimarySkillCollisionStillFailsClosed()
     {
-        using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create("conductor");
+        CanonicalSquadTree tree = CanonicalSquadTree.Create();
+        tree.Files.CreateDirectory(tree.PathOf("skills/conductor"));
+        tree.Files.WriteAllText(
+            tree.PathOf("skills/conductor/SKILL.md"),
+            """
+            ---
+            name: conductor
+            description: Use when a canonical skill deliberately occupies a primary agent's lowered identity.
+            license: MIT
+            ---
+            Fixture body for the 'conductor' identity collision.
+            """);
 
         ClaudeRenderer renderer = new();
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
             renderer.RenderAsync(new SquadRenderRequest(
-                fixture.ProductRoot,
+                tree.ProductRoot,
                 [SquadTarget.Claude],
-                SquadDeploymentScope.Project).Prepared()));
+                SquadDeploymentScope.Project).Prepared(tree)));
 
         // Assert the collision-specific wording, not just the agent name: any
         // validation error that happens to mention "conductor" would satisfy a
@@ -237,7 +243,13 @@ public sealed class SquadRootWrapperAgentTests
         SquadDeploymentScope scope,
         string expectedDirectory)
     {
-        SquadRenderResult result = await TestSquadCorpus.GetDefaultRenderAsync(SquadTarget.Claude, scope);
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
+        SquadRenderResult result = await tree.Registry(SquadHostDefaults.CreateRenderers()).RenderAsync(tree.Prepare(new SquadRenderRequest(
+            tree.ProductRoot,
+            [SquadTarget.Claude],
+            scope,
+            GlobalRoots: new SquadGlobalRoots(_ => null, Path.GetFullPath("/kw/home")),
+            PreloadedSource: CanonicalSquadTree.SharedSource)));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -265,31 +277,11 @@ public sealed class SquadRootWrapperAgentTests
     [Fact]
     public void FullBundleRosterMatchesTheAgentDirectory()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         Assert.Contains("bug-crusher", source.Bundle.AgentNames);
         Assert.Equal(
             source.Agents.Select(agent => agent.Name).Order(StringComparer.Ordinal),
             source.Bundle.AgentNames.Order(StringComparer.Ordinal));
-    }
-
-    private static SquadRendererRegistry AllRenderers()
-    {
-        return SquadTestRegistry.Create(
-        [
-            new CopilotRenderer(),
-            new CursorRenderer(),
-            new ClaudeRenderer(),
-            new AntigravityRenderer(),
-            new CodexRenderer(),
-            new OpenCodeRenderer(),
-            new KiloRenderer(),
-            new PiRenderer(),
-            new FactoryRenderer(),
-            new WarpRenderer(),
-            new ZCodeRenderer(),
-            new DevinRenderer(),
-            new CommandCodeRenderer()
-        ]);
     }
 }
