@@ -210,7 +210,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        DoctorPresetTestRenderer renderer = new();
+        FakeSquadRenderer renderer = PresetRenderer();
 
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
@@ -269,7 +269,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithMatchingArbiterProbe();
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        DoctorPresetTestRenderer renderer = new();
+        FakeSquadRenderer renderer = PresetRenderer();
 
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
@@ -391,39 +391,24 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
     }
 
     /// <summary>
-    ///     Test renderer that differentiates rendered content when an active preset is provided in the request.
+    ///     Renders the architect body with the model the request's active preset selects, so doctor's
+    ///     comparison render can be observed against a preset-rendered deployment.
     /// </summary>
-    private sealed class DoctorPresetTestRenderer : ISquadRenderer
-    {
-        private readonly List<SquadRenderRequest> _renderRequests = [];
-
-        public IReadOnlyList<SquadRenderRequest> RenderRequests => _renderRequests;
-
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Claude];
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            _renderRequests.Add(request);
-
-            List<SquadDeploymentFile> files = [];
-            foreach (SquadTarget target in request.Targets)
-            {
-                string targetToken = SquadTargetCatalog.GetToken(target);
-                bool hasPreset = request.ModelPresets is not null && request.ModelPresets.ContainsKey(target);
-                string modelName = hasPreset ? "custom-preset-model" : "default-bundled-model";
-                string content = $"You are architect.\nModel: {modelName}\n";
-                files.Add(new SquadDeploymentFile("agents/architect.md", Encoding.UTF8.GetBytes(content), targetToken));
-            }
-
-            return Task.FromResult(new SquadRenderResult(
+    private static FakeSquadRenderer PresetRenderer() =>
+        FakeSquadRenderer.Responding(
+            request => new SquadRenderResult(
                 true,
-                files,
+                [.. request.Targets.Select(target =>
+                {
+                    bool hasPreset = request.ModelPresets?.ContainsKey(target) == true;
+                    string modelName = hasPreset ? "custom-preset-model" : "default-bundled-model";
+                    return new SquadDeploymentFile(
+                        "agents/architect.md",
+                        Encoding.UTF8.GetBytes($"You are architect.\nModel: {modelName}\n"),
+                        SquadTargetCatalog.GetToken(target));
+                })],
                 [],
                 [],
-                []));
-        }
-    }
+                []),
+            SquadTarget.Claude);
 }

@@ -40,8 +40,8 @@ public sealed class SquadOwnedBlockLifecycleTests
         using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
         SquadRendererRegistry registry = SquadTestRegistry.Create(
         [
-            new BlockStubRenderer(SquadTarget.Cursor, CursorBlock("cursor-one")),
-            new BlockStubRenderer(SquadTarget.Codex, CodexBlock("codex-one")),
+            FakeSquadRenderer.WithBlocks(SquadTarget.Cursor, CursorBlock("cursor-one")),
+            FakeSquadRenderer.WithBlocks(SquadTarget.Codex, CodexBlock("codex-one")),
         ]);
 
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
@@ -785,7 +785,7 @@ public sealed class SquadOwnedBlockLifecycleTests
         SquadStateStore store = Store(fixture.Path);
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
-            new BlockStubRenderer(SquadTarget.Cursor, CursorBlock("cursor-one")),
+            FakeSquadRenderer.WithBlocks(SquadTarget.Cursor, CursorBlock("cursor-one")),
             store,
             new FixedTimeProvider(InstalledAt));
 
@@ -1158,19 +1158,6 @@ public sealed class SquadOwnedBlockLifecycleTests
 
     private static string Read(string root, string relativePath) =>
         File.ReadAllText(Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
-
-    private sealed class BlockStubRenderer(SquadTarget target, SquadRenderedBlock block) : ISquadRenderer
-    {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [target];
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], [], Blocks: [block]));
-        }
-    }
 
     /// <summary>
     /// An isolated home with a global deployment in it: the store that holds its receipt, the

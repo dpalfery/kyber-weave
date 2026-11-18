@@ -564,7 +564,7 @@ public sealed class SquadRendererSharedContractTests
     [Fact]
     public async Task TheRegistryRefusesTheWholeRequestBeforeAnyRendererRunsWhenATargetHasNoRenderer()
     {
-        CountingRenderer claude = new(SquadTarget.Claude);
+        FakeSquadRenderer claude = FakeSquadRenderer.Empty(SquadTarget.Claude);
         SquadRendererRegistry registry = SquadTestRegistry.Create([claude]);
 
         SquadRenderResult result = await registry.RenderAsync(new SquadRenderRequest(
@@ -575,7 +575,7 @@ public sealed class SquadRendererSharedContractTests
 
         Assert.False(result.Success);
         Assert.Empty(result.Files);
-        Assert.Equal(0, claude.Calls);
+        Assert.Equal(0, claude.RenderCount);
         Assert.Contains(result.Errors, e => e.Contains("copilot", StringComparison.Ordinal));
         Assert.Contains(result.Errors, e => e.Contains("docs/todo", StringComparison.Ordinal));
     }
@@ -631,19 +631,4 @@ public sealed class SquadRendererSharedContractTests
         string[] GrantedShellTools,
         string[] WithheldWriteTools,
         bool SubagentsOnly);
-
-    private sealed class CountingRenderer(SquadTarget target) : ISquadRenderer
-    {
-        public int Calls { get; private set; }
-
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [target];
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            return Task.FromResult(new SquadRenderResult(true, [], [], [], []));
-        }
-    }
 }

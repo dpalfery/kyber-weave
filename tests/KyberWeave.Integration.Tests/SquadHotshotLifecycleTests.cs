@@ -68,7 +68,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
-            new RosterShrinkingRenderer(RosterPaths, includeObsolete: false),
+            RosterRenderer(includeObsolete: false),
             stateStore);
 
         SquadLifecycleResult update = await service.UpdateAsync(new SquadUpdateRequest(
@@ -122,7 +122,7 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
             using FakeSquadReleaseSource releaseSource = new();
             SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
                 releaseSource,
-                new RosterShrinkingRenderer(RosterPaths, includeObsolete: true),
+                RosterRenderer(includeObsolete: true),
                 stateStore);
 
             SquadLifecycleResult result = service.InstallAsync(new SquadInstallRequest(
@@ -188,36 +188,23 @@ public sealed class SquadHotshotLifecycleTests : IDisposable
                 SquadPhysicalRootIdentity.KeyOf(canonicalRoot));
     }
 
-    private sealed class RosterShrinkingRenderer(IReadOnlyList<string> rosterPaths, bool includeObsolete)
-        : ISquadRenderer
-    {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Copilot];
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            cancellationToken.ThrowIfCancellationRequested();
-            List<string> paths = [.. rosterPaths];
-            if (includeObsolete)
-            {
-                paths.Add(ObsoletePath);
-            }
-
-            SquadDeploymentFile[] files = paths
-                .Order(StringComparer.Ordinal)
-                .Select(path => new SquadDeploymentFile(
-                    path,
-                    Encoding.UTF8.GetBytes($"render: {path}\n"),
-                    "copilot"))
-                .ToArray();
-            return Task.FromResult(new SquadRenderResult(
-                Success: true,
-                Files: files,
-                Degradations: [],
-                Warnings: [],
-                Errors: []));
-        }
-    }
+    /// <summary>
+    /// Renders the roster paths with content the receipt can plan against, adding the obsolete path an
+    /// older release wrote so an update can remove it.
+    /// </summary>
+    private static FakeSquadRenderer RosterRenderer(bool includeObsolete) =>
+        FakeSquadRenderer.Responding(
+            _ => new SquadRenderResult(
+                true,
+                [.. RosterPaths
+                    .Concat(includeObsolete ? [ObsoletePath] : [])
+                    .Order(StringComparer.Ordinal)
+                    .Select(path => new SquadDeploymentFile(
+                        path,
+                        Encoding.UTF8.GetBytes($"render: {path}\n"),
+                        "copilot"))],
+                [],
+                [],
+                []),
+            SquadTarget.Copilot);
 }
