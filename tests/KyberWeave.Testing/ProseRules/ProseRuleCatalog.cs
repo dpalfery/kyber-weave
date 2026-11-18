@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Review;
 using YamlDotNet.RepresentationModel;
@@ -55,22 +54,37 @@ internal sealed partial record ProseRuleCatalog(double ConfidenceFloor, IReadOnl
     private static readonly string[] ControlKeys = ["path", "without-section"];
     private static readonly string[] RetiredKeys = ["statement", "example", "absent-from", "seed-into"];
 
-    /// <summary>The catalog shipped with the tests.</summary>
-    public static string DefaultPath([CallerFilePath] string sourcePath = "") =>
-        Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", "Fixtures", "prose-rules", "catalog.yml");
+    /// <summary>The catalog, relative to the repository root.</summary>
+    public const string RelativePath = "tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml";
 
-    /// <summary>Loads and parses the catalog; an unknown key, a missing field or a wrong type is refused by name.</summary>
+    /// <summary>The full path of the catalog in this checkout.</summary>
+    public static string DefaultPath() =>
+        Path.Combine(CheckoutCorpusSource.Checkout.Root, RelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>Loads and parses the catalog from a file; an unknown key, a missing field or a wrong type is refused by name.</summary>
     public static ProseRuleCatalog Load(string path)
     {
+        using StreamReader reader = File.OpenText(path);
+        return Parse(reader, path);
+    }
+
+    /// <summary>Parses the catalog text a corpus help supplies; the origin names the catalog in a refusal.</summary>
+    /// <param name="text">The catalog's YAML.</param>
+    /// <param name="origin">Where the text came from, as a refusal names it.</param>
+    public static ProseRuleCatalog Parse(string text, string origin)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+        return Parse(new StringReader(text), origin);
+    }
+
+    private static ProseRuleCatalog Parse(TextReader text, string origin)
+    {
         YamlStream stream = new();
-        using (StreamReader reader = File.OpenText(path))
-        {
-            stream.Load(reader);
-        }
+        stream.Load(text);
 
         YamlMappingNode root = stream.Documents.Count == 1 && stream.Documents[0].RootNode is YamlMappingNode mapping
             ? mapping
-            : throw new InvalidDataException($"{path}: expected one YAML document holding a mapping.");
+            : throw new InvalidDataException($"{origin}: expected one YAML document holding a mapping.");
         RefuseUnknownKeys(root, TopKeys, "catalog");
 
         string version = Scalar(root, "version", "catalog");

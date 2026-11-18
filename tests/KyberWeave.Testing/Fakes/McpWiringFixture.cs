@@ -1,5 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Scaffolding;
 using Xunit;
@@ -66,6 +67,51 @@ internal static class McpWiringFixture
         }
 
         return path;
+    }
+
+    /// <summary>
+    /// The in-memory equivalent of <see cref="WriteExecutable"/>: an empty file at the name a resolver looks for, so
+    /// the existence check a declaration passes through finds it and no launch happens.
+    /// </summary>
+    /// <param name="files">The in-memory file system to write into.</param>
+    /// <param name="directory">The directory the binary is installed in.</param>
+    /// <param name="name">The binary's name, without the platform's executable suffix.</param>
+    /// <returns>The path it wrote, inside the in-memory tree.</returns>
+    public static string WriteExecutable(InMemoryFileSystem files, string directory, string name)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        files.CreateDirectory(directory);
+
+        string path = Path.Combine(directory, OperatingSystem.IsWindows() ? name + ".exe" : name);
+        files.WriteAllText(path, string.Empty);
+        return path;
+    }
+
+    /// <summary>Writes UTF-8 text to a repository-relative path in an in-memory tree, creating its directories.</summary>
+    /// <param name="files">The in-memory file system to write into.</param>
+    /// <param name="root">The repository root the relative path resolves against.</param>
+    /// <param name="relativePath">The path, written with forward slashes.</param>
+    /// <param name="content">The text to write.</param>
+    public static void WriteText(InMemoryFileSystem files, string root, string relativePath, string content)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        WriteBytes(files, root, relativePath, Encoding.UTF8.GetBytes(content));
+    }
+
+    /// <summary>Writes bytes to a repository-relative path in an in-memory tree, creating its directories.</summary>
+    /// <param name="files">The in-memory file system to write into.</param>
+    /// <param name="root">The repository root the relative path resolves against.</param>
+    /// <param name="relativePath">The path, written with forward slashes.</param>
+    /// <param name="content">The bytes to write.</param>
+    public static void WriteBytes(InMemoryFileSystem files, string root, string relativePath, byte[] content)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string? directory = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(directory))
+            files.CreateDirectory(directory);
+
+        files.WriteAllBytes(path, content);
     }
 
     /// <summary>Writes UTF-8 text to a repository-relative path, creating its directories.</summary>

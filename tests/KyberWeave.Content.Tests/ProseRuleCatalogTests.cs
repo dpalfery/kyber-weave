@@ -14,7 +14,8 @@ public sealed partial class ProseRuleCatalogTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly Lazy<ProseRuleCatalog> Catalog = new(() => ProseRuleCatalog.Load(ProseRuleCatalog.DefaultPath()));
+    private static readonly Lazy<ProseRuleCatalog> Catalog = new(
+        () => ProseRuleCatalog.Parse(Corpus.ReadText(ProseRuleCatalog.RelativePath), ProseRuleCatalog.RelativePath));
 
     [Fact]
     public void EveryRuleHasAUniqueIdAStatementAHomeAndANegativeControl()
@@ -193,22 +194,30 @@ public sealed partial class ProseRuleCatalogTests
         Assert.All(parts.Skip(1), part => Assert.StartsWith("## ", part, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The same catalog through its own loader and default path: <see cref="ProseRuleCatalog.DefaultPath"/> is the
+    /// file the opt-in grading run reads, and a wrong or missing path there is a grading run that never starts.
+    /// </summary>
     [Fact]
-    public void Load_RefusesAnUnknownKeyByName()
+    public void Load_ReadsTheCatalogTheCorpusSeamDelivers()
     {
-        string path = Path.GetTempFileName();
-        try
-        {
-            File.WriteAllText(path, "version: 1\nconfidence-floor: 0.8\nrules:\n  - id: x\n    statement: s\n    stated-in: [a.md]\n    controls: [b.md]\n    phrase: pinned\n");
+        ProseRuleCatalog loaded = ProseRuleCatalog.Load(ProseRuleCatalog.DefaultPath());
 
-            InvalidDataException error = Assert.Throws<InvalidDataException>(() => ProseRuleCatalog.Load(path));
+        Assert.Equal(
+            Catalog.Value.Rules.Select(rule => rule.Id),
+            loaded.Rules.Select(rule => rule.Id));
+        Assert.Equal(Catalog.Value.ConfidenceFloor, loaded.ConfidenceFloor);
+    }
 
-            Assert.Contains("unknown key 'phrase'", error.Message, StringComparison.Ordinal);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
+    [Fact]
+    public void Parse_RefusesAnUnknownKeyByName()
+    {
+        const string text = "version: 1\nconfidence-floor: 0.8\nrules:\n  - id: x\n    statement: s\n    stated-in: [a.md]\n    controls: [b.md]\n    phrase: pinned\n";
+
+        InvalidDataException error = Assert.Throws<InvalidDataException>(
+            () => ProseRuleCatalog.Parse(text, ProseRuleCatalog.RelativePath));
+
+        Assert.Contains("unknown key 'phrase'", error.Message, StringComparison.Ordinal);
     }
 
     private static string Read(string path) => Corpus.ReadText(path);
