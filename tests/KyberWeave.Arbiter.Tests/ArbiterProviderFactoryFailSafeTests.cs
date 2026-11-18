@@ -17,38 +17,24 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterProviderFactoryFailSafeTests : IDisposable
 {
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     /// <summary>The tools over an enabled Arbiter, so the provider factory is reached rather than skipped.</summary>
     private ArbiterTools Tools(Func<KyberWeaveConfig, IArbiterProvider> factory)
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: factory,
-            homeDirectory: () => _home.Path);
+        ArbiterHookDecisionEngine engine = _host.Engine(providerFactory: factory);
         KyberWeaveConfig configured = new()
         {
             Arbiter = ArbiterConfigDefaults.Product with { Enabled = true },
         };
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            _repo.Path,
-            engine,
-            TextWriter.Null,
-            _ => configured,
-            _ => true));
+        return _host.Tools(engine, loadConfig: _ => configured);
     }
 
     private void WriteCitedFile()
     {
-        string path = Path.Combine(_repo.Path, "docs", "guide.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "# Guide\nIntro.\n## Install\nSteps.\n");
+        _ = _host.Write(Path.Combine(_host.RepoRoot, "docs", "guide.md"), "# Guide\nIntro.\n## Install\nSteps.\n");
     }
 
     /// <summary>A factory that fails with a type outside the transport and decoding set is still a fail-safe answer.</summary>

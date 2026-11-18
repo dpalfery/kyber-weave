@@ -35,43 +35,32 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
         "| nit | `src/Gadget.cs` | 8-10 | Prefer a constant for the magic number. |\n" +
         "| warning | `src/Widget.cs:20` | 20 | The null check is missing before the dereference. |\n";
 
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     private void WriteCitedFiles()
     {
         foreach (string relative in new[] { "src/Widget.cs", "src/Gadget.cs" })
         {
-            string full = Path.Combine(_repo.Path, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+            _ = _host.Write(Path.Combine(_host.RepoRoot, relative), string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
         }
     }
 
     private ArbiterTools Tools(IArbiterProvider provider, IReadOnlyList<string> botLogins)
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => provider,
-            homeDirectory: () => _home.Path);
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            _repo.Path,
+        ArbiterHookDecisionEngine engine = _host.Engine(
+            providerFactory: _ => provider);
+        return _host.Tools(
             engine,
-            TextWriter.Null,
-            _ => new KyberWeaveConfig
+            loadConfig: _ => new KyberWeaveConfig
             {
                 Arbiter = ArbiterConfigDefaults.Product with
                 {
                     Enabled = true,
                     CommentTriage = new ArbiterCommentTriageConfig(botLogins),
                 },
-            },
-            _ => true));
+            });
     }
 
     /// <summary>A configured bot's summary yields one item per table row, each with the fields the caller needs.</summary>

@@ -23,14 +23,9 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterServeToolResponseTests : IDisposable
 {
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     /// <summary>
     /// The header block the tool synthesizes is terminated by a blank line, so a
@@ -57,7 +52,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
 
         ArbiterLedgerEvent? record = Assert.Single(
-            RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+            _host.Ledger.ReadAll());
         Assert.Equal("code-reviewer", record.Caller);
     }
 
@@ -82,7 +77,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.Contains("larger than", response, StringComparison.Ordinal);
-        Assert.Empty(RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+        Assert.Empty(_host.Ledger.ReadAll());
     }
 
     [Fact]
@@ -99,7 +94,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
             });
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
-        Assert.Empty(RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+        Assert.Empty(_host.Ledger.ReadAll());
     }
 
     [Fact]
@@ -114,7 +109,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
 
         Assert.Contains("outcome: error", response, StringComparison.Ordinal);
         Assert.Contains("at most 64", response, StringComparison.Ordinal);
-        Assert.Empty(RealArbiterState.Ledger(Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll());
+        Assert.Empty(_host.Ledger.ReadAll());
     }
 
     [Fact]
@@ -217,16 +212,16 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     [Fact]
     public void Evaluate_ReportsTheRetargetItWouldMake_AsAdvisory_AndChangesNothing()
     {
-        using TempDirectory baseline = new();
-        WriteServeTable(_repo.Path);
-        WriteServeTable(baseline.Path);
+        string baseline = ArbiterTestRoots.Under("baseline");
+        WriteServeTable(_host.RepoRoot);
+        WriteServeTable(baseline);
 
-        ArbiterTools tools = CreateRetargetTools(_repo.Path, "enforce");
+        ArbiterTools tools = CreateRetargetTools(_host.RepoRoot, "enforce");
         string response = tools.Evaluate("delegate", RetargetFacts());
 
         // The fixture must reach a retarget, or the advisory assertions below prove nothing.
         ArbiterDecisionRecord difficulty = Assert.Single(
-            RealArbiterState.Decisions(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
+            _host.State.Decisions(ArbiterDirectoryOf(_host.RepoRoot)).ReadAll(),
             record => record.Trigger == "delegate.model");
         Assert.NotNull(difficulty.Model);
         Assert.Equal("dev-hard", difficulty.Model.Profile);
@@ -239,21 +234,20 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
         Assert.Contains("opus", response, StringComparison.Ordinal);
 
         // The same serve call with model-targeting off writes the same ledger events.
-        CreateRetargetTools(baseline.Path, "off").Evaluate("delegate", RetargetFacts());
-        var retargeted = LedgerProjection(_repo.Path);
-        Assert.Equal(LedgerProjection(baseline.Path), retargeted);
+        CreateRetargetTools(baseline, "off").Evaluate("delegate", RetargetFacts());
+        var retargeted = LedgerProjection(_host.RepoRoot);
+        Assert.Equal(LedgerProjection(baseline), retargeted);
 
         // No model field on the pre event names a retarget: it is rendered, caller or unknown.
         Assert.All(
-            RealArbiterState.Ledger(ArbiterDirectoryOf(_repo.Path)).ReadAll(),
+            _host.State.Ledger(ArbiterDirectoryOf(_host.RepoRoot)).ReadAll(),
             record => Assert.NotEqual("retarget", record.ModelSource));
     }
 
     /// <summary>Writes the serve harness's model targets table, so the advisory has a profile and a token to name.</summary>
-    private static void WriteServeTable(string repoRoot)
+    private void WriteServeTable(string repoRoot)
     {
         string directory = ArbiterDirectoryOf(repoRoot);
-        Directory.CreateDirectory(directory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             "serve",
@@ -266,7 +260,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                 ["dev-hard"] = "opus",
             },
             new Dictionary<string, ArbiterModelTargetsAgent>(StringComparer.Ordinal));
-        File.WriteAllText(Path.Combine(directory, "model-targets.serve.json"), JsonSerializer.Serialize(table));
+        _ = _host.Write(Path.Combine(directory, "model-targets.serve.json"), JsonSerializer.Serialize(table));
     }
 
     private static ArbiterFacts RetargetFacts() => new()
@@ -280,8 +274,8 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     private static string ArbiterDirectoryOf(string repoRoot) => Path.Combine(repoRoot, "artifacts", "arbiter");
 
     /// <summary>The ledger's decision-relevant fields, without ids and timestamps, in write order.</summary>
-    private static List<(string Phase, string? Trigger, string? Target, string? Caller, string? CallerSource, string? ModelProfile, string? ModelToken, string? ModelSource)> LedgerProjection(string repoRoot) =>
-        RealArbiterState.Ledger(ArbiterDirectoryOf(repoRoot)).ReadAll()
+    private List<(string Phase, string? Trigger, string? Target, string? Caller, string? CallerSource, string? ModelProfile, string? ModelToken, string? ModelSource)> LedgerProjection(string repoRoot) =>
+        _host.State.Ledger(ArbiterDirectoryOf(repoRoot)).ReadAll()
             .Select(record => (record.Phase, record.Trigger, record.Target, record.Caller, record.CallerSource, record.ModelProfile, record.ModelToken, record.ModelSource))
             .ToList();
 
@@ -302,9 +296,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     /// <summary>A serve tools instance over its own repository, with the difficulty and scope rules live and the given mode.</summary>
     private ArbiterTools CreateRetargetTools(string repoRoot, string mode)
     {
-        Directory.CreateDirectory(Path.Combine(repoRoot, ".kyber-weave"));
-        File.WriteAllText(
-            Path.Combine(repoRoot, ".kyber-weave", "kyber-weave.yml"),
+        _ = _host.WriteRepoConfig(
             "arbiter:\n" +
             "  enabled: true\n" +
             "  provider:\n" +
@@ -316,31 +308,24 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                 "\n",
                 ArbiterExpectedRuleIds.All
                     .Where(id => id is not ("KW-ARB-DIFFICULTY-001" or "KW-ARB-SCOPE-002"))
-                    .Select(id => $"    - id: {id}\n      enabled: false")) + "\n");
+                    .Select(id => $"    - id: {id}\n      enabled: false")) + "\n",
+            repoRoot);
 
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
+        ArbiterHookDecisionEngine engine = _host.Engine(
             providerFactory: _ => new FakeArbiterProvider
             {
                 Answers = { ["KW-ARB-SCOPE-002"] = "within-task", ["KW-ARB-DIFFICULTY-001"] = "hard" },
                 Scores = { ["KW-ARB-DIFFICULTY-001"] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
             },
-            planReaderFactory: _ => new RecordedDifficulty(),
-            homeDirectory: () => _home.Path);
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            repoRoot,
-            engine,
-            TextWriter.Null,
-            ArbiterTestServices.LoadHostConfig,
-            _ => true));
+            planReaderFactory: _ => new RecordedDifficulty());
+        return _host.Tools(engine, repoRoot);
     }
 
     private ArbiterTools CreateTools(
         string provider = "    kind: none\n",
         Func<KyberWeaveConfig, bool>? keyResolved = null)
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
-        File.WriteAllText(
-            Path.Combine(_repo.Path, ".kyber-weave", "kyber-weave.yml"),
+        _ = _host.WriteRepoConfig(
             "arbiter:\n" +
             "  enabled: true\n" +
             "  provider:\n" +
@@ -351,14 +336,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                 ArbiterExpectedRuleIds.All.Select(
                     id => $"    - id: {id}\n      enabled: false")) + "\n");
 
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => FakeArbiterProvider.None(),
-            homeDirectory: () => _home.Path);
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            _repo.Path,
-            engine,
-            TextWriter.Null,
-            ArbiterTestServices.LoadHostConfig,
-            keyResolved ?? (_ => true)));
+        ArbiterHookDecisionEngine engine = _host.Engine(providerFactory: _ => FakeArbiterProvider.None());
+        return _host.Tools(engine, keyResolved: keyResolved);
     }
 }

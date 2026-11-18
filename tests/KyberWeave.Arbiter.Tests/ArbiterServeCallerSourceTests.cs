@@ -19,20 +19,13 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterServeCallerSourceTests : IDisposable
 {
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     private ArbiterTools CreateTools()
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
-        File.WriteAllText(
-            Path.Combine(_repo.Path, ".kyber-weave", "kyber-weave.yml"),
+        _ = _host.WriteRepoConfig(
             "arbiter:\n" +
             "  enabled: true\n" +
             "  provider:\n" +
@@ -43,15 +36,8 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
                 ArbiterExpectedRuleIds.All.Select(
                     id => $"    - id: {id}\n      enabled: false")) + "\n");
 
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => FakeArbiterProvider.None(),
-            homeDirectory: () => _home.Path);
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            _repo.Path,
-            engine,
-            TextWriter.Null,
-            ArbiterTestServices.LoadHostConfig,
-            _ => true));
+        ArbiterHookDecisionEngine engine = _host.Engine(providerFactory: _ => FakeArbiterProvider.None());
+        return _host.Tools(engine);
     }
 
     [Fact]
@@ -70,8 +56,7 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
 
         Assert.Contains("outcome: allow", response, StringComparison.Ordinal);
 
-        IReadOnlyList<ArbiterLedgerEvent> events = RealArbiterState.Ledger(
-            Path.Combine(_repo.Path, "artifacts", "arbiter")).ReadAll();
+        IReadOnlyList<ArbiterLedgerEvent> events = _host.Ledger.ReadAll();
         ArbiterLedgerEvent? record = Assert.Single(events);
         Assert.Equal("serve", record.Harness);
         Assert.Equal("conductor", record.Caller);

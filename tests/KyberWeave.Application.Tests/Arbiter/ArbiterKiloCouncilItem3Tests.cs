@@ -41,11 +41,9 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
         new HashSet<string>(StringComparer.Ordinal) { "sonnet", "opus", "haiku", "fable" },
         "https://code.claude.com/docs/en/sub-agents");
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _repo.Dispose();
-
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    public void Dispose() => _host.Dispose();
 
     /// <summary>
     /// The plan facts the evaluator reads, with the rating the task file records: under the one remaining roster
@@ -87,11 +85,11 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
-    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => ArbiterTestServices.Engine(
+    private ArbiterHookDecisionEngine Engine(IArbiterProvider provider) => _host.Engine(
         providerFactory: _ => provider,
         gitFactsFactory: _ => new NoGitFacts(),
         planReaderFactory: _ => new PlanStub(),
-        homeDirectory: () => _repo.Path);
+        homeDirectory: () => _host.RepoRoot);
 
     private sealed class NoGitFacts : IArbiterGitFacts
     {
@@ -99,14 +97,13 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
     }
 
     private HookContext Context() => new(
-        _repo.Path,
+        _host.RepoRoot,
         () => "decision-27",
         TextWriter.Null,
         ModelOverride: ClaudeOverride);
 
     private void WriteTable()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             "claude",
@@ -122,8 +119,8 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
             {
                 ["dev-medium"] = new("general", "sonnet"),
             });
-        File.WriteAllText(
-            Path.Combine(ArbiterDirectory, "model-targets.claude.json"),
+        _ = _host.Write(
+            Path.Combine(_host.ArbiterDirectory, "model-targets.claude.json"),
             JsonSerializer.Serialize(table));
     }
 

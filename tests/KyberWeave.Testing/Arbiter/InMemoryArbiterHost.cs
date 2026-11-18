@@ -24,7 +24,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// in-memory credential store. A command test builds one and runs commands against it, so nothing touches the disk,
 /// the process or the host's console.
 /// </summary>
-internal sealed class InMemoryArbiterHost : IDisposable
+internal sealed partial class InMemoryArbiterHost : IDisposable
 {
     private readonly ArbiterTestHost _host;
     private readonly Action<IServiceCollection>? _configure;
@@ -67,6 +67,8 @@ internal sealed class InMemoryArbiterHost : IDisposable
         _ = services.AddSingleton<IProcessExecutor>(Processes);
         _ = services.AddSingleton<IProcessRunner>(Runner);
         _ = services.AddSingleton<ICredentialStore>(Credentials);
+        _ = services.AddSingleton<IGitRepositoryFacts>(Git);
+        _ = services.AddSingleton<IArbiterHttpHandlers>(new FakeArbiterHttpHandlers(UnscriptedHttp));
         _ = services.AddSingleton<IFileStatReader>(new InMemoryFileStatReader(Files));
         _ = services.AddSingleton<IBoundedFileReader>(new InMemoryBoundedFileReader(Files));
         _configure?.Invoke(services);
@@ -108,6 +110,9 @@ internal sealed class InMemoryArbiterHost : IDisposable
 
     /// <summary>Gets the process runner a test scripts.</summary>
     internal ScriptedProcessRunner Runner { get; } = new();
+
+    /// <summary>Gets the git facts: no repository, no worktrees, unless a test names them.</summary>
+    internal FakeGitRepositoryFacts Git { get; } = new();
 
     /// <summary>Gets the operating-system credential store in memory.</summary>
     internal FakeCredentialStore Credentials { get; } = new();

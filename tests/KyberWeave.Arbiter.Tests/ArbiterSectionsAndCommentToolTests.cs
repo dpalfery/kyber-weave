@@ -24,33 +24,20 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterSectionsAndCommentToolTests : IDisposable
 {
-    private readonly TempDirectory _repo = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _repo.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
     private ArbiterTools Tools()
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null },
-            homeDirectory: () => _home.Path);
-        return ArbiterTestServices.Tools(new ArbiterServeContext(
-            _repo.Path,
-            engine,
-            TextWriter.Null,
-            ArbiterTestServices.LoadHostConfig,
-            _ => true));
+        ArbiterHookDecisionEngine engine = _host.Engine(
+            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null });
+        return _host.Tools(engine);
     }
 
     private string WriteDocument()
     {
-        string path = Path.Combine(_repo.Path, "docs", "guide.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, "# Guide\nIntro.\n## Install\nSteps.\n## Usage\nRun it.\n");
+        _ = _host.Write(Path.Combine(_host.RepoRoot, "docs", "guide.md"), "# Guide\nIntro.\n## Install\nSteps.\n## Usage\nRun it.\n");
         return "docs/guide.md";
     }
 
