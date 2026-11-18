@@ -196,7 +196,7 @@ public sealed class TaskPromptService(
         string? priorResults = null;
         if (Clean(request.PriorResultsPath) is { } priorPath)
         {
-            if (!ScratchFile(root, priorPath, out string absolute))
+            if (!ScratchFile(files, root, priorPath, out string absolute))
             {
                 return TaskPromptResult.NotBuilt(
                     $"No prompt: the prior-results file '{priorPath}' is outside this run's scratch area. " +
@@ -279,24 +279,27 @@ public sealed class TaskPromptService(
     /// <summary>
     /// Whether the path names a file inside the run's scratch area, the only place a prior-results file is read from.
     /// </summary>
+    /// <param name="files">The file system the read goes through, so the check and the read see the same links.</param>
     /// <param name="root">The repository root.</param>
     /// <param name="path">The path the dispatch named, relative to the root or absolute.</param>
-    public static bool IsScratchFile(string root, string path) => ScratchFile(root, path, out _);
+    public static bool IsScratchFile(IFileSystem files, string root, string path) =>
+        ScratchFile(files, root, path, out _);
 
     /// <summary>
     /// Resolves a prior-results path and reports whether it stays inside the run's scratch area. Only that area is
     /// readable: the dispatch header names a file, and a header must not turn any readable file into prompt text.
     /// </summary>
+    /// <param name="files">The file system links are resolved through.</param>
     /// <param name="root">The repository root.</param>
     /// <param name="path">The path the dispatch named, relative to the root or absolute.</param>
     /// <param name="absolute">The resolved path, when it is inside the scratch area.</param>
-    private static bool ScratchFile(string root, string path, out string absolute)
+    private static bool ScratchFile(IFileSystem files, string root, string path, out string absolute)
     {
         // The check is on the resolved path: a symlink lying inside the scratch area is a window onto its target,
         // and that target is what a read would return to the worker.
-        absolute = RealPath(Path.GetFullPath(path, root));
+        absolute = RealPath(files, Path.GetFullPath(path, root));
         string scratch = Path.TrimEndingDirectorySeparator(
-            RealPath(Path.GetFullPath(Path.Combine(root, ScratchFolder))));
+            RealPath(files, Path.GetFullPath(Path.Combine(root, ScratchFolder))));
         return string.Equals(absolute, scratch, StringComparison.Ordinal)
             ? false
             : absolute.StartsWith(scratch + Path.DirectorySeparatorChar, StringComparison.Ordinal);
@@ -306,8 +309,9 @@ public sealed class TaskPromptService(
     /// The path with every symlinked component resolved, so a check made on it describes the file a read returns.
     /// A component that does not exist is kept as written; the read then reports it as unreadable.
     /// </summary>
+    /// <param name="files">The file system links are read from.</param>
     /// <param name="full">An absolute path.</param>
-    private static string RealPath(string full)
+    private static string RealPath(IFileSystem files, string full)
     {
         string root = Path.GetPathRoot(full) ?? string.Empty;
         string current = root;
@@ -316,14 +320,13 @@ public sealed class TaskPromptService(
             StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
-            FileSystemInfo info = Directory.Exists(current) ? new DirectoryInfo(current) : new FileInfo(current);
-            if (!info.Exists || info.LinkTarget is null)
+            if (files.GetLinkTarget(current) is not { } linkTarget)
             {
                 continue;
             }
 
-            current = info.ResolveLinkTarget(returnFinalTarget: true)?.FullName
-                ?? Path.GetFullPath(info.LinkTarget, Path.GetDirectoryName(current) ?? root);
+            current = files.GetFinalLinkTarget(current)
+                ?? Path.GetFullPath(linkTarget, Path.GetDirectoryName(current) ?? root);
         }
 
         return current;
