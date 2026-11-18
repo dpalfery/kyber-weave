@@ -12,6 +12,26 @@ public sealed class SquadFileSystemPathSemantics : IFileSystemPathSemantics
     /// <summary>The stateless filesystem answer, shared by the adapters that need one.</summary>
     public static SquadFileSystemPathSemantics Instance { get; } = new();
 
+    /// <summary>
+    ///     The parent listings one operation may reuse. Null outside a scope, so the ordinary answer is
+    ///     always read from the filesystem.
+    /// </summary>
+    private static readonly AsyncLocal<Dictionary<string, FileSystemInfo[]>?> ScopedListings = new();
+
+    /// <summary>
+    ///     Reuses the listings a preflight reads while it inspects a tree it does not change. Scoped to
+    ///     the caller: the cache dies with the returned scope, so no answer outlives the operation that
+    ///     read it. A caller must not mutate the tree while the scope is open — the preflight plan
+    ///     builders are the only callers, and they only read.
+    /// </summary>
+    /// <returns>The scope that restores the previous listing cache when it is disposed.</returns>
+    internal static IDisposable BeginListingScope()
+    {
+        Dictionary<string, FileSystemInfo[]>? prior = ScopedListings.Value;
+        ScopedListings.Value = new Dictionary<string, FileSystemInfo[]>(StringComparer.Ordinal);
+        return new ListingScope(prior);
+    }
+
     /// <summary>The canonical physical path of an existing deployment root.</summary>
     /// <param name="targetRoot">The directory a deployment is bound to.</param>
     /// <returns>The canonical spelling of the directory.</returns>
@@ -105,11 +125,50 @@ public sealed class SquadFileSystemPathSemantics : IFileSystemPathSemantics
         if (!Directory.Exists(parentPath))
             return null;
 
-        FileSystemInfo[] entries = new DirectoryInfo(parentPath).EnumerateFileSystemInfos().ToArray();
-        FileSystemInfo? exact = entries.FirstOrDefault(entry =>
-            string.Equals(entry.Name, segment, StringComparison.Ordinal));
-        if (exact is not null)
-            return exact;
+        Dictionary<string, FileSystemInfo[]>? scope = ScopedListings.Value;
+        if (scope is not null)
+            return ResolveFromEntries(parentPath, ListingsFor(scope, parentPath), segment);
+
+        // Outside a scope the walk stops as soon as the exact spelling is found, so a directory with
+        // thousands of entries is not materialised when the caller's spelling is already the disk's.
+        foreach (FileSystemInfo entry in new DirectoryInfo(parentPath).EnumerateFileSystemInfos())
+        {
+            if (string.Equals(entry.Name, segment, StringComparison.Ordinal))
+                return entry;
+        }
+
+        string lexicalCandidate = Path.Combine(parentPath, segment);
+        if (!Directory.Exists(lexicalCandidate) && !File.Exists(lexicalCandidate))
+            return null;
+
+        return ResolveFromEntries(
+            parentPath,
+            new DirectoryInfo(parentPath).EnumerateFileSystemInfos().ToArray(),
+            segment);
+    }
+
+    private static FileSystemInfo[] ListingsFor(
+        Dictionary<string, FileSystemInfo[]> scope,
+        string parentPath)
+    {
+        if (scope.TryGetValue(parentPath, out FileSystemInfo[]? entries))
+            return entries;
+
+        entries = new DirectoryInfo(parentPath).EnumerateFileSystemInfos().ToArray();
+        scope[parentPath] = entries;
+        return entries;
+    }
+
+    private static FileSystemInfo? ResolveFromEntries(
+        string parentPath,
+        FileSystemInfo[] entries,
+        string segment)
+    {
+        foreach (FileSystemInfo entry in entries)
+        {
+            if (string.Equals(entry.Name, segment, StringComparison.Ordinal))
+                return entry;
+        }
 
         string lexicalCandidate = Path.Combine(parentPath, segment);
         if (!Directory.Exists(lexicalCandidate) && !File.Exists(lexicalCandidate))
@@ -119,6 +178,11 @@ public sealed class SquadFileSystemPathSemantics : IFileSystemPathSemantics
                 string.Equals(entry.Name, segment, StringComparison.OrdinalIgnoreCase))
             .ToArray();
         return aliases.Length == 1 ? aliases[0] : null;
+    }
+
+    private sealed class ListingScope(Dictionary<string, FileSystemInfo[]>? prior) : IDisposable
+    {
+        public void Dispose() => ScopedListings.Value = prior;
     }
 
     private static bool HasPathPrefix(string root, string candidate)

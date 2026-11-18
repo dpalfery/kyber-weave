@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-17
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -24,10 +24,49 @@ would otherwise have to re-argue in review.
 
 ### Stack
 
-**xUnit**, one project covering all three artifact classes. The suite is fast — the whole
-run stays well under a second — and it should stay that way.
+**xUnit**, split into three projects:
+
+- `tests/KyberWeave.Tests` — the unit suite. The full run must finish in 120 seconds or less
+  ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)), and
+  the speed rules below are how a test keeps it there.
+- `tests/KyberWeave.Integration.Tests` — the safety net: a test that performs a real Squad
+  deployment, starts a real program, or needs a file system beyond its own scratch folder.
+  It runs in CI and the review council, not in the unit time budget.
+- `tests/KyberWeave.Testing` — the helpers both test assemblies use (the temp root, the
+  durability switch, prepared installs, release fakes, console capture, path helpers and
+  shared fixtures). It holds no tests.
+
+The class lists `tests/KyberWeave.Tests` and `tests/KyberWeave.Integration.Tests` both keep the
+namespace root they use for routing (`KyberWeave.Tests` and `KyberWeave.Integration.Tests`), so a
+fully-qualified class name names one test in one project.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
+
+### Which project a test belongs in
+
+One rule, and it is checkable by reading the test:
+
+- **`tests/KyberWeave.Integration.Tests`** holds a test that performs a real Squad deployment, starts
+  a real program (git, the CLI, `dotnet`, `sqlite3`, node, bun), or needs a real file system beyond
+  its own small scratch folder.
+- **`tests/KyberWeave.Tests`** holds everything else. Its full run is the 120-second unit suite, so
+  a real deployment or a real child program in it is a defect, not a slow test to tolerate.
+
+**New behaviour gets an in-memory unit test written against an interface.** If the behaviour depends
+on the disk, the clock or another program, the seam is an interface the test replaces: a file-system
+or executor abstraction, a fake release source, a fake renderer. The unit test proves the decision
+through that seam, and the integration suite proves the real implementation once, end to end.
+
+**Code that can only be tested through the real disk or a real program is a design gap to raise, not
+a reason to add a slow test to the unit project.** Introduce the interface first (or widen an existing
+one), write the unit test against it, and keep the real-disk or real-program test in the integration
+project. A new test in the unit project that reaches the real disk or spawns a process will be moved
+at review.
+
+The integration project is the safety net: CI runs it on every pull request in its own job, and a
+developer agent does not run it. The review council's `integration-test` gate is marked
+`full-suite: true`, so a developer's `review gates` run refuses it (`KW-REVIEW-033`) the same way it
+refuses the unit `test` gate.
 
 ### A test name is an assertion
 
@@ -166,6 +205,27 @@ Tests run concurrently across classes. Never introduce hidden cross-test couplin
 - **Serial collections policy**: xUnit `DisableParallelization = true` (e.g. `ScaleAcceptanceCollection`) is reserved strictly for benchmarks monitoring thread allocations (`GC.GetAllocatedBytesForCurrentThread()`) or hard execution-time ceilings across high-volume iterations (such as 10,000 DocGraph claims). Never use collection serialization to mask shared static mutable state.
 - **Parallel repository-wide scans**: Whole-repository assertion sweeps (such as `UpstreamSeveranceTests`) partition tracked file sets across all available cores using `Parallel.ForEach` with thread-safe collectors (`ConcurrentBag<string>`) to avoid multi-second single-threaded disk I/O bottlenecks.
 
+### The suite stays inside its time budget
+
+Each rule is one sentence a reviewer can check, and the measurement after it is why the rule
+exists. The suite has become slow more than once; these are the causes that made it slow.
+
+- **A class that does heavy work stays small, split by theme** — the runner parallelises across
+  test classes and never inside one, so a class of 513 tests summed to 390 s and pinned the whole
+  run.
+- **Expensive setup — an installed deployment, a git repository, the agent corpus — is built once
+  per class and copied per test, never rebuilt per test** — a real install costs 150–250 ms and a
+  one-target deployment commit about 1.5 s.
+- **A test works only inside the test temp root the test project provides, in its own folder, and
+  removes it** — `TempDirectory` creates `kw-export-<guid>` under that root and deletes it on
+  dispose, and no test writes directly in the system temp folder or lists a shared folder.
+- **No sleeps and no fixed waits — wait on the condition — and no real process unless the test is
+  about that process, with one end-to-end test per behaviour.**
+- **Product code under test must not list a whole directory to find one entry** — a path check
+  that did cost 6.7 ms per call on a temp root of 8,543 entries, and grew as the run added folders.
+- **A single test over one second states why in a comment.**
+- **Whoever adds or changes tests reports the time of the classes they touched.**
+
 ### Release sources and immutable corpus fixtures
 
 Tests avoid redundant disk extraction, file copying, and YAML/Markdown parsing through focused test fixtures:
@@ -183,18 +243,21 @@ helper `internal` is not a reason to test it only through a command.
 
 ### Fixtures
 
+The shared helpers live in `tests/KyberWeave.Testing` and are referenced by both test projects.
+Two helpers that need a real disk tree live with their callers in
+`tests/KyberWeave.Integration.Tests`: `CodeGraphFixtureDb` (a real sqlite index, for adapter parity only)
+and `TestGitRepositoryTemplate` (a pre-seeded git repository copied without spawning OS child processes).
+
 | Helper | For |
 |---|---|
 | `TempDirectory` | A disposable scratch directory. Implement `IDisposable` on the test class and dispose it. |
 | `DocFixture` | A documentation corpus on disk — `.WithCatalog()`, `.WithSourceRoot()`, `.Write()`, `.Load()` |
 | `FakeCodeGraphResolver` | `.WithSymbols(...)` for deterministic symbol and route resolution |
-| `CodeGraphFixtureDb` | A real sqlite index, for adapter parity only |
 | `KyberWeaveTestPaths` | Locates the repository root by walking up to `KyberWeave.sln` |
 | `ProcessConsoleCapture` | Lock-free, `AsyncLocal` console capture isolating stdout, stderr, and Spectre console width per async context |
 | `TestSquadCorpus` | Thread-safe, lazy-cached immutable canonical `SquadSource` and target baseline renders |
 | `SquadRenderedOutput` | Reading rendered Squad files back: frontmatter split, required scalars, shared and suppressed identities |
 | `SyntheticValidSquadReleaseSource` | Lightweight ~15-file valid Squad source tree for state, lock, receipt, and lifecycle tests |
-| `TestGitRepositoryTemplate` | Pre-initialized git repository template directory copied without spawning OS child processes |
 
 ### Tests that start processes
 
@@ -269,12 +332,22 @@ format check, then report. Run these `dotnet` commands directly from the reposit
 **No dev agent runs the full test suite**: the review council's `test` gate and CI run it. Whoever
 runs it, person or agent, times it and reports the number: it must finish in 120 seconds or less
 ([the .NET test budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)).
+The integration project (`tests/KyberWeave.Integration.Tests`) is not part of that budget: CI and the
+council's `integration-test` gate run it, and a developer agent runs only the integration classes its
+change touches when it is asked to.
 
 ```bash
 dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
+```
+
+A class in the integration project builds and runs the same way, against its own project:
+
+```bash
+dotnet build tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj -c Release
+dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 ```
 
 The build comes first and `--no-build` depends on it: the same build produced the binaries the
@@ -310,6 +383,7 @@ A filter that matches nothing exits 8 ("Zero tests ran"). Outside a Kyber-Squad 
 `scripts/fast-loop.sh --class 'KyberWeave.Tests.<Area>*'` does the same for one area and builds
 first. Inside a run, the task packet names the command.
 
+
 ### Limits of the guard
 
 The guard is best effort. It reads the command line and whether stdin is a terminal, so it does not stop everything an agent can do:
@@ -342,3 +416,68 @@ When the build used `--artifacts-path <dir>` with `-c Release`, the direct runne
 - **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
 - **Reserve the full suite for the review council and CI**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it on the integrated head in the first full review, and for CI. No dev agent runs it, and a cross-cutting change is no exception. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on), run a targeted set: the classes that reference what changed or, for a change every class depends on, a few representative classes. Name what you did not run; the council and CI cover it.
 - **The failing run is the task's own**: In test-first mode the worker that writes a task's code writes its tests first and runs its task gate with `--red` before implementing, then runs the gate again once the tests pass; the two reports are the proof ([ADR 0076](../../adr/0076-test-first-is-one-worker-per-task.md)). Never stash or revert work to fake a failing run.
+
+The speed rules in [the suite stays inside its time budget](#the-suite-stays-inside-its-time-budget)
+are checked here, in the same order:
+
+- **The classes you touched report their time.** State each one's time from the run in your report.
+- **A class you add or enlarge is small and split by theme**, so it does not hold a large share of
+  the suite's serial time.
+- **Expensive setup is a class fixture the tests copy**, not work each test repeats.
+- **Every test works in its own folder under the test temp root and removes it.**
+- **No sleep, no fixed wait, and no real process the test is not about.**
+- **No test makes product code list a directory to find one entry.**
+- **A test over one second gives its reason in a comment.**
+
+### Where the tests put their files, and the optional RAM disk
+
+Every test writes under one per-process root, `<base>/kw-<checkout-key>/<pid>`, because
+`TestTempRoot` redirects `TMPDIR` for the test process and every child it spawns. On macOS the
+base is `/private/var/folders/<xx>/<hash>/kw-test-temp`, a folder the tests create beside the
+per-user temp directory (`getconf DARWIN_USER_TEMP_DIR`). That tree is the location this
+machine's endpoint-security software (Microsoft Defender) skips, and the folder is beside the
+shared temp directory rather than inside it: canonicalising a deployment path lists every
+ancestor, and on this machine the temp directory held 1,706 entries against 5 in its parent, so
+leaving the root out of it takes that listing off every install. Linux and the rest use `/tmp`,
+which Defender scans.
+
+Measured on the same 651 tests (`ArbiterInstallCommandTests`, the eight `SquadDeploymentState`
+classes and `SquadGlobalRootTests`, now in the integration project), Defender real-time
+protection off, load average 6.5–8.6, runs back to back:
+
+| Base | Run 1 | Run 2 |
+|---|---|---|
+| per-user temp directory (`/var/folders/<xx>/<hash>/T`) | 23.35 s | 22.38 s |
+| `kw-test-temp` beside it | 19.23 s | 19.43 s |
+
+The slowest single test in those runs,
+`ArbiterInstallCommandTests.Install_ThreeGlobalTargets…`, took 9.61 s and 9.38 s under the temp
+directory and 7.56 s and 7.58 s under its sibling. The cache folder that
+`getconf DARWIN_USER_CACHE_DIR` returns is a third candidate, rejected on entry count: it held
+693 entries against 5 in the per-user folder.
+
+`KW_TEST_TEMP_ROOT=<absolute path>` moves the base while keeping the `kw-<key>/<pid>` shape, so a
+run still cannot see another checkout's or another process's files. A relative path, or one the
+control pipe cannot fit, fails the run instead of silently measuring somewhere else.
+
+**A RAM disk, for a heavy local run.** Guidance, not a script: create the volume, point the root at
+it, run, then eject it. This example is 8 GiB (16,777,216 sectors of 512 bytes):
+
+```bash
+diskutil erasevolume HFS+ KWTestRam "$(hdiutil attach -nomount ram://16777216)"
+export KW_TEST_TEMP_ROOT=/Volumes/KWTestRam
+# ... run the tests ...
+diskutil eject /Volumes/KWTestRam
+```
+
+Measured on 651 tests with `/tmp` as the base, a RAM disk is about 26 % faster. That comparison
+predates the default base change above and has not been repeated against `kw-test-temp`. Ejecting
+discards everything on it, so it needs no cleanup.
+
+**Why the path must stay short.** The test runner puts its control pipe at
+`$TMPDIR/MONITORTOHOST_<32 hex>`, and a Unix domain socket path is limited to 103 bytes, so a root
+that still carries that pipe may be at most 56 characters. The default macOS root is about 85
+characters, so `TestTempRoot` moves the pipe to `/tmp` through
+`TESTINGPLATFORM_PIPE_DIRECTORY`. An override is held to the same limit and fails with the budget
+in its message unless you set `TESTINGPLATFORM_PIPE_DIRECTORY` yourself;
+`/Volumes/KWTestRam/kw-<16 hex>/<pid>` is about 44 characters and fits.

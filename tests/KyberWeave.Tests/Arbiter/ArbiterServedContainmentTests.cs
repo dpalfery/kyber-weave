@@ -132,7 +132,7 @@ public sealed class ArbiterServedContainmentTests : IDisposable
             }));
 
         Assert.Equal(1, execution.Result);
-        Assert.Contains(OutsideMessageStem, execution.Output, StringComparison.Ordinal);
+        ConsoleOutputAssert.ContainsUnwrapped(OutsideMessageStem, execution.Output);
         Assert.DoesNotContain("decision", execution.Output, StringComparison.OrdinalIgnoreCase);
     }
 }

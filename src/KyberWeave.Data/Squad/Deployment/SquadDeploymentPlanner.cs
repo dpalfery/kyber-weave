@@ -26,6 +26,9 @@ public static class SquadDeploymentPlanner
         IReadOnlyList<SquadRenderedBlock>? blocks = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
+        // The preflight reads the tree and writes nothing, so its repeated walks over the same
+        // parent directories share one listing for the length of this call.
+        using IDisposable listingScope = SquadFileSystemPathSemantics.BeginListingScope();
         SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(targetRoot, Semantics);
         string root = identity.PhysicalPath;
         IReadOnlyList<NormalizedDeploymentFile> normalizedFiles = NormalizeRenderedFiles(
@@ -124,6 +127,9 @@ public static class SquadDeploymentPlanner
         IReadOnlyList<SquadRenderedBlock>? blocks = null)
     {
         ValidateCommon(targetRoot, squadLock, renderedFiles, degradations, timeProvider);
+        // The preflight reads the tree and writes nothing, so its repeated walks over the same
+        // parent directories share one listing for the length of this call.
+        using IDisposable listingScope = SquadFileSystemPathSemantics.BeginListingScope();
         ArgumentNullException.ThrowIfNull(previousReceipt);
         EnsureReceiptScope(previousReceipt, scope);
 
@@ -371,6 +377,11 @@ public static class SquadDeploymentPlanner
         ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         ArgumentNullException.ThrowIfNull(receipt);
         EnsureReceiptScope(receipt, scope);
+
+        // The preflight reads the tree and writes nothing, so its repeated walks over the same
+        // parent directories share one listing for the length of this call.
+        using IDisposable listingScope = SquadFileSystemPathSemantics.BeginListingScope();
+
 
         // Resolved once, from the receipt being uninstalled, and used both to walk its files
         // below and to carry on the plan instance so SquadTransaction resolves the same way at

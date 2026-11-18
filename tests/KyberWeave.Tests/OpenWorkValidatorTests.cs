@@ -65,7 +65,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void APlanStillInThePlansFolderIsKWDOCLIFECYCLE003()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write("6-Docs/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"));
 
@@ -85,7 +85,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ASpecificationFolderIsOneFindingPointingAtItsReadme()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SpecIndex, Index("specs/index"))
             .Write("6-Docs/specs/tray/README.md", Index("specs/tray/index"))
             .Write("6-Docs/specs/tray/requirements.md", Work("specs/tray/requirements", "requirements"))
@@ -103,7 +103,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void TheIndexesAloneAreNotOpenWork()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write(SpecIndex, Index("specs/index"));
 
@@ -116,7 +116,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ArchivedPlansAndSpecificationsAreClosed()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write(SpecIndex, Index("specs/index"))
             .Write("6-Docs/archive/plans/2026-09-14-kilo.md", Work("plans/2026-09-14-kilo", "plan"))
@@ -138,7 +138,7 @@ public sealed class OpenWorkValidatorTests
         {
             Additions = [new ConfigRegEntry(ConfigRegConfig.PlanIndexProperty, "6-Docs/README.md")]
         });
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write("6-Docs/README.md", Index("index"))
             .Write("6-Docs/guide.md", Work("guide", "reference"))
             .Write("6-Docs/2026-09-14-kilo.md", Work("2026-09-14-kilo", "plan"));
@@ -158,7 +158,7 @@ public sealed class OpenWorkValidatorTests
     [InlineData(true, 1)]
     public void DocsValidateReportsOpenWorkOnlyWithMergeReady(bool mergeReady, int expectedExit)
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(PlanIndex, """
                 ---
                 id: plans/index
@@ -202,7 +202,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ALeftoverTaskFileFailsMergeReadyAsKWDOCCLIFECYCLE005()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(PlanIndex, """
                 ---
                 id: plans/index
@@ -244,7 +244,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ATaskFileArchivedWithItsSpecificationIsStillCaught()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(SpecIndex, Index("specs/index"))
             .Write(
                 "6-Docs/archive/specs/tray/tasks.yml",
@@ -264,7 +264,7 @@ public sealed class OpenWorkValidatorTests
     [Fact]
     public void ATaskFileInASecondaryDocsRootIsCaught()
     {
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.Create().WithCatalog()
             .Write(PlanIndex, Index("plans/index"))
             .Write(
                 "secondary/plans/2026-09-14-kilo.tasks.yml",

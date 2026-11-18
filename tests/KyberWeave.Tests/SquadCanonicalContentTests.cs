@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -162,7 +163,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadFullProductTreeContainsExactlyApprovedAgentIdentities()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.Equal(ExpectedAgents, source.Agents.Select(agent => agent.Name));
         Assert.Equal(ExpectedAgents, source.Bundle.AgentNames.Order(StringComparer.Ordinal));
@@ -174,7 +175,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadFullProductTreeContainsExactlyApprovedSkillIdentities()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.Equal(ExpectedSkills, source.Skills.Select(skill => skill.Name));
         Assert.Equal(ExpectedSkills, source.Bundle.SkillNames.Order(StringComparer.Ordinal));
@@ -186,7 +187,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadFullProductTreeExcludesKyberWeaveDocsSkill()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "kyber-weave-docs");
         Assert.False(Directory.Exists(Path.Combine(ProductRoot, "skills", "kyber-weave-docs")));
@@ -206,7 +207,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadFullProductTreeCarriesTheSharedExecutionSkillBothEntryPointsLoad()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         bool loaded = source.Skills.Any(skill => skill.Name == "delivery-execution");
         bool selected = source.Bundle.SkillNames.Contains("delivery-execution", StringComparer.Ordinal);
 
@@ -241,7 +242,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadFullProductTreeContainsNoSecondBrainInBundleOrRoster()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         string bundleText = File.ReadAllText(Path.Combine(ProductRoot, "bundles", "full.yml"));
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "second-brain");
@@ -507,7 +508,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadAgentSkillIntersectionHasPinnedSharedAndPrefixedFallbackIdentities()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         Dictionary<string, SquadSkill> skillsByName =
             source.Skills.ToDictionary(skill => skill.Name, StringComparer.Ordinal);
         string[] intersections = source.Agents
@@ -535,7 +536,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadConductorHasOneUnoccupiedFallbackIdentity()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "conductor");
@@ -549,7 +550,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadUnifiedOrchestrationStackContainsNoVersionedIdentityOrAlias()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         (string Alias, string Canonical)[] aliases = source.Agents
             .SelectMany(agent => agent.Aliases.Select(alias => (Alias: alias, Canonical: agent.Name)))
             .OrderBy(pair => pair.Alias, StringComparer.Ordinal)
@@ -571,7 +572,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadCanonicalAgentBodiesHaveNoDuplicateDigest()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         string[] duplicateBodies = source.Agents
             .GroupBy(agent => agent.BodyDigest, StringComparer.Ordinal)
             .Where(group => group.Count() > 1)
@@ -586,7 +587,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadUnifiedOrchestrationStackDeclaresCanonicalDelegationAndModelProfiles()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
@@ -670,7 +671,7 @@ public sealed class SquadCanonicalContentTests
     [InlineData("review-triage")]
     public void LoadCodeReadingAgentsDirectIndexedDiscoveryBeforeRawReads(string agentName)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
 
         AssertDiscoveryContract(agent.InstructionBody, agentName);
@@ -708,7 +709,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void ConductorRoutesDefectDiagnosisThroughTheIntakePathAndItsStatuses()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         string contract = ReadAgentContract("conductor");
 
@@ -768,7 +769,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void LoadProductOwnerIsHeadlessAndReturnsStructuredPhaseAndGapMarkers()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
         string skillContract = ReadSkillContract("product-owner");
 
@@ -846,7 +847,7 @@ public sealed class SquadCanonicalContentTests
     [InlineData("dev-medium")]
     public void DeveloperTierBodyRunsTheTaskGateAndEmitsItsDigest(string agentName)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
 
         Assert.Contains("task gate", agent.InstructionBody, StringComparison.OrdinalIgnoreCase);
@@ -876,7 +877,7 @@ public sealed class SquadCanonicalContentTests
     [InlineData("dev-medium")]
     public void DeveloperAgentBodyRoutesItsCodingStandardThroughTheTool(string agentName)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == agentName);
 
         Assert.Contains("docs_get_coding_standard_for_technology", agent.InstructionBody, StringComparison.Ordinal);
@@ -889,7 +890,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void NonDeveloperAgentBodiesNeverEmitTaskGateDigest()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         string[] offenders = source.Agents
             .Where(agent => !DeveloperGateAgents.Contains(agent.Name, StringComparer.Ordinal))
             .Where(agent => agent.InstructionBody.Contains("TASK_GATE:", StringComparison.Ordinal))
@@ -959,7 +960,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void CodeReviewerBodyAndArchitectPlanAuthoringDoNotNameRetiredTaskReviewer()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent codeReviewer = Assert.Single(source.Agents, agent => agent.Name == "code-reviewer");
         string planAuthoring =
             File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "plan-authoring.md"));
@@ -1031,7 +1032,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void CodeReviewSkillRetainsSelfReviewGateSection()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadSkill? skill = source.Skills.FirstOrDefault(candidate => candidate.Name == "code-review");
 
         Assert.NotNull(skill);

@@ -23,6 +23,13 @@
          threading the token through every call is a responsiveness change, not a defect
          fix, and no test here relies on cancellation. -->
     <NoWarn>$(NoWarn);xUnit1051</NoWarn>
+
+    <!-- CA2000 (dispose before losing scope) cannot see the shared `DocFixture` in
+         tests/KyberWeave.Testing: its fluent WithCatalog/Write methods and the helpers that
+         take and return it hand back the same instance, which its owner disposes with `using`,
+         but the analyzer only follows that inside one assembly and reports every call site.
+         Suppressed for this project alone; it stays armed in src/. -->
+    <NoWarn>$(NoWarn);CA2000</NoWarn>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -44,6 +51,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Arbiter\KyberWeave.Arbiter.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Cli\KyberWeave.Cli.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Core\KyberWeave.Core.csproj" />

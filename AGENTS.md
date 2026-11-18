@@ -96,9 +96,20 @@ the slowest test classes and what else was running on the machine, if known. The
 split the slowest classes, re-measure, until it is at or under 120 seconds. Never raise the budget, skip or disable
 tests, or report the task complete while it is over; a change that makes the suite slower than the budget is not mergeable.
 
+What keeps the run there is written down, in [the test standard's speed rules](docs/standards/test/test.standards.md#the-suite-stays-inside-its-time-budget);
+read them before you write a test. Do not add a guard script or a timing check for them: the rules are guidance an
+author reads, and the classes themselves stay performant.
+
+**Integration tests live in `tests/KyberWeave.Integration.Tests`.** A test that performs a real Squad
+deployment, starts a real program, or needs a real file system beyond its own small scratch folder
+belongs there. That project is the safety net: CI runs it on every pull request as its own job, and a
+developer agent does not run it. The rule for which project a test belongs in, and the in-memory unit
+test that stands in for new behaviour, are in
+[the test standard](docs/standards/test/test.standards.md#which-project-a-test-belongs-in).
+
 `review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
 so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
-Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `ts-test`, `cargo-test`)
+Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `integration-test`, `ts-test`, `cargo-test`)
 are not run: each is reported as a refused blocking failure (`KW-REVIEW-033`, exit `1`) that means "not run
 here", not a code finding. Only the `code-reviewer` council and CI pass `--council`. A scoped run still
 runs the other gates; with `--all` a refused full-suite gate ends the run at once, with no gate started.
@@ -106,8 +117,8 @@ runs the other gates; with `--all` a refused full-suite gate ends the run at onc
 Run every test and e2e command you start yourself directly: `.NET` via `dotnet`, KyberDash and tray
 via `npm --prefix dash …`, `npx --prefix dash playwright test …` and `cargo … --manifest-path
 dash/tray/src-tauri/Cargo.toml …`. In [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
-every gate — the `dotnet test` gates (`test`, `test-policy`) and the dash `ts-test` gate — declares
-its command directly. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
+every gate — the `dotnet test` gates (`test`, `integration-test`, `test-policy`) and the dash
+`ts-test` gate — declares its command directly. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
 see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
 test, and skill argv are the `review.gates` entries in
 [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml). There is no separate

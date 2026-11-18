@@ -87,7 +87,7 @@ public sealed class ArbiterTriageCliCommandTests : IDisposable
             new ArbiterSectionsSettings { Path = WriteDocumentOutsideRoot(), Task = "Change the install steps." }));
 
         Assert.NotEqual(0, execution.ExitCode);
-        Assert.Contains("not found under the repository root", execution.Output, StringComparison.Ordinal);
+        ConsoleOutputAssert.ContainsUnwrapped("not found under the repository root", execution.Output);
         Assert.DoesNotContain("guide/install", execution.Output, StringComparison.Ordinal);
     }
 

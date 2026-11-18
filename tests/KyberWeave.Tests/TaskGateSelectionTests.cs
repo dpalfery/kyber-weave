@@ -183,6 +183,21 @@ public sealed class TaskGateSelectionTests
         Assert.Contains("test", skip.Reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// The suppression scan is product code a change reaches often, and the task gate runs the unit
+    /// project only: a scan class whose coverage lived only in the integration project would resolve
+    /// no class here and skip its tests gate, leaving the change with no executed evidence.
+    /// </summary>
+    [Fact]
+    public void TheSuppressionScanResolvesToAUnitClass()
+    {
+        TaskGatePlan plan = TaskGateSelection.Plan(
+            [TestsGate()], ["src/KyberWeave.Domain/Review/SuppressionScan.cs"], null, "unix");
+
+        PlannedTaskGate gate = Assert.Single(plan.Gates);
+        Assert.Contains("KyberWeave.Tests.SuppressionScanTests", string.Join(" ", gate.Run), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void AnInaccessibleOrMissingRootRefusesThePlan()
     {

@@ -5,7 +5,7 @@ doc-type: runbook
 status: current
 component: CI Pipelines
 owner: dpalfery
-last-reviewed: 2026-11-15
+last-reviewed: 2026-11-17
 ---
 
 # Wiring Kyber-Weave into CI
@@ -235,7 +235,7 @@ Local equivalent (must stay GREEN; the command runs directly, with no wrapper �
 npx --prefix dash playwright test --config dash/playwright.isolated.config.ts dash/e2e/harness-collection.spec.ts
 ```
 
-### Process cleanup steps in `dash-e2e` and `build-test`
+### Process cleanup steps in `dash-e2e`, `build-test` and `integration-test`
 
 No job inspects the process table for leftovers: there is no wrapper, no start-epoch marker
 and no `check-leftovers` step in `ci.yml`. The two jobs that build .NET end with the same
@@ -246,6 +246,7 @@ servers outlive every build by design:
 |---|---|
 | `dash-e2e` | `npx --prefix dash playwright test --config dash/playwright.isolated.config.ts …`, the only Playwright invocation in CI |
 | `build-test` | `dotnet format`, `dotnet build`, `dotnet test`, `dotnet pack` |
+| `integration-test` | `dotnet build`, the integration test project |
 
 `ts-gates` starts no long-lived server, so it needs no cleanup step. `dash-e2e` also fails on
 its own terms when the isolated C# engine it booted is still running at teardown, because the
@@ -277,6 +278,14 @@ Four jobs always run, even on docs-only pull requests: `build-test`, `gitleaks`,
 has a name. The .NET tests read files under `docs/`,
 `products/`, `.kyber-weave/`, `.github/`, `scripts/`, and a few under `dash/`, so no path
 set can prove them irrelevant.
+
+`build-test` runs the unit project (`tests/KyberWeave.Tests`) plus the policy, prose and layer
+projects. `integration-test`, displayed as **Integration tests**, runs
+`tests/KyberWeave.Integration.Tests` — the real Squad deployments, real child programs and
+file-system work — on the same path filter, and `CI Summary` requires both. The split exists so the
+unit job can finish inside its 120-second budget; development agents do not run the integration
+project. `squad-filesystem-contract` keeps its macOS and Windows legs and runs the same project with
+a `SquadDeploymentState` filter.
 
 Anything that is not a pull request — a push to `main`, the weekly Monday cron, a manual
 dispatch — runs everything. So does any edit to `.github/workflows/ci.yml` itself or to

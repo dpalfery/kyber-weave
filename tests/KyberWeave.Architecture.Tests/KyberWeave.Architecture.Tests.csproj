@@ -2,7 +2,8 @@
 
   <!--
     Pins the layering of the shared core (Kernel, Domain, Contracts, Data, Application) and the
-    four entry apps. It reads project files only, so it builds without any other project.
+    four entry apps. It reads project files only; the shared test library supplies the temp root
+    and repository-root helpers every test project uses.
   -->
   <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -23,8 +24,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Compile Include="..\KyberWeave.Tests\KyberWeaveTestPaths.cs" Link="Shared\KyberWeaveTestPaths.cs" />
-    <Compile Include="..\KyberWeave.Tests\TestTempRoot.cs" Link="Shared\TestTempRoot.cs" />
+    <!-- The repository-root locator and the per-process temp root live in the shared test
+         library, so this project references the one copy rather than compiling a source file
+         from another test project. -->
+    <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
   </ItemGroup>
 
 </Project>

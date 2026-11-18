@@ -10,7 +10,8 @@ namespace KyberWeave.Tests;
 /// Macs, so each spawn site must appear in Fixtures/spawn-sites-allowlist.json with a non-empty
 /// <c>bound</c> that says what stops it (a timeout, a kill in finally, a self-exiting
 /// command, or a fake). A site is keyed by its repository-relative file (prefixed with its scan root,
-/// <c>tests/KyberWeave.Tests/</c>, <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
+/// <c>tests/KyberWeave.Tests/</c>, <c>tests/KyberWeave.Integration.Tests/</c>,
+/// <c>tests/KyberWeave.Testing/</c>, <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
 /// normalized line text with an occurrence count, so unrelated edits above a site do not invalidate
 /// its entry. Unlisted sites fail
 /// with root-prefixed file:line, and entries that no longer match a site fail as stale.
@@ -26,6 +27,8 @@ public sealed class ProcessSpawnSitesTests
     private static readonly (string Root, string[] Extensions)[] ScanRoots =
     [
         ("tests/KyberWeave.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Integration.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Testing", [".cs", ".sh"]),
         ("tests/KyberWeave.RepoPolicy.Tests", [".cs", ".sh"]),
         ("src", [".cs"])
     ];
