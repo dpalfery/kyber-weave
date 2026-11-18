@@ -510,7 +510,9 @@ public sealed class DocSpecValidator
     /// A folder that does not exist is skipped — <c>docs init</c> creates it, and a technology
     /// declared before its folder exists is a scaffolding concern, not a validation error.
     /// A folder that lies behind a symbolic link is reported: the loader never follows a link, so
-    /// none of the folder's files is in the corpus, and skipping the folder would hide that.
+    /// none of the folder's files is in the corpus, and skipping the folder would hide that. The link is
+    /// checked before the folder, because <see cref="Directory.Exists"/> follows a link and answers false
+    /// for one that points at a file or at nothing.
     /// </remarks>
     private void ValidateStandardsFolders(
         Dictionary<string, DocumentModel> byPath,
@@ -527,8 +529,6 @@ public sealed class DocSpecValidator
                 if (!checkedFolders.Add(relativeFolder)) continue;
 
                 string absoluteFolder = Combine(relativeFolder);
-                if (!Directory.Exists(absoluteFolder)) continue;
-
                 if (LinksIt(relativeFolder))
                 {
                     report.Add(new Diagnostic(
@@ -538,6 +538,8 @@ public sealed class DocSpecValidator
                         "Replace the link with a real folder holding the four standards files."));
                     continue;
                 }
+
+                if (!Directory.Exists(absoluteFolder)) continue;
 
                 string standard = RepositoryRelative(DocsLayout.StandardFile(docsRoot, scope));
                 string legacy = $"{relativeFolder}/README.md";

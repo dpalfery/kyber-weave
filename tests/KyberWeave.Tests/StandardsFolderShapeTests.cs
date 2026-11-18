@@ -297,6 +297,34 @@ public class StandardsFolderShapeTests
             && i.Message.Contains("symbolic link", StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// A standards folder that is itself a symbolic link is reported whatever its target: the loader follows
+    /// no link, so a link that points at a file, or at nothing, holds none of the folder's files and must not
+    /// read as a folder that does not exist.
+    /// </summary>
+    [Theory]
+    [InlineData("dangling")]
+    [InlineData("file")]
+    public void AStandardsFolderWhoseLinkIsNotADirectoryIsReportedRatherThanSkipped(string target)
+    {
+        using DocFixture fixture = new DocFixture().WithCatalog()
+            .Write("outside/not-a-folder.md", "# not a folder\n");
+        Directory.CreateDirectory(Path.Combine(fixture.Root, "6-Docs", "standards"));
+        Directory.CreateSymbolicLink(
+            Path.Combine(fixture.Root, "6-Docs", "standards", "dotnet"),
+            target == "dangling"
+                ? Path.Combine(fixture.Root, "missing-folder")
+                : Path.Combine(fixture.Root, "outside", "not-a-folder.md"));
+
+        DiagnosticReport report = fixture.Validate(DotnetDeclared);
+
+        Assert.Contains(report.Items, i =>
+            i.Code == DocSpecValidator.MissingFolderFile
+            && i.Severity == Severity.Error
+            && i.Message.Contains("'dotnet'", StringComparison.Ordinal)
+            && i.Message.Contains("symbolic link", StringComparison.Ordinal));
+    }
+
     private static string RoleRules(string scope) => Rules(scope).Replace(
         "technology: " + scope, "role: " + scope, StringComparison.Ordinal);
 
