@@ -48,6 +48,20 @@ public sealed class ArbiterConsoleSeamTests
         Assert.Contains(FailingArbiterConfigs.Code, console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary><c>arbiter validate</c> is one of the commands, so its findings reach the injected console too.</summary>
+    [Fact]
+    public void Validate_AConfigurationThatFailsToLoad_WritesItsFindingToTheConsoleItWasGiven()
+    {
+        TestConsole console = new();
+        console.Profile.Width = 200;
+        ArbiterValidateCommand command = new(new FailingArbiterConfigs(), console);
+
+        int exitCode = command.Execute(null!, new ArbiterSettings { Path = "/nowhere", Format = "json" });
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(FailingArbiterConfigs.Code, console.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>The empty notice is the exact text <c>arbiter status</c> and <c>arbiter doctor</c> printed before.</summary>
     [Fact]
     public void GatingConsole_WritesTheEmptyNoticeUnchanged()
