@@ -1,0 +1,170 @@
+using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Review;
+using Xunit;
+using YamlDotNet.Core;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Gate <c>applies-when</c>: a gate declares the paths it applies to, and a gate that
+/// does not apply is reported as not applicable rather than executed or omitted. The
+/// verdict engine counts such a gate as neither passed nor failed, and older
+/// <c>review-gates/v1</c> reports still read.
+/// </summary>
+public sealed class ReviewGateApplicabilityTests : IDisposable
+{
+    private static readonly DateOnly Today = new(2026, 8, 20);
+
+    private readonly InMemoryReviewServices _services = new();
+
+    public void Dispose() => _services.Dispose();
+
+    private void DotnetSucceeds() =>
+        _services.Processes.Script(
+            "dotnet",
+            new ProcessRunResult(0, string.Empty, TimedOut: false) { StandardOutput = "10.0.0", StandardError = string.Empty });
+
+    private static ReviewGate DashGate(string[] run, bool blocking = true) =>
+        new("dash-gate", run, blocking, 900, AppliesWhen: new ReviewGateAppliesWhen(["dash/**"]));
+
+    private static ReviewConfig Config(params ReviewGate[] gates) => new() { Gates = gates };
+
+    private static ReviewConfig PolicyConfig() =>
+        new() { Policy = new ReviewPolicy() };
+
+    [Fact]
+    public void AppliesWhenPathsAreParsedFromYaml()
+    {
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
+            review:
+              gates:
+                - id: ts-typecheck
+                  run: [npm, run, --prefix, dash, typecheck]
+                  applies-when:
+                    paths: ["dash/**"]
+            """).Review;
+
+        ReviewGate gate = Assert.Single(config.Gates);
+        Assert.Equal(["dash/**"], gate.AppliesWhen!.Paths);
+    }
+
+    [Fact]
+    public void AChangedSetIsNeededWhenOnlyAppliesWhenIsDeclared()
+    {
+        ReviewGate gate = new(
+            "e2e",
+            ["dotnet"],
+            AppliesWhen: new ReviewGateAppliesWhen(["e2e/**"]));
+
+        Assert.True(ReviewGateReporting.NeedsChangedSet([gate]));
+    }
+
+    [Fact]
+    public void AppliesWhenWithNoPathsIsRejected()
+    {
+        YamlException ex = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(
+            "review:\n  gates:\n    - id: a\n      run: [dotnet]\n      applies-when:\n        paths: []\n"));
+
+        Assert.Contains("applies-when", ex.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WithoutChangedPathsEveryGateRunsAndTheBaseIsAbsent()
+    {
+        DotnetSucceeds();
+
+        GateReport report = _services.Gates.Run(
+            Config(DashGate(["dotnet", "--version"]), new ReviewGate("build", ["dotnet", "--version"])),
+            _services.Root);
+
+        Assert.All(report.Gates, gate => Assert.Null(gate.NotApplicableReason));
+        Assert.All(report.Gates, gate => Assert.True(gate.Passed));
+        Assert.Null(report.Base);
+    }
+
+    [Fact]
+    public void ANonMatchingGateIsNotExecutedAndReportsItsReason()
+    {
+        GateReport report = _services.Gates.Run(
+            Config(DashGate(["definitely-missing-gate-binary-xyz", "--version"])),
+            _services.Root,
+            changedPaths: ["src/Foo.cs"],
+            baseRef: "main");
+
+        GateResult gate = Assert.Single(report.Gates);
+        Assert.Equal("main", report.Base);
+        Assert.NotNull(gate.NotApplicableReason);
+        Assert.Contains("dash/**", gate.NotApplicableReason, StringComparison.Ordinal);
+
+        // A run would have failed to start the missing binary; a skip never starts it.
+        Assert.DoesNotContain("could not start", gate.Summary, StringComparison.Ordinal);
+        Assert.Empty(_services.Processes.Calls);
+        Assert.False(gate.Passed);
+        Assert.Equal("KW-REVIEW-026", ReviewGateOutcome.NotApplicable);
+    }
+
+    [Fact]
+    public void AMatchingGateRuns()
+    {
+        DotnetSucceeds();
+
+        GateReport report = _services.Gates.Run(
+            Config(DashGate(["dotnet", "--version"])),
+            _services.Root,
+            changedPaths: ["dash/src/x.ts"],
+            baseRef: "main");
+
+        GateResult gate = Assert.Single(report.Gates);
+        Assert.Null(gate.NotApplicableReason);
+        Assert.True(gate.Passed);
+        Assert.Equal("main", report.Base);
+    }
+
+    [Fact]
+    public void TheVerdictIgnoresNotApplicableGates()
+    {
+        ReviewConfig config = PolicyConfig();
+        GateResult notApplicable = new("dash-gate", true, 1, "failed", 0, "no changed path matches applies-when");
+
+        ReviewOutcome withNotApplicable =
+            VerdictEngine.Evaluate([], [notApplicable], config, Today);
+        ReviewOutcome without =
+            VerdictEngine.Evaluate([], [], config, Today);
+
+        // Even a non-zero exit code on a not-applicable gate changes nothing.
+        Assert.Equal(ReviewVerdict.Approve, withNotApplicable.Verdict);
+        Assert.Equal(without.Verdict, withNotApplicable.Verdict);
+        Assert.Equal(without.Risk, withNotApplicable.Risk);
+        Assert.DoesNotContain(
+            withNotApplicable.Diagnostics, d => d.Code == VerdictEngine.BlockingGateFailed);
+    }
+
+    [Fact]
+    public void GateReportsRoundTripTheBaseAndTheReason()
+    {
+        DotnetSucceeds();
+
+        GateReport report = _services.Gates.Run(
+            Config(new ReviewGate("build", ["dotnet", "--version"])),
+            _services.Root,
+            baseRef: "main");
+
+        GateReport reread = ReviewJson.ReadGates(ReviewJson.Write(report));
+
+        Assert.Equal("main", reread.Base);
+    }
+
+    [Fact]
+    public void GateReportsWrittenBeforeTheBaseStillRead()
+    {
+        GateReport old = ReviewJson.ReadGates(
+            """{"schema":"kyber-weave.review-gates/v1","gates":[{"id":"build","blocking":true,"exitCode":0,"summary":"passed","durationMilliseconds":5}]}""");
+
+        GateResult gate = Assert.Single(old.Gates);
+        Assert.Null(old.Base);
+        Assert.Null(gate.NotApplicableReason);
+        Assert.True(gate.Passed);
+    }
+}
