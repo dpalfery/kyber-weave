@@ -32,7 +32,7 @@ public sealed class WorkerRosterTests
         Assert.Equal(WorkerRosters.Tiered, KyberWeaveConfig.ProductDefaults.WorkerRoster);
         Assert.Equal(
             WorkerRosters.Tiered,
-            KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: docs\n").WorkerRoster);
+            KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: docs\n").WorkerRoster);
     }
 
     [Fact]
@@ -40,14 +40,14 @@ public sealed class WorkerRosterTests
     {
         Assert.Equal(
             WorkerRosters.Tiered,
-            KyberWeaveConfigLoader.LoadFromYaml("worker-roster: tiered\n").WorkerRoster);
+            KyberWeaveConfigAssembler.FromYaml("worker-roster: tiered\n").WorkerRoster);
     }
 
     [Fact]
     public void TheTechnologyRosterIsAnErrorThatNamesTheChange()
     {
         YamlException error = Assert.Throws<YamlException>(() =>
-            KyberWeaveConfigLoader.LoadFromYaml("worker-roster: technology\n"));
+            KyberWeaveConfigAssembler.FromYaml("worker-roster: technology\n"));
 
         Assert.Contains("worker-roster", error.Message, StringComparison.Ordinal);
         Assert.Contains("technology", error.Message, StringComparison.Ordinal);
@@ -59,7 +59,7 @@ public sealed class WorkerRosterTests
     public void AnotherValueIsAConfigurationErrorNamingTheRoster()
     {
         YamlException error = Assert.Throws<YamlException>(() =>
-            KyberWeaveConfigLoader.LoadFromYaml("worker-roster: side-by-side\n"));
+            KyberWeaveConfigAssembler.FromYaml("worker-roster: side-by-side\n"));
 
         Assert.Contains("tiered", error.Message, StringComparison.Ordinal);
     }

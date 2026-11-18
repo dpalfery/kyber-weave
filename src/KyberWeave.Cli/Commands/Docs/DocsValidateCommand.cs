@@ -9,7 +9,10 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Schema tier: frontmatter conformance. Needs no code index.</summary>
-public sealed class DocsValidateCommand(IDocsSchemaGate gate, IDocumentSourceFactory documents) : Command<DocsValidateSettings>
+public sealed class DocsValidateCommand(
+    IDocsSchemaGate gate,
+    IDocumentSourceFactory documents,
+    IKyberWeaveConfigRepository configs) : Command<DocsValidateSettings>
 {
     /// <summary>
     /// Runs every frontmatter and inventory validator, and the open-work gate when
@@ -19,7 +22,7 @@ public sealed class DocsValidateCommand(IDocsSchemaGate gate, IDocumentSourceFac
         CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config,
+        if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config,
                 out OntologyConfig ontology))
         {
             CommandHelpers.Finish(report, settings, "docs validate", "Document");

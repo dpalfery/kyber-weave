@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
@@ -130,7 +132,7 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
             $"command: ['{executable}', --repo-root, .]",
             "provenance: first-party");
 
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
 
         Assert.True(
             result.Success,
@@ -164,19 +166,19 @@ public sealed class McpDeclarationSurfaceTests : IDisposable
     /// <summary>Takes the refusal through the <c>KW-CONFIG-001</c> path and returns the message.</summary>
     private string AssertRefusedAsConfigError(string configPath)
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
 
         Assert.False(result.Success, "the declaration must be refused");
         Assert.Null(result.Config);
         Assert.Equal(configPath, result.ConfigPath);
 
         DiagnosticReport report = new();
-        bool loaded = CommandHelpers.TryLoadConfig(_root.Path, null, report, out KyberWeaveConfig config);
+        bool loaded = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _root.Path, null, report, out KyberWeaveConfig config);
 
         Assert.False(loaded);
         Assert.Equal(KyberWeaveConfig.ProductDefaults, config);
         Diagnostic diagnostic = Assert.Single(report.Items);
-        Assert.Equal(KyberWeaveConfigLoader.ConfigLoadErrorCode, diagnostic.Code);
+        Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, diagnostic.Code);
         Assert.Equal(Severity.Error, diagnostic.Severity);
 
         return result.Error ?? string.Empty;

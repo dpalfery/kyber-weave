@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -473,7 +475,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
 
     private static DocsTools CreateTools(string root, Func<ICodeGraphResolver> resolverFactory)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentIndexHost host = new(
             root,
             resolverFactory,

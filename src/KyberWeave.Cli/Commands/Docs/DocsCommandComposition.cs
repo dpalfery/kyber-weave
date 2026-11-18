@@ -19,20 +19,22 @@ namespace KyberWeave.Cli.Commands.Docs;
 internal static class DocsCommandComposition
 {
     public static bool TryResolveOntology(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         out OntologyConfig ontology)
     {
-        return TryResolveConfig(settings, report, out _, out ontology);
+        return TryResolveConfig(configs, settings, report, out _, out ontology);
     }
 
     public static bool TryResolveConfig(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         out KyberWeaveConfig config,
         out OntologyConfig ontology)
     {
-        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out config))
+        if (!CommandHelpers.TryLoadConfig(configs, settings.Path, settings.Config, report, out config))
         {
             ontology = OntologyConfig.ProductDefaults;
             return false;
@@ -65,7 +67,7 @@ internal static class DocsCommandComposition
             // A rejected --docs-root is the same class of operator error as a rejected
             // docs-root in the config file, and reports under the same code.
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                KyberWeaveConfigDiagnosticCodes.LoadError,
                 Severity.Error,
                 ex.Message,
                 "--docs-root"));
@@ -75,18 +77,20 @@ internal static class DocsCommandComposition
     }
 
     public static bool TryCreateLoader(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         out DocumentLoader? loader) =>
-        TryCreateLoader(settings, report, out loader, out _);
+        TryCreateLoader(configs, settings, report, out loader, out _);
 
     public static bool TryCreateLoader(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         out DocumentLoader? loader,
         out KyberWeaveConfig config)
     {
-        if (!TryResolveConfig(settings, report, out config, out OntologyConfig ontology))
+        if (!TryResolveConfig(configs, settings, report, out config, out OntologyConfig ontology))
         {
             loader = null;
             return false;
@@ -100,6 +104,7 @@ internal static class DocsCommandComposition
         codeGraph.ForRepository(settings.Path).Resolver;
 
     public static bool TryCreateAnalysisRuntime(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         DocsAnalysisCompositionFactories factories,
@@ -110,7 +115,7 @@ internal static class DocsCommandComposition
         ArgumentNullException.ThrowIfNull(factories);
 
         runtime = null;
-        if (!TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
+        if (!TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
             return false;
         }

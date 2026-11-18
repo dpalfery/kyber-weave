@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
@@ -24,7 +26,7 @@ public sealed class ArchitectShellGuardTests
     private const string Worktree = "/w";
 
     private static readonly Lazy<IReadOnlyList<string>> PlanningDirectories = new(() =>
-        ReadGuard.ProtectedDirectories(KyberWeaveConfigLoader.Load(Corpus.Root)));
+        ReadGuard.ProtectedDirectories(ConfigFileReader.Load(Corpus.Root)));
 
     private const string RuleId = ArchitectShellGuard.RuleId;
 

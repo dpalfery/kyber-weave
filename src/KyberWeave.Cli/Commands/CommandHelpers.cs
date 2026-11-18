@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
@@ -10,18 +11,20 @@ public static class CommandHelpers
 {
     /// <summary>
     /// Loads <c>.kyber-weave/kyber-weave.yml</c> for CLI commands. On failure, adds
-    /// <see cref="KyberWeaveConfigLoader.ConfigLoadErrorCode"/> and returns false.
+    /// <see cref="KyberWeaveConfigDiagnosticCodes.LoadError"/> and returns false.
     /// </summary>
     public static bool TryLoadConfig(
+        IKyberWeaveConfigRepository configs,
         string repoRoot,
         string? configPath,
         DiagnosticReport report,
         out KyberWeaveConfig config) =>
-        TryLoadConfig(repoRoot, configPath, report, out config, out _);
+        TryLoadConfig(configs, repoRoot, configPath, report, out config, out _);
 
     /// <summary>
     /// Loads <c>.kyber-weave/kyber-weave.yml</c> for CLI commands, reporting the file it read.
     /// </summary>
+    /// <param name="configs">The repository the configuration is read through.</param>
     /// <param name="repoRoot">The repository root the configuration is resolved under.</param>
     /// <param name="configPath">An explicit <c>--config</c> path, or null for the repository's own.</param>
     /// <param name="report">The report a load failure is recorded in.</param>
@@ -32,18 +35,21 @@ public static class CommandHelpers
     /// difference between "unset" and "not configured".
     /// </param>
     public static bool TryLoadConfig(
+        IKyberWeaveConfigRepository configs,
         string repoRoot,
         string? configPath,
         DiagnosticReport report,
         out KyberWeaveConfig config,
         out string? resolvedConfigPath)
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repoRoot, configPath);
+        ArgumentNullException.ThrowIfNull(configs);
+
+        KyberWeaveConfigLoadResult result = configs.TryLoad(repoRoot, configPath);
         resolvedConfigPath = result.ConfigPath;
         if (!result.Success)
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                KyberWeaveConfigDiagnosticCodes.LoadError,
                 Severity.Error,
                 result.Error ?? "Failed to load kyber-weave.yml.",
                 "kyber-weave.yml",
@@ -58,7 +64,7 @@ public static class CommandHelpers
         foreach (string warning in config.Review.Warnings)
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigWarningCode,
+                KyberWeaveConfigDiagnosticCodes.Warning,
                 Severity.Warning,
                 warning,
                 "kyber-weave.yml",

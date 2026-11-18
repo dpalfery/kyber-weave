@@ -61,7 +61,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         string yaml = "arbiter:\n  enabled: true\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: " +
             (shadow ? "true" : "false") + "\n";
-        return KyberWeaveConfigLoader.LoadFromYaml(yaml).Arbiter.Rules;
+        return KyberWeaveConfigAssembler.FromYaml(yaml).Arbiter.Rules;
     }
 
     private void WriteCitedFiles()

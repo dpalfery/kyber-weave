@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
@@ -125,7 +127,7 @@ public sealed class RetrievalSourceDocumentTests(ITestOutputHelper output)
         if (directory is null) return null;
 
         string root = directory.FullName;
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentSet set = new DocumentLoader(root, config.Ontology).Load();
         return DocumentIndex.Build(set, CodeGraphResolverAdapter.ForRepository(root));
     }

@@ -42,7 +42,7 @@ public sealed class PacketTestCommandTests
             Services.GetRequiredService<ITaskGateSelectionService>());
 
 
-    private static KyberWeaveConfig Config() => KyberWeaveConfigLoader.LoadFromYaml("""
+    private static KyberWeaveConfig Config() => KyberWeaveConfigAssembler.FromYaml("""
         review:
           test-map:
             "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":

@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Globalization;
 using System.Text.RegularExpressions;
 
@@ -184,7 +186,7 @@ public sealed class RetrievalRegressionTests
 
     private static DocumentIndexHost CreateHost(string root)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         return new DocumentIndexHost(
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),

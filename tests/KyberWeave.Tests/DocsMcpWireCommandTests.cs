@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -970,7 +971,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
     }
 
     private CapturedConsoleExecution<int> Wire(string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring).Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring, ConfigFileReader.Repository).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets, DryRun = dryRun }));
 

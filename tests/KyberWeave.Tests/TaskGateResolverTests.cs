@@ -15,7 +15,7 @@ public sealed class TaskGateResolverTests : IDisposable
 
     public void Dispose() => _root.Dispose();
 
-    private static KyberWeaveConfig Config(string yaml) => KyberWeaveConfigLoader.LoadFromYaml(yaml);
+    private static KyberWeaveConfig Config(string yaml) => KyberWeaveConfigAssembler.FromYaml(yaml);
 
     private void Standard(string technology, string frontmatter, string fileName = "")
     {

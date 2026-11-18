@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
@@ -7,13 +8,13 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Governance view: doc-type coverage by component.</summary>
-public sealed class DocsCatalogCommand : Command<DocsSettings>
+public sealed class DocsCatalogCommand(IKyberWeaveConfigRepository configs) : Command<DocsSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!DocsCommandComposition.TryCreateLoader(settings, report, out DocumentLoader? loader))
+        if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, out DocumentLoader? loader))
         {
             CommandHelpers.Finish(report, settings, "docs catalog", "Document");
             return 1;

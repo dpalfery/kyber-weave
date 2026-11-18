@@ -27,7 +27,8 @@ public sealed class DocsPacketCommand(
     IPlanTaskTargetService targets,
     ITaskGateSelectionService taskGates,
     ICodeGraphPortsFactory codeGraph,
-    IRepositoryFileStore repositoryFiles) : Command<DocsPacketSettings>
+    IRepositoryFileStore repositoryFiles,
+    IKyberWeaveConfigRepository configs) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -54,7 +55,7 @@ public sealed class DocsPacketCommand(
         DiagnosticReport report = new();
         string current = Path.GetFullPath(settings.WorkingDirectory ?? environment.CurrentDirectory);
         string root = settings.Plan is null ? ArbiterRepoRoot.Find(current) : PlanArguments.RepositoryRootFor(settings.Plan, current);
-        if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
+        if (!CommandHelpers.TryLoadConfig(configs, root, settings.Config, report, out KyberWeaveConfig config))
         {
             return Fail(report);
         }

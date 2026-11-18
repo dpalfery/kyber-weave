@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -1282,7 +1284,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     /// <summary>Runs the wire verb, to produce a receipt the migrate verb must rebase.</summary>
     private CapturedConsoleExecution<int> Wire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring).Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpWireCommand(McpWiringTestServices.Wiring, ConfigFileReader.Repository).Execute(
             null!,
             new DocsMcpWireSettings { Path = Repo, Target = targets }));
 
@@ -1368,7 +1370,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     private LoadResult LoadConfig()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Repo);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(Repo);
         IReadOnlyList<string> names = result.Config?.Mcp is { } mcp
             ? [.. mcp.RequiredServers.Keys]
             : [];

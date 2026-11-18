@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using System.Diagnostics.CodeAnalysis;
 
 using KyberWeave.Cli.Commands.Docs;
@@ -66,6 +67,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         DiagnosticReport report = new DiagnosticReport();
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+            ConfigFileReader.Repository,
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
@@ -112,6 +114,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         DiagnosticReport report = new DiagnosticReport();
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+            ConfigFileReader.Repository,
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
@@ -144,6 +147,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
         FactoryProbe factories = Factories(cacheSafe: true, persistence, embedding, new AvailableResolver());
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+            ConfigFileReader.Repository,
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,
@@ -169,6 +173,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new UnavailableResolver());
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+            ConfigFileReader.Repository,
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             report,
             factories.Factories,
@@ -193,6 +198,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             new AvailableResolver());
 
         bool success = DocsCommandComposition.TryCreateAnalysisRuntime(
+            ConfigFileReader.Repository,
             new DocsIntegrityCheckSettings { Path = _temp.Path },
             new DiagnosticReport(),
             factories.Factories,

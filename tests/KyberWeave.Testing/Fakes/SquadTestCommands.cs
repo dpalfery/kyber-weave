@@ -9,7 +9,9 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Review;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -156,7 +158,8 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadRenderer? renderer = null,
         SquadStateStore? stateStore = null,
-        Func<string, string?>? environmentReader = null)
+        Func<string, string?>? environmentReader = null,
+        IKyberWeaveConfigRepository? configs = null)
     {
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadDoctorCommand(
@@ -174,7 +177,8 @@ internal static class SquadTestCommands
             new FileDevinImportOverlapInspector(),
             new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory),
-            SquadFileSystemPathSemantics.Instance);
+            SquadFileSystemPathSemantics.Instance,
+            configs ?? new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe()));
     }
 
     public static SquadPresetUseCommand PresetUse(

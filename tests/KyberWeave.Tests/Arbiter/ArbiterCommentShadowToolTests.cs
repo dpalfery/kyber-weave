@@ -75,7 +75,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     {
         string yaml = "arbiter:\n  enabled: true\n  comment-triage:\n    bot-logins:\n      - " + BotLogin +
             "\n  rules:\n    - id: KW-ARB-COMMENT-001\n      shadow: " + (shadow ? "true" : "false") + "\n";
-        return KyberWeaveConfigLoader.LoadFromYaml(yaml);
+        return KyberWeaveConfigAssembler.FromYaml(yaml);
     }
 
     /// <summary>An inline answer in shadow reports class real, shadow true, and the nitpick it would have given.</summary>

@@ -11,8 +11,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 /// <remarks>
 /// The legacy engine assemblies (<c>KyberWeave.Core</c>, <c>.Core.Squad</c>) are
-/// being drained into the layers. Layers never reference them; the entry apps may, until the
-/// last type has moved. <see cref="LegacyReferenceBaseline"/> can only shrink.
+/// being drained into the layers. <c>KyberWeave.Core</c> now sits on the shared layers and reads nothing above
+/// them, so its references are pinned with theirs. Layers never reference either legacy assembly; the entry apps
+/// may, until the last type has moved. <see cref="LegacyReferenceBaseline"/> can only shrink.
 /// </remarks>
 public sealed class LayerReferenceTests
 {
@@ -27,7 +28,10 @@ public sealed class LayerReferenceTests
         { "KyberWeave.Domain", ["KyberWeave.Kernel"] },
         { "KyberWeave.Contracts", ["KyberWeave.Domain", "KyberWeave.Kernel"] },
         { "KyberWeave.Data", ["KyberWeave.Contracts", "KyberWeave.Domain", "KyberWeave.Kernel"] },
-        { "KyberWeave.Application", ["KyberWeave.Contracts", "KyberWeave.Data", "KyberWeave.Domain", "KyberWeave.Kernel"] }
+        { "KyberWeave.Application", ["KyberWeave.Contracts", "KyberWeave.Data", "KyberWeave.Domain", "KyberWeave.Kernel"] },
+
+        // The drained engine assembly reads the shared layers only: no Data, no Application.
+        { "KyberWeave.Core", ["KyberWeave.Contracts", "KyberWeave.Domain", "KyberWeave.Kernel"] }
     };
 
     /// <summary>Entry apps that exist today. Each may reference these layers and nothing else new.</summary>

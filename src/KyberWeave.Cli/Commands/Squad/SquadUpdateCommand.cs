@@ -398,6 +398,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
         // Load configuration if present
         KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+            _configs,
             run.TargetRoot,
             run.Scope,
             stateStore.UserPaths.HomeDirectory);

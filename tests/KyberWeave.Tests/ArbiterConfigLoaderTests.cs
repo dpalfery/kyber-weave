@@ -29,7 +29,7 @@ public sealed class ArbiterConfigLoaderTests
     public void ProjectLevelGlobalTargetsFailValidationWithRuleId011()
     {
         YamlException exception = Assert.Throws<YamlException>(() =>
-            KyberWeaveConfigLoader.LoadFromYaml("""
+            KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               global:
                 targets: [harness-token-01]

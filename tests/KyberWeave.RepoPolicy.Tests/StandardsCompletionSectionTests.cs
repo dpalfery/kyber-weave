@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Corpus;
 using Xunit;
@@ -95,7 +97,7 @@ public sealed class StandardsCompletionSectionTests
 
     private static IReadOnlyList<string> DeclaredStandards()
     {
-        return KyberWeaveConfigLoader.Load(Corpus.Root).Ontology.Technologies;
+        return ConfigFileReader.Load(Corpus.Root).Ontology.Technologies;
     }
 
     private static string StandardPath(string technology)

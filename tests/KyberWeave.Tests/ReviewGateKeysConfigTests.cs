@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using Xunit;
 using YamlDotNet.Core;
@@ -13,7 +15,7 @@ namespace KyberWeave.Tests;
 /// <remarks>
 /// Working-directory checks need a real repository root, so they write a
 /// <c>.kyber-weave/kyber-weave.yml</c> into a temp tree and load it through the path a command
-/// takes. Refusals are asserted through <see cref="KyberWeaveConfigLoader.TryLoad(string, string?)"/>
+/// takes. Refusals are asserted through <see cref="ConfigFileReader.TryLoad(string, string?)"/>
 /// because that is where a refusal becomes KW-CONFIG-001 naming the gate.
 /// </remarks>
 public sealed class ReviewGateKeysConfigTests : IDisposable
@@ -35,7 +37,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void CouncilGateIncludeAndOsAreReadAsWritten()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: build
@@ -56,7 +58,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void CouncilGateWithoutIncludeOsOrWorkingDirectoryKeepsTheDefaults()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: build
@@ -72,7 +74,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void CouncilGateRefusesAnOsValueThatIsNotRecognised()
     {
-        YamlException thrown = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml("""
+        YamlException thrown = Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: build
@@ -90,7 +92,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root.Path, "tools", "lint"));
         WriteConfig(CouncilYaml("./tools/lint/"));
 
-        ReviewConfig config = KyberWeaveConfigLoader.Load(_root.Path).Review;
+        ReviewConfig config = ConfigFileReader.Load(_root.Path).Review;
 
         ReviewGate gate = Assert.Single(config.Gates);
         Assert.Equal("tools/lint", gate.WorkingDirectory?.Replace('\\', '/'));
@@ -102,7 +104,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
         WriteConfig(TaskYaml("./web/"));
 
-        ReviewConfig config = KyberWeaveConfigLoader.Load(_root.Path).Review;
+        ReviewConfig config = ConfigFileReader.Load(_root.Path).Review;
 
         ReviewTaskGate gate = Assert.Single(config.TaskGates[TaskAgent]);
         Assert.Equal("web", gate.WorkingDirectory?.Replace('\\', '/'));
@@ -117,7 +119,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
         WriteConfig(CouncilYaml(workingDirectory));
 
-        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
     }
 
     [Theory]
@@ -128,7 +130,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     {
         WriteConfig(CouncilYaml(workingDirectory));
 
-        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
     }
 
     [Theory]
@@ -139,7 +141,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     {
         WriteConfig(TaskYaml(workingDirectory));
 
-        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), TaskGateId);
+        AssertRefused(ConfigFileReader.TryLoad(_root.Path), TaskGateId);
     }
 
     [Fact]
@@ -148,7 +150,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
         Directory.CreateSymbolicLink(Path.Combine(_root.Path, "linked"), _outside.Path);
         WriteConfig(CouncilYaml("linked"));
 
-        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
     }
 
     [Fact]
@@ -157,7 +159,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
         Directory.CreateSymbolicLink(Path.Combine(_root.Path, "linked"), _outside.Path);
         WriteConfig(TaskYaml("linked"));
 
-        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), TaskGateId);
+        AssertRefused(ConfigFileReader.TryLoad(_root.Path), TaskGateId);
     }
 
     /// <summary>
@@ -170,7 +172,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
         WriteConfig(CouncilYaml("web", """[npx, tsc, "{changed}"]"""));
 
-        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), CouncilGateId);
+        AssertRefused(ConfigFileReader.TryLoad(_root.Path), CouncilGateId);
     }
 
     [Fact]
@@ -179,7 +181,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_root.Path, "web"));
         WriteConfig(TaskYaml("web", """[npx, tsc, "{changed}"]"""));
 
-        AssertRefused(KyberWeaveConfigLoader.TryLoad(_root.Path), TaskGateId);
+        AssertRefused(ConfigFileReader.TryLoad(_root.Path), TaskGateId);
     }
 
     /// <summary>
@@ -189,7 +191,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void FailOnOutputDefaultsToFalseOnCouncilAndTaskGates()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: build
@@ -207,7 +209,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void FailOnOutputIsReadOnCouncilAndTaskGatesWithoutAWarning()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: fmt
@@ -233,7 +235,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void ConcurrentDefaultsToFalseAndIsReadOnACouncilGateWithoutAWarning()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: build
@@ -251,8 +253,8 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void ParallelismDefaultsToTwoAndReadsAHostValue()
     {
-        Assert.Equal(2, KyberWeaveConfigLoader.LoadFromYaml("review:\n  gates: []\n").Review.Parallelism);
-        Assert.Equal(3, KyberWeaveConfigLoader.LoadFromYaml("review:\n  parallelism: 3\n").Review.Parallelism);
+        Assert.Equal(2, KyberWeaveConfigAssembler.FromYaml("review:\n  gates: []\n").Review.Parallelism);
+        Assert.Equal(3, KyberWeaveConfigAssembler.FromYaml("review:\n  parallelism: 3\n").Review.Parallelism);
     }
 
     [Theory]
@@ -260,7 +262,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [InlineData("-1")]
     public void ParallelismBelowOneIsRefusedWhereTheOperatorWroteIt(string value)
     {
-        Exception error = Assert.ThrowsAny<Exception>(() => KyberWeaveConfigLoader.LoadFromYaml($"review:\n  parallelism: {value}\n"));
+        Exception error = Assert.ThrowsAny<Exception>(() => KyberWeaveConfigAssembler.FromYaml($"review:\n  parallelism: {value}\n"));
 
         Assert.Contains("review.parallelism must be greater than zero", error.ToString(), StringComparison.Ordinal);
     }
@@ -272,7 +274,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void AnUnknownCouncilGateKeyIsReportedAsOneWarningNamingTheKeyAndGate()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: build
@@ -289,7 +291,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void AnUnknownTaskGateKeyIsReportedAsOneWarningNamingTheKeyAndAgent()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               task-gates:
                 typescript-dev:
@@ -306,7 +308,7 @@ public sealed class ReviewGateKeysConfigTests : IDisposable
     [Fact]
     public void GateKeysThatAreAllKnownProduceNoWarning()
     {
-        ReviewConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        ReviewConfig config = KyberWeaveConfigAssembler.FromYaml("""
             review:
               gates:
                 - id: build
