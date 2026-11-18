@@ -1,6 +1,6 @@
 using System.ComponentModel;
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Review;
@@ -21,7 +21,7 @@ public sealed class ReviewSeatsCommand(
     IReviewDecisionModelFactory decisionModels,
     IConsole standard,
     IAnsiConsole ansi,
-    IProcessExecutor? indexExecutor = null) : Command<ReviewSeatsSettings>
+    IBoundedProcessExecutor processes) : Command<ReviewSeatsSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description =
@@ -29,7 +29,7 @@ public sealed class ReviewSeatsCommand(
 
     private const int ClientInputExitCode = ReviewCommandResult.ClientInputExitCode;
 
-    private static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
+    internal static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewSeatsSettings settings, CancellationToken cancellationToken)
@@ -45,7 +45,7 @@ public sealed class ReviewSeatsCommand(
         ReviewCommandResult result = service.Prepare(
             Request(settings),
             (repositoryRoot, config) => decisionModels.CreateForRepository(repositoryRoot, config, settings.NoDecisionModel, cachePath: null),
-            indexExecutor ?? ProcessExecutor.WithTimeout(IndexTimeout),
+            new TimeBoundedProcessExecutor(processes, IndexTimeout),
             standard.Out,
             cancellationToken);
 

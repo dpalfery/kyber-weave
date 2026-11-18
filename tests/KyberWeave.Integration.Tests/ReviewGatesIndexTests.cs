@@ -15,8 +15,7 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The command takes its CodeGraph child through <see cref="ReviewGatesCommand.Executor" />, the same seam
-///         <c>doctor --ensure</c> exposes, so no real <c>codegraph</c> runs. Each gate writes a marker into the
+///         The command takes its CodeGraph child through <see cref="ReviewGatesCommand" />'s bounded process executor, so no real <c>codegraph</c> runs. Each gate writes a marker into the
 ///         repository's git configuration when it starts; a case that must stop before any gate proves it by finding
 ///         no marker there.
 ///     </para>

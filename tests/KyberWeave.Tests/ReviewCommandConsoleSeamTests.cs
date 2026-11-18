@@ -148,7 +148,7 @@ public sealed class ReviewCommandConsoleSeamTests
         FakeConsole standard = new();
         TestConsole ansi = Ansi();
         ScriptedService service = new(WithFinding());
-        ReviewSeatsCommand command = new(service, new NoDecisionModels(), standard, ansi);
+        ReviewSeatsCommand command = new(service, new NoDecisionModels(), standard, ansi, new ScriptedProcessExecutor(_ => throw new InvalidOperationException()));
 
         int exit = command.Execute(null!, new ReviewSeatsSettings { Format = "json" }, CancellationToken.None);
 
@@ -168,7 +168,8 @@ public sealed class ReviewCommandConsoleSeamTests
             new ScriptedService(new ReviewCommandResult(2, ClientError: "no folder")),
             new NoDecisionModels(),
             standard,
-            Ansi());
+            Ansi(),
+            new ScriptedProcessExecutor(_ => throw new InvalidOperationException()));
 
         int exit = command.Execute(null!, new ReviewSeatsSettings(), CancellationToken.None);
 
@@ -220,7 +221,7 @@ public sealed class ReviewCommandConsoleSeamTests
         FakeConsole standard = new();
         TestConsole ansi = Ansi();
         ScriptedGates service = new(new ReviewCommandResult(0));
-        ReviewGatesCommand command = new(service, standard, ansi);
+        ReviewGatesCommand command = new(service, standard, ansi, new ScriptedProcessExecutor(_ => throw new InvalidOperationException()));
 
         int exit = command.Execute(
             null!, new ReviewGatesSettings { Config = " " }, CancellationToken.None);
@@ -239,7 +240,7 @@ public sealed class ReviewCommandConsoleSeamTests
     {
         FakeConsole standard = new(isInputRedirected: redirected);
         ScriptedGates service = new(new ReviewCommandResult(0));
-        ReviewGatesCommand command = new(service, standard, Ansi());
+        ReviewGatesCommand command = new(service, standard, Ansi(), new ScriptedProcessExecutor(_ => throw new InvalidOperationException()));
 
         command.Execute(null!, new ReviewGatesSettings(), CancellationToken.None);
 
@@ -253,7 +254,7 @@ public sealed class ReviewCommandConsoleSeamTests
         FakeConsole standard = new();
         TestConsole ansi = Ansi();
         ScriptedGates service = new(WithFinding());
-        ReviewGatesCommand command = new(service, standard, ansi);
+        ReviewGatesCommand command = new(service, standard, ansi, new ScriptedProcessExecutor(_ => throw new InvalidOperationException()));
 
         int exit = command.Execute(null!, new ReviewGatesSettings { Format = "json" }, CancellationToken.None);
 

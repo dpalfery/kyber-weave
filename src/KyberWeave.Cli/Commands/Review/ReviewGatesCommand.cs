@@ -1,8 +1,8 @@
 using System.ComponentModel;
 
-using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
@@ -21,12 +21,12 @@ public sealed class ReviewGatesCommand(
     IReviewGatesService service,
     IConsole standard,
     IAnsiConsole ansi,
-    IProcessExecutor? indexExecutor = null) : Command<ReviewGatesSettings>
+    IBoundedProcessExecutor processes) : Command<ReviewGatesSettings>
 {
     private const int ClientInputExitCode = ReviewCommandResult.ClientInputExitCode;
 
     /// <summary>The bound on the CodeGraph index run, the same default <c>doctor --ensure</c> uses.</summary>
-    private static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
+    internal static readonly TimeSpan IndexTimeout = DoctorOptions.Defaults.IndexTimeout;
 
     /// <inheritdoc />
     public override int Execute(CommandContext context, ReviewGatesSettings settings,
@@ -93,7 +93,7 @@ public sealed class ReviewGatesCommand(
 
         ReviewCommandResult result = service.Run(
             Request(settings),
-            indexExecutor ?? ProcessExecutor.WithTimeout(IndexTimeout),
+            new TimeBoundedProcessExecutor(processes, IndexTimeout),
             standard.Out,
             cancellationToken);
 
