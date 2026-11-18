@@ -106,6 +106,18 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void DeleteTreeNoFollowRemovesAFilePathAndToleratesAMissingOne()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string file = WriteFile(files, root, "leftover.txt", "x");
+
+        files.DeleteTreeNoFollow(file);
+        files.DeleteTreeNoFollow(At(root, "absent"));
+
+        Assert.False(files.FileExists(file));
+    }
+
+    [Fact]
     public void DeleteTreeNoFollowRemovesADanglingLinkItself()
     {
         IWritableFileSystem files = Starting(out string root);

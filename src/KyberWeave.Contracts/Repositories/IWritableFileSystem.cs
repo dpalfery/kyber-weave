@@ -99,7 +99,8 @@ public interface IWritableFileSystem : IFileSystem
     /// <param name="directoryPath">The root of the tree.</param>
     /// <remarks>
     /// A link inside the tree is removed as a link, so its target survives; the tree the caller asked to delete is
-    /// the only tree that goes. A missing path is not an error. A read-only file is made writable first.
+    /// the only tree that goes. A path that names a regular file is deleted, and a missing path is not an error. A
+    /// read-only file is made writable first.
     /// </remarks>
     /// <exception cref="UnauthorizedAccessException">The process may not delete part of the tree.</exception>
     /// <exception cref="IOException">Part of the tree could not be deleted, for example because a file is open.</exception>

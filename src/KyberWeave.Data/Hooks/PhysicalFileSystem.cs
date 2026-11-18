@@ -65,14 +65,19 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     /// <inheritdoc />
     public void DeleteTreeNoFollow(string directoryPath)
     {
-        if (!Directory.Exists(directoryPath) && !File.Exists(directoryPath) && !IsLink(directoryPath))
-        {
-            return;
-        }
-
         if (IsLink(directoryPath))
         {
             DeleteLinkEntry(directoryPath);
+            return;
+        }
+
+        if (!Directory.Exists(directoryPath))
+        {
+            if (File.Exists(directoryPath))
+            {
+                DeleteFileEntry(directoryPath);
+            }
+
             return;
         }
 
@@ -89,12 +94,7 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
             }
             else
             {
-                if (entry.Attributes.HasFlag(FileAttributes.ReadOnly))
-                {
-                    File.SetAttributes(entry.FullName, FileAttributes.Normal);
-                }
-
-                File.Delete(entry.FullName);
+                DeleteFileEntry(entry.FullName);
             }
         }
 
@@ -278,6 +278,16 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
         {
             File.Delete(path);
         }
+    }
+
+    private static void DeleteFileEntry(string path)
+    {
+        if ((File.GetAttributes(path) & FileAttributes.ReadOnly) != 0)
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
+
+        File.Delete(path);
     }
 
     private static void CreateLinkParent(string linkPath)
