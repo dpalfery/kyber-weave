@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -20,12 +21,14 @@ namespace KyberWeave.Application.Review;
 /// <param name="cycles">Reads the recorded review cycle folders.</param>
 /// <param name="selector">Finds the review folder and the prior cycle's findings.</param>
 /// <param name="configs">Loads the host's configuration.</param>
+/// <param name="paths">Resolves the path the command was run against.</param>
 /// <param name="environment">Reports the operating-system family a gate's <c>os</c> filter is matched against.</param>
 public sealed class ReviewCycleService(
     IReviewWorkTreeService trees,
     IReviewCycleStore cycles,
     IReviewCycleSelector selector,
     IConfigLoadService configs,
+    IPathResolver paths,
     IProcessEnvironment environment) : IReviewCycleService
 {
     private const string UnreadableInput = "KW-REVIEW-023";
@@ -39,7 +42,7 @@ public sealed class ReviewCycleService(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(output);
 
-        string root = Path.GetFullPath(request.Path);
+        string root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         DiagnosticReport report = new();
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResultFactory.Reported(1, report);

@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Review;
@@ -16,6 +17,7 @@ public sealed class ReviewWorkTreeService(
     IWritableFileSystem fileSystem,
     IRunStateStore runState,
     IRunCheckout checkout,
+    IPathResolver paths,
     IProcessEnvironment environment) : IReviewWorkTreeService
 {
     private static readonly string[] FallbackBases = ["origin/main", "origin/master", "main", "master"];
@@ -28,12 +30,12 @@ public sealed class ReviewWorkTreeService(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        string full = Path.GetFullPath(path);
-        for (DirectoryInfo? directory = new(full); directory is not null; directory = directory.Parent)
+        string full = paths.GetFullPath(path, environment.CurrentDirectory);
+        for (string? directory = full; directory is not null; directory = Path.GetDirectoryName(directory))
         {
-            string entry = Path.Combine(directory.FullName, ReviewWorkTree.GitEntry);
+            string entry = Path.Combine(directory, ReviewWorkTree.GitEntry);
             if (fileSystem.DirectoryExists(entry) || fileSystem.FileExists(entry))
-                return directory.FullName;
+                return directory;
         }
 
         return full;
