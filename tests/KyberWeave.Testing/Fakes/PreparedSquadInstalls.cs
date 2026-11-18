@@ -265,11 +265,7 @@ public static class SquadInstallCopy
 {
     private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
 
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".json", ".toml", ".yaml", ".yml", ".md", ".txt", ".sh", ".ps1",
-        ".cmd", ".bat", ".cfg", ".conf", ".ini", ".xml", ".env", ".gitignore",
-    };
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>
     /// Copies a directory tree with <see cref="File.Copy"/>, preserving symbolic links and Unix file modes.
@@ -431,10 +427,10 @@ public static class SquadInstallCopy
     {
         foreach (string file in EnumerateOwnFiles(directory))
         {
-            if (!TextExtensions.Contains(Path.GetExtension(file)))
+            byte[] bytes = File.ReadAllBytes(file);
+            if (!IsText(bytes, out string text))
                 continue;
 
-            string text = File.ReadAllText(file);
             if (TryReplaceRoot(text, from, to, out string updated))
                 WriteTextAtomically(file, updated);
         }
@@ -461,6 +457,27 @@ public static class SquadInstallCopy
             }
 
             yield return entry.FullName;
+        }
+    }
+
+    /// <summary>
+    /// Answers whether the bytes are text: no NUL byte and valid UTF-8. A binary file can happen to hold
+    /// the root's bytes, and rewriting it would corrupt what the receipt's digest names.
+    /// </summary>
+    private static bool IsText(byte[] bytes, out string text)
+    {
+        text = string.Empty;
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
+            return false;
+
+        try
+        {
+            text = StrictUtf8.GetString(bytes);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
         }
     }
 

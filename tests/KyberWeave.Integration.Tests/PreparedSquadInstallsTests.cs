@@ -257,6 +257,26 @@ public sealed class PreparedSquadInstallsTests : IDisposable
     }
 
     /// <summary>
+    /// A deployed file that names the template root is rewritten whatever its extension: the arbiter
+    /// extension is <c>.ts</c> and a hook may have none, so a list of text extensions cannot be the rule.
+    /// </summary>
+    [Fact]
+    public void ReRootRewritesTextFilesWhateverTheirExtension()
+    {
+        using TempDirectory temp = new();
+        string stateDir = Directory.CreateDirectory(Path.Combine(temp.Path, "state")).FullName;
+        string extension = Path.Combine(stateDir, "kyber-arbiter.ts");
+        string extensionless = Path.Combine(stateDir, "hook");
+        File.WriteAllText(extension, $$"""const root = "{{From}}/a";""");
+        File.WriteAllText(extensionless, $"#!/bin/sh\nexec \"{From}/a\"\n");
+
+        SquadInstallCopy.ReRoot(stateDir, From, To);
+
+        Assert.Equal($$"""const root = "{{To}}/a";""", File.ReadAllText(extension));
+        Assert.Equal($"#!/bin/sh\nexec \"{To}/a\"\n", File.ReadAllText(extensionless));
+    }
+
+    /// <summary>
     /// Re-rooting touches only the recorded root itself: a binary file that happens to contain the
     /// bytes is left alone, and a sibling path that merely starts with the root is not rewritten.
     /// </summary>
