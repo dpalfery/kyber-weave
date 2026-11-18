@@ -2,6 +2,8 @@ using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -13,12 +15,25 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadCanonicalProfileStoreTests
 {
+    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero));
+    private readonly InMemoryFileSystem _files;
+    private readonly FakeSquadUserPaths _userPaths;
+
+    public SquadCanonicalProfileStoreTests()
+    {
+        _files = new InMemoryFileSystem(_clock);
+        _userPaths = new FakeSquadUserPaths(Path.Combine(_files.Root, "appdata"));
+    }
+
+    private SquadCanonicalProfileStore NewStore() => new(_userPaths, _files);
+
+    private string ProfilesDirectory => Path.Combine(_userPaths.HomeDirectory, ".kyber-weave", "squad", "profiles");
+
     [Fact]
     public void WriteThenReadRoundTripsProfilesAndAgentMap()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
         SquadCanonicalProfiles snapshot = CreateSnapshot("1.2.3");
 
         store.Write(snapshot);
@@ -29,7 +44,7 @@ public sealed class SquadCanonicalProfileStoreTests
             "squad",
             "profiles",
             "1.2.3.yml");
-        Assert.True(File.Exists(expectedPath), $"Expected snapshot file at '{expectedPath}'.");
+        Assert.True(_files.FileExists(expectedPath), $"Expected snapshot file at '{expectedPath}'.");
         SquadCanonicalProfiles? reread = store.TryRead("1.2.3");
         Assert.NotNull(reread);
         Assert.Equal("1.2.3", reread.SquadVersion);
@@ -54,9 +69,8 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void WriteOverwritesAnExistingSnapshotAtomically()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
 
         store.Write(CreateSnapshot("1.2.3"));
         store.Write(CreateSnapshotWithAgent("1.2.3", "reviewer", "general"));
@@ -70,16 +84,15 @@ public sealed class SquadCanonicalProfileStoreTests
             ".kyber-weave",
             "squad",
             "profiles");
-        Assert.Empty(Directory.GetFiles(profilesDirectory, "*.tmp"));
-        Assert.Single(Directory.GetFiles(profilesDirectory, "*.yml"));
+        Assert.Empty(_files.EnumerateFiles(profilesDirectory, "*.tmp", recursive: false).ToArray());
+        Assert.Single(_files.EnumerateFiles(profilesDirectory, "*.yml", recursive: false).ToArray());
     }
 
     [Fact]
     public void TryReadReturnsExactVersionWhenMultipleSnapshotsExist()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
         store.Write(CreateSnapshot("1.2.3"));
         store.Write(CreateSnapshotWithAgent("1.2.4", "reviewer", "general"));
 
@@ -93,18 +106,11 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadLatestReturnsTheMostRecentlyWrittenSnapshot()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
-        store.Write(CreateSnapshot("1.2.3"));
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
         store.Write(CreateSnapshotWithAgent("1.2.4", "reviewer", "general"));
-        string olderPath = Path.Combine(
-            userPaths.HomeDirectory,
-            ".kyber-weave",
-            "squad",
-            "profiles",
-            "1.2.4.yml");
-        File.SetLastWriteTimeUtc(olderPath, DateTime.UtcNow - TimeSpan.FromHours(1));
+        _clock.Advance(TimeSpan.FromHours(1));
+        store.Write(CreateSnapshot("1.2.3"));
 
         SquadCanonicalProfiles? latest = store.TryReadLatest();
 
@@ -115,19 +121,10 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadLatestBreaksWriteTimeTiesByNumericVersion()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
         store.Write(CreateSnapshot("1.9.0"));
         store.Write(CreateSnapshot("1.10.0"));
-        DateTime tied = new(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-        string profilesDirectory = Path.Combine(
-            userPaths.HomeDirectory,
-            ".kyber-weave",
-            "squad",
-            "profiles");
-        File.SetLastWriteTimeUtc(Path.Combine(profilesDirectory, "1.9.0.yml"), tied);
-        File.SetLastWriteTimeUtc(Path.Combine(profilesDirectory, "1.10.0.yml"), tied);
 
         SquadCanonicalProfiles? latest = store.TryReadLatest();
 
@@ -140,9 +137,8 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void SnapshotAgentRosterResolvesNamesCaseInsensitively()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
         store.Write(CreateSnapshot("1.2.3"));
 
         SquadCanonicalProfiles? reread = store.TryRead("1.2.3");
@@ -158,9 +154,8 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadReturnsNullWhenProfilesDirectoryIsMissing()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
 
         Assert.Null(store.TryRead("1.2.3"));
     }
@@ -168,19 +163,15 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadReturnsNullWhenSnapshotFileIsCorrupt()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
+        FakeSquadUserPaths userPaths = _userPaths;
         string profilesDirectory = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
             "squad",
             "profiles");
-        Directory.CreateDirectory(profilesDirectory);
-        File.WriteAllText(
-            Path.Combine(profilesDirectory, "1.2.3.yml"),
-            "schema: kyber-squad.canonical-profiles/v1\nprofiles: [unclosed\n",
-            Encoding.UTF8);
-        SquadCanonicalProfileStore store = new(userPaths);
+        _files.CreateDirectory(profilesDirectory);
+        _files.WriteAllText(Path.Combine(profilesDirectory, "1.2.3.yml"), "schema: kyber-squad.canonical-profiles/v1\nprofiles: [unclosed\n");
+        SquadCanonicalProfileStore store = NewStore();
 
         Assert.Null(store.TryRead("1.2.3"));
     }
@@ -188,19 +179,15 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadReturnsNullWhenSnapshotSchemaIsUnexpected()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
+        FakeSquadUserPaths userPaths = _userPaths;
         string profilesDirectory = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
             "squad",
             "profiles");
-        Directory.CreateDirectory(profilesDirectory);
-        File.WriteAllText(
-            Path.Combine(profilesDirectory, "1.2.3.yml"),
-            "schema: kyber-squad.model-profiles/v1\nsquad-version: 1.2.3\nprofiles: {}\nagents: {}\n",
-            Encoding.UTF8);
-        SquadCanonicalProfileStore store = new(userPaths);
+        _files.CreateDirectory(profilesDirectory);
+        _files.WriteAllText(Path.Combine(profilesDirectory, "1.2.3.yml"), "schema: kyber-squad.model-profiles/v1\nsquad-version: 1.2.3\nprofiles: {}\nagents: {}\n");
+        SquadCanonicalProfileStore store = NewStore();
 
         Assert.Null(store.TryRead("1.2.3"));
     }
@@ -208,16 +195,15 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadReturnsNullWhenEmbeddedVersionDoesNotMatchFileName()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
         store.Write(CreateSnapshot("1.2.4"));
         string profilesDirectory = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
             "squad",
             "profiles");
-        File.Move(
+        _files.MoveFile(
             Path.Combine(profilesDirectory, "1.2.4.yml"),
             Path.Combine(profilesDirectory, "1.2.3.yml"));
 
@@ -227,15 +213,14 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadReturnsNullWhenSnapshotPathIsADirectory()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
+        FakeSquadUserPaths userPaths = _userPaths;
         string profilesDirectory = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
             "squad",
             "profiles");
-        Directory.CreateDirectory(Path.Combine(profilesDirectory, "1.2.3.yml"));
-        SquadCanonicalProfileStore store = new(userPaths);
+        _files.CreateDirectory(Path.Combine(profilesDirectory, "1.2.3.yml"));
+        SquadCanonicalProfileStore store = NewStore();
 
         Assert.Null(store.TryRead("1.2.3"));
     }
@@ -243,9 +228,8 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadLatestReturnsNullWhenProfilesDirectoryIsMissing()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
 
         Assert.Null(store.TryReadLatest());
     }
@@ -253,19 +237,15 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void TryReadLatestSkipsCorruptSnapshots()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
+        FakeSquadUserPaths userPaths = _userPaths;
         string profilesDirectory = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
             "squad",
             "profiles");
-        Directory.CreateDirectory(profilesDirectory);
-        File.WriteAllText(
-            Path.Combine(profilesDirectory, "1.2.3.yml"),
-            "not yaml at all: [unclosed",
-            Encoding.UTF8);
-        SquadCanonicalProfileStore store = new(userPaths);
+        _files.CreateDirectory(profilesDirectory);
+        _files.WriteAllText(Path.Combine(profilesDirectory, "1.2.3.yml"), "not yaml at all: [unclosed");
+        SquadCanonicalProfileStore store = NewStore();
         store.Write(CreateSnapshot("1.2.4"));
 
         SquadCanonicalProfiles? latest = store.TryReadLatest();
@@ -277,9 +257,8 @@ public sealed class SquadCanonicalProfileStoreTests
     [Fact]
     public void WriteThenReadRoundTripsEmptySections()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
         SquadCanonicalProfiles snapshot = new(
             "1.2.3",
             new SquadModelProfiles(
@@ -303,7 +282,7 @@ public sealed class SquadCanonicalProfileStoreTests
     public void ConstructorWithEmptyOrWhitespaceHomeDirectoryThrowsArgumentException(string homeDirectory)
     {
         ISquadUserPaths userPaths = new FakeSquadUserPaths("/dummy/appdata", homeDirectory);
-        Assert.Throws<ArgumentException>(() => new SquadCanonicalProfileStore(userPaths));
+        Assert.Throws<ArgumentException>(() => new SquadCanonicalProfileStore(userPaths, _files));
     }
 
     [Theory]
@@ -314,9 +293,8 @@ public sealed class SquadCanonicalProfileStoreTests
     [InlineData("a/b")]
     public void WriteRejectsVersionsThatEscapeTheProfilesDirectory(string version)
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
 
         Assert.Throws<ArgumentException>(() => store.Write(CreateSnapshot(version)));
     }
@@ -329,9 +307,8 @@ public sealed class SquadCanonicalProfileStoreTests
     [InlineData("a/b")]
     public void TryReadRejectsVersionsThatEscapeTheProfilesDirectory(string version)
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadCanonicalProfileStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = _userPaths;
+        SquadCanonicalProfileStore store = NewStore();
 
         Assert.Throws<ArgumentException>(() => store.TryRead(version));
     }

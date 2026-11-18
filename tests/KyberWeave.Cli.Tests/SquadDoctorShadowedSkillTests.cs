@@ -12,13 +12,11 @@ namespace KyberWeave.Tests;
 /// <c>squad doctor</c> warns when a skill folder the repository keeps for itself repeats the name of
 /// an installed squad skill with different content, so a worker is not left reading a stale copy.
 /// </summary>
-public sealed class SquadDoctorShadowedSkillTests : IDisposable
+public sealed class SquadDoctorShadowedSkillTests
 {
     private const string Installed = "---\nname: task-gate\n---\nRun the current command.\n";
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
+    private readonly InMemorySquadState _state = new();
 
     [Fact]
     public void AProjectCopyWithDifferentContentIsAWarningNamingBothPathsAndTheFix()
@@ -60,16 +58,16 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
     /// <summary>Installs the squad skill under <c>.claude</c> through a receipt, then writes one unmanaged project file.</summary>
     private string Deploy(string projectRelativePath, string projectContent)
     {
-        string workingDir = Path.Combine(_temp.Path, "project");
+        string workingDir = _state.CreateRoot("project");
         string installedPath = Path.Combine(workingDir, ".claude", "skills", "task-gate", "SKILL.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(installedPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(installedPath)!);
         byte[] installedBytes = Encoding.UTF8.GetBytes(Installed);
-        File.WriteAllBytes(installedPath, installedBytes);
+        _state.Files.WriteAllBytes(installedPath, installedBytes);
         SeedReceipt(workingDir, ".claude/skills/task-gate/SKILL.md", installedBytes);
 
         string projectPath = Path.Combine(workingDir, projectRelativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
-        File.WriteAllText(projectPath, projectContent);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+        _state.Files.WriteAllText(projectPath, projectContent);
         return workingDir;
     }
 
@@ -77,9 +75,9 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home")),
             workingDirectory: workingDir);
 
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() => command.Execute(
@@ -90,9 +88,9 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
 
     private void SeedReceipt(string targetRoot, string relativePath, byte[] content)
     {
-        SquadStateStore stateStore = RealSquadState.Store(new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home")));
+        SquadStateStore stateStore = _state.Store;
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         SquadReceipt receipt = new(
             Schema: "kyber-squad.receipt/v1",
             Scope: SquadDeploymentScope.Project,
@@ -100,7 +98,7 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
             InstalledAtUtc: DateTimeOffset.UtcNow,
             Degradations: [],
             Files: [new SquadOwnedFile(relativePath, Convert.ToHexStringLower(SHA256.HashData(content)), "claude", Adopted: false)]);
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
+        _state.Files.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt));
     }
 
     private static string Normalize(string text) =>

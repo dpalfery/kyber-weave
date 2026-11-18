@@ -1,6 +1,9 @@
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Testing.Squad;
+using Microsoft.Extensions.DependencyInjection;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -16,7 +19,7 @@ namespace KyberWeave.Tests;
 /// an exit code that moved on it would turn a healthy install into a red one for a rename it has not
 /// yet been asked to make.
 /// </remarks>
-public sealed class SquadDoctorMcpRenameTests : IDisposable
+public sealed class SquadDoctorMcpRenameTests
 {
     private const string WarningCode = "KW-MCP-WIRE-007";
 
@@ -24,9 +27,8 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
 
     private const string MigrateVerb = "docs mcp-migrate";
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
+    private readonly InMemorySquadState _state = new();
+    private readonly MemoryDocsHost _host = new();
 
     /// <summary>
     /// A project whose <c>.mcp.json</c> holds a proven old key is warned about: doctor names the rule id,
@@ -35,7 +37,7 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
     [Fact]
     public void Doctor_ProjectWithProvenOldKey_WarnsWithTheMigrateVerbAndKeepsItsExitCode()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-old-key");
+        string workingDir = NewRoot("doctor-old-key");
         WriteProvenOldKey(workingDir);
 
         CommandExecution leftover = RunProjectDoctor(workingDir);
@@ -45,8 +47,8 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
         Assert.Contains(".mcp.json", leftover.Output, StringComparison.Ordinal);
         Assert.Contains(MigrateVerb, leftover.Output, StringComparison.Ordinal);
 
-        string cleanDir = Path.Combine(_temp.Path, "doctor-clean");
-        Directory.CreateDirectory(cleanDir);
+        string cleanDir = NewRoot("doctor-clean");
+        _state.Files.CreateDirectory(cleanDir);
         CommandExecution clean = RunProjectDoctor(cleanDir);
 
         Assert.Equal(clean.ExitCode, leftover.ExitCode);
@@ -62,11 +64,9 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
     [Fact]
     public void Doctor_ProjectWithoutAnOldKey_SaysNothingAboutRenaming()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-no-old-key");
-        Directory.CreateDirectory(workingDir);
-        McpWiringFixture.WriteText(
-            workingDir,
-            ".mcp.json",
+        string workingDir = NewRoot("doctor-no-old-key");
+        _host.Files.WriteAllText(
+            Path.Combine(workingDir, ".mcp.json"),
             new JsonObject
             {
                 ["mcpServers"] = new JsonObject
@@ -80,7 +80,7 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
         Assert.DoesNotContain(WarningCode, execution.Output, StringComparison.Ordinal);
         Assert.DoesNotContain(MigrateVerb, execution.Output, StringComparison.Ordinal);
 
-        string controlDir = Path.Combine(_temp.Path, "doctor-no-old-key-control");
+        string controlDir = NewRoot("doctor-no-old-key-control");
         WriteProvenOldKey(controlDir);
 
         CommandExecution control = RunProjectDoctor(controlDir);
@@ -95,11 +95,9 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
     [Fact]
     public void Doctor_ProjectWithUnprovenOldKey_ReportsItAsLeftAloneWithAHandEdit()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-unproven");
-        Directory.CreateDirectory(workingDir);
-        McpWiringFixture.WriteText(
-            workingDir,
-            ".mcp.json",
+        string workingDir = NewRoot("doctor-unproven");
+        _host.Files.WriteAllText(
+            Path.Combine(workingDir, ".mcp.json"),
             new JsonObject
             {
                 ["mcpServers"] = new JsonObject
@@ -128,25 +126,30 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
     [Fact]
     public void Doctor_ProjectWithProvenOldKey_LeavesTheFileByteIdentical()
     {
-        string workingDir = Path.Combine(_temp.Path, "doctor-read-only");
+        string workingDir = NewRoot("doctor-read-only");
         WriteProvenOldKey(workingDir);
-        byte[] before = File.ReadAllBytes(Path.Combine(workingDir, ".mcp.json"));
+        byte[] before = _host.Files.ReadAllBytes(Path.Combine(workingDir, ".mcp.json"));
 
         CommandExecution execution = RunProjectDoctor(workingDir);
 
         Assert.Contains(WarningCode, execution.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(workingDir, ".mcp.json")));
+        Assert.Equal(before, _host.Files.ReadAllBytes(Path.Combine(workingDir, ".mcp.json")));
+    }
+
+    private string NewRoot(string name)
+    {
+        string root = Path.Combine(_host.Files.Root, name);
+        _host.Files.CreateDirectory(root);
+        _state.Files.CreateDirectory(root);
+        return root;
     }
 
     private void WriteProvenOldKey(string workingDir)
     {
-        Directory.CreateDirectory(workingDir);
-        string bin = Path.Combine(_temp.Path, "bin");
-        Directory.CreateDirectory(bin);
-        string binary = McpWiringFixture.WriteExecutable(bin, "kyber-weave-mcp");
-        McpWiringFixture.WriteText(
-            workingDir,
-            ".mcp.json",
+        string bin = Path.Combine(_host.Files.Root, "bin");
+        string binary = _host.WriteExecutable(bin, "kyber-weave-mcp");
+        _host.Files.WriteAllText(
+            Path.Combine(workingDir, ".mcp.json"),
             new JsonObject
             {
                 ["mcpServers"] = new JsonObject
@@ -165,11 +168,11 @@ public sealed class SquadDoctorMcpRenameTests : IDisposable
     {
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            userPaths,
-            workingDirectory: workingDir);
+            workingDirectory: workingDir,
+            wiring: _host.Services().GetRequiredService<IMcpWiringService>());
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,

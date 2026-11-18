@@ -236,7 +236,8 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadRenderer? renderer = null,
         IKyberWeaveConfigRepository? configs = null,
-        SquadConsole? output = null)
+        SquadConsole? output = null,
+        IMcpWiringService? wiring = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         InMemorySquadServices services = new(state.Files);
@@ -260,7 +261,8 @@ internal static class SquadTestCommands
             configs ?? new FakeKyberWeaveConfigRepository(),
             console,
             state.Files,
-            new SquadCommandRoots(state.Files, state.Paths, state.Environment, console));
+            new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
+            wiring);
     }
 
     public static SquadPresetUseCommand PresetUse(
