@@ -43,4 +43,15 @@ public sealed class FakeIdGeneratorContractTests : IdGeneratorContractTests
 {
     /// <inheritdoc />
     protected override IIdGenerator CreateGenerator() => new FakeIdGenerator();
+
+    [Fact]
+    public void TwoFakesAreIndependentAndPredictable()
+    {
+        FakeIdGenerator first = new();
+        FakeIdGenerator second = new();
+
+        Assert.Equal(first.NewGuid(), second.NewGuid());
+        Assert.Equal(first.NewRandomToken(), second.NewRandomToken());
+        Assert.Equal(first.NewRandomFileName(), second.NewRandomFileName());
+    }
 }

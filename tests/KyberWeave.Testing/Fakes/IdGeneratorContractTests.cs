@@ -57,6 +57,7 @@ public abstract partial class IdGeneratorContractTests
             Assert.Equal(name, Path.GetFileName(name));
             Assert.DoesNotContain('/', name);
             Assert.DoesNotContain('\\', name);
+            Assert.Equal(-1, name.IndexOfAny(Path.GetInvalidFileNameChars()));
             Assert.True(seen.Add(name), $"The generator returned '{name}' twice.");
         }
     }

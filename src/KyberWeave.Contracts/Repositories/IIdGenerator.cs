@@ -4,7 +4,8 @@ namespace KyberWeave.Contracts.Repositories;
 /// <remarks>
 /// Code above the data layer asks this instead of calling <see cref="Guid.NewGuid" />, <see cref="Random" /> or
 /// <see cref="System.IO.Path.GetRandomFileName" />, so a test that observes the value supplies a predictable one.
-/// Every generated value is unique and no two calls return the same value.
+/// No two calls on the same generator return the same value. Two generators are independent, so a deterministic fake
+/// can start again from the same value in every test that builds one.
 /// </remarks>
 public interface IIdGenerator
 {
