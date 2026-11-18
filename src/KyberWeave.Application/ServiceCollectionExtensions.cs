@@ -130,6 +130,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
+        services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();

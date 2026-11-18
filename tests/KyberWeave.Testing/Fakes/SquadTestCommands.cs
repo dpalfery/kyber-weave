@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Configuration;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -178,7 +179,7 @@ internal static class SquadTestCommands
             new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory),
             SquadFileSystemPathSemantics.Instance,
-            configs ?? new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe()));
+            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()));
     }
 
     public static SquadPresetUseCommand PresetUse(

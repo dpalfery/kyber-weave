@@ -70,7 +70,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         services.TryAddSingleton<IReviewDecisionCacheStore>(_ => new FileReviewDecisionCacheStore());
         services.TryAddSingleton<ICitedSourceFiles>(_ => new FileCitedSourceFiles());
-        services.TryAddSingleton<IRepositoryTreeProbe>(_ => new FileRepositoryTreeProbe());
         services.TryAddSingleton<ITestClassSources>(_ => new FileTestClassSources());
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp => new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
         services.TryAddSingleton<IRepositoryToolSettings>(sp => new ConfigFileToolSettings(sp.GetRequiredService<IKyberWeaveConfigRepository>()));
