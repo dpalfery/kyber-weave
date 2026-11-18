@@ -744,7 +744,7 @@ The full-suite refusal now lives in the commands a run goes through, because the
   is refused unless `--council` is given or stdin is a terminal. A refused gate is reported as a
   blocking failure `KW-REVIEW-033` with exit `1`, and starts nothing. Under `--all`, the run stops at
   once; a scoped run still runs the other gates.
-- **`scripts/fast-loop.sh --full`, `--scoped` and `--regenerate`.** Exit `89` before any build when
+- **`scripts/fast-loop.sh --full` and `--scoped`.** Exit `89` before any build when
   stdin is not a terminal, and print the targeted alternatives. `--class` and `--method` are the
   targeted, unchanged modes.
 

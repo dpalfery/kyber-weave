@@ -17,7 +17,7 @@ public sealed class UserHostConfigTests
 
     private string NewHome()
     {
-        string home = Path.Combine(_files.RootPath, "home");
+        string home = Path.Combine(_files.Root, "home");
         _files.CreateDirectory(home);
         return home;
     }

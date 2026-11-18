@@ -1,0 +1,17 @@
+{
+  "solution": {
+    "path": "KyberWeave.sln",
+    "projects": [
+      "tests\\KyberWeave.Application.Tests\\KyberWeave.Application.Tests.csproj",
+      "tests\\KyberWeave.Arbiter.Tests\\KyberWeave.Arbiter.Tests.csproj",
+      "tests\\KyberWeave.Architecture.Tests\\KyberWeave.Architecture.Tests.csproj",
+      "tests\\KyberWeave.Cli.Tests\\KyberWeave.Cli.Tests.csproj",
+      "tests\\KyberWeave.Content.Tests\\KyberWeave.Content.Tests.csproj",
+      "tests\\KyberWeave.Data.Tests\\KyberWeave.Data.Tests.csproj",
+      "tests\\KyberWeave.Hooks.Tests\\KyberWeave.Hooks.Tests.csproj",
+      "tests\\KyberWeave.Kernel.Tests\\KyberWeave.Kernel.Tests.csproj",
+      "tests\\KyberWeave.Mcp.Tests\\KyberWeave.Mcp.Tests.csproj",
+      "tests\\KyberWeave.RepoPolicy.Tests\\KyberWeave.RepoPolicy.Tests.csproj"
+    ]
+  }
+}

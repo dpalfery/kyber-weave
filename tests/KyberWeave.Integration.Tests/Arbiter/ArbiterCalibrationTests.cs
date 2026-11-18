@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using Xunit;
+using static KyberWeave.Tests.ArbiterCalibrationHarness;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -20,10 +21,7 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 public sealed class ArbiterCalibrationTests
 {
     private const string OutputVariable = "KW_ARBITER_CALIBRATE_OUT";
-    private const string ModelsVariable = "KW_ARBITER_CALIBRATE_MODELS";
-    private const string DefaultModels = "jev-1.13.0,jev-1.14.0";
     private const string EndpointVariable = "KW_ARBITER_CALIBRATE_ENDPOINT";
-    private const string LimitVariable = "KW_ARBITER_CALIBRATE_LIMIT";
     private const string CasesVariable = "KW_ARBITER_CALIBRATE_CASES";
     private const string DefaultEndpoint = "https://api.typesafe.ai/v1";
 
@@ -34,11 +32,6 @@ public sealed class ArbiterCalibrationTests
     private const double MaxReportedCostUsd = 0.30;
 
     private const int MaxConsecutiveFailures = 3;
-
-    /// <summary>The status recorded for a call that got no HTTP response.</summary>
-    private const HttpStatusCode TransportFailure = 0;
-
-    private static readonly Uri ProbeUri = new("https://calibration.invalid/v1");
 
     private static string CasesPath([CallerFilePath] string sourcePath = "") =>
         Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", "Fixtures", "arbiter-calibration", "cases.jsonl");
@@ -149,37 +142,6 @@ public sealed class ArbiterCalibrationTests
         }
     }
 
-    [Theory]
-    [InlineData("")]
-    [InlineData("   ")]
-    [InlineData(" , ")]
-    public void ParseModels_RefusesAValueThatNamesNoModel(string value)
-    {
-        Assert.Throws<ArgumentException>(() => ParseModels(value));
-    }
-
-    [Fact]
-    public void ParseModels_UsesTheDefaultWhenUnset()
-    {
-        Assert.Equal(["jev-1.13.0", "jev-1.14.0"], ParseModels(null));
-    }
-
-    [Theory]
-    [InlineData("0")]
-    [InlineData("-1")]
-    [InlineData("")]
-    [InlineData("many")]
-    public void ApplyLimit_RefusesAValueThatIsNotAPositiveCount(string value)
-    {
-        Assert.Throws<ArgumentException>(() => ApplyLimit(LoadCases(CasesPath()), value));
-    }
-
-    [Fact]
-    public void ApplyLimit_TakesThatManyCases()
-    {
-        Assert.Equal(2, ApplyLimit(LoadCases(CasesPath()), "2").Count);
-    }
-
     [Fact]
     public void OpenOutput_LeavesAnExistingFileUntouched()
     {
@@ -198,94 +160,9 @@ public sealed class ArbiterCalibrationTests
         }
     }
 
-    [Fact]
-    public async Task SendAsync_ReportsANetworkErrorAsAFailedCall()
-    {
-        using ThrowingHandler handler = new(new HttpRequestException("unreachable"));
-        using HttpClient client = new(handler);
-
-        (HttpStatusCode status, _) = await SendAsync(client, ProbeUri, "key", "{}", TestContext.Current.CancellationToken);
-
-        Assert.Equal(TransportFailure, status);
-    }
-
-    [Fact]
-    public async Task SendAsync_ReportsATimeoutAsAFailedCall()
-    {
-        using ThrowingHandler handler = new(new TaskCanceledException("timed out"));
-        using HttpClient client = new(handler);
-
-        (HttpStatusCode status, _) = await SendAsync(client, ProbeUri, "key", "{}", TestContext.Current.CancellationToken);
-
-        Assert.Equal(TransportFailure, status);
-    }
-
-    [Fact]
-    public async Task SendAsync_StopsWhenTheRunIsCancelled()
-    {
-        using CancellationTokenSource cancellation = new();
-        await cancellation.CancelAsync();
-        using ThrowingHandler handler = new(new OperationCanceledException(cancellation.Token));
-        using HttpClient client = new(handler);
-
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
-            () => SendAsync(client, ProbeUri, "key", "{}", cancellation.Token));
-    }
-
-    /// <summary>The models to measure: the default when unset, and never an empty list.</summary>
-    private static string[] ParseModels(string? value)
-    {
-        string[] models = (value ?? DefaultModels).Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-        return models.Length > 0 ? models : throw new ArgumentException($"{ModelsVariable} names no model.", nameof(value));
-    }
-
-    /// <summary>All the cases when unset; otherwise the first <paramref name="value"/>, which must be a positive count.</summary>
-    private static List<CalibrationCase> ApplyLimit(List<CalibrationCase> cases, string? value)
-    {
-        if (value is null)
-        {
-            return cases;
-        }
-
-        return int.TryParse(value, CultureInfo.InvariantCulture, out int limit) && limit > 0
-            ? cases.Take(limit).ToList()
-            : throw new ArgumentException($"{LimitVariable} must be a positive count.", nameof(value));
-    }
-
     /// <summary>Creates the output file, refusing any path that already exists, such as the labelled cases.</summary>
     private static StreamWriter OpenOutput(string path) =>
         new(new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read), new UTF8Encoding(false));
-
-    private static async Task<(HttpStatusCode Status, string Body)> SendAsync(
-        HttpClient client, Uri requestUri, string key, string body, CancellationToken cancellationToken)
-    {
-        for (int attempt = 0; ; attempt++)
-        {
-            try
-            {
-                using HttpRequestMessage request = new(HttpMethod.Post, requestUri)
-                {
-                    Content = new StringContent(body, Encoding.UTF8, "application/json"),
-                };
-                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", key);
-                using HttpResponseMessage response = await client.SendAsync(request, cancellationToken);
-                if (response.StatusCode is not ((HttpStatusCode)429 or (HttpStatusCode)529) || attempt >= 4)
-                {
-                    return (response.StatusCode, await response.Content.ReadAsStringAsync(cancellationToken));
-                }
-            }
-            catch (HttpRequestException exception)
-            {
-                return (TransportFailure, exception.Message);
-            }
-            catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
-            {
-                return (TransportFailure, exception.Message);
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(1 << attempt), cancellationToken);
-        }
-    }
 
     private static double? ReadReportedCost(string body)
     {
@@ -329,48 +206,5 @@ public sealed class ArbiterCalibrationTests
             Assert.Contains(item.Label, rule.Answers);
             Assert.All(rule.Ask!.State.Values, fact => Assert.True(item.Facts.Contains(fact), $"{item.Id} lacks {fact}"));
         }
-    }
-
-    private static List<CalibrationCase> LoadCases(string path) =>
-        File.ReadLines(path)
-            .Where(line => !string.IsNullOrWhiteSpace(line))
-            .Select(ParseCase)
-            .ToList();
-
-    private static CalibrationCase ParseCase(string line)
-    {
-        using JsonDocument json = JsonDocument.Parse(line);
-        JsonElement root = json.RootElement;
-        Dictionary<string, ArbiterFact> facts = new(StringComparer.Ordinal);
-        foreach (JsonProperty fact in root.GetProperty("facts").EnumerateObject())
-        {
-            facts[fact.Name] = new ArbiterFact(ToValue(fact.Value), ArbiterFactLabel.Asserted);
-        }
-
-        return new CalibrationCase(
-            root.GetProperty("id").GetString()!,
-            root.GetProperty("rule").GetString()!,
-            root.GetProperty("label").GetString()!,
-            root.GetProperty("difficulty").GetString()!,
-            new ArbiterFactSet(facts));
-    }
-
-    private static object? ToValue(JsonElement element) => element.ValueKind switch
-    {
-        JsonValueKind.Array => element.EnumerateArray().Select(ToValue).ToList(),
-        JsonValueKind.Object => element.EnumerateObject().ToDictionary(item => item.Name, item => ToValue(item.Value), StringComparer.Ordinal),
-        JsonValueKind.Number => element.GetDouble().ToString(CultureInfo.InvariantCulture),
-        JsonValueKind.True => true,
-        JsonValueKind.False => false,
-        JsonValueKind.Null => null,
-        _ => element.GetString(),
-    };
-
-    private sealed record CalibrationCase(string Id, string Rule, string Label, string Difficulty, ArbiterFactSet Facts);
-
-    private sealed class ThrowingHandler(Exception exception) : HttpMessageHandler
-    {
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromException<HttpResponseMessage>(exception);
     }
 }

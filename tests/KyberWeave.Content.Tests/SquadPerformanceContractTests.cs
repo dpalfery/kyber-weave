@@ -8,7 +8,7 @@ namespace KyberWeave.Tests;
 ///     canonical agent instructions, the shared execution skill both entry points load, test-dev
 ///     skills, and test coding standards: the command tokens, flags, paths and digest templates. The
 ///     rules those surfaces state in prose are checked by
-///     <c>tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml</c>.
+///     <c>tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml</c>.
 /// </summary>
 public sealed class SquadPerformanceContractTests
 {
@@ -45,7 +45,7 @@ public sealed class SquadPerformanceContractTests
     private const string ReviewCouncilArchitecturePath = "docs/code-review/architecture.md";
 
     private const string DirectAssemblyRunner =
-        "dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class";
+        "dotnet tests/KyberWeave.<Project>.Tests/bin/Release/net10.0/KyberWeave.<Project>.Tests.dll -class";
 
     /// <summary>
     ///     Retired. The quiet reporter prints the same one banner line for a passing run and for a
@@ -61,7 +61,7 @@ public sealed class SquadPerformanceContractTests
     ///     fully qualified name, so a short class name runs zero tests and still exits 0.
     /// </summary>
     private const string DirectAssemblyRegex =
-        @"tests/KyberWeave\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.Tests\.dll\s+-class\s+""<[Nn]amespace>\.<[^"">\r\n]+>""";
+        @"tests/KyberWeave\.<Project>\.Tests/bin/Release/net\d+\.\d+/KyberWeave\.<Project>\.Tests\.dll\s+-class\s+""<[Nn]amespace>\.<[^"">\r\n]+>""";
 
     private const string DigestTestCountersRegex =
         @"TESTS:\s*total=(?:\d+|N|<[^>\r\n]+>)\s+failed=(?:\d+|N|<[^>\r\n]+>)\s+passed=(?:\d+|N|<[^>\r\n]+>)";
@@ -96,7 +96,7 @@ public sealed class SquadPerformanceContractTests
     /// <remarks>
     ///     <para>
     ///         <c>products/kyber-squad/</c> ships to every consumer, so a line naming
-    ///         <c>tests/KyberWeave.Tests/bin/…</c> teaches every downstream repository a fact about
+    ///         <c>tests/KyberWeave.&lt;Project&gt;.Tests/bin/…</c> teaches every downstream repository a fact about
     ///         this one, and that is what slice 7's D5 forbids. The rule the earlier pin enforced is
     ///         unchanged — the worker is still told the exact runner, and still told the class must be
     ///         fully qualified — and only its home moved: the host's test standard carries the

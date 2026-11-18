@@ -13,9 +13,9 @@ last-reviewed: 2026-11-16
 ## Commands
 
 ```bash
-# The product's tests: build once, then the classes the change covers.
-dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build \
+# The unit tests of the project that holds the code: build once, then the classes the change covers.
+dotnet build tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release
+dotnet test tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release --no-build \
   --filter "FullyQualifiedName~<Class>"
 
 # Repository policy: scripts, workflows, gate configuration, docs prose, source scans.

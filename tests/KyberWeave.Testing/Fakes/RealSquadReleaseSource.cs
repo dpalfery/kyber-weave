@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Paths;
+using KyberWeave.Testing.Squad;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -41,4 +42,19 @@ internal static class RealSquadReleaseSource
             onStagingCreated,
             maximumAssetBytes);
     }
+
+    /// <summary>The source over <paramref name="handler"/> and the in-memory file system of <paramref name="state"/>.</summary>
+    /// <param name="handler">The transport; it must not follow redirects.</param>
+    /// <param name="apiRoot">The release API root.</param>
+    /// <param name="state">The in-memory state whose file system, paths and environment the source works in.</param>
+    internal static GitHubSquadReleaseSource CreateInMemory(HttpMessageHandler handler, Uri apiRoot, InMemorySquadState state) =>
+        new(
+            handler,
+            apiRoot,
+            state.Files,
+            state.Paths,
+            state.Environment,
+            new FakeIdGenerator(),
+            null,
+            GitHubSquadReleaseSource.DefaultMaximumAssetBytes);
 }

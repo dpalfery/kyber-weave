@@ -9,7 +9,7 @@ namespace KyberWeave.Tests.Review;
 /// <summary>The decision cache keeps answers in an in-memory file system and survives an unreadable file.</summary>
 public sealed class FileReviewDecisionCacheStoreTests
 {
-    private static readonly string Root = Path.GetFullPath(Path.Combine(new InMemoryFileSystem().RootPath, "cache"));
+    private static readonly string Root = Path.GetFullPath(Path.Combine(new InMemoryFileSystem().Root, "cache"));
     private static readonly string CachePath = Path.Combine(Root, "decisions.json");
 
     private readonly InMemoryFileSystem _files = new();

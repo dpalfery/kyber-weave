@@ -148,7 +148,7 @@ fi
 
 # ----------------------------------------------------------- library helpers
 #
-# Helpers exposed for the test harness (tests/KyberWeave.Tests/ReleaseTests.cs).
+# Helpers exposed for the test harness (tests/KyberWeave.RepoPolicy.Tests/ReleaseTests.cs).
 # Sourcing install.sh with KYBER_WEAVE_INSTALL_LIB=1 returns after these are
 # defined, leaving the functions reachable from the surrounding shell without
 # running the installer. fetch and fetch_stdout sit above that return on
@@ -648,7 +648,7 @@ esac
 
 # Single source of truth for the platform -> Kyber-Weave RID mapping. The
 # inline duplicate the previous version of this script carried has been
-# removed so a test in tests/KyberWeave.Tests/ReleaseTests.cs and the
+# removed so a test in tests/KyberWeave.RepoPolicy.Tests/ReleaseTests.cs and the
 # installer derive the same string from the same rules.
 RID="$(kyber_weave_resolve_rid "$os" "$arch")"
 

@@ -80,39 +80,11 @@ internal static class UpdateCommandTestServices
     }
 }
 
-/// <summary>Builds the update's Arbiter seams over the container, for a test's own home and environment.</summary>
+/// <summary>The update's Arbiter refresh targets for a test.</summary>
 internal static class UpdateTestServices
 {
     /// <summary>An update that covers no project and no global target.</summary>
     internal static IArbiterRefreshTargets NoProjects { get; } = new NoProjectsArbiterRefreshTargets();
-
-    /// <summary>
-    /// The production refresher, resolved from the container over <paramref name="readEnvironment"/>'s home, so a test
-    /// exercises the real renderers and receipt rewrites against its own temporary tree.
-    /// </summary>
-    /// <param name="readEnvironment">Reads one environment variable.</param>
-    /// <param name="log">Receives one line per step or warning.</param>
-    /// <returns>The refresher.</returns>
-    internal static ArbiterHookRefresher Refresher(Func<string, string?> readEnvironment, Action<string>? log = null) =>
-        (ArbiterHookRefresher)Container(readEnvironment).GetRequiredService<IArbiterHookRefresherFactory>().Create(log ?? (_ => { }));
-
-    /// <summary>The production refresh targets, resolved from the container over <paramref name="readEnvironment"/>'s home.</summary>
-    /// <param name="readEnvironment">Reads one environment variable.</param>
-    /// <returns>The targets the update covers.</returns>
-    internal static IArbiterRefreshTargets Targets(Func<string, string?> readEnvironment) =>
-        Container(readEnvironment).GetRequiredService<IArbiterRefreshTargets>();
-
-    private static ServiceProvider Container(Func<string, string?> readEnvironment)
-    {
-        ServiceCollection services = [];
-        services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
-            () => readEnvironment("HOME") ?? readEnvironment("USERPROFILE") ?? string.Empty,
-            readEnvironment));
-        services.TryAddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
-        _ = services.AddSquadCliServices();
-        _ = services.AddWeaveApplication();
-        return services.BuildServiceProvider();
-    }
 }
 
 /// <summary>An update whose registry lists no project and whose user config names no global target.</summary>

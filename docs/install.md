@@ -798,7 +798,7 @@ Requires .NET SDK 10 (pinned in `global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
+dotnet test --solution KyberWeave.Unit.slnf -c Release --no-build
 ```
 
 `.NET` commands run directly via `dotnet` so Roslyn/MSBuild build servers stay warm. KyberDash (`dash/`)

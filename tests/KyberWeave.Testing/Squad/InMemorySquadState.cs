@@ -19,11 +19,15 @@ public sealed class InMemorySquadState
     /// <summary>Creates a state over a file system and lease host of its own.</summary>
     /// <param name="leaseHost">The simulated machine whose lease table the migration contends in; a new one when null.</param>
     /// <param name="storeLease">The lease the store takes for registry writes; one on the lease host when null.</param>
-    public InMemorySquadState(InProcessLeaseHost? leaseHost = null, ILease? storeLease = null)
+    /// <param name="applicationDataDirectory">The user's application-data directory; a fixed one when null.</param>
+    public InMemorySquadState(
+        InProcessLeaseHost? leaseHost = null,
+        ILease? storeLease = null,
+        string? applicationDataDirectory = null)
     {
         Files = new InMemoryFileSystem(caseSensitive: true);
         string home = Path.GetFullPath("/kw/home");
-        string applicationData = Path.GetFullPath("/kw/application-data");
+        string applicationData = applicationDataDirectory ?? Path.GetFullPath("/kw/application-data");
         Files.CreateDirectory(home);
         Files.CreateDirectory(applicationData);
         UserPaths = new FakeSquadUserPaths(applicationData, home);

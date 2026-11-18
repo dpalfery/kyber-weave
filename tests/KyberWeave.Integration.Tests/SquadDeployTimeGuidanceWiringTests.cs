@@ -15,6 +15,7 @@ namespace KyberWeave.Integration.Tests;
 ///     effective response-preferences text on every installed entry file, survives updates, and is
 ///     created as part of global install while preserving local edits and the existing home-file
 ///     protection rules.
+///     Unit twin (the unreadable deployed entry cases): <c>SquadUnreadableDeployedEntryUnitTests</c>.
 /// </summary>
 public sealed class SquadDeployTimeGuidanceWiringTests : IClassFixture<SquadGuidanceTemplates>, IDisposable
 {
