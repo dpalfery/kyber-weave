@@ -81,9 +81,27 @@ public sealed class ReviewEvidenceService(
                 change,
                 gates,
                 diffPath,
-                paths.GetFullPath(gatesPath, environment.CurrentDirectory),
+                FullGatesPath(gatesPath),
                 coverageFloor));
         return path;
+    }
+
+    /// <summary>
+    ///     The gate report's path as the evidence names it. A spelling the path seam refuses is named as unresolved
+    ///     rather than thrown: the evidence is what every seat reads, and it is worth more with a line saying where the
+    ///     report is not than not written at all.
+    /// </summary>
+    private string FullGatesPath(string gatesPath)
+    {
+        try
+        {
+            return paths.GetFullPath(gatesPath, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                       or PathTooLongException or System.Security.SecurityException)
+        {
+            return $"{gatesPath} (unresolved: {ex.Message})";
+        }
     }
 
     /// <summary>

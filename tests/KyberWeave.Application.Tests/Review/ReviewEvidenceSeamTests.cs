@@ -40,6 +40,18 @@ public sealed class ReviewEvidenceSeamTests
         Assert.Equal("diff", _files.TextAt("/work/review/cycle-1/" + ReviewEvidence.DiffFileName));
     }
 
+    [Fact]
+    public void AnUnusableGateReportPathStillWritesTheEvidenceAndNamesTheProblem()
+    {
+        ReviewEvidenceService service = new(new StubGit(), _files, _paths, _environment);
+
+        string path = service.Write("/work/review/cycle-1", "/work/tree", "origin/main", null, "bad\0gates.json");
+
+        string evidence = Assert.IsType<string>(_files.TextAt(path));
+        Assert.Contains("unresolved", evidence, StringComparison.Ordinal);
+        Assert.True(_files.WasWritten("/work/review/cycle-1/" + ReviewEvidence.DiffFileName));
+    }
+
     /// <summary>Git answers one merge base, one head and an empty change, so the evidence is written without a checkout.</summary>
     private sealed class StubGit : IGitChangeReader
     {
