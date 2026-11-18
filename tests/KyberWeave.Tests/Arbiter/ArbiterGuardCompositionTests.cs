@@ -2,6 +2,9 @@ using KyberWeave.Arbiter;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Review;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -83,11 +86,11 @@ public sealed class ArbiterGuardCompositionTests
     {
         using ServiceProvider services = (ServiceProvider)ArbiterContainer.Create();
 
-        Assert.NotNull(services.GetRequiredService<IArbiterHookHost>());
-        Assert.NotNull(services.GetRequiredService<IFileTextFacts>());
-        Assert.NotNull(services.GetRequiredService<IClaudeHookCoverage>());
-        Assert.NotNull(services.GetRequiredService<IGateReportFacts>());
-        Assert.NotNull(services.GetRequiredService<IArbiterUserSettings>());
-        Assert.NotNull(services.GetRequiredService<IArbiterModelTargetsReader>());
+        _ = Assert.IsAssignableFrom<IArbiterHookHost>(services.GetRequiredService<IArbiterHookHost>());
+        _ = Assert.IsType<FileTextFacts>(services.GetRequiredService<IFileTextFacts>());
+        _ = Assert.IsType<ClaudeHookCoverage>(services.GetRequiredService<IClaudeHookCoverage>());
+        _ = Assert.IsType<GateReportFacts>(services.GetRequiredService<IGateReportFacts>());
+        _ = Assert.IsType<FileArbiterUserSettings>(services.GetRequiredService<IArbiterUserSettings>());
+        _ = Assert.IsType<FileArbiterModelTargetsReader>(services.GetRequiredService<IArbiterModelTargetsReader>());
     }
 }
