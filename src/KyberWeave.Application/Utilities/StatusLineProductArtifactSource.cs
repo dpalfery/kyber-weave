@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Utilities;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.StatusLine;
 
@@ -22,13 +23,21 @@ internal sealed class StatusLineProductArtifactSource : IUtilitiesStatusLineArti
     private readonly string _productRoot;
 
     /// <param name="files">Reads the artifact tree.</param>
+    /// <param name="paths">Turns the product root into a full path.</param>
+    /// <param name="environment">Names the directory a relative product root is read against.</param>
     /// <param name="productRoot">The absolute path of <c>products/kyber-utilities/statusline</c>.</param>
-    public StatusLineProductArtifactSource(IStatusLineFiles files, string productRoot)
+    public StatusLineProductArtifactSource(
+        IStatusLineFiles files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        string productRoot)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentException.ThrowIfNullOrWhiteSpace(productRoot);
         _files = files;
-        _productRoot = Path.GetFullPath(productRoot);
+        _productRoot = paths.GetFullPath(productRoot, environment.CurrentDirectory);
     }
 
     /// <inheritdoc />

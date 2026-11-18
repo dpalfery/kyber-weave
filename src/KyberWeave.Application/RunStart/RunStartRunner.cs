@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.RunStart;
@@ -27,23 +28,27 @@ public sealed class RunStartRunner : IRunStartRunner
     private readonly IGitCommandRunner _git;
     private readonly IWritableFileSystem _files;
     private readonly IProcessEnvironment _environment;
+    private readonly IPathResolver _paths;
     private readonly string _repositoryRoot;
 
     /// <summary>Creates a runner over the checkout at <paramref name="repositoryRoot" />.</summary>
     /// <param name="git">The git seam, bounded by its own timeout.</param>
     /// <param name="files">The file system worktree folders and their claims live on.</param>
     /// <param name="environment">The process state the CodeGraph lookup reads.</param>
+    /// <param name="paths">Resolves the repository root into the full path the worktree folder sits beside.</param>
     /// <param name="repositoryRoot">The repository root every git command runs in.</param>
-    public RunStartRunner(IGitCommandRunner git, IWritableFileSystem files, IProcessEnvironment environment, string repositoryRoot)
+    public RunStartRunner(IGitCommandRunner git, IWritableFileSystem files, IProcessEnvironment environment, IPathResolver paths, string repositoryRoot)
     {
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(paths);
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
         _git = git;
         _files = files;
         _environment = environment;
+        _paths = paths;
         _repositoryRoot = repositoryRoot;
     }
 
@@ -266,7 +271,7 @@ public sealed class RunStartRunner : IRunStartRunner
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(branch);
 
-        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_repositoryRoot));
+        string root = Path.TrimEndingDirectorySeparator(_paths.GetFullPath(_repositoryRoot, _environment.CurrentDirectory));
         string? parent = Path.GetDirectoryName(root);
         string container = Path.Combine(
             string.IsNullOrEmpty(parent) ? root : parent,

@@ -10,7 +10,9 @@ using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
@@ -114,6 +116,7 @@ internal static class SquadTestCommands
     public static SquadPackCommand Pack(string? workingDirectory = null) =>
         new(new SquadPackService(
             new FakeProcessEnvironment(currentDirectory: workingDirectory ?? "/kw/work"),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
             new FileSquadSourceLocator(),
             new FileSquadPackager(RealSquadPacker.Create())));
 

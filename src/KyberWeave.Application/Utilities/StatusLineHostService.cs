@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using KyberWeave.Cli.Commands.Utilities;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
@@ -18,7 +19,8 @@ public sealed class StatusLineHostService(
     IStatusLineFiles files,
     IProcessEnvironment environment,
     IProductRootLocator productRoots,
-    IFileSystemPathSemantics pathSemantics) : IStatusLineHostService
+    IFileSystemPathSemantics pathSemantics,
+    IPathResolver paths) : IStatusLineHostService
 {
     /// <summary>Where the status-line artifact tree sits in the checkout.</summary>
     internal const string ProductRelativePath = "products/kyber-utilities/statusline";
@@ -32,7 +34,7 @@ public sealed class StatusLineHostService(
                 "The Kyber Utilities status-line artifacts were not found. Run this command from the " +
                 "repository checkout that holds 'products/kyber-utilities/statusline'.");
 
-        return new StatusLineProductArtifactSource(files, productRoot);
+        return new StatusLineProductArtifactSource(files, paths, environment, productRoot);
     }
 
     /// <inheritdoc />

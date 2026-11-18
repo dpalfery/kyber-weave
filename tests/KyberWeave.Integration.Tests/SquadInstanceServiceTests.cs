@@ -4,6 +4,9 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using Xunit;
 
 namespace KyberWeave.Integration.Tests;
@@ -410,7 +413,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
 
         public SquadInstanceService CreateService()
         {
-            return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots, new FileSquadInstanceLinkSync(), new PhysicalSquadFileAccess());
+            return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots, new FileSquadInstanceLinkSync(), new PhysicalSquadFileAccess(), new PhysicalPathResolver(new PhysicalFileSystem()), new ProcessEnvironment());
         }
     }
     private sealed class FakeGlobalRootResolver(string baseGlobalRoot) : ISquadGlobalRootResolver

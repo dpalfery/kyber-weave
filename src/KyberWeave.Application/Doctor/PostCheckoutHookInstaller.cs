@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Core.Processes;
@@ -19,7 +20,12 @@ namespace KyberWeave.Application.Doctor;
 ///     is ready by the time an agent looks. The hook lives in the shared <c>.git/hooks</c> directory, which every
 ///     worktree of the clone uses, so one install covers them all.
 /// </remarks>
-public sealed class PostCheckoutHookInstaller(IGitHookFiles hooks, IDoctorFileSystem files, IRepositoryToolSettings settings)
+public sealed class PostCheckoutHookInstaller(
+    IGitHookFiles hooks,
+    IDoctorFileSystem files,
+    IRepositoryToolSettings settings,
+    IPathResolver paths,
+    IProcessEnvironment environment)
 {
     /// <summary>The check id the hook status reports under. Agents branch on it.</summary>
     public const string CheckId = "githook.post-checkout";
@@ -187,14 +193,14 @@ public sealed class PostCheckoutHookInstaller(IGitHookFiles hooks, IDoctorFileSy
     ///     the root. A hooks folder inside the working tree that git tracks belongs to the repository: writing there
     ///     would leave a change to commit that nobody asked for.
     /// </remarks>
-    private static (string? Folder, DoctorCheck? Problem) ResolveHooksFolder(string root, IProcessExecutor executor)
+    private (string? Folder, DoctorCheck? Problem) ResolveHooksFolder(string root, IProcessExecutor executor)
     {
         ProcessResult? hooks = Git(root, executor, "rev-parse", "--git-path", "hooks");
         string answer = hooks is { ExitCode: 0 } ? hooks.Value.StandardOutput.Trim() : string.Empty;
         if (answer.Length == 0)
             return (null, Warn("git could not say where its hooks folder is", null));
 
-        string folder = Path.GetFullPath(Path.Combine(root, answer));
+        string folder = paths.GetFullPath(Path.Combine(root, answer), environment.CurrentDirectory);
         if (!IsInside(root, folder))
             return (folder, null);
 
@@ -203,7 +209,7 @@ public sealed class PostCheckoutHookInstaller(IGitHookFiles hooks, IDoctorFileSy
         if (!redirected)
             return (folder, null);
 
-        string relative = Path.GetRelativePath(Path.GetFullPath(root), folder).Replace('\\', '/');
+        string relative = Path.GetRelativePath(paths.GetFullPath(root, environment.CurrentDirectory), folder).Replace('\\', '/');
         ProcessResult? tracked = Git(root, executor, "ls-files", "--", relative);
         if (tracked is null || tracked.Value.ExitCode != 0)
             return (null, Warn($"git could not say whether the hooks folder '{relative}' is tracked", null));
@@ -220,9 +226,9 @@ public sealed class PostCheckoutHookInstaller(IGitHookFiles hooks, IDoctorFileSy
     }
 
     /// <summary>Whether <paramref name="path"/> is inside <paramref name="root"/>, by its relative path rather than a string prefix.</summary>
-    private static bool IsInside(string root, string path)
+    private bool IsInside(string root, string path)
     {
-        string relative = Path.GetRelativePath(Path.GetFullPath(root), path);
+        string relative = Path.GetRelativePath(paths.GetFullPath(root, environment.CurrentDirectory), path);
         return !Path.IsPathRooted(relative)
             && relative != ".."
             && !relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)

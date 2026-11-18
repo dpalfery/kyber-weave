@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Packaging;
@@ -7,10 +8,12 @@ namespace KyberWeave.Application.Squad.Packaging;
 
 /// <summary>Packages the canonical Kyber-Squad source from the repository root into the APM and Agent Plugins archives.</summary>
 /// <param name="environment">Names the working directory the repository root is looked for in.</param>
+/// <param name="paths">Resolves a relative output directory against the working directory.</param>
 /// <param name="locator">Finds the canonical source.</param>
 /// <param name="packager">Writes the archives and checks the composed tree.</param>
 public sealed class SquadPackService(
     IProcessEnvironment environment,
+    IPathResolver paths,
     ISquadSourceLocator locator,
     ISquadPackager packager) : ISquadPackService
 {
@@ -39,7 +42,7 @@ public sealed class SquadPackService(
             : request.DefaultVersion;
         string outDir = string.IsNullOrWhiteSpace(request.OutDirectory)
             ? Path.Combine(workingDirectory, "artifacts")
-            : Path.GetFullPath(request.OutDirectory, workingDirectory);
+            : paths.GetFullPath(request.OutDirectory, workingDirectory);
 
         List<string> warnings = [];
         try

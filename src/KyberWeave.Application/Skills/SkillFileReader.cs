@@ -8,7 +8,7 @@ using Markdig.Syntax;
 namespace KyberWeave.Application.Skills;
 
 /// <summary>Reads SKILL.md files and the on-disk facts the pure parser needs.</summary>
-public sealed class SkillFileReader(IFileSystem files, IPathResolver paths)
+public sealed class SkillFileReader(IFileSystem files, IPathResolver paths, IProcessEnvironment environment)
 {
     private readonly FileReferenceExtractor _references = new(files, paths);
 
@@ -60,11 +60,11 @@ public sealed class SkillFileReader(IFileSystem files, IPathResolver paths)
     /// <exception cref="SkillParseException">The file is missing or its front matter cannot be parsed.</exception>
     public Skill ReadFile(string skillFilePath)
     {
-        if (!files.FileExists(skillFilePath))
+        string fullPath = paths.GetFullPath(skillFilePath, environment.CurrentDirectory);
+        if (!files.FileExists(fullPath))
             throw new SkillParseException($"SKILL.md not found at '{skillFilePath}'.");
 
-        string content = files.ReadAllText(skillFilePath);
-        string fullPath = Path.GetFullPath(skillFilePath);
+        string content = files.ReadAllText(fullPath);
         string directory = Path.GetDirectoryName(fullPath)!;
         return Read(content, fullPath, directory);
     }

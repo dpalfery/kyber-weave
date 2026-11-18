@@ -235,7 +235,7 @@ public class SkillEvalGovernanceTests
         InMemoryFileSystem files = new();
         files.WriteAllText("/eval.yaml", "cases: [unclosed");
 
-        SkillGovernanceService service = new(files, new FakePathResolver(files), new UnusedArchiveWriter());
+        SkillGovernanceService service = new(files, new UnusedArchiveWriter(), new FakePathResolver(files), new FakeProcessEnvironment());
 
         RoutingEvalParseException error = Assert.Throws<RoutingEvalParseException>(
             () => service.Evaluate("/eval.yaml", new LexicalRoutingStrategy(), SampleSet()));

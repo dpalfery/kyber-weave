@@ -1,4 +1,6 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -36,6 +38,8 @@ public sealed class DocsRootRegistry
     private readonly Func<string, DocsTools> _factory;
     private readonly IGitWorktreeIdentity _git;
     private readonly IFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
     private readonly Lock _gate = new();
     private readonly LinkedList<(string Root, DocsTools Tools)> _recent = new();
     private (string? TopLevel, string? CommonDirectory, string? Error)? _serverIdentity;
@@ -45,15 +49,27 @@ public sealed class DocsRootRegistry
     /// <param name="factory">Builds the tools for another worktree root of the same repository.</param>
     /// <param name="git">Names the working tree a directory belongs to.</param>
     /// <param name="files">Checks that a named project path is a directory.</param>
-    public DocsRootRegistry(string serverRoot, Func<string, DocsTools> factory, IGitWorktreeIdentity git, IFileSystem files)
+    /// <param name="paths">Turns the server root and a named project path into full paths.</param>
+    /// <param name="environment">Names the directory a relative project path is resolved against, and the platform whose path-name rule compares worktree roots.</param>
+    public DocsRootRegistry(
+        string serverRoot,
+        Func<string, DocsTools> factory,
+        IGitWorktreeIdentity git,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serverRoot);
         ArgumentNullException.ThrowIfNull(factory);
         ArgumentNullException.ThrowIfNull(git);
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _git = git;
         _files = files;
-        _serverRoot = Path.GetFullPath(serverRoot);
+        _paths = paths;
+        _environment = environment;
+        _serverRoot = paths.GetFullPath(serverRoot, environment.CurrentDirectory);
         _factory = factory;
     }
 
@@ -69,7 +85,9 @@ public sealed class DocsRootRegistry
             serverRoot,
             root => CreateTools(root, codeGraphRefreshEnabled, null, services),
             DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IGitWorktreeIdentity>(),
-            DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IFileSystem>());
+            DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IFileSystem>(),
+            DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IPathResolver>(),
+            DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IProcessEnvironment>());
 
     /// <summary>The tools for one checkout: its own document host, analysis reader and refresh schedule.</summary>
     /// <param name="repoRoot">The checkout root.</param>
@@ -103,12 +121,7 @@ public sealed class DocsRootRegistry
         return DocsToolsComposition.Create(
             host,
             DocsToolsComposition.AnalysisReader(provider, repoRoot),
-            new CodeGraphFreshness(
-                repoRoot,
-                codeGraphRefreshEnabled,
-                provider.GetRequiredService<ICodeGraphProvisioner>(),
-                provider.GetRequiredService<IKyberWeaveConfigRepository>(),
-                provider.GetRequiredService<TimeProvider>()),
+            DocsToolsComposition.Freshness(provider, repoRoot, codeGraphRefreshEnabled),
             registry,
             services,
             deliveryExecutor,
@@ -135,7 +148,7 @@ public sealed class DocsRootRegistry
         }
 
         // stderr, never stdout: stdout is the JSON-RPC transport.
-        Console.Error.WriteLine(
+        DocsToolsComposition.ServicesOrDefault(services).GetRequiredService<IConsole>().Error.WriteLine(
             $"{KyberWeaveConfigDiagnosticCodes.LoadError}: Failed to load " +
             $"'{loaded.ConfigPath ?? "kyber-weave.yml"}': {loaded.Error ?? "unknown error"}. " +
             "Serving the default ontology; the corpus may be empty.");
@@ -165,7 +178,7 @@ public sealed class DocsRootRegistry
         string candidate;
         try
         {
-            candidate = Path.GetFullPath(projectPath.Trim());
+            candidate = _paths.GetFullPath(projectPath.Trim(), _environment.CurrentDirectory);
         }
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
@@ -235,8 +248,8 @@ public sealed class DocsRootRegistry
         }
     }
 
-    private static StringComparison PathComparison =>
-        OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+    private StringComparison PathComparison =>
+        _environment.OperatingSystem is OperatingSystemKind.Windows or OperatingSystemKind.MacOS
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 }

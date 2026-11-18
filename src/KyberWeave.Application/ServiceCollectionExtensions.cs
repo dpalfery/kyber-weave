@@ -109,7 +109,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IStatusLineFiles>(),
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<IProductRootLocator>(),
-            sp.GetRequiredService<IFileSystemPathSemantics>()));
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<ISkillGovernanceService, SkillGovernanceService>();
         services.TryAddSingleton<IAgentGovernanceService, AgentGovernanceService>();
         services.TryAddSingleton<ICodeGraphProvisioner, CodeGraphIndexProvisioner>();

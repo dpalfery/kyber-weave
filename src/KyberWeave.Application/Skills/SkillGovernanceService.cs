@@ -12,11 +12,15 @@ using KyberWeave.Core.Skills.Validation;
 namespace KyberWeave.Application.Skills;
 
 /// <summary>Runs the skill governance library over a path and writes what the authoring commands produce.</summary>
-public sealed class SkillGovernanceService(IWritableFileSystem files, IPathResolver paths, ISkillArchiveWriter archive) : ISkillGovernanceService
+public sealed class SkillGovernanceService(
+    IWritableFileSystem files,
+    ISkillArchiveWriter archive,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISkillGovernanceService
 {
     private const string ParseErrorCode = "KW-PARSE-000";
 
-    private readonly SkillFileReader _reader = new(files, paths);
+    private readonly SkillFileReader _reader = new(files, paths, environment);
 
     /// <inheritdoc />
     public DiagnosticReport Validate(string path)

@@ -2,6 +2,7 @@ using System.Text.Json;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.RunStart;
 using KyberWeave.Core.RunStart;
 using Xunit;
@@ -84,7 +85,7 @@ public sealed class RunStartCommandTests : IDisposable
     [Fact]
     public void WorktreeFolderIsStampedInUtcAndUniqueWithinASecond()
     {
-        RunStartRunner runner = new(new ProcessGitCommandRunner(TimeSpan.FromSeconds(5)), new PhysicalFileSystem(), new ProcessEnvironment(), _probe.Root);
+        RunStartRunner runner = new(new ProcessGitCommandRunner(TimeSpan.FromSeconds(5)), new PhysicalFileSystem(), new ProcessEnvironment(), new PhysicalPathResolver(new PhysicalFileSystem()), _probe.Root);
         DateTimeOffset startedAt = new(2026, 11, 10, 10, 6, 12, TimeSpan.FromHours(-5));
 
         string first = runner.WorktreePathFor("claude/fix/x", startedAt);

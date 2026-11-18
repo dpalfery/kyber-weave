@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Model;
@@ -28,6 +29,8 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
     private readonly ISquadStateStore _stateStore;
     private readonly ISquadInstanceLinkSync _linkSync;
     private readonly ISquadFileAccess _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="SquadInstanceService" /> class.
@@ -38,6 +41,8 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
     /// <param name="globalRootResolver">Resolver for canonical harness global homes.</param>
     /// <param name="linkSync">Synchronizes the instance links with the canonical home.</param>
     /// <param name="files">File probes for the instance directories.</param>
+    /// <param name="paths">Resolves the instance root for the containment check.</param>
+    /// <param name="environment">Names the working directory a relative home is resolved against.</param>
     /// <param name="stateStore">Optional state store for reading receipts and recording instance metadata.</param>
     public SquadInstanceService(
         ISquadLifecycleService lifecycleService,
@@ -46,6 +51,8 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         ISquadGlobalRootResolver globalRootResolver,
         ISquadInstanceLinkSync linkSync,
         ISquadFileAccess files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
         ISquadStateStore? stateStore = null)
     {
         ArgumentNullException.ThrowIfNull(lifecycleService);
@@ -54,6 +61,8 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         ArgumentNullException.ThrowIfNull(globalRootResolver);
         ArgumentNullException.ThrowIfNull(linkSync);
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
 
         _lifecycleService = lifecycleService;
         _presetStore = presetStore;
@@ -61,6 +70,8 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         _globalRootResolver = globalRootResolver;
         _linkSync = linkSync;
         _files = files;
+        _paths = paths;
+        _environment = environment;
         _stateStore = stateStore ?? lifecycleService.StateStore;
     }
 
@@ -271,10 +282,12 @@ public sealed partial class SquadInstanceService : ISquadInstanceService
         }
     }
 
-    private static void VerifyPathContainment(string home, string targetToken, string instanceRoot)
+    private void VerifyPathContainment(string home, string targetToken, string instanceRoot)
     {
-        string expectedBase = Path.GetFullPath(Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken));
-        string fullInstanceRoot = Path.GetFullPath(instanceRoot);
+        string expectedBase = _paths.GetFullPath(
+            Path.Combine(home, ".kyber-weave", "squad", "instances", targetToken),
+            _environment.CurrentDirectory);
+        string fullInstanceRoot = _paths.GetFullPath(instanceRoot, _environment.CurrentDirectory);
         string prefix = expectedBase.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
 
         if (!fullInstanceRoot.StartsWith(prefix, StringComparison.Ordinal) || fullInstanceRoot.Length <= prefix.Length)

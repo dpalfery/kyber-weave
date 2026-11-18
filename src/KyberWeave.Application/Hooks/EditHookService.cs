@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Hooks;
@@ -14,7 +15,9 @@ public sealed class EditHookService(
     IHooksConfigSource configSource,
     ITestClassResolver testClassResolver,
     IProcessRunner processRunner,
-    TimeProvider timeProvider) : IEditHookService
+    TimeProvider timeProvider,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IEditHookService
 {
     private static readonly TimeSpan Grace = TimeSpan.FromSeconds(5);
 
@@ -39,9 +42,9 @@ public sealed class EditHookService(
 
     private async Task<HookResult> RunCoreAsync(HookEditEvent edit, CancellationToken cancellationToken)
     {
-        string baseDirectory = string.IsNullOrWhiteSpace(edit.Cwd) ? Directory.GetCurrentDirectory() : edit.Cwd;
-        string fullPath = Path.GetFullPath(edit.FilePath, baseDirectory);
-        string sessionDirectory = string.IsNullOrWhiteSpace(edit.ProjectDirectory) ? baseDirectory : Path.GetFullPath(edit.ProjectDirectory, baseDirectory);
+        string baseDirectory = string.IsNullOrWhiteSpace(edit.Cwd) ? environment.CurrentDirectory : edit.Cwd;
+        string fullPath = paths.GetFullPath(edit.FilePath, baseDirectory);
+        string sessionDirectory = string.IsNullOrWhiteSpace(edit.ProjectDirectory) ? baseDirectory : paths.GetFullPath(edit.ProjectDirectory, baseDirectory);
         string? fileDirectory = Path.GetDirectoryName(fullPath);
         if (fileDirectory is null || !PathContainment.IsWithin(sessionDirectory, fullPath))
         {
