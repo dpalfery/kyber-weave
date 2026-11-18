@@ -102,12 +102,12 @@ public sealed class ArbiterShortcutRuleTests
         new(
             provider,
             _ => null,
-            _arbiter.Ledger,
-            _arbiter.Decisions,
+            _arbiter.LedgerStore,
+            _arbiter.DecisionLog,
             gitFacts ?? new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(_arbiter.Files),
-            _arbiter.GateReports,
+            _arbiter.GateReports(),
             _arbiter.State,
             new FixedClock(Now),
             new FakeIdGenerator(), SecondaryTriggers.For);
@@ -563,7 +563,7 @@ public sealed class ArbiterShortcutRuleTests
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        Assert.Contains(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(_arbiter.Decisions));
+        Assert.Contains(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(_arbiter.DecisionLog));
     }
 
     /// <summary>A shadow shortcut dispatched the worker, so its ledger id is not in the not-dispatched set.</summary>
@@ -576,7 +576,7 @@ public sealed class ArbiterShortcutRuleTests
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Shipped(TriageRule)]));
 
-        Assert.DoesNotContain(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(_arbiter.Decisions));
+        Assert.DoesNotContain(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(_arbiter.DecisionLog));
     }
 
     // ---- Shipped pins (acceptance: the three ids are in the catalogue and shipped in shadow) ----

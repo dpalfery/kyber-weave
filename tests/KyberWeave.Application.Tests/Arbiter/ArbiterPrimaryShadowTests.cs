@@ -64,12 +64,12 @@ public sealed class ArbiterPrimaryShadowTests
         return new ArbiterEvaluator(
             provider,
             _ => null,
-            _arbiter.Ledger,
-            _arbiter.Decisions,
+            _arbiter.LedgerStore,
+            _arbiter.DecisionLog,
             gitFacts,
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(_arbiter.Files),
-            _arbiter.GateReports,
+            _arbiter.GateReports(),
             _arbiter.State,
             new FixedClock(fixedNow),
             new FakeIdGenerator());

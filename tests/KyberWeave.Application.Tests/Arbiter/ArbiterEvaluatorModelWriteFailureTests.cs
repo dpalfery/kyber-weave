@@ -79,12 +79,12 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests
             Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
         },
         _ => null,
-        _arbiter.Ledger,
-        _arbiter.Decisions,
+        _arbiter.LedgerStore,
+        _arbiter.DecisionLog,
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(_arbiter.Files),
-            _arbiter.GateReports,
+            _arbiter.GateReports(),
             _arbiter.State,
         TimeProvider.System, new FakeIdGenerator());
 

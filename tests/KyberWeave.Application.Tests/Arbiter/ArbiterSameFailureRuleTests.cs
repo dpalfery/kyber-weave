@@ -89,12 +89,12 @@ public sealed class ArbiterSameFailureRuleTests
         new(
             provider,
             _ => null,
-            _arbiter.Ledger,
-            _arbiter.Decisions,
+            _arbiter.LedgerStore,
+            _arbiter.DecisionLog,
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(_arbiter.Files),
-            _arbiter.GateReports,
+            _arbiter.GateReports(),
             _arbiter.State,
             new FixedClock(Now),
             Ids, SecondaryTriggers.For);

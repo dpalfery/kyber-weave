@@ -144,12 +144,12 @@ public sealed class ArbiterModelTargetRulesTests
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) => new(
         provider,
         _ => null,
-        _arbiter.Ledger,
-        _arbiter.Decisions,
+        _arbiter.LedgerStore,
+        _arbiter.DecisionLog,
         new NoGitFacts(),
         new PlanFacts(_recordedDifficulty),
         new FileArbiterModelTargetsReader(_arbiter.Files),
-            _arbiter.GateReports,
+            _arbiter.GateReports(),
             _arbiter.State,
         TimeProvider.System, new FakeIdGenerator(),
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
