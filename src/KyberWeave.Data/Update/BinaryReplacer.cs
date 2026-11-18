@@ -72,9 +72,9 @@ internal sealed class BinaryReplacer(
         if (!files.FileExists(destinationPath))
         {
             // A stop between the two moves below left no image and the old one here. The new image takes its place and
-            // the old one, which nothing needs now, goes.
+            // the old one stays: if this commit fails and the update rolls back, it is the only image the user has. The
+            // next normal update removes it.
             files.MoveFile(staging, destinationPath, overwrite: true);
-            RemoveQuietly(oldPath);
             return;
         }
 
@@ -127,12 +127,20 @@ internal sealed class BinaryReplacer(
 
         string directory = Path.GetDirectoryName(destinationPath) ?? string.Empty;
         string staging = Path.Combine(directory, "." + Path.GetFileName(destinationPath) + ".new");
-        CopyContent(sourcePath, staging);
-        UnixFileMode? mode = modes.Get(sourcePath);
-        if (mode is { } bits)
-            modes.Set(staging, bits);
+        try
+        {
+            CopyContent(sourcePath, staging);
+            UnixFileMode? mode = modes.Get(sourcePath);
+            if (mode is { } bits)
+                modes.Set(staging, bits);
 
-        files.MoveFile(staging, destinationPath, overwrite);
+            files.MoveFile(staging, destinationPath, overwrite);
+        }
+        catch
+        {
+            RemoveQuietly(staging);
+            throw;
+        }
     }
 
     private void CopyContent(string sourcePath, string stagingPath)

@@ -206,7 +206,7 @@ public sealed class SelfUpdateSystemTests
     }
 
     [Fact]
-    public void ARecoveryAfterAStopBetweenTheTwoWindowsMovesInstallsTheNewImageAndDropsTheOldOne()
+    public void ARecoveryAfterAStopBetweenTheTwoWindowsMovesInstallsTheNewImageAndKeepsTheOldOneForTheNextUpdate()
     {
         _files.WriteAllText(Destination + ".old", "old");
         _files.WriteAllText(Work + "/kyber-weave", "new");
@@ -214,7 +214,63 @@ public sealed class SelfUpdateSystemTests
         _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
+        Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
+    }
+
+    [Fact]
+    public void ARecoveryWhoseCommitFailsStillLeavesTheUserAnImage()
+    {
+        _files.WriteAllText(Destination + ".old", "old");
+        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.FailWhen(
+            operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
+            new IOException("denied"));
+
+        _ = Assert.Throws<IOException>(
+            () => _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false));
+
+        Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
+        Assert.Equal([Destination + ".old"], _files.EnumerateFiles(Install, "*", recursive: true));
+    }
+
+    [Fact]
+    public void ANormalWindowsUpdateAfterARecoveryRemovesTheOldImage()
+    {
+        _files.WriteAllText(Destination, "current");
+        _files.WriteAllText(Destination + ".old", "stray");
+        _files.WriteAllText(Work + "/kyber-weave", "new");
+
+        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
+
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
+    }
+
+    [Fact]
+    public void AFailedCopyOrFinalMoveLeavesNoStagingFile()
+    {
+        _files.WriteAllText(Install + "/source", "source");
+        _files.WriteAllText(Work + "/destination", "destination");
+        _files.FailWhen(
+            operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
+            new IOException("denied"));
+
+        _ = Assert.Throws<IOException>(() => _system.CopyFile(Install + "/source", Work + "/destination", overwrite: true));
+
+        Assert.Equal("destination", _files.ReadAllText(Work + "/destination"));
+        Assert.DoesNotContain(Work + "/.destination.new", _files.EnumerateFiles(Work, "*", recursive: false));
+    }
+
+    [Fact]
+    public void ACopyThatFailsWhileWritingLeavesNoStagingFile()
+    {
+        _files.WriteAllText(Install + "/source", "source");
+        _files.FailWhen(
+            operation => operation.Name == nameof(_files.OpenWriteNew),
+            new IOException("disk full"));
+
+        _ = Assert.Throws<IOException>(() => _system.CopyFile(Install + "/source", Work + "/destination", overwrite: true));
+
+        Assert.Empty(_files.EnumerateFiles(Work, "*", recursive: false));
     }
 
     [Fact]
