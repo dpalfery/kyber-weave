@@ -125,7 +125,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
             SecondaryTriggers.For);

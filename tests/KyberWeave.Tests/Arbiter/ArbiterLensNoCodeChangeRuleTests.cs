@@ -229,7 +229,7 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
             new FixedReviewFacts(review),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             TimeProvider.System);
         KyberWeaveConfig config = new()

@@ -110,7 +110,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
@@ -131,7 +131,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
@@ -159,7 +159,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new PassThroughGitFacts(),
             new FileListPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 

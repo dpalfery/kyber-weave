@@ -87,7 +87,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
         TimeProvider.System);
 

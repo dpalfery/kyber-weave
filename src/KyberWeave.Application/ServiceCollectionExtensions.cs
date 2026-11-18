@@ -3,6 +3,7 @@ using KyberWeave.Application.Doctor;
 using KyberWeave.Application.Arbiter;
 using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.Docs.Parsing;
@@ -147,6 +148,11 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
         services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IKyberWeaveConfigRepository>(sp => new FileKyberWeaveConfigRepository(
+            sp.GetRequiredService<IRepositoryTreeProbe>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<INotSeatedStore>(sp => new FileNotSeatedStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(
             sp.GetRequiredService<IProgramRunner>(), sp.GetRequiredService<IFileSystem>()));

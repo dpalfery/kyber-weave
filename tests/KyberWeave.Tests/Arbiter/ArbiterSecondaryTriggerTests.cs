@@ -164,7 +164,7 @@ public sealed class ArbiterSecondaryTriggerTests : IDisposable
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(fixedNow),
             secondaryTriggers: SecondaryFor);

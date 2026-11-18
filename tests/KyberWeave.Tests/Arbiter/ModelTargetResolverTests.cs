@@ -132,7 +132,7 @@ public sealed class ModelTargetResolverTests : IDisposable
         new NoGitFacts(),
         new PlanFacts(provider is HardProvider { Hard: false } ? null : provider is HardProvider hard ? hard.Difficulty : "hard"),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)

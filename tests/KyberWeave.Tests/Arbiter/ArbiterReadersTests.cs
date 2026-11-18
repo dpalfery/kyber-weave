@@ -333,7 +333,7 @@ public sealed class ArbiterReadersTests : IDisposable
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "gates.json"), ReviewJson.Write(report));
 
-        GateReport? read = new GateReportFacts().TryRead(repo);
+        GateReport? read = RealGateReportFacts.Create().TryRead(repo);
 
         Assert.NotNull(read);
         Assert.Equal("abc123", read!.Base);
@@ -352,12 +352,12 @@ public sealed class ArbiterReadersTests : IDisposable
             Path.Combine(dir, "gates.json"),
             """{"schema":"kyber-weave.review-gates/v1","gates":[]}""");
 
-        GateReport? old = new GateReportFacts().TryRead(repo);
+        GateReport? old = RealGateReportFacts.Create().TryRead(repo);
         Assert.NotNull(old);
         Assert.Null(old!.Base);
 
         string empty = NewTempPath();
-        Assert.Null(new GateReportFacts().TryRead(empty));
+        Assert.Null(RealGateReportFacts.Create().TryRead(empty));
     }
 
     private sealed class OwnedDir(string path) : IDisposable

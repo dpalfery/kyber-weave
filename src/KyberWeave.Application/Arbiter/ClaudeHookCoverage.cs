@@ -19,9 +19,10 @@ namespace KyberWeave.Core.Arbiter;
 /// <c>PostToolUse</c>) and fires it when that container's matcher matches the tool. A source that
 /// does not carry the Arbiter's dispatch hook under the event's own container does not cover the
 /// dispatch, so it must not make the user-level hook wait. Nothing here throws: an unreadable or
-/// malformed file is a source that does not fire.
+/// malformed file is a source that does not fire. Every file read and listing goes through the file-system seam.
 /// </remarks>
-public sealed class ClaudeHookCoverage : IClaudeHookCoverage
+/// <param name="files">The file system the hook sources are read from.</param>
+public sealed class ClaudeHookCoverage(IFileSystem files) : IClaudeHookCoverage
 {
     /// <summary>The command fragment that identifies a Claude hook running the Arbiter.</summary>
     public const string ArbiterClaudeHookMarker = "kyber-weave-arbiter hook --harness claude";
@@ -116,9 +117,9 @@ public sealed class ClaudeHookCoverage : IClaudeHookCoverage
         string agents = Path.Combine(projectRoot, ".claude", "agents");
         try
         {
-            if (Directory.Exists(agents))
+            if (files.DirectoryExists(agents))
             {
-                foreach (string file in Directory.EnumerateFiles(agents, "*.md").Order(StringComparer.Ordinal))
+                foreach (string file in files.EnumerateFiles(agents, "*.md", recursive: false).Order(StringComparer.Ordinal))
                 {
                     if (EffectiveAgent(projectRoot, homeDirectory, Path.GetFileNameWithoutExtension(file)) is { } agent)
                     {
@@ -139,13 +140,13 @@ public sealed class ClaudeHookCoverage : IClaudeHookCoverage
             .ToList();
     }
 
-    private static List<Source> Collect(string projectRoot, string homeDirectory, string? agentType)
+    private List<Source> Collect(string projectRoot, string homeDirectory, string? agentType)
     {
         List<Source> sources = [];
         foreach (string settings in new[] { "settings.json", "settings.local.json" })
         {
             string path = Path.Combine(projectRoot, ".claude", settings);
-            if (File.Exists(path))
+            if (files.FileExists(path))
             {
                 sources.Add(new Source(Path.Combine(".claude", settings), path));
             }
@@ -162,7 +163,7 @@ public sealed class ClaudeHookCoverage : IClaudeHookCoverage
     }
 
     // The project's agent file wins over the personal one of the same name, as Claude Code resolves it.
-    private static Source? EffectiveAgent(string projectRoot, string homeDirectory, string? agentType)
+    private Source? EffectiveAgent(string projectRoot, string homeDirectory, string? agentType)
     {
         if (agentType is null || !IsAgentType(agentType))
         {
@@ -171,18 +172,18 @@ public sealed class ClaudeHookCoverage : IClaudeHookCoverage
 
         string fileName = agentType + ".md";
         string project = Path.Combine(projectRoot, ".claude", "agents", fileName);
-        if (File.Exists(project))
+        if (files.FileExists(project))
         {
             return new Source(Path.Combine(".claude", "agents", fileName), project);
         }
 
         string personal = Path.Combine(homeDirectory, ".claude", "agents", fileName);
-        return File.Exists(personal) ? new Source(personal, personal) : null;
+        return files.FileExists(personal) ? new Source(personal, personal) : null;
     }
 
     // A personal skill shadows a project skill of the same name, so the personal SKILL.md is the one
     // that is effective when both exist.
-    private static IEnumerable<Source> EffectiveSkills(string projectRoot, string homeDirectory)
+    private IEnumerable<Source> EffectiveSkills(string projectRoot, string homeDirectory)
     {
         Dictionary<string, Source> project = SkillFiles(projectRoot, personal: false);
         Dictionary<string, Source> personal = SkillFiles(homeDirectory, personal: true);
@@ -195,39 +196,40 @@ public sealed class ClaudeHookCoverage : IClaudeHookCoverage
         }
     }
 
-    private static Dictionary<string, Source> SkillFiles(string root, bool personal)
+    private Dictionary<string, Source> SkillFiles(string root, bool personal)
     {
         Dictionary<string, Source> skills = new(StringComparer.OrdinalIgnoreCase);
-        foreach (FileSystemInfo entry in ChildDirectories(Path.Combine(root, ".claude", "skills")))
+        foreach (string directory in ChildDirectories(Path.Combine(root, ".claude", "skills")))
         {
-            string file = Path.Combine(entry.FullName, "SKILL.md");
-            if (!File.Exists(file))
+            string name = Path.GetFileName(directory);
+            string file = Path.Combine(directory, "SKILL.md");
+            if (!files.FileExists(file))
             {
                 continue;
             }
 
             string display = personal
                 ? file
-                : Path.Combine(".claude", "skills", entry.Name, "SKILL.md");
-            skills[entry.Name] = new Source(display, file);
+                : Path.Combine(".claude", "skills", name, "SKILL.md");
+            skills[name] = new Source(display, file);
         }
 
         return skills;
     }
 
     // One level only, and never a symbolic link: recursing would follow a link out of the skills folder.
-    private static List<FileSystemInfo> ChildDirectories(string path)
+    private List<string> ChildDirectories(string path)
     {
-        if (!Directory.Exists(path))
+        if (!files.DirectoryExists(path))
         {
             return [];
         }
 
         try
         {
-            return new DirectoryInfo(path)
-                .EnumerateFileSystemInfos("*", new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 })
-                .Where(entry => entry is DirectoryInfo && entry.LinkTarget is null)
+            return files.EnumerateEntries(path)
+                .Where(entry => entry.IsDirectory && !entry.IsLink)
+                .Select(entry => entry.Path)
                 .ToList();
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -262,7 +264,7 @@ public sealed class ClaudeHookCoverage : IClaudeHookCoverage
     /// <param name="readSource">Reads the source's text (bounded); the file system when null. Lets a test make the read fail.</param>
     internal bool Fires(string path, string eventName, string toolName, Func<string, string>? readSource = null)
     {
-        Func<string, string> read = readSource ?? (source => BoundedFileReader.ReadAllText(source, MaxSourceBytes));
+        Func<string, string> read = readSource ?? ReadBounded;
         try
         {
             IReadOnlyList<HookGroup> groups = string.Equals(Path.GetExtension(path), ".md", StringComparison.OrdinalIgnoreCase)
@@ -275,6 +277,12 @@ public sealed class ClaudeHookCoverage : IClaudeHookCoverage
             // A source that cannot be read or parsed does not fire. It must not stop the dispatch.
             return false;
         }
+    }
+
+    private string ReadBounded(string source)
+    {
+        using Stream stream = files.OpenRead(source);
+        return BoundedFileReader.ReadAllText(stream, MaxSourceBytes);
     }
 
     private static IReadOnlyList<HookGroup> JsonGroups(string path, string eventName, Func<string, string> read)

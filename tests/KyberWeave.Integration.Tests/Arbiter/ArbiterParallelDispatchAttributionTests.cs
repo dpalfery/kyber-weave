@@ -246,7 +246,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
         ArbiterTestServices.HookGitFacts(_repo.Path, _home.Path, _arbiter),
         new RealPlanReader(_repo.Path),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
         TimeProvider.System);
 

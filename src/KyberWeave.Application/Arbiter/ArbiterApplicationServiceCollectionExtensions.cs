@@ -6,9 +6,10 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Arbiter.Mcp;
+using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Arbiter.Facts;
-using KyberWeave.Data;
 using KyberWeave.Data.Arbiter;
+using KyberWeave.Data;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Hooks.Arbiter;
 using KyberWeave.Data.Review;
@@ -34,8 +35,21 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IArbiterKeyService, Core.Arbiter.ArbiterKeyService>();
         services.TryAddSingleton<IArbiterDryRunService, Core.Arbiter.ArbiterDryRunService>();
         services.TryAddSingleton<IOllamaProbe, Core.Arbiter.OllamaProbe>();
+        services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
+        services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(
+            sp.GetRequiredService<IArbiterUserSettings>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IArbiterHttpHandlers>(),
+            sp.GetRequiredService<TimeProvider>(),
+            () => sp.GetRequiredService<ICredentialStore>()));
         services.TryAddSingleton<IArbiterConfigResolver, Cli.Commands.Arbiter.ArbiterConfigResolver>();
         services.TryAddSingleton<IArbiterSectionSelectionService, ArbiterSectionSelectionService>();
+        services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IFileTextFacts>(sp => new FileTextFacts(sp.GetRequiredService<IRepositoryFileStore>()));
+        services.TryAddSingleton<IGateReportFacts>(sp => new GateReportFacts(sp.GetRequiredService<IRepositoryFileStore>()));
+        services.TryAddSingleton<IClaudeHookCoverage>(sp => new Core.Arbiter.ClaudeHookCoverage(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IPlanRootResolver>(sp => new Core.Arbiter.Plans.PlanRootResolver(
             sp.GetRequiredService<IGitRepositoryFacts>(),
             sp.GetRequiredService<IPlanFileResolver>(),
@@ -111,7 +125,11 @@ public static class ArbiterApplicationServiceCollectionExtensions
         _ = services.AddWeaveRunStartState();
         services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp =>
-            new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
+            new FileKyberWeaveConfigRepository(
+                sp.GetRequiredService<IRepositoryTreeProbe>(),
+                sp.GetRequiredService<IFileSystem>(),
+                sp.GetRequiredService<IPathResolver>(),
+                sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IWorkerBudgetStore, FileWorkerBudgetStore>();
         services.TryAddSingleton<IFileLinkProbe, FileLinkProbe>();
         services.TryAddSingleton<IGitRepositoryFacts, GitFacts>();

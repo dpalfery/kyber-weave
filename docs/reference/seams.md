@@ -41,7 +41,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 | Console | `IConsole` (`Contracts/Host`) | Output and error writers; read line; input redirected | `SystemConsole` (`KyberWeave.Data`, `Host/SystemConsole.cs`); the standard-stream transport `DrainingStreamServerTransport` in `KyberWeave.Mcp` and `KyberWeave.Arbiter` | `FakeConsole` (`Fakes/FakeConsole.cs`) | `ConsoleContractTests`: fake in `KyberWeave.Tests/Console/FakeConsoleContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/SystemConsoleContractTests.cs` |
 | Lease | `ILease` (`Contracts/Host`) | Acquire a named cross-process lease with a timeout; release from any thread | `MutexLease` (`KyberWeave.Data`, `Host/MutexLease.cs`); the lock-file variant is `FileCodeGraphIndexWorkspace` (`Data/Doctor/FileCodeGraphIndexWorkspace.cs`) | `InProcessLease` (`Fakes/InProcessLease.cs`) | `LeaseContractTests`: fake in `KyberWeave.Tests/Lease/InProcessLeaseContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/MutexLeaseContractTests.cs` |
 | Embedded resource | `IEmbeddedResources` (`Contracts/Host`) | Read a named manifest resource as a stream or UTF-8 text | `AssemblyEmbeddedResources` (`KyberWeave.Data`, `Host/AssemblyEmbeddedResources.cs`) | `FakeEmbeddedResources` (`Fakes/FakeEmbeddedResources.cs`) | `EmbeddedResourceContractTests`: fake in `KyberWeave.Tests/EmbeddedResources/FakeEmbeddedResourcesContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/AssemblyEmbeddedResourcesContractTests.cs` |
-| Configuration | `IKyberWeaveConfigRepository` (`Contracts/Repositories`) | Load and try-load the repository's and the user's host configuration; find the config path | `FileKyberWeaveConfigRepository` (`KyberWeave.Data`, `Configuration/FileKyberWeaveConfigRepository.cs`) over `FileRepositoryTreeProbe` (`KyberWeave.Application`, `Review/FileRepositoryTreeProbe.cs`, over `IFileSystem`) | No shared fake yet: `FixedConfigs` is private in `KyberWeave.Application.Tests/Configuration/ConfigLoadServiceTests.cs` | None yet. Gap recorded for task 2.3, which retires the static loader and gives every caller a fake repository |
+| Configuration | `IKyberWeaveConfigRepository` (`Contracts/Repositories`) | Load and try-load the repository's and the user's host configuration; find the config path | `FileKyberWeaveConfigRepository` (`KyberWeave.Application`, `Configuration/FileKyberWeaveConfigRepository.cs`) over `IRepositoryTreeProbe` (`KyberWeave.Application`, `Review/FileRepositoryTreeProbe.cs`), `IFileSystem`, `IPathResolver` and `IProcessEnvironment` | `FakeKyberWeaveConfigRepository` (`Fakes/FakeKyberWeaveConfigRepository.cs`) | `KyberWeaveConfigRepositoryContractTests`: fake in `KyberWeave.Tests/Configuration/FakeKyberWeaveConfigRepositoryContractTests.cs`, adapter over the in-memory file system in `KyberWeave.Tests/Configuration/InMemoryFileKyberWeaveConfigRepositoryContractTests.cs`, and over the real disk in `KyberWeave.Integration.Tests/Contracts/FileKyberWeaveConfigRepositoryContractTests.cs` |
 | Shipped content (tests) | `ICorpusSource` (`tests/KyberWeave.Testing/Corpus/ICorpusSource.cs`) | Read the shipped agents, skills, standards, documents and workflows by relative path, contained in the corpus; host name-case rule | `CheckoutCorpusSource` (`tests/KyberWeave.Testing/Corpus/CheckoutCorpusSource.cs`), a test adapter over this checkout | `InMemoryCorpusSource` (`tests/KyberWeave.Testing/Corpus/InMemoryCorpusSource.cs`) | `CorpusSourceContractTests`: both against the adapter and the fake in `KyberWeave.RepoPolicy.Tests/CorpusSourceContractTests.cs` |
 
 Notes.
@@ -106,7 +106,7 @@ task's list.
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
-| `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Data` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree probe |
+| `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
 
 `ICredentialStore` is a product interface, not one of the eleven seams. Two of its adapters are
@@ -184,6 +184,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepositoryLocator` (`Arbiter/ArbiterRepositoryLocator.cs`) | file system, paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
+| `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
+| `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths, identifiers | 4.3 |
 | `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
@@ -313,10 +315,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `ClaudeHookCoverage` (`Arbiter/ClaudeHookCoverage.cs`) | file system | 4.4 |
-| `ConfiguredArbiterProviderFactory` (`Arbiter/ConfiguredArbiterProviderFactory.cs`) | environment, network | 4.4 |
-| `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | file system, paths | 4.4 |
-| `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | file system, paths | 4.4 |
 | `PlanPathResolver` (`Arbiter/Plans/PlanPathResolver.cs`) | file system, paths | 4.4 |
 | `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
 | `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
@@ -440,9 +438,7 @@ the behaviour: where a test observes the value, the seam still wraps it.
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 17 non-adapter classes open a `FileStream` directly. They are
 `Application/Docs/Scaffolding/StandardsFolderMigration.cs`, `Application/Update/SelfUpdater.cs`,
-`Data/Arbiter/Facts/FileTextFacts.cs` and `GateReportFacts.cs`,
-`Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and
-`FileWorkerBudgetStore.cs`, `Data/Squad/Deployment/SquadStateMigration.cs`, `SquadStateStore.cs`,
+`Data/Hooks/Arbiter/FileHookSnapshotStore.cs` and `FileWorkerBudgetStore.cs`, `Data/Squad/Deployment/SquadStateMigration.cs`, `SquadStateStore.cs`,
 `SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,

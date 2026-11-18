@@ -1,16 +1,16 @@
 using KyberWeave.Contracts.Repositories;
 using System.Text;
 using KyberWeave.Core.Arbiter.Sections;
-using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>
 /// Reads the current text around a line of a repository file, so a review comment is judged against the code as it
 /// is now. Reads are bounded in lines, characters per line and characters overall, and a path that leaves the
-/// repository root is never read.
+/// repository root is never read. Every read goes through the repository file-store seam.
 /// </summary>
-public sealed class FileTextFacts : IFileTextFacts
+/// <param name="store">The repository checkout the excerpts are read from.</param>
+public sealed class FileTextFacts(IRepositoryFileStore store) : IFileTextFacts
 {
     /// <summary>The most characters one excerpt carries.</summary>
     public const int MaxExcerptCharacters = 4000;
@@ -67,7 +67,7 @@ public sealed class FileTextFacts : IFileTextFacts
         }
     }
 
-    private static FileExcerpt? ReadWindow(string full, string path, int line)
+    private FileExcerpt? ReadWindow(string full, string path, int line)
     {
         int first = Math.Max(1, line - Radius);
         int last = line + Radius;
@@ -80,7 +80,7 @@ public sealed class FileTextFacts : IFileTextFacts
         bool reachedTarget = false;
         long budget = MaxConsumedCharacters;
 
-        using FileStream stream = File.OpenRead(full);
+        using Stream stream = store.OpenRead(full);
         using StreamReader reader = new(stream, Encoding.UTF8);
         while (lineNumber < last && ReadBoundedLine(reader, current, ref budget, out bool clipped))
         {
@@ -176,11 +176,11 @@ public sealed class FileTextFacts : IFileTextFacts
 
         string root = Path.GetFullPath(repoRoot);
         string relative = Path.GetRelativePath(root, full);
-        return KyberWeave.Core.Configuration.DocsRootPath.IsContainedFile(root, relative, []) ? full : null;
+        return store.IsContainedFile(root, relative, []) ? full : null;
     }
 
     /// <inheritdoc/>
-    public long LengthOf(string fullPath) => new FileInfo(fullPath).Length;
+    public long LengthOf(string fullPath) => store.GetLength(fullPath);
 
     /// <summary>
     /// Reads one line into <paramref name="line"/>, keeping at most <see cref="MaxLineCharacters"/> characters and

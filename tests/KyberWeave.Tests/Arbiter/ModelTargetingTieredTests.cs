@@ -145,7 +145,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
         new NoGitFacts(),
         new RealPlanReader(RealPlanFacts.Create(), _repo.Path),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-        new GateReportFacts(),
+        RealGateReportFacts.Create(),
         RealArbiterState.Factory(),
         TimeProvider.System,
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)

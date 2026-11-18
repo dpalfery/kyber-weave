@@ -21,8 +21,10 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// the rule cannot decide from the line, so it asks the model whether the return reports a
 /// gate run at all, and reads the raw claim line and the report tail this class also supplies.
 /// </para>
+/// <para>Every file read goes through the repository file-store seam.</para>
 /// </remarks>
-public sealed class GateReportFacts : IGateReportFacts
+/// <param name="store">The repository checkout the reports are read from.</param>
+public sealed class GateReportFacts(IRepositoryFileStore store) : IGateReportFacts
 {
     /// <summary>The fact a returned digest's <c>TASK_GATE:</c> claim is verified into.</summary>
     public const string AgreesFact = "gate.report.agrees";
@@ -74,11 +76,11 @@ public sealed class GateReportFacts : IGateReportFacts
     {
         try
         {
-            if (!File.Exists(gatesJsonPath))
+            if (!store.FileExists(gatesJsonPath))
                 return null;
 
             const int maxBytes = 1024 * 1024;
-            using FileStream stream = new(gatesJsonPath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using Stream stream = store.OpenRead(gatesJsonPath);
             if (stream.Length > maxBytes || stream.Length == 0)
                 return null;
 
@@ -162,7 +164,7 @@ public sealed class GateReportFacts : IGateReportFacts
             return null;
 
         string? path = Resolve(claim.ReportPath, repositoryRoot);
-        if ((path is null || !File.Exists(path)) && claim.WholeLinePath is not null)
+        if ((path is null || !store.FileExists(path)) && claim.WholeLinePath is not null)
             path = Resolve(claim.WholeLinePath, repositoryRoot) ?? path;
         if (path is null)
             return null;
@@ -191,7 +193,7 @@ public sealed class GateReportFacts : IGateReportFacts
 
         DigestClaim claim = ReadClaim(returnedText!)!;
         string? path = Resolve(claim.ReportPath, repositoryRoot);
-        if ((path is null || !File.Exists(path)) && claim.WholeLinePath is not null)
+        if ((path is null || !store.FileExists(path)) && claim.WholeLinePath is not null)
             path = Resolve(claim.WholeLinePath, repositoryRoot) ?? path;
         if (path is null || Path.GetDirectoryName(path) is not { } folder)
             return null;
@@ -201,10 +203,10 @@ public sealed class GateReportFacts : IGateReportFacts
             if (IsFailingRun(TryReadFile(path)))
                 return false;
 
-            DateTime passedAt = File.GetLastWriteTimeUtc(path);
-            return Directory.EnumerateFiles(folder, "*.json", SearchOption.TopDirectoryOnly)
+            DateTime passedAt = store.GetLastWriteTimeUtc(path);
+            return store.EnumerateFiles(folder, "*.json", recursive: false)
                 .Where(candidate => !string.Equals(Path.GetFullPath(candidate), Path.GetFullPath(path), StringComparison.Ordinal))
-                .Any(candidate => File.GetLastWriteTimeUtc(candidate) < passedAt && IsFailingRun(TryReadFile(candidate)));
+                .Any(candidate => store.GetLastWriteTimeUtc(candidate) < passedAt && IsFailingRun(TryReadFile(candidate)));
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -288,7 +290,7 @@ public sealed class GateReportFacts : IGateReportFacts
         }
     }
 
-    private static string? Resolve(string reportPath, string? repositoryRoot)
+    private string? Resolve(string reportPath, string? repositoryRoot)
     {
         if (string.IsNullOrWhiteSpace(reportPath) || string.IsNullOrWhiteSpace(repositoryRoot))
             return null;
@@ -316,8 +318,7 @@ public sealed class GateReportFacts : IGateReportFacts
             string checkPath = resolved;
             while (checkPath.Length >= fullRepo.Length)
             {
-                FileSystemInfo fsi = Directory.Exists(checkPath) ? new DirectoryInfo(checkPath) : new FileInfo(checkPath);
-                if (fsi.LinkTarget is { } linkTarget)
+                if (store.GetLinkTarget(checkPath) is { } linkTarget)
                 {
                     string target = Path.IsPathRooted(linkTarget)
                         ? Path.GetFullPath(linkTarget)

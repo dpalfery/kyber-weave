@@ -178,7 +178,7 @@ public sealed class ArbiterNitpickRuleTests : IDisposable
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
             (_, _) => []);
