@@ -74,25 +74,13 @@
       "bound": "Run at line 536: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only (`init --quiet`), in a temp repository the fixture created."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/DocsInitReviewGatesTests.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "Started by the Run at line 495: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
-    },
-    {
-      "file": "tests/KyberWeave.Integration.Tests/DocsInitReviewGatesTests.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(60));",
-      "count": 1,
-      "bound": "Run at line 495: ProcessRunner timeout 60 s kills the child tree on expiry; git argv only, in a temp or fixture repository."
-    },
-    {
-      "file": "tests/KyberWeave.Integration.Tests/DocsInitReviewGatesTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/ReviewGatesRealRustToolchainTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"cargo\")",
       "count": 1,
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry, so a stalled rustup proxy cannot hang the suite. Runs `cargo --version` only."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/DocsInitReviewGatesTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/ReviewGatesRealRustToolchainTests.cs",
       "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30)).ExitCode == 0;",
       "count": 1,
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry, so a stalled rustup proxy cannot hang the suite. Runs `cargo --version` only."
