@@ -194,6 +194,21 @@ public sealed partial class ProseRuleCatalogTests
         Assert.All(parts.Skip(1), part => Assert.StartsWith("## ", part, StringComparison.Ordinal));
     }
 
+    /// <summary>
+    /// The same catalog through its own loader and default path: <see cref="ProseRuleCatalog.DefaultPath"/> is the
+    /// file the opt-in grading run reads, and a wrong or missing path there is a grading run that never starts.
+    /// </summary>
+    [Fact]
+    public void Load_ReadsTheCatalogTheCorpusSeamDelivers()
+    {
+        ProseRuleCatalog loaded = ProseRuleCatalog.Load(ProseRuleCatalog.DefaultPath());
+
+        Assert.Equal(
+            Catalog.Value.Rules.Select(rule => rule.Id),
+            loaded.Rules.Select(rule => rule.Id));
+        Assert.Equal(Catalog.Value.ConfidenceFloor, loaded.ConfidenceFloor);
+    }
+
     [Fact]
     public void Parse_RefusesAnUnknownKeyByName()
     {
