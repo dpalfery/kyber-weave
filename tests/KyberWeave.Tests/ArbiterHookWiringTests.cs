@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
@@ -48,7 +49,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
 
     public void Dispose() => _fixture.Dispose();
 
-    private SquadSource LoadedSource => SquadSourceLoader.Load(_fixture.Path);
+    private SquadSource LoadedSource => RealSquadServices.Load(_fixture.Path);
 
     [Fact]
     public void Dispatchers_AreExactlyTheAgentsWithDelegations()
@@ -507,7 +508,7 @@ public sealed class ArbiterHookWiringTests : IDisposable
     public void ShellGuardedAgents_ShippedSource_IsExactlyTheArchitect()
     {
         // The architect is the only agent whose Bash and PowerShell calls are checked against its documented list.
-        SquadSource source = SquadSourceLoader.Load(ShippedProductRoot);
+        SquadSource source = RealSquadServices.Load(ShippedProductRoot);
 
         Assert.Equal(
             new HashSet<string>(["architect"], StringComparer.Ordinal),

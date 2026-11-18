@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -802,7 +803,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
             string.Join('\n', skillLines),
             new UTF8Encoding(false));
 
-        SquadSource source = SquadSourceLoader.Load(fixtureRoot);
+        SquadSource source = RealSquadServices.Load(fixtureRoot);
         SquadRenderResult result = await RenderZCodeAsync(fixtureRoot);
 
         List<SquadSkill> quoted = source.Skills

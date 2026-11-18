@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -486,7 +487,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         foreach (SquadTarget target in GrantingTargets)

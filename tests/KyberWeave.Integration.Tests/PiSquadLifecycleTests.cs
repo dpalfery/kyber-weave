@@ -173,7 +173,7 @@ public sealed class PiSquadLifecycleTests : IDisposable
     /// </summary>
     private static int ExpectedRenderedFileCount()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);

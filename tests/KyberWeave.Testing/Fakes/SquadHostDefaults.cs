@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -68,7 +69,7 @@ internal static class SquadHostDefaults
     }
 
     /// <summary>Creates the registry over one instance of every shipped renderer.</summary>
-    public static ISquadRenderer ResolveRenderer() => new SquadRendererRegistry(CreateRenderers(), new FileSquadRenderInputReader());
+    public static ISquadRenderer ResolveRenderer() => new SquadRendererRegistry(CreateRenderers(), RealSquadServices.RenderInputReader());
 
     /// <summary>Creates one instance of every shipped harness renderer.</summary>
     public static IReadOnlyList<ISquadRenderer> CreateRenderers() => SquadRendererSet.Create();
@@ -134,8 +135,8 @@ internal static class SquadHostDefaults
             stateStore,
             presetStore ?? new SquadModelPresetStore(stateStore.UserPaths),
             selectionStore ?? new SquadModelPresetSelectionStore(stateStore.UserPaths, new PhysicalFileSystem(), SquadFileSystemPathSemantics.Instance),
-            new FileSquadSourceLoader(),
-            new FileSquadModelPresetValidator(),
+            RealSquadServices.SourceLoader(),
+            RealSquadServices.PresetValidator(),
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(stateStore),
             new FileSquadResponseGuidanceStore(),
@@ -159,7 +160,7 @@ internal static class SquadHostDefaults
         SquadStateStore stateStore = ResolveStateStore(resolvedPaths);
         string? local = new PhysicalSquadFileAccess().FindCheckoutSquadSourceRoot();
         ISquadReleaseSource releaseSource = local is not null
-            ? SquadReleaseSources.LocalCheckout(local)
+            ? SquadReleaseSources.LocalCheckout(local, RealSquadServices.CompanionSkills())
             : CreateGitHubReleaseSource(Environment.GetEnvironmentVariable);
         SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore, releaseSource);
         return new SquadInstanceService(
@@ -167,7 +168,7 @@ internal static class SquadHostDefaults
             new SquadModelPresetStore(resolvedPaths),
             ResolveLinkFileSystem(),
             ResolveGlobalRoots(),
-            new FileSquadInstanceLinkSync(),
+            RealSquadServices.InstanceLinkSync(),
             new PhysicalSquadFileAccess(),
             new PhysicalPathResolver(new PhysicalFileSystem()),
             new ProcessEnvironment(),

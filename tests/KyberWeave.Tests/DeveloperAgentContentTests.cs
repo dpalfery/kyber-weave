@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -18,7 +19,7 @@ public sealed class DeveloperAgentContentTests
     private static readonly string ProductRoot =
         Path.Combine(Corpus.Root, "products", "kyber-squad");
 
-    private static readonly Lazy<SquadSource> Source = new(() => SquadSourceLoader.Load(ProductRoot));
+    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
 
     private static readonly string[] DeveloperAgents = ["dev-easy", "dev-medium", "dev-hard"];
 

@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 
 using System.Globalization;
@@ -284,7 +285,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     [Fact]
     public void SharedArchitectProfileGrantsProcessExecute()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         SquadCapabilityProfile architect = source.CapabilityProfiles.Profiles["architect"];
 
         Assert.True(

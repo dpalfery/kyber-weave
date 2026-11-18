@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -236,7 +237,7 @@ public sealed class SkillResourceDispositionAuditTests
         else
         {
             IReadOnlyList<DispositionRow> dispositions = ParseDispositionRows(Corpus.ReadText(RelativeAuditPath));
-            SquadSource source = SquadSourceLoader.Load(ProductRootPath);
+            SquadSource source = RealSquadServices.Load(ProductRootPath);
             Dictionary<string, HashSet<string>> renderedBySkill = source.Skills.ToDictionary(
                 skill => skill.Name,
                 skill => skill.Resources.Select(resource => resource.RelativePath).ToHashSet(StringComparer.Ordinal),

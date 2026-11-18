@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.RegularExpressions;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
@@ -23,7 +24,7 @@ public sealed class PlatformAgentContentTests
     private static readonly string ProductRoot =
         Path.Combine(Corpus.Root, "products", "kyber-squad");
 
-    private static readonly Lazy<SquadSource> Source = new(() => SquadSourceLoader.Load(ProductRoot));
+    private static readonly Lazy<SquadSource> Source = new(() => RealSquadServices.Load(ProductRoot));
 
     private static readonly Regex PlatformWord = new(
         @"\b(azure|aws|amazon|gcp|google cloud|kubernetes|k8s|github|gitlab|jira|bitbucket)\b",

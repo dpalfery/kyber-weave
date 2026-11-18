@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -857,7 +858,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void DeliveryAgentBodyNamesTheTaskGateSkillAndEmitsItsDigest()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRootPath);
+        SquadSource source = RealSquadServices.Load(ProductRootPath);
         SquadAgent agent = Assert.Single(source.Agents, a => a.Name == "devops");
 
         Assert.Contains("task-gate", agent.InstructionBody, StringComparison.Ordinal);

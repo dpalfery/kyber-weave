@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Collections.Frozen;
 using System.Security.Cryptography;
 using System.Text;
@@ -28,6 +29,7 @@ namespace KyberWeave.Tests;
 public sealed class SquadInstanceLinkSyncTests : IDisposable
 {
     private readonly TempDirectory _tempDirectory = new();
+    private readonly SquadInstanceLinkSync _sync = RealSquadServices.InstanceLinkSync();
 
     public void Dispose()
     {
@@ -59,7 +61,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
 
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult result = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -99,7 +101,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         IReadOnlySet<string> renderedPaths = new HashSet<string> { "agents/worker.md" };
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult result = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -149,7 +151,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult firstResult = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult firstResult = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -163,7 +165,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
 
         File.Delete(tempCacheFile);
 
-        SquadInstanceLinkSyncResult secondResult = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult secondResult = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -196,7 +198,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult firstSync = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult firstSync = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -212,7 +214,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         File.WriteAllText(instanceSettings, content, Encoding.UTF8);
         Assert.False(fileSystem.IsLinkTo(instanceSettings, mainSettings));
 
-        SquadInstanceLinkSyncResult secondSync = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult secondSync = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -245,7 +247,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult firstSync = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult firstSync = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -261,7 +263,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         File.WriteAllText(instanceSettings, editedInstanceContent, Encoding.UTF8);
         Assert.False(fileSystem.IsLinkTo(instanceSettings, mainSettings));
 
-        SquadInstanceLinkSyncResult secondSync = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult secondSync = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -306,7 +308,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSync.Sync(
+        _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -319,7 +321,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         File.Delete(instanceAuth);
         File.WriteAllText(instanceAuth, "{\"auth\": \"local-instance-overwrite\"}", Encoding.UTF8);
 
-        SquadInstanceLinkSync.Sync(
+        _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -355,7 +357,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult result = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -406,7 +408,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
 
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult result = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -443,7 +445,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult result = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -484,7 +486,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         IReadOnlySet<string> renderedPaths = new HashSet<string> { "agents/worker.md" };
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult result = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -506,7 +508,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         string instanceRoot = Path.Combine(_tempDirectory.Path, "instance-for-mutex");
         Directory.CreateDirectory(instanceRoot);
 
-        string mutexName = SquadInstanceLinkSync.GetMutexName(instanceRoot);
+        string mutexName = _sync.GetMutexName(instanceRoot);
 
         Assert.StartsWith("kyber-weave-squad-", mutexName, StringComparison.Ordinal);
         Assert.True(mutexName.Length > "kyber-weave-squad-".Length);
@@ -527,7 +529,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        Task<SquadInstanceLinkSyncResult> task1 = Task.Run(() => SquadInstanceLinkSync.Sync(
+        Task<SquadInstanceLinkSyncResult> task1 = Task.Run(() => _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -535,7 +537,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
             fileSystem,
             stateDirectory));
 
-        Task<SquadInstanceLinkSyncResult> task2 = Task.Run(() => SquadInstanceLinkSync.Sync(
+        Task<SquadInstanceLinkSyncResult> task2 = Task.Run(() => _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -569,7 +571,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         FakeSquadLinkFileSystem fakeFileSystem = new();
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
 
-        SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+        SquadInstanceLinkSyncResult result = _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -612,7 +614,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        Assert.Throws<InvalidDataException>(() => SquadInstanceLinkSync.Sync(
+        Assert.Throws<InvalidDataException>(() => _sync.Sync(
             instanceRoot,
             mainHome,
             row,
@@ -668,7 +670,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
             else
                 File.SetUnixFileMode(lockedDir, UnixFileMode.UserRead | UnixFileMode.UserExecute);
 
-            SquadInstanceLinkSyncResult result = SquadInstanceLinkSync.Sync(
+            SquadInstanceLinkSyncResult result = _sync.Sync(
                 instanceRoot,
                 mainHome,
                 row,
@@ -712,7 +714,7 @@ public sealed class SquadInstanceLinkSyncTests : IDisposable
         SquadInstanceRow row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
         ISquadLinkFileSystem fileSystem = CreatePlatformFileSystem();
 
-        Assert.Throws<InvalidDataException>(() => SquadInstanceLinkSync.Sync(
+        Assert.Throws<InvalidDataException>(() => _sync.Sync(
             instanceRoot,
             mainHome,
             row,

@@ -8,5 +8,5 @@ public static class RealSquadPacker
 {
     /// <summary>Creates a packer that reads and writes the real disk.</summary>
     /// <returns>The packer.</returns>
-    public static SquadPacker Create() => new(new PhysicalFileSystem(), new FileSquadCompanionSkills());
+    public static SquadPacker Create() => new(new PhysicalFileSystem(), RealSquadServices.CompanionSkills());
 }

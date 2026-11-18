@@ -1,6 +1,8 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Validation;
@@ -13,7 +15,11 @@ using YamlDotNet.RepresentationModel;
 namespace KyberWeave.Core.Squad.Parsing;
 
 /// <summary>Loads and validates the target-neutral source maintained for Kyber-Squad.</summary>
-public static class SquadSourceLoader
+/// <param name="files">Reads every manifest, agent, skill, profile and schema file and probes links.</param>
+/// <param name="paths">Resolves the source root to a full path.</param>
+/// <param name="environment">Supplies the directory a relative source root is resolved against.</param>
+public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IProcessEnvironment environment)
+    : ISquadSourceLoader
 {
     private const string ManifestSchema = "kyber-squad.squad/v1";
     private const string BundleSchema = "kyber-squad.bundle/v1";
@@ -60,12 +66,12 @@ public static class SquadSourceLoader
     public static readonly IReadOnlyList<string> TargetScopedProfileTargets = ["copilot", "devin"];
 
     /// <summary>Loads the default bundle from a canonical product source root.</summary>
-    public static SquadSource Load(string root)
+    public SquadSource Load(string root)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
-        string logicalRoot = Path.GetFullPath(root);
-        if (!Directory.Exists(logicalRoot))
+        string logicalRoot = FullPath(root);
+        if (!files.DirectoryExists(logicalRoot))
         {
             SquadSourceValidator.Throw(
                 $"Squad source root '{root}' does not exist.",
@@ -697,17 +703,17 @@ public static class SquadSourceLoader
         }
     }
 
-    private static IReadOnlyList<SquadAgent> LoadAgents(string logicalRoot, string resolvedRoot)
+    private IReadOnlyList<SquadAgent> LoadAgents(string logicalRoot, string resolvedRoot)
     {
         const string directory = "agents";
         string logicalDirectory = Path.Combine(logicalRoot, directory);
-        if (!Directory.Exists(logicalDirectory))
+        if (!files.DirectoryExists(logicalDirectory))
         {
             return [];
         }
 
         EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, true);
-        return Directory.EnumerateFiles(logicalDirectory, "*.md", SearchOption.TopDirectoryOnly)
+        return files.EnumerateFiles(logicalDirectory, "*.md", recursive: false)
             .Select(path => ToRelativePath(logicalRoot, path))
             .Order(StringComparer.Ordinal)
             .Select(relativePath => ParseAgent(
@@ -725,7 +731,7 @@ public static class SquadSourceLoader
             .ToArray();
     }
 
-    private static SquadAgent ParseAgent(string logicalRoot, string resolvedRoot, SourceFile file)
+    private SquadAgent ParseAgent(string logicalRoot, string resolvedRoot, SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
@@ -917,11 +923,11 @@ public static class SquadSourceLoader
         return tools;
     }
 
-    private static IReadOnlyList<SquadSkill> LoadSkills(string logicalRoot, string resolvedRoot)
+    private IReadOnlyList<SquadSkill> LoadSkills(string logicalRoot, string resolvedRoot)
     {
         const string directory = "skills";
         string logicalDirectory = Path.Combine(logicalRoot, directory);
-        if (!Directory.Exists(logicalDirectory))
+        if (!files.DirectoryExists(logicalDirectory))
         {
             return [];
         }
@@ -929,12 +935,12 @@ public static class SquadSourceLoader
         EnsureDiscoveredPath(logicalRoot, resolvedRoot, directory, true);
         List<SquadSkill> skills = new();
         foreach (string skillDirectory in
-                 Directory.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
+                 files.EnumerateDirectories(logicalDirectory).Order(StringComparer.Ordinal))
         {
             string relativeDirectory = ToRelativePath(logicalRoot, skillDirectory);
             EnsureDiscoveredPath(logicalRoot, resolvedRoot, relativeDirectory, true);
             string skillPath = Path.Combine(skillDirectory, "SKILL.md");
-            if (!File.Exists(skillPath))
+            if (!files.FileExists(skillPath))
             {
                 continue;
             }
@@ -958,7 +964,7 @@ public static class SquadSourceLoader
             .ToArray();
     }
 
-    private static SquadSkill ParseSkill(string logicalRoot, string resolvedRoot, SourceFile file)
+    private SquadSkill ParseSkill(string logicalRoot, string resolvedRoot, SourceFile file)
     {
         Frontmatter frontmatter = ParseFrontmatter(file);
         YamlMappingNode root = ParseYamlMapping(file with { Content = frontmatter.Yaml }, frontmatter.LineOffset);
@@ -975,7 +981,7 @@ public static class SquadSourceLoader
             LoadResources(logicalRoot, resolvedRoot, file.RelativePath, frontmatter.Body));
     }
 
-    private static IReadOnlyList<SquadResource> LoadResources(
+    private IReadOnlyList<SquadResource> LoadResources(
         string logicalRoot,
         string resolvedRoot,
         string principalPath,
@@ -983,9 +989,10 @@ public static class SquadSourceLoader
     {
         string platformPrincipalPath = principalPath.Replace('/', Path.DirectorySeparatorChar);
         string ownerRelativePath = Path.GetDirectoryName(platformPrincipalPath) ?? string.Empty;
-        string logicalOwnerRoot = Path.GetFullPath(Path.Combine(logicalRoot, ownerRelativePath));
+        string logicalOwnerRoot = FullPath(Path.Combine(logicalRoot, ownerRelativePath));
         string resolvedOwnerRoot = ResolveExistingPath(logicalOwnerRoot).FullPath;
         ResourceClosureBuilder builder = new(
+            this,
             logicalRoot,
             resolvedRoot,
             logicalOwnerRoot,
@@ -993,7 +1000,7 @@ public static class SquadSourceLoader
         return builder.Build(principalPath, instructionBody);
     }
 
-    private static void ValidateSchemaDocuments(string logicalRoot, string resolvedRoot)
+    private void ValidateSchemaDocuments(string logicalRoot, string resolvedRoot)
     {
         foreach (string relativePath in RequiredSchemaFiles)
         {
@@ -1049,7 +1056,7 @@ public static class SquadSourceLoader
         }
     }
 
-    private static SourceFile ReadSourceFile(
+    private SourceFile ReadSourceFile(
         string logicalRoot,
         string resolvedRoot,
         string relativePath,
@@ -1068,7 +1075,7 @@ public static class SquadSourceLoader
         string platformPath = relativePath
             .Replace('/', Path.DirectorySeparatorChar)
             .Replace('\\', Path.DirectorySeparatorChar);
-        string logicalPath = Path.GetFullPath(Path.Combine(logicalRoot, platformPath));
+        string logicalPath = FullPath(Path.Combine(logicalRoot, platformPath));
         if (!IsWithin(logicalRoot, logicalPath))
         {
             SquadSourceValidator.Throw(
@@ -1078,7 +1085,7 @@ public static class SquadSourceLoader
                 "Use a relative path that resolves inside the Squad product root.");
         }
 
-        if (!File.Exists(logicalPath))
+        if (!files.FileExists(logicalPath))
         {
             string hint = relativePath.StartsWith("schemas/", StringComparison.Ordinal)
                 ? "Ensure the required schema file exists inside the Squad product root."
@@ -1104,7 +1111,7 @@ public static class SquadSourceLoader
         string portablePath = ToPortablePath(Path.GetRelativePath(logicalRoot, logicalPath));
         try
         {
-            byte[] bytes = File.ReadAllBytes(logicalPath);
+            byte[] bytes = files.ReadAllBytes(logicalPath);
             string content = StrictUtf8.GetString(bytes);
             if (content.Length > 0 && content[0] == '\uFEFF')
             {
@@ -1124,7 +1131,7 @@ public static class SquadSourceLoader
         }
     }
 
-    private static void EnsureDiscoveredPath(
+    private void EnsureDiscoveredPath(
         string logicalRoot,
         string resolvedRoot,
         string relativePath,
@@ -1133,7 +1140,7 @@ public static class SquadSourceLoader
         string logicalPath = Path.Combine(
             logicalRoot,
             relativePath.Replace('/', Path.DirectorySeparatorChar));
-        bool exists = isDirectory ? Directory.Exists(logicalPath) : File.Exists(logicalPath);
+        bool exists = isDirectory ? files.DirectoryExists(logicalPath) : files.FileExists(logicalPath);
         if (!exists)
         {
             return;
@@ -1150,9 +1157,9 @@ public static class SquadSourceLoader
         }
     }
 
-    private static ResolvedPath ResolveExistingPath(string path)
+    private ResolvedPath ResolveExistingPath(string path)
     {
-        string fullPath = Path.GetFullPath(path);
+        string fullPath = FullPath(path);
         string root = Path.GetPathRoot(fullPath)
                       ?? throw new InvalidOperationException($"Path '{path}' has no filesystem root.");
         string current = root;
@@ -1164,23 +1171,25 @@ public static class SquadSourceLoader
         foreach (string segment in segments)
         {
             current = Path.Combine(current, segment);
-            FileSystemInfo info = Directory.Exists(current)
-                ? new DirectoryInfo(current)
-                : new FileInfo(current);
-            if (!info.Exists || (info.Attributes & FileAttributes.ReparsePoint) == 0)
+            if (!files.DirectoryExists(current) && !files.FileExists(current))
             {
                 continue;
             }
 
-            FileSystemInfo? target = info.ResolveLinkTarget(true);
+            if ((files.GetAttributes(current) & FileAttributes.ReparsePoint) == 0)
+            {
+                continue;
+            }
+
+            string? target = files.GetFinalLinkTarget(current);
             if (target is not null)
             {
                 encounteredLink = true;
-                current = Path.GetFullPath(target.FullName);
+                current = FullPath(target);
             }
         }
 
-        return new ResolvedPath(Path.GetFullPath(current), encounteredLink);
+        return new ResolvedPath(FullPath(current), encounteredLink);
     }
 
     private static Frontmatter ParseFrontmatter(SourceFile file)
@@ -1626,9 +1635,13 @@ public static class SquadSourceLoader
             .Any(segment => string.Equals(segment, "..", StringComparison.Ordinal));
     }
 
-    private static bool IsWithin(string root, string candidate)
+    private bool FileExists(string path) => files.FileExists(path);
+
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
+
+    private bool IsWithin(string root, string candidate)
     {
-        string relative = Path.GetRelativePath(Path.GetFullPath(root), Path.GetFullPath(candidate));
+        string relative = Path.GetRelativePath(FullPath(root), FullPath(candidate));
         return !Path.IsPathRooted(relative) &&
                !string.Equals(relative, "..", StringComparison.Ordinal) &&
                !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) &&
@@ -1667,6 +1680,7 @@ public static class SquadSourceLoader
 
     private sealed class ResourceClosureBuilder
     {
+        private readonly SquadSourceLoader _loader;
         private readonly string _logicalRoot;
         private readonly string _resolvedRoot;
         private readonly string _logicalOwnerRoot;
@@ -1677,11 +1691,13 @@ public static class SquadSourceLoader
         private readonly HashSet<string> _complete = new(StringComparer.Ordinal);
 
         public ResourceClosureBuilder(
+            SquadSourceLoader loader,
             string logicalRoot,
             string resolvedRoot,
             string logicalOwnerRoot,
             string resolvedOwnerRoot)
         {
+            _loader = loader;
             _logicalRoot = logicalRoot;
             _resolvedRoot = resolvedRoot;
             _logicalOwnerRoot = logicalOwnerRoot;
@@ -1715,17 +1731,17 @@ public static class SquadSourceLoader
             }
 
             string platformTarget = target.Replace('/', Path.DirectorySeparatorChar);
-            string logicalPath = Path.GetFullPath(Path.Combine(
+            string logicalPath = _loader.FullPath(Path.Combine(
                 _logicalOwnerRoot,
                 declaringDirectory.Replace('/', Path.DirectorySeparatorChar),
                 platformTarget));
-            if (!IsWithin(_logicalOwnerRoot, logicalPath) ||
+            if (!_loader.IsWithin(_logicalOwnerRoot, logicalPath) ||
                 string.Equals(_logicalOwnerRoot, logicalPath, StringComparison.Ordinal))
             {
                 ThrowOutsideOwner(target, declaringPath);
             }
 
-            if (!File.Exists(logicalPath))
+            if (!_loader.FileExists(logicalPath))
             {
                 SquadSourceValidator.Throw(
                     $"Referenced resource '{target}' does not exist inside its owning artifact directory.",
@@ -1734,8 +1750,8 @@ public static class SquadSourceLoader
                     "Add the file or update the link to an existing resource inside the owning agent or skill directory.");
             }
 
-            ResolvedPath resolved = ResolveExistingPath(logicalPath);
-            if (!IsWithin(_resolvedOwnerRoot, resolved.FullPath))
+            ResolvedPath resolved = _loader.ResolveExistingPath(logicalPath);
+            if (!_loader.IsWithin(_resolvedOwnerRoot, resolved.FullPath))
             {
                 string mechanism = resolved.EncounteredSymbolicLink ? "symbolic link" : "resolved path";
                 SquadSourceValidator.Throw(
@@ -1763,7 +1779,7 @@ public static class SquadSourceLoader
             }
 
             string productRelativePath = ToPortablePath(Path.GetRelativePath(_logicalRoot, logicalPath));
-            SourceFile resource = ReadSourceFile(
+            SourceFile resource = _loader.ReadSourceFile(
                 _logicalRoot,
                 _resolvedRoot,
                 productRelativePath,

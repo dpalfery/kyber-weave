@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Collections;
 using System.Reflection;
 using System.Text;
@@ -204,12 +205,12 @@ public sealed class SquadResourceClosureTests
 
     private static SquadAgent LoadAgent(ResourceFixture fixture) =>
         Assert.Single(
-            SquadSourceLoader.Load(fixture.Path).Agents,
+            RealSquadServices.Load(fixture.Path).Agents,
             agent => agent.Name == "architect");
 
     private static SquadSkill LoadSkill(ResourceFixture fixture) =>
         Assert.Single(
-            SquadSourceLoader.Load(fixture.Path).Skills,
+            RealSquadServices.Load(fixture.Path).Skills,
             skill => skill.Name == "test-dev");
 
     private static IReadOnlyList<ResourceSnapshot> ReadResources(object artifact)
@@ -239,7 +240,7 @@ public sealed class SquadResourceClosureTests
     private static Diagnostic AssertInvalid(ResourceFixture fixture, string expectedFragment)
     {
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => SquadSourceLoader.Load(fixture.Path));
+            () => RealSquadServices.Load(fixture.Path));
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => item.Message.Contains(expectedFragment, StringComparison.OrdinalIgnoreCase) ||

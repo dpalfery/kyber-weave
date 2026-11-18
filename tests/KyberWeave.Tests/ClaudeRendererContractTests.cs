@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
@@ -848,7 +849,7 @@ public sealed class ClaudeRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedOrchestrator();
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
 
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         Assert.Equal(

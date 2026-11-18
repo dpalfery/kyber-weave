@@ -1,9 +1,10 @@
-using System.Text;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>Reads the operator channel overlay from a Squad source tree.</summary>
-public static class SquadOperatorChannelOverlayFile
+/// <param name="files">Reads the overlay file.</param>
+public sealed class SquadOperatorChannelOverlayFile(IFileSystem files) : ISquadOperatorChannelOverlayFile
 {
     /// <summary>
     /// Reads the overlay file's text. A missing overlay is a source defect, so it fails the render rather than shipping a
@@ -12,7 +13,7 @@ public static class SquadOperatorChannelOverlayFile
     /// <param name="sourceDirectory">The Squad source root.</param>
     /// <returns>The file's text.</returns>
     /// <exception cref="SquadRenderValidationException">The overlay is missing or cannot be read.</exception>
-    public static string ReadText(string sourceDirectory)
+    public string ReadText(string sourceDirectory)
     {
         string path = Path.Combine(
             sourceDirectory,
@@ -22,7 +23,7 @@ public static class SquadOperatorChannelOverlayFile
         // is taken from the read and translated into a render error that names the path and the cause.
         try
         {
-            return File.ReadAllText(path, Encoding.UTF8);
+            return files.ReadAllText(path);
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
         {
@@ -43,6 +44,6 @@ public static class SquadOperatorChannelOverlayFile
     /// <param name="sourceDirectory">The Squad source root.</param>
     /// <param name="serverName">The validated server name.</param>
     /// <returns>The overlay, ready to render.</returns>
-    public static SquadOperatorChannelOverlay LoadOverlay(string sourceDirectory, string serverName) =>
+    public SquadOperatorChannelOverlay LoadOverlay(string sourceDirectory, string serverName) =>
         SquadOperatorChannelOverlay.FromFileText(ReadText(sourceDirectory), serverName);
 }

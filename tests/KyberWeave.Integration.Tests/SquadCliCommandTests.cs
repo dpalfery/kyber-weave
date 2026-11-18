@@ -53,25 +53,25 @@ public sealed class SquadCliCommandTests : IDisposable
         // is missing in the immediate working directory.
         string emptyDir = Path.Combine(_temp.Path, "empty-dir");
         Directory.CreateDirectory(emptyDir);
-        Assert.Null(SquadPackSourceLocator.Resolve(emptyDir));
+        Assert.Null(RealSquadServices.SourceLocator().Resolve(emptyDir));
 
         // Missing squad.yml only
         string slnOnlyDir = Path.Combine(_temp.Path, "sln-only");
         Directory.CreateDirectory(slnOnlyDir);
         File.WriteAllText(Path.Combine(slnOnlyDir, "KyberWeave.sln"), "Microsoft Visual Studio Solution File");
-        Assert.Null(SquadPackSourceLocator.Resolve(slnOnlyDir));
+        Assert.Null(RealSquadServices.SourceLocator().Resolve(slnOnlyDir));
 
         // Missing KyberWeave.sln only
         string squadYmlOnlyDir = Path.Combine(_temp.Path, "squad-yml-only");
         Directory.CreateDirectory(Path.Combine(squadYmlOnlyDir, "products", "kyber-squad"));
         File.WriteAllText(Path.Combine(squadYmlOnlyDir, "products", "kyber-squad", "squad.yml"), "schema: kyber-squad.squad/v1");
-        Assert.Null(SquadPackSourceLocator.Resolve(squadYmlOnlyDir));
+        Assert.Null(RealSquadServices.SourceLocator().Resolve(squadYmlOnlyDir));
 
         // Directory exists but squad.yml file is absent
         string dirWithoutSquadYml = Path.Combine(_temp.Path, "dir-without-squad-yml");
         Directory.CreateDirectory(Path.Combine(dirWithoutSquadYml, "products", "kyber-squad"));
         File.WriteAllText(Path.Combine(dirWithoutSquadYml, "KyberWeave.sln"), "solution");
-        Assert.Null(SquadPackSourceLocator.Resolve(dirWithoutSquadYml));
+        Assert.Null(RealSquadServices.SourceLocator().Resolve(dirWithoutSquadYml));
     }
 
     [Fact]
@@ -84,7 +84,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string childDir = Path.Combine(repo.Path, "src", "KyberWeave.Cli");
         Directory.CreateDirectory(childDir);
 
-        Assert.Null(SquadPackSourceLocator.Resolve(childDir));
+        Assert.Null(RealSquadServices.SourceLocator().Resolve(childDir));
 
         // Assert CLI, Core and Squad assemblies have no embedded resource for products/kyber-squad corpus
         Assembly cliAssembly = typeof(KyberWeave.Cli.CliApplication).Assembly;
@@ -114,7 +114,7 @@ public sealed class SquadCliCommandTests : IDisposable
         // K6c locator: Verifies locator succeeds when both markers exist in immediate directory.
         using SquadRepoFixture repo = SquadRepoFixture.CreateValid();
 
-        string? resolved = SquadPackSourceLocator.Resolve(repo.Path);
+        string? resolved = RealSquadServices.SourceLocator().Resolve(repo.Path);
 
         Assert.NotNull(resolved);
         Assert.Equal(

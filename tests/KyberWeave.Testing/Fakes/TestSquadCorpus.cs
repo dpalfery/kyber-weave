@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Collections.Concurrent;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -27,7 +28,7 @@ public static class TestSquadCorpus
         Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly Lazy<SquadSource> LazyCanonicalSource =
-        new(static () => SquadSourceLoader.Load(ProductRoot));
+        new(static () => RealSquadServices.Load(ProductRoot));
 
     private static readonly
         ConcurrentDictionary<(SquadTarget Target, SquadDeploymentScope Scope), Task<SquadRenderResult>>

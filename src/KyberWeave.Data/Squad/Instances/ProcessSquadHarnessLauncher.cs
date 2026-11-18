@@ -4,8 +4,9 @@ using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
-/// <summary>Builds harness start information through <see cref="SquadHarnessLauncher"/> and starts the harness on the console.</summary>
-public sealed class ProcessSquadHarnessLauncher : ISquadHarnessLauncher
+/// <summary>Builds harness start information through <see cref="ISquadHarnessStartInfoBuilder"/> and starts the harness on the console.</summary>
+/// <param name="builder">Prepares the start information and finds the executable.</param>
+public sealed class ProcessSquadHarnessLauncher(ISquadHarnessStartInfoBuilder builder) : ISquadHarnessLauncher
 {
     /// <inheritdoc />
     public ProcessStartInfo PrepareLaunch(
@@ -15,11 +16,11 @@ public sealed class ProcessSquadHarnessLauncher : ISquadHarnessLauncher
         Func<string, string?> getEnv,
         Func<string, string?> findOnPath,
         bool isWindows) =>
-        SquadHarnessLauncher.BuildStartInfo(row, instanceRoot, args, getEnv, findOnPath, isWindows);
+        builder.PrepareLaunch(row, instanceRoot, args, getEnv, findOnPath, isWindows);
 
     /// <inheritdoc />
     public string? FindOnPath(string executableName, Func<string, string?>? getEnv = null) =>
-        SquadHarnessLauncher.FindOnPath(executableName, getEnv);
+        builder.FindOnPath(executableName, getEnv);
 
     /// <inheritdoc />
     public int RunInteractive(ProcessStartInfo startInfo) => ProcessRunner.RunInteractive(startInfo);

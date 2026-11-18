@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Diagnostics;
@@ -26,8 +27,8 @@ public sealed class SquadSourceTests
     {
         using SquadFixture fixture = SquadFixture.CreateValid();
 
-        SquadSource first = SquadSourceLoader.Load(fixture.Path);
-        SquadSource second = SquadSourceLoader.Load(fixture.Path);
+        SquadSource first = RealSquadServices.Load(fixture.Path);
+        SquadSource second = RealSquadServices.Load(fixture.Path);
 
         Assert.Equal("kyber-squad", first.Manifest.Name);
         Assert.Equal("full", first.Bundle.Name);
@@ -67,7 +68,7 @@ public sealed class SquadSourceTests
                 default: inherit
             """);
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
 
         SquadModelProfile profile = source.ModelProfiles.Profiles["deep-planning"];
         Assert.Equal("inherit", profile.Default);
@@ -134,7 +135,7 @@ public sealed class SquadSourceTests
     [InlineData("dev-hard", "zcode", "glm-5.3")]
     public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.True(
             source.ModelProfiles.Profiles.ContainsKey(profileName),
@@ -169,7 +170,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void ModelsYmlUsesHaiku55OnlyForTheFastProfile()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         foreach ((string profileName, SquadModelProfile profile) in source.ModelProfiles.Profiles)
         {
@@ -203,7 +204,7 @@ public sealed class SquadSourceTests
         string profileName,
         string expectedAntigravityModel)
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.True(
             source.ModelProfiles.Profiles.ContainsKey(profileName),
@@ -224,7 +225,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void ArchitectAndProductOwnerOwnArchitectModelProfileAndDeepPlanningPeersStayOnDeepPlanning()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
         Assert.Equal("architect", architect.ModelProfile);
@@ -246,7 +247,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void ReviewerProfileHasNonEmptyMembership()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.True(
             source.ModelProfiles.Profiles.ContainsKey("reviewer"),
@@ -262,7 +263,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void MaiCodeFlashKeyIsRemovedFromModelsYml()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.False(
             source.ModelProfiles.Profiles.ContainsKey("mai-code-flash"),
@@ -272,7 +273,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void CodeReviewerReviewLensReviewTriageDeclareReviewerProfile()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
 
         foreach (string agentName in reviewerAgents)
@@ -294,7 +295,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void DevEasyDeclaresModelProfileFast()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         SquadAgent devEasy = Assert.Single(
             source.Agents,
@@ -463,7 +464,7 @@ public sealed class SquadSourceTests
             "copilot-capability-profile: architect-copilot\n" +
             "copilot-tools: [vscode, read, edit]");
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
         Assert.Equal("architect", architect.CapabilityProfile);
@@ -521,7 +522,7 @@ public sealed class SquadSourceTests
             "pi-extensions: [pi-mcp-adapter]\n" +
             "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp__context7__resolve_library_id]");
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
         Assert.Equal(["vscode", "read"], architect.CopilotTools);
@@ -709,7 +710,7 @@ public sealed class SquadSourceTests
             "capability-profile: architect\n" +
             "devin-capability-profile: architect-devin\n");
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
         Assert.Equal("architect", architect.CapabilityProfile);
@@ -916,7 +917,7 @@ public sealed class SquadSourceTests
             You are conductor.
             """);
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
 
         Assert.True(string.IsNullOrWhiteSpace(
             source.Agents.Single(agent => agent.Name == "conductor").ModelProfile));
@@ -1133,7 +1134,7 @@ public sealed class SquadSourceTests
         }
 
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => SquadSourceLoader.Load(fixture.Path));
+            () => RealSquadServices.Load(fixture.Path));
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => item.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) &&
@@ -1219,7 +1220,7 @@ public sealed class SquadSourceTests
         }
 
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => SquadSourceLoader.Load(fixture.Path));
+            () => RealSquadServices.Load(fixture.Path));
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => string.Equals(item.FilePath, expectedSourcePath, StringComparison.Ordinal) &&
@@ -1274,7 +1275,7 @@ public sealed class SquadSourceTests
         fixture.Replace("bundles/full.yml", "  - architect", "  - Role-architect");
         fixture.Replace("bundles/full.yml", "skills:\n  - dev-medium", "skills:\n  - Role-test-dev");
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
 
         SquadAgent agent = Assert.Single(source.Agents, item => item.Name == "Role-architect");
         Assert.Equal(["Role-planner"], agent.Aliases);
@@ -1291,8 +1292,8 @@ public sealed class SquadSourceTests
             SquadFixture.ArchitectAgentLf.Replace("\n", "\r\n", StringComparison.Ordinal),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        SquadAgent lfAgent = SquadSourceLoader.Load(lfFixture.Path).Agents.Single(agent => agent.Name == "architect");
-        SquadAgent crlfAgent = SquadSourceLoader.Load(crlfFixture.Path).Agents.Single(agent => agent.Name == "architect");
+        SquadAgent lfAgent = RealSquadServices.Load(lfFixture.Path).Agents.Single(agent => agent.Name == "architect");
+        SquadAgent crlfAgent = RealSquadServices.Load(crlfFixture.Path).Agents.Single(agent => agent.Name == "architect");
 
         Assert.Equal(NormalizedArchitectBody, lfAgent.InstructionBody);
         Assert.Equal(NormalizedArchitectBody, crlfAgent.InstructionBody);
@@ -1376,7 +1377,7 @@ public sealed class SquadSourceTests
     {
         using SquadFixture fixture = SquadFixture.CreateValid();
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
 
         Assert.Empty(source.Toolchain.RequiredMcpTools);
     }
@@ -1397,7 +1398,7 @@ public sealed class SquadSourceTests
             validated-release: null
             """);
 
-        SquadSource source = SquadSourceLoader.Load(fixture.Path);
+        SquadSource source = RealSquadServices.Load(fixture.Path);
 
         Assert.Equal(["codegraph", "kyber-weave"], source.Toolchain.RequiredMcpTools.Keys);
         Assert.Equal(["codegraph_explore"], source.Toolchain.RequiredMcpTools["codegraph"]);
@@ -1480,7 +1481,7 @@ public sealed class SquadSourceTests
         string expectedMessageFragment)
     {
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => SquadSourceLoader.Load(fixture.Path));
+            () => RealSquadServices.Load(fixture.Path));
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => string.Equals(item.FilePath, expectedRelativePath, StringComparison.Ordinal) &&

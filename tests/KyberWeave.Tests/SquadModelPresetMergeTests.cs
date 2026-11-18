@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using System.Text.Json;
@@ -216,7 +217,7 @@ public sealed class SquadModelPresetMergeTests
                                   """;
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset("valid.yml", Encoding.UTF8.GetBytes(presetYaml));
 
-        SquadModelPresetValidator.Validate(preset, bundled);
+        RealSquadServices.PresetValidator().Validate(preset, bundled);
     }
 
     [Fact]
@@ -235,7 +236,7 @@ public sealed class SquadModelPresetMergeTests
         SquadModelPreset preset = SquadSourceLoader.ParseModelPreset(relativePath, Encoding.UTF8.GetBytes(presetYaml));
 
         SquadSourceValidationException exception =
-            Assert.Throws<SquadSourceValidationException>(() => SquadModelPresetValidator.Validate(preset, bundled));
+            Assert.Throws<SquadSourceValidationException>(() => RealSquadServices.PresetValidator().Validate(preset, bundled));
 
         Diagnostic diagnostic = Assert.Single(exception.Diagnostics.Items);
         Assert.Equal(Severity.Error, diagnostic.Severity);
@@ -269,7 +270,7 @@ public sealed class SquadModelPresetMergeTests
 
         SquadSourceValidationException exception =
             Assert.Throws<SquadSourceValidationException>(() =>
-                SquadModelPresetValidator.Validate(preset, bundledWithoutFast));
+                RealSquadServices.PresetValidator().Validate(preset, bundledWithoutFast));
 
         Diagnostic diagnostic = Assert.Single(exception.Diagnostics.Items);
         Assert.Equal(Severity.Error, diagnostic.Severity);
@@ -294,7 +295,7 @@ public sealed class SquadModelPresetMergeTests
                                  """;
         SquadModelPreset validPreset =
             SquadSourceLoader.ParseModelPreset("valid-source.yml", Encoding.UTF8.GetBytes(validYaml));
-        SquadModelPresetValidator.Validate(validPreset, source);
+        RealSquadServices.PresetValidator().Validate(validPreset, source);
 
         const string invalidYaml = """
                                    schema: kyber-squad.model-preset/v1
@@ -304,7 +305,7 @@ public sealed class SquadModelPresetMergeTests
                                    """;
         SquadModelPreset invalidPreset =
             SquadSourceLoader.ParseModelPreset("invalid-source.yml", Encoding.UTF8.GetBytes(invalidYaml));
-        Assert.Throws<SquadSourceValidationException>(() => SquadModelPresetValidator.Validate(invalidPreset, source));
+        Assert.Throws<SquadSourceValidationException>(() => RealSquadServices.PresetValidator().Validate(invalidPreset, source));
     }
 
     [Fact]

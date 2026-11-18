@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using System.Text.RegularExpressions;
@@ -530,7 +531,7 @@ public sealed class PiRendererContractTests : IDisposable
     public async Task RenderAsync_Pi_AgentsOutsideTheFileReadEntitlementRenderNoOverlay()
     {
         using PiFileReadDeniedFixture fixture = PiFileReadDeniedFixture.Create();
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
 
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == PiFileReadDeniedFixture.TestAgentName);
         Assert.False(

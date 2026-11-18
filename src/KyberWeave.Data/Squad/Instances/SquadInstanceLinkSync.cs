@@ -1,6 +1,10 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -19,9 +23,21 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///         If they match, the link is re-established; if they differ, both copies are preserved and a warning is raised.
 ///     </para>
 /// </remarks>
-public static class SquadInstanceLinkSync
+/// <param name="files">Reads, writes and lists the instance, main-home and state files.</param>
+/// <param name="paths">Canonicalizes and resolves the instance root.</param>
+/// <param name="lease">Serializes concurrent syncs of one instance root.</param>
+/// <param name="environment">Supplies the base for a relative root and the operating system's case rule.</param>
+public sealed class SquadInstanceLinkSync(
+    IWritableFileSystem files,
+    IPathResolver paths,
+    ILease lease,
+    IProcessEnvironment environment) : ISquadInstanceLinkSync
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+    private static readonly TimeSpan LeaseTimeout = TimeSpan.FromMinutes(5);
+
+    // The lease refuses a second request from the process that holds the name, so concurrent callers in this
+    // process queue here first and one at a time reach the cross-process lease.
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates = new(StringComparer.Ordinal);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -35,12 +51,11 @@ public static class SquadInstanceLinkSync
     /// </summary>
     /// <param name="instanceRoot">The filesystem root of the instance.</param>
     /// <returns>A mutex name starting with <c>kyber-weave-squad-</c> followed by the canonical root key.</returns>
-    public static string GetMutexName(string instanceRoot)
+    public string GetMutexName(string instanceRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceRoot);
-        string canonical = Semantics.Canonicalize(instanceRoot);
-        string rootKey = SquadPhysicalRootIdentity.KeyOf(canonical);
-        return $"kyber-weave-squad-{rootKey}";
+        string canonical = paths.Canonicalize(instanceRoot);
+        return SquadLeaseNames.ForRoot(SquadPhysicalRootIdentity.KeyOf(canonical));
     }
 
     /// <summary>
@@ -53,7 +68,7 @@ public static class SquadInstanceLinkSync
     /// <param name="fileSystem">Filesystem abstraction for creating and inspecting links.</param>
     /// <param name="instanceStateDirectory">Directory where instance state, including <c>links.json</c>, is recorded.</param>
     /// <returns>Result containing active links and any generated warnings.</returns>
-    public static SquadInstanceLinkSyncResult Sync(
+    public SquadInstanceLinkSyncResult Sync(
         string instanceRoot,
         string mainHome,
         SquadInstanceRow row,
@@ -70,21 +85,12 @@ public static class SquadInstanceLinkSync
 
         if (row.Kind != SquadInstanceKind.HomeReplace) return new SquadInstanceLinkSyncResult([], []);
 
-        string mutexName = GetMutexName(instanceRoot);
-        using Mutex mutex = new(false, mutexName);
-        bool acquired = false;
-
+        string leaseName = GetMutexName(instanceRoot);
+        SemaphoreSlim gate = _gates.GetOrAdd(leaseName, static _ => new SemaphoreSlim(1, 1));
+        gate.Wait();
         try
         {
-            try
-            {
-                acquired = mutex.WaitOne();
-            }
-            catch (AbandonedMutexException)
-            {
-                acquired = true;
-            }
-
+            using IDisposable held = lease.Acquire(leaseName, LeaseTimeout);
             return SynchronizeCore(
                 instanceRoot,
                 mainHome,
@@ -95,11 +101,11 @@ public static class SquadInstanceLinkSync
         }
         finally
         {
-            if (acquired) mutex.ReleaseMutex();
+            _ = gate.Release();
         }
     }
 
-    private static SquadInstanceLinkSyncResult SynchronizeCore(
+    private SquadInstanceLinkSyncResult SynchronizeCore(
         string instanceRoot,
         string mainHome,
         SquadInstanceRow row,
@@ -131,13 +137,13 @@ public static class SquadInstanceLinkSync
             {
                 if (remove.Record.Kind == SquadLinkKind.Directory)
                 {
-                    if (Directory.Exists(linkPath) || fileSystem.IsLink(linkPath))
+                    if (files.DirectoryExists(linkPath) || fileSystem.IsLink(linkPath))
                         fileSystem.DeleteTreeNoFollow(linkPath);
                 }
                 else
                 {
-                    if (File.Exists(linkPath) || fileSystem.IsLink(linkPath))
-                        File.Delete(linkPath);
+                    if (files.FileExists(linkPath) || fileSystem.IsLink(linkPath))
+                        files.DeleteFile(linkPath);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -167,13 +173,13 @@ public static class SquadInstanceLinkSync
             string targetPath = recorded.TargetPath;
 
             if (!fileSystem.IsLinkTo(linkPath, targetPath))
-                if (File.Exists(linkPath) && File.Exists(targetPath))
+                if (files.FileExists(linkPath) && files.FileExists(targetPath))
                 {
                     if (FilesAreEqual(linkPath, targetPath))
                     {
                         try
                         {
-                            File.Delete(linkPath);
+                            files.DeleteFile(linkPath);
                             fileSystem.CreateFileLink(linkPath, targetPath);
                         }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -214,7 +220,7 @@ public static class SquadInstanceLinkSync
             if (record.Kind == SquadLinkKind.Directory)
                 try
                 {
-                    if (Directory.Exists(linkPath) || fileSystem.IsLink(linkPath))
+                    if (files.DirectoryExists(linkPath) || fileSystem.IsLink(linkPath))
                         fileSystem.DeleteTreeNoFollow(linkPath);
 
                     EnsureDirectoryExists(Path.GetDirectoryName(linkPath));
@@ -228,7 +234,7 @@ public static class SquadInstanceLinkSync
             else
                 try
                 {
-                    if (File.Exists(linkPath) || fileSystem.IsLink(linkPath)) File.Delete(linkPath);
+                    if (files.FileExists(linkPath) || fileSystem.IsLink(linkPath)) files.DeleteFile(linkPath);
 
                     EnsureDirectoryExists(Path.GetDirectoryName(linkPath));
                     fileSystem.CreateFileLink(linkPath, targetPath);
@@ -251,10 +257,10 @@ public static class SquadInstanceLinkSync
         return new SquadInstanceLinkSyncResult(sortedLinks, warnings);
     }
 
-    private static void ValidateRecordedLinks(string instanceRoot, IReadOnlyList<SquadLinkRecord> recordedLinks)
+    private void ValidateRecordedLinks(string instanceRoot, IReadOnlyList<SquadLinkRecord> recordedLinks)
     {
-        string canonicalRoot = Path.GetFullPath(instanceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string canonicalRoot = FullPath(instanceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        StringComparison comparison = environment.OperatingSystem == OperatingSystemKind.Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
         foreach (SquadLinkRecord record in recordedLinks)
         {
@@ -269,20 +275,20 @@ public static class SquadInstanceLinkSync
             if (segments.Any(s => s == ".."))
                 throw new InvalidDataException($"Recorded link relative path '{record.RelativePath}' contains directory traversal segments.");
 
-            string fullPath = Path.GetFullPath(Path.Combine(instanceRoot, record.RelativePath));
+            string fullPath = FullPath(Path.Combine(instanceRoot, record.RelativePath));
             if (!fullPath.StartsWith(canonicalRoot, comparison))
                 throw new InvalidDataException($"Recorded link relative path '{record.RelativePath}' escapes instance root '{instanceRoot}'.");
         }
     }
 
-    private static List<SquadLinkRecord> ReadRecordedLinks(string instanceStateDirectory)
+    private List<SquadLinkRecord> ReadRecordedLinks(string instanceStateDirectory)
     {
         string linksJsonPath = Path.Combine(instanceStateDirectory, "links.json");
-        if (!File.Exists(linksJsonPath)) return [];
+        if (!files.FileExists(linksJsonPath)) return [];
 
         try
         {
-            string json = File.ReadAllText(linksJsonPath, Encoding.UTF8);
+            string json = files.ReadAllText(linksJsonPath);
             List<SquadLinkRecord>? deserialized = JsonSerializer.Deserialize<List<SquadLinkRecord>>(json, JsonOptions);
             return deserialized ?? throw new InvalidDataException($"Corrupt instance link state file '{linksJsonPath}'.");
         }
@@ -292,50 +298,21 @@ public static class SquadInstanceLinkSync
         }
     }
 
-    private static void WriteLinksJson(string instanceStateDirectory, IReadOnlyList<SquadLinkRecord> links)
+    private void WriteLinksJson(string instanceStateDirectory, IReadOnlyList<SquadLinkRecord> links)
     {
         EnsureDirectoryExists(instanceStateDirectory);
         string text = JsonSerializer.Serialize(links, JsonOptions) + "\n";
         string targetPath = Path.Combine(instanceStateDirectory, "links.json");
-        string tempPath = Path.Combine(instanceStateDirectory, $"links.json.{Guid.NewGuid():N}.tmp");
-
-        try
-        {
-            using (FileStream stream = new(
-                       tempPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       4096,
-                       SquadTransaction.SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
-            {
-                byte[] bytes = new UTF8Encoding(false).GetBytes(text);
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: SquadTransaction.SyncToDisk);
-            }
-
-            File.Move(tempPath, targetPath, true);
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-                try
-                {
-                    File.Delete(tempPath);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                }
-        }
+        files.WriteAllBytesAtomic(targetPath, new UTF8Encoding(false).GetBytes(text), SquadTransaction.SyncToDisk);
     }
 
-    private static List<SquadLinkRecord> EnumerateMainHome(
+    private List<SquadLinkRecord> EnumerateMainHome(
         string mainHome,
         IReadOnlySet<string> renderedPaths,
         IReadOnlyList<string> extraLinks)
     {
         List<SquadLinkRecord> records = [];
-        if (!Directory.Exists(mainHome)) return records;
+        if (!files.DirectoryExists(mainHome)) return records;
 
         HashSet<string> interestingPrefixes = new(StringComparer.Ordinal);
         foreach (string path in renderedPaths)
@@ -360,47 +337,40 @@ public static class SquadInstanceLinkSync
             }
         }
 
-        Queue<(DirectoryInfo Dir, int Depth)> queue = new();
-        queue.Enqueue((new DirectoryInfo(mainHome), 0));
-
-        EnumerationOptions options = new()
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0
-        };
+        Queue<(string Dir, int Depth)> queue = new();
+        queue.Enqueue((mainHome, 0));
 
         while (queue.Count > 0)
         {
-            (DirectoryInfo current, int depth) = queue.Dequeue();
-            IEnumerable<FileSystemInfo> entries;
+            (string current, int depth) = queue.Dequeue();
+            IEnumerable<FileSystemEntry> entries;
             try
             {
-                entries = current.EnumerateFileSystemInfos("*", options);
+                entries = files.EnumerateEntries(current);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
 
-            foreach (FileSystemInfo entry in entries)
+            foreach (FileSystemEntry entry in entries)
             {
-                string relativePath = Path.GetRelativePath(mainHome, entry.FullName).Replace('\\', '/');
+                string relativePath = Path.GetRelativePath(mainHome, entry.Path).Replace('\\', '/');
                 string normRel = relativePath.Trim('/');
 
-                if (entry is DirectoryInfo dirEntry)
+                if (entry.IsDirectory)
                 {
-                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.Directory, dirEntry.FullName));
+                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.Directory, entry.Path));
                     if (depth < 10 &&
-                        entry.LinkTarget is null &&
-                        !entry.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
+                        !entry.IsLink &&
                         interestingPrefixes.Contains(normRel))
                     {
-                        queue.Enqueue((dirEntry, depth + 1));
+                        queue.Enqueue((entry.Path, depth + 1));
                     }
                 }
                 else
                 {
-                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.File, entry.FullName));
+                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.File, entry.Path));
                 }
             }
         }
@@ -408,43 +378,34 @@ public static class SquadInstanceLinkSync
         return records;
     }
 
-    private static List<string> EnumerateInstanceRoot(string instanceRoot)
+    private List<string> EnumerateInstanceRoot(string instanceRoot)
     {
         List<string> results = [];
-        if (!Directory.Exists(instanceRoot)) return results;
+        if (!files.DirectoryExists(instanceRoot)) return results;
 
-        Queue<(DirectoryInfo Dir, int Depth)> queue = new();
-        queue.Enqueue((new DirectoryInfo(instanceRoot), 0));
-
-        EnumerationOptions options = new()
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0
-        };
+        Queue<(string Dir, int Depth)> queue = new();
+        queue.Enqueue((instanceRoot, 0));
 
         while (queue.Count > 0)
         {
-            (DirectoryInfo current, int depth) = queue.Dequeue();
-            IEnumerable<FileSystemInfo> entries;
+            (string current, int depth) = queue.Dequeue();
+            IEnumerable<FileSystemEntry> entries;
             try
             {
-                entries = current.EnumerateFileSystemInfos("*", options);
+                entries = files.EnumerateEntries(current);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
 
-            foreach (FileSystemInfo entry in entries)
+            foreach (FileSystemEntry entry in entries)
             {
-                string relativePath = Path.GetRelativePath(instanceRoot, entry.FullName).Replace('\\', '/');
+                string relativePath = Path.GetRelativePath(instanceRoot, entry.Path).Replace('\\', '/');
                 results.Add(relativePath);
-                if (entry is DirectoryInfo dirEntry &&
-                    depth < 10 &&
-                    entry.LinkTarget is null &&
-                    !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                if (entry.IsDirectory && depth < 10 && !entry.IsLink)
                 {
-                    queue.Enqueue((dirEntry, depth + 1));
+                    queue.Enqueue((entry.Path, depth + 1));
                 }
             }
         }
@@ -452,19 +413,17 @@ public static class SquadInstanceLinkSync
         return results;
     }
 
-    private static bool FilesAreEqual(string path1, string path2)
+    private bool FilesAreEqual(string path1, string path2)
     {
         try
         {
-            FileInfo info1 = new(path1);
-            FileInfo info2 = new(path2);
+            long length = files.GetLength(path1);
+            if (length != files.GetLength(path2)) return false;
 
-            if (info1.Length != info2.Length) return false;
+            if (length == 0) return true;
 
-            if (info1.Length == 0) return true;
-
-            using FileStream stream1 = File.OpenRead(path1);
-            using FileStream stream2 = File.OpenRead(path2);
+            using Stream stream1 = files.OpenRead(path1);
+            using Stream stream2 = files.OpenRead(path2);
 
             Span<byte> buffer1 = stackalloc byte[8192];
             Span<byte> buffer2 = stackalloc byte[8192];
@@ -487,18 +446,20 @@ public static class SquadInstanceLinkSync
         }
     }
 
-    private static void EnsureDirectoryExists(string? directoryPath)
+    private void EnsureDirectoryExists(string? directoryPath)
     {
-        if (!string.IsNullOrEmpty(directoryPath) && !Directory.Exists(directoryPath))
+        if (!string.IsNullOrEmpty(directoryPath) && !files.DirectoryExists(directoryPath))
             try
             {
-                Directory.CreateDirectory(directoryPath);
+                files.CreateDirectory(directoryPath);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
                                            or NotSupportedException)
             {
             }
     }
+
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 
     private static string NormalizeRelativePath(string path)
     {
