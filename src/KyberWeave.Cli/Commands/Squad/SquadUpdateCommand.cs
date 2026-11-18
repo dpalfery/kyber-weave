@@ -34,6 +34,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     private readonly ISquadProjectPicker? _picker;
     private readonly SquadConsoleOptions _console;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
+    private readonly IKyberWeaveConfigRepository _configs;
 
     /// <summary>Creates the update command over the Squad services the host registers.</summary>
     /// <param name="lifecycle">Updates the deployment.</param>
@@ -46,6 +47,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     /// <param name="console">How the command prompts; the defaults read the console.</param>
     /// <param name="picker">Offers the registered projects to choose from, or null for the terminal picker.</param>
     /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
+    /// <param name="configs">Reads the project's host config for the task-gate hint.</param>
     public SquadUpdateCommand(
         ISquadLifecycleService lifecycle,
         ISquadInstanceService instances,
@@ -55,6 +57,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         ISquadGlobalRootResolver globalRoots,
         ISquadFileAccess files,
         SquadConsoleOptions console,
+        IKyberWeaveConfigRepository configs,
         ISquadProjectPicker? picker = null,
         KyberDashCapturePluginStep? capturePluginStep = null)
     {
@@ -66,6 +69,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         ArgumentNullException.ThrowIfNull(globalRoots);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(configs);
         _lifecycle = lifecycle;
         _instances = instances;
         _stateStore = stateStore;
@@ -74,6 +78,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         _globalRoots = globalRoots;
         _files = files;
         _console = console;
+        _configs = configs;
         _picker = picker;
         _capturePluginStep = capturePluginStep;
     }
@@ -491,7 +496,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 // configuration itself, and the hint never changes this exit code.
                 if (run.Scope == SquadDeploymentScope.Project)
                 {
-                    SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot);
+                    SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot, _configs);
                 }
 
                 // Until trust is granted the hooks stay off (§10.7), so the update names
