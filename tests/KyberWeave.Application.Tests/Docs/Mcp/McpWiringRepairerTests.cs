@@ -326,7 +326,7 @@ public sealed class McpWiringRepairerTests
             [Path.Combine(Bin, BinaryName), "--repo-root", "."],
             McpProvenance.FirstParty));
         _wiring.Files.CreateDirectory(Path.Combine(Repo, ".factory"));
-        McpWiringFixture.WriteText(_wiring.Files, 
+        McpWiringFixture.WriteText(_wiring.Files,
             Repo,
             ".factory/mcp.json",
             new JsonObject
@@ -770,7 +770,7 @@ public sealed class McpWiringRepairerTests
     public void AnInsertRoundTripIsAcceptedByTheCheck()
     {
         const string ConfigFile = ".vscode/mcp.json";
-        McpWiringFixture.WriteText(_wiring.Files, 
+        McpWiringFixture.WriteText(_wiring.Files,
             Repo,
             ConfigFile,
             """{"servers": {"other": {"command": "other-mcp"}}}""");
@@ -928,7 +928,7 @@ public sealed class McpWiringRepairerTests
     {
         // The entry is under the declared server's name — `ServerName` — with a launch that differs
         // from the declared one, which is the `CommandDiffers` finding 5.5 refuses to repair.
-        McpWiringFixture.WriteText(_wiring.Files, 
+        McpWiringFixture.WriteText(_wiring.Files,
             Repo,
             ".mcp.json",
             """{"mcpServers": {"kw-docs": {"command": "kyber-weave-mcp", "args": ["--repo-root", "/somewhere/else"]}}}""");
