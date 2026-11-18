@@ -328,6 +328,17 @@ public sealed class SquadModelPresetStoreTests
         Assert.Empty(stems);
     }
 
+    [Fact]
+    public void EveryConstructorTakesTheFileSystemSeam()
+    {
+        foreach (System.Reflection.ConstructorInfo constructor in typeof(SquadModelPresetStore).GetConstructors())
+        {
+            Assert.Contains(
+                constructor.GetParameters(),
+                parameter => parameter.ParameterType == typeof(KyberWeave.Contracts.Repositories.IFileSystem));
+        }
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

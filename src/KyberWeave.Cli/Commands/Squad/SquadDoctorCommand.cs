@@ -44,7 +44,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly IKyberWeaveConfigRepository _configs;
     private readonly SquadConsole _console;
     private readonly IWritableFileSystem _files;
-    private readonly IMcpWiringService? _wiring;
+    private readonly IMcpWiringService _wiring;
     private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
@@ -67,7 +67,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <param name="output">Where every line is written.</param>
     /// <param name="files">Reads the deployment state files the checks probe.</param>
     /// <param name="roots">Resolves the target root, migrates legacy state and anchors a global run.</param>
-    /// <param name="wiring">Scans for retired MCP server keys; the container-built service when null.</param>
+    /// <param name="wiring">Scans for retired MCP server keys.</param>
     public SquadDoctorCommand(
         ISquadStateStore stateStore,
         ISquadStateMigration migration,
@@ -88,7 +88,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         SquadConsole output,
         IWritableFileSystem files,
         SquadCommandRoots roots,
-        IMcpWiringService? wiring = null)
+        IMcpWiringService wiring)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -109,6 +109,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(wiring);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
@@ -317,7 +318,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. (_wiring ?? LegacyMcpWiring.Service).Scan(workingDirectory, null)
+            .. _wiring.Scan(workingDirectory, null)
                 .Where(change => change.Code is McpServerRenamer.RenameCode
                     or McpServerRenamer.LeftAloneCode
                     or McpServerRenamer.RefusedCode)

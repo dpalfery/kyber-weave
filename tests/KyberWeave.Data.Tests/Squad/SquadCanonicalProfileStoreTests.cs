@@ -276,6 +276,17 @@ public sealed class SquadCanonicalProfileStoreTests
         Assert.Empty(reread.AgentProfiles);
     }
 
+    [Fact]
+    public void EveryConstructorTakesTheFileSystemSeam()
+    {
+        foreach (System.Reflection.ConstructorInfo constructor in typeof(SquadCanonicalProfileStore).GetConstructors())
+        {
+            Assert.Contains(
+                constructor.GetParameters(),
+                parameter => parameter.ParameterType == typeof(KyberWeave.Contracts.Repositories.IWritableFileSystem));
+        }
+    }
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]

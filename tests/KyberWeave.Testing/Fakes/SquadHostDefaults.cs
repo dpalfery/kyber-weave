@@ -134,7 +134,7 @@ internal static class SquadHostDefaults
             releaseSource,
             renderer,
             stateStore,
-            presetStore ?? new SquadModelPresetStore(stateStore.UserPaths),
+            presetStore ?? new SquadModelPresetStore(stateStore.UserPaths, new PhysicalFileSystem()),
             selectionStore ?? new SquadModelPresetSelectionStore(stateStore.UserPaths, new PhysicalFileSystem(), SquadFileSystemPathSemantics.Instance),
             RealSquadServices.SourceLoader(),
             RealSquadServices.PresetValidator(),
@@ -142,7 +142,7 @@ internal static class SquadHostDefaults
             RealSquadDeployment.TransactionFactory(stateStore),
             new SquadResponseGuidanceReader(new PhysicalFileSystem()),
             new FactoryHooksShadowing(new PhysicalFileSystem()),
-            new SquadCanonicalProfileStore(stateStore.UserPaths),
+            new SquadCanonicalProfileStore(stateStore.UserPaths, new PhysicalFileSystem()),
             new PhysicalSquadFileAccess(),
             pathSemantics ?? SquadFileSystemPathSemantics.Instance,
             timeProvider,
@@ -166,7 +166,7 @@ internal static class SquadHostDefaults
         SquadLifecycleService lifecycleService = CreateLifecycleService(resolvedPaths, stateStore, releaseSource);
         return new SquadInstanceService(
             lifecycleService,
-            new SquadModelPresetStore(resolvedPaths),
+            new SquadModelPresetStore(resolvedPaths, new PhysicalFileSystem()),
             ResolveLinkFileSystem(),
             ResolveGlobalRoots(),
             RealSquadServices.InstanceLinkSync(),

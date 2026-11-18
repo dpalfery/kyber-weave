@@ -589,7 +589,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Assert
         Assert.True(result.Success);
-        SquadCanonicalProfileStore snapshots = new(userPaths);
+        SquadCanonicalProfileStore snapshots = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         SquadCanonicalProfiles? snapshot = snapshots.TryRead("1.0.0");
         Assert.NotNull(snapshot);
         Assert.Equal("1.0.0", snapshot.SquadVersion);
@@ -630,7 +630,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         // Assert — the update snapshot is keyed by the new release version; the older
         // snapshot is retained (no pruning) and the newest read resolves to the update.
         Assert.True(updateResult.Success);
-        SquadCanonicalProfileStore snapshots = new(userPaths);
+        SquadCanonicalProfileStore snapshots = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         SquadCanonicalProfiles? updated = snapshots.TryRead("1.1.0");
         Assert.NotNull(updated);
         Assert.Equal("1.1.0", updated.SquadVersion);
@@ -665,7 +665,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Assert
         Assert.True(dryInstallResult.Success);
-        SquadCanonicalProfileStore snapshots = new(userPaths);
+        SquadCanonicalProfileStore snapshots = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         Assert.Null(snapshots.TryRead("1.0.0"));
         Assert.Null(snapshots.TryReadLatest());
 
@@ -728,7 +728,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             warning => warning.Contains("squad update", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(stateStore.ReadReceipt(targetRoot, SquadDeploymentScope.Project));
         Assert.NotNull(stateStore.ReadLock(targetRoot, SquadDeploymentScope.Project));
-        Assert.Null(new SquadCanonicalProfileStore(userPaths).TryRead("1.0.0"));
+        Assert.Null(new SquadCanonicalProfileStore(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem()).TryRead("1.0.0"));
     }
 
     private static async Task<string> WritePresetAsync(ISquadUserPaths userPaths, string name, string yaml)

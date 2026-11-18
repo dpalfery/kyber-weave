@@ -117,7 +117,8 @@ public sealed class SquadPresetStatusDoctorTests
             new FakeKyberWeaveConfigRepository(),
             console,
             Files,
-            new SquadCommandRoots(Files, _state.Paths, environment, console));
+            new SquadCommandRoots(Files, _state.Paths, environment, console),
+            new FakeMcpWiringService());
     }
 
     [Fact]

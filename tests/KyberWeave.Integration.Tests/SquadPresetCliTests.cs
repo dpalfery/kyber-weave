@@ -767,7 +767,7 @@ public sealed class SquadPresetCliTests : IDisposable
     public void ShowWithSnapshotPresentResolvesNewestSnapshot()
     {
         WritePreset("percat", PerCategoryPresetYaml);
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
         string? seenVersion = "unset";
         SquadPresetShowCommand command = SquadTestCommands.PresetShow(
@@ -797,7 +797,7 @@ public sealed class SquadPresetCliTests : IDisposable
     public void ShowNamesTheSnapshotVersionItResolved()
     {
         WritePreset("percat", PerCategoryPresetYaml);
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
         SquadPresetShowCommand command = SquadTestCommands.PresetShow(
             _userPaths,
@@ -867,7 +867,7 @@ public sealed class SquadPresetCliTests : IDisposable
     public void ShowWithUnknownPresetCategoryExits1WithPathAndLine()
     {
         WritePreset("bad", BadPresetYaml);
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
         SquadPresetShowCommand command = SquadTestCommands.PresetShow(_userPaths, (_, _) => snapshotStore.TryReadLatest());
 
@@ -922,7 +922,7 @@ public sealed class SquadPresetCliTests : IDisposable
         string version,
         Action<string?>? onVersion = null)
     {
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot(version));
         return (preferredVersion, _) =>
         {

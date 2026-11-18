@@ -155,6 +155,15 @@ public sealed class SquadDoctorSeamTests
         Assert.Equal(string.Empty, _streams.Output);
     }
 
+    [Fact]
+    public void Constructor_TakesTheMcpWiringServiceAsARequiredArgument()
+    {
+        System.Reflection.ParameterInfo wiring = typeof(SquadDoctorCommand).GetConstructors().Single()
+            .GetParameters().Single(parameter => parameter.ParameterType == typeof(KyberWeave.Contracts.Services.IMcpWiringService));
+
+        Assert.False(wiring.HasDefaultValue);
+    }
+
     private int Execute(SquadDoctorSettings settings, out string output)
     {
         SquadDoctorCommand command = Doctor();
@@ -202,7 +211,8 @@ public sealed class SquadDoctorSeamTests
             new FakeKyberWeaveConfigRepository(),
             console,
             _files,
-            new SquadCommandRoots(_files, new FakePathResolver(_files), environment, console));
+            new SquadCommandRoots(_files, new FakePathResolver(_files), environment, console),
+            new FakeMcpWiringService());
     }
 
     private readonly EmptyStateStore _state = new();

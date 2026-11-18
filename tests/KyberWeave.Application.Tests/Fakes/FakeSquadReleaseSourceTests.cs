@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.Squad;
@@ -10,34 +11,36 @@ namespace KyberWeave.Tests.Squad;
 /// <summary>
 /// The shared release-source fake writes the release the test configured, whether that is the minimal corpus, a
 /// directory, a pack archive or per-file content, and records every request, so no test needs a release-source
-/// double of its own.
+/// double of its own. Every case runs over the in-memory file system the fake is given.
 /// </summary>
-public sealed class FakeSquadReleaseSourceTests : IDisposable
+public sealed class FakeSquadReleaseSourceTests
 {
     private const string EmptyAssetSha256 =
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly string _work;
 
-    public void Dispose()
+    public FakeSquadReleaseSourceTests()
     {
-        _temp.Dispose();
+        _work = Path.Combine(_files.Root, "work");
+        _files.CreateDirectory(_work);
     }
 
     [Fact]
     public async Task TheUnconfiguredFakeWritesTheMinimalCorpusAndRecordsTheRequest()
     {
-        FakeSquadReleaseSource source = new();
+        FakeSquadReleaseSource source = new() { Files = _files };
         SquadReleaseRequest request = Request("minimal");
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(request);
 
         Assert.Equal(
             Utf8NoBom("schema: kyber-squad.squad/v1\nversion-source: kyber-weave-assembly\n"),
-            await File.ReadAllBytesAsync(Path.Combine(request.DestinationPath, "squad.yml")));
+            _files.ReadAllBytes(Path.Combine(request.DestinationPath, "squad.yml")));
         Assert.Equal(
             Utf8NoBom("schema: kyber-squad.toolchain/v1\nrequired-features: []\nvalidated-release: null"),
-            await File.ReadAllBytesAsync(Path.Combine(request.DestinationPath, "toolchain.yml")));
+            _files.ReadAllBytes(Path.Combine(request.DestinationPath, "toolchain.yml")));
         Assert.Equal(["squad.yml", "toolchain.yml"], result.ExtractedFiles);
         Assert.Equal("kyber-squad-1.2.3.zip", result.Asset.Name);
         Assert.Equal(
@@ -53,23 +56,23 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     [Fact]
     public async Task AConfiguredDirectoryIsCopiedByteForByteAndTheSourceIsLeftAlone()
     {
-        string sourceRoot = Path.Combine(_temp.Path, "corpus");
+        string sourceRoot = Path.Combine(_work, "corpus");
         WriteFile(sourceRoot, "squad.yml", "corpus");
         WriteFile(sourceRoot, "agents/conductor.md", "the conductor");
         WriteFile(sourceRoot, "skills/task-gate/SKILL.md", "the skill");
         Dictionary<string, byte[]> before = Snapshot(sourceRoot);
-        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromDirectory(sourceRoot);
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromDirectory(sourceRoot, _files);
         SquadReleaseRequest request = Request("copied");
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(request);
 
-        Assert.Equal("corpus", await File.ReadAllTextAsync(Path.Combine(request.DestinationPath, "squad.yml")));
+        Assert.Equal("corpus", _files.ReadAllText(Path.Combine(request.DestinationPath, "squad.yml")));
         Assert.Equal(
             "the conductor",
-            await File.ReadAllTextAsync(Path.Combine(request.DestinationPath, "agents", "conductor.md")));
+            _files.ReadAllText(Path.Combine(request.DestinationPath, "agents", "conductor.md")));
         Assert.Equal(
             "the skill",
-            await File.ReadAllTextAsync(Path.Combine(request.DestinationPath, "skills", "task-gate", "SKILL.md")));
+            _files.ReadAllText(Path.Combine(request.DestinationPath, "skills", "task-gate", "SKILL.md")));
         Assert.Equal(
             ["agents/conductor.md", "skills/task-gate/SKILL.md", "squad.yml"],
             result.ExtractedFiles);
@@ -81,6 +84,7 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     {
         FakeSquadReleaseSource source = new()
         {
+            Files = _files,
             FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["squad.yml"] = "name: kyber-squad\nschema: invalid-schema-v999\n",
@@ -93,10 +97,10 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
 
         Assert.Equal(
             Utf8NoBom("name: kyber-squad\nschema: invalid-schema-v999\n"),
-            await File.ReadAllBytesAsync(Path.Combine(request.DestinationPath, "squad.yml")));
+            _files.ReadAllBytes(Path.Combine(request.DestinationPath, "squad.yml")));
         Assert.Equal(
             Utf8NoBom("---\nname: response-format\n---\nbody"),
-            await File.ReadAllBytesAsync(
+            _files.ReadAllBytes(
                 Path.Combine(request.DestinationPath, "skills", "response-format", "SKILL.md")));
         Assert.Equal(
             ["skills/response-format/SKILL.md", "squad.yml", "toolchain.yml"],
@@ -106,12 +110,12 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     [Fact]
     public async Task ConfiguringASourceDirectoryAndAnArchiveIsRefused()
     {
-        string sourceRoot = Path.Combine(_temp.Path, "ambiguous-source");
+        string sourceRoot = Path.Combine(_work, "ambiguous-source");
         WriteFile(sourceRoot, "squad.yml", "source");
-        string archivePath = Path.Combine(_temp.Path, "ambiguous.zip");
-        await ZipFile.CreateFromDirectoryAsync(sourceRoot, archivePath);
+        string archivePath = await WriteArchiveAsync(Path.Combine(_work, "ambiguous.zip"), ("squad.yml", "source"));
         FakeSquadReleaseSource source = new()
         {
+            Files = _files,
             SourceDirectory = sourceRoot,
             ArchivePath = archivePath,
         };
@@ -125,60 +129,55 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     [Fact]
     public async Task ASymbolicLinkInTheSourceDirectoryIsRefused()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("Creating a symbolic link needs a privilege Windows test runs do not have.");
-        }
-
-        string sourceRoot = Path.Combine(_temp.Path, "linked-source");
+        string sourceRoot = Path.Combine(_work, "linked-source");
         WriteFile(sourceRoot, "squad.yml", "linked corpus");
-        File.CreateSymbolicLink(
+        _files.CreateFileLink(
             Path.Combine(sourceRoot, "linked.yml"),
             Path.Combine(sourceRoot, "squad.yml"));
-        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromDirectory(sourceRoot);
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromDirectory(sourceRoot, _files);
         SquadReleaseRequest request = Request("linked");
 
         await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
 
-        Assert.False(File.Exists(Path.Combine(request.DestinationPath, "linked.yml")));
+        Assert.False(_files.FileExists(Path.Combine(request.DestinationPath, "linked.yml")));
     }
 
     [Fact]
     public async Task AnArchiveEntryThatEscapesTheDestinationIsRefused()
     {
         string archivePath = await WriteArchiveAsync(
-            Path.Combine(_temp.Path, "escaping.zip"),
+            Path.Combine(_work, "escaping.zip"),
             ("../evil.txt", "escaped archive content"));
-        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath);
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath, _files);
         SquadReleaseRequest request = Request("escaping-archive");
 
         await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
 
-        Assert.False(File.Exists(Path.Combine(_temp.Path, "evil.txt")));
+        Assert.False(_files.FileExists(Path.Combine(_work, "evil.txt")));
     }
 
     [Fact]
     public async Task ASymbolicLinkArchiveEntryIsRefused()
     {
         string archivePath = await WriteArchiveAsync(
-            Path.Combine(_temp.Path, "linked.zip"),
+            Path.Combine(_work, "linked.zip"),
             ("linked.yml", "squad.yml", unchecked((int)(0xA000u << 16))));
-        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath);
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath, _files);
         SquadReleaseRequest request = Request("linked-archive");
 
         await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
 
-        Assert.False(File.Exists(Path.Combine(request.DestinationPath, "linked.yml")));
+        Assert.False(_files.FileExists(Path.Combine(request.DestinationPath, "linked.yml")));
     }
 
     [Fact]
     public async Task ADuplicateArchivePathIsRefused()
     {
         string archivePath = await WriteArchiveAsync(
-            Path.Combine(_temp.Path, "duplicate.zip"),
+            Path.Combine(_work, "duplicate.zip"),
             ("squad.yml", "first"),
             ("squad.yml", "second"));
-        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath);
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath, _files);
 
         await Assert.ThrowsAsync<InvalidDataException>(
             () => source.DownloadAndExtractAsync(Request("duplicate-archive")));
@@ -189,6 +188,7 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     {
         FakeSquadReleaseSource source = new()
         {
+            Files = _files,
             FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["../escaped.txt"] = "escaped content",
@@ -198,15 +198,16 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
 
         await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
 
-        Assert.False(File.Exists(Path.Combine(_temp.Path, "escaped.txt")));
+        Assert.False(_files.FileExists(Path.Combine(_work, "escaped.txt")));
     }
 
     [Fact]
     public async Task ARootedFileContentPathIsRefused()
     {
-        string rootedPath = Path.Combine(_temp.Path, "rooted.txt");
+        string rootedPath = Path.Combine(_work, "rooted.txt");
         FakeSquadReleaseSource source = new()
         {
+            Files = _files,
             FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 [rootedPath] = "rooted content",
@@ -216,7 +217,7 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
         await Assert.ThrowsAsync<InvalidDataException>(
             () => source.DownloadAndExtractAsync(Request("rooted-content")));
 
-        Assert.False(File.Exists(rootedPath));
+        Assert.False(_files.FileExists(rootedPath));
     }
 
     [Theory]
@@ -226,11 +227,11 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     [InlineData("owner/name", "01.2.3")]
     public async Task AMalformedRequestIsRefusedLikeTheRealSource(string repository, string version)
     {
-        FakeSquadReleaseSource source = new();
+        FakeSquadReleaseSource source = new() { Files = _files };
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => source.DownloadAndExtractAsync(
-                new SquadReleaseRequest(repository, version, Path.Combine(_temp.Path, "malformed"))));
+                new SquadReleaseRequest(repository, version, Path.Combine(_work, "malformed"))));
 
         Assert.Empty(source.Requests);
     }
@@ -238,7 +239,7 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     [Fact]
     public async Task AWhitespaceDestinationIsRefusedLikeTheRealSource()
     {
-        FakeSquadReleaseSource source = new();
+        FakeSquadReleaseSource source = new() { Files = _files };
 
         await Assert.ThrowsAsync<ArgumentException>(
             () => source.DownloadAndExtractAsync(new SquadReleaseRequest("owner/name", "1.2.3", "   ")));
@@ -249,7 +250,7 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     [Fact]
     public async Task APrereleaseVersionIsAccepted()
     {
-        FakeSquadReleaseSource source = new();
+        FakeSquadReleaseSource source = new() { Files = _files };
         SquadReleaseRequest request = Request("prerelease", version: "1.2.3-rc.1");
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(request);
@@ -261,15 +262,17 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     [Fact]
     public async Task TheAfterExtractHookSeesTheExtractedRootAndItsEditLands()
     {
-        string sourceRoot = Path.Combine(_temp.Path, "padded-corpus");
+        string sourceRoot = Path.Combine(_work, "padded-corpus");
         WriteFile(sourceRoot, "agents/conductor.md", "the conductor\n");
         FakeSquadReleaseSource source = new()
         {
+            Files = _files,
             SourceDirectory = sourceRoot,
-            AfterExtract = static (root, token) => File.AppendAllTextAsync(
-                Path.Combine(root, "agents", "conductor.md"),
-                "the padding\n",
-                token),
+            AfterExtract = (root, _) =>
+            {
+                _files.AppendAllText(Path.Combine(root, "agents", "conductor.md"), "the padding\n");
+                return Task.CompletedTask;
+            },
         };
         SquadReleaseRequest request = Request("padded");
 
@@ -277,30 +280,29 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
 
         Assert.Equal(
             "the conductor\nthe padding\n",
-            await File.ReadAllTextAsync(Path.Combine(request.DestinationPath, "agents", "conductor.md")));
+            _files.ReadAllText(Path.Combine(request.DestinationPath, "agents", "conductor.md")));
     }
 
     [Fact]
     public async Task FromArchiveExtractsThePackAndReportsTheArchivesOwnIdentity()
     {
-        string archiveSource = Path.Combine(_temp.Path, "archive-source");
-        WriteFile(archiveSource, "squad.yml", "packed");
-        WriteFile(archiveSource, "skills/task-gate/SKILL.md", "packed skill");
-        string archivePath = Path.Combine(_temp.Path, "kyber-squad-1.2.3.zip");
-        await ZipFile.CreateFromDirectoryAsync(archiveSource, archivePath);
-        byte[] archiveBytes = await File.ReadAllBytesAsync(archivePath);
-        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath);
+        string archivePath = await WriteArchiveAsync(
+            Path.Combine(_work, "kyber-squad-1.2.3.zip"),
+            ("squad.yml", "packed"),
+            ("skills/task-gate/SKILL.md", "packed skill"));
+        byte[] archiveBytes = _files.ReadAllBytes(archivePath);
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath, _files);
         SquadReleaseRequest request = Request("unpacked");
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(request);
 
-        Assert.Equal("packed", await File.ReadAllTextAsync(Path.Combine(request.DestinationPath, "squad.yml")));
+        Assert.Equal("packed", _files.ReadAllText(Path.Combine(request.DestinationPath, "squad.yml")));
         Assert.Equal(
             ["skills/task-gate/SKILL.md", "squad.yml"],
             result.ExtractedFiles);
         Assert.Equal("kyber-squad-1.2.3.zip", result.Asset.Name);
         Assert.Equal("https://localhost/kyber-squad-1.2.3.zip", result.Asset.DownloadUri.AbsoluteUri);
-        Assert.Equal(new FileInfo(archivePath).Length, result.Asset.Size);
+        Assert.Equal(_files.GetLength(archivePath), result.Asset.Size);
         Assert.Equal(Convert.ToHexStringLower(SHA256.HashData(archiveBytes)), result.Checksum.Sha256);
     }
 
@@ -310,6 +312,7 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
         Uri downloadUri = new("https://example.com/asset.zip");
         FakeSquadReleaseSource source = new()
         {
+            Files = _files,
             AssetName = "asset",
             DownloadUri = downloadUri,
             AssetSize = 100,
@@ -336,13 +339,13 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
 
         Assert.Same(fault, thrown);
         Assert.Same(request, Assert.Single(source.Requests));
-        Assert.False(Directory.Exists(request.DestinationPath));
+        Assert.False(_files.DirectoryExists(request.DestinationPath));
     }
 
     [Fact]
     public async Task ACancelledRequestIsRefusedBeforeItIsRecorded()
     {
-        FakeSquadReleaseSource source = new();
+        FakeSquadReleaseSource source = new() { Files = _files };
         using CancellationTokenSource cancellation = new();
         await cancellation.CancelAsync();
 
@@ -357,34 +360,37 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
         return new SquadReleaseRequest(
             "owner/kyber-squad",
             version,
-            Path.Combine(_temp.Path, name));
+            Path.Combine(_work, name));
     }
 
-    private static void WriteFile(string root, string relativePath, string content)
+    private void WriteFile(string root, string relativePath, string content)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, content);
     }
 
-    private static async Task<string> WriteArchiveAsync(
+    private async Task<string> WriteArchiveAsync(
         string archivePath,
         params (string Name, string Content, int ExternalAttributes)[] entries)
     {
-        await using FileStream stream = File.Create(archivePath);
-        using ZipArchive archive = new(stream, ZipArchiveMode.Create);
-        foreach ((string name, string content, int externalAttributes) in entries)
+        using MemoryStream stream = new();
+        using (ZipArchive archive = new(stream, ZipArchiveMode.Create, leaveOpen: true))
         {
-            ZipArchiveEntry entry = archive.CreateEntry(name);
-            entry.ExternalAttributes = externalAttributes;
-            await using Stream entryStream = await entry.OpenAsync();
-            await entryStream.WriteAsync(Utf8NoBom(content));
+            foreach ((string name, string content, int externalAttributes) in entries)
+            {
+                ZipArchiveEntry entry = archive.CreateEntry(name);
+                entry.ExternalAttributes = externalAttributes;
+                await using Stream entryStream = await entry.OpenAsync();
+                await entryStream.WriteAsync(Utf8NoBom(content));
+            }
         }
 
+        _files.WriteAllBytes(archivePath, stream.ToArray());
         return archivePath;
     }
 
-    private static async Task<string> WriteArchiveAsync(
+    private async Task<string> WriteArchiveAsync(
         string archivePath,
         params (string Name, string Content)[] entries)
     {
@@ -394,12 +400,12 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
         return await WriteArchiveAsync(archivePath, expanded);
     }
 
-    private static Dictionary<string, byte[]> Snapshot(string root)
+    private Dictionary<string, byte[]> Snapshot(string root)
     {
-        return Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+        return _files.EnumerateFiles(root, "*", recursive: true)
             .ToDictionary(
                 file => Path.GetRelativePath(root, file).Replace(Path.DirectorySeparatorChar, '/'),
-                File.ReadAllBytes,
+                _files.ReadAllBytes,
                 StringComparer.Ordinal);
     }
 

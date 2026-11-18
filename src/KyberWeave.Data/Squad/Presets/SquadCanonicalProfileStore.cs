@@ -42,15 +42,6 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
     private readonly string _profilesDirectory;
     private readonly IWritableFileSystem _files;
 
-    /// <summary>Creates a snapshot store over the given user paths and the real disk.</summary>
-    /// <param name="userPaths">The user paths provider.</param>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="userPaths"/> is null.</exception>
-    /// <exception cref="ArgumentException">Thrown when the home directory is empty.</exception>
-    public SquadCanonicalProfileStore(ISquadUserPaths userPaths)
-        : this(userPaths, new PhysicalFileSystem())
-    {
-    }
-
     /// <summary>Creates a snapshot store over the given user paths and file system.</summary>
     /// <param name="userPaths">The user paths provider.</param>
     /// <param name="files">The file system the snapshots are read from and written to.</param>

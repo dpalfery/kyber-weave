@@ -353,7 +353,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
         Directory.CreateDirectory(globalHome);
         FakeGlobalRootResolver globalRoots = new(globalHome);
         FakeSquadLinkFileSystem linkFileSystem = new();
-        SquadModelPresetStore presetStore = new(userPaths);
+        SquadModelPresetStore presetStore = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         FakeSquadReleaseSource releaseSource = new()
