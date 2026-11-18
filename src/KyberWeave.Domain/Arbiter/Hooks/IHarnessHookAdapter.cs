@@ -93,7 +93,7 @@ public enum HookScope
 /// <param name="ConfirmModelWrite">Writes an accepted model token into the harness input and reports whether
 /// the write held. The decision asks it before recording a delivered model. Null when the adapter writes later.</param>
 /// <param name="BuildDispatchPrompt">Builds the task prompt a dispatch's identity line is replaced with, or null
-/// when the host has no prompt service. The adapters call it through <see cref="DispatchPromptInsertion"/>, after
+/// when the host has no prompt service. The adapters call it through <c>DispatchPromptInsertion</c>, after
 /// the rules judged the short dispatch and alone when the Arbiter is off.</param>
 public sealed record HookContext(
     string RepoRoot,

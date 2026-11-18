@@ -151,10 +151,10 @@ clock and no task would track the fix.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
-| `KyberWeave.Application` | 64 | 208 | 4.1, 4.2, 4.3, 4.8 |
+| `KyberWeave.Application` | 68 | 208 | 4.1, 4.2, 4.3, 4.8 |
 | `KyberWeave.Cli` | 49 | 180 | 4.5 |
 | `KyberWeave.Data` | 81 | 714 | 3.2, 3.3, 3.4, 3.5, 4.4, 4.9 |
-| `KyberWeave.Domain` | 26 | 46 | 2.5 |
+| `KyberWeave.Domain` | 24 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 3 | 22 | 4.9 |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
@@ -167,7 +167,7 @@ The totals before adapters and roots are taken out are 68 classes and 212 sites 
 all of them `ProcessStartInfo` in an interface or a request record; it holds no implementation.
 `Environment.NewLine` sites are excluded from both sets of numbers.
 
-#### KyberWeave.Application (64 classes)
+#### KyberWeave.Application (68 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -180,7 +180,9 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths, identifiers | 4.3 |
+| `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
+| `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
 | `HookCommand` (`Arbiter/Hooks/HookCommand.cs`) | identifiers | 4.3 |
 | `HookGitFacts` (`Arbiter/Hooks/HookGitFacts.cs`) | clock | 4.3 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
@@ -363,7 +365,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotPromptRefresher` (`Update/CopilotPromptRefresher.cs`) | file system | 4.4 |
 | `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
 
-#### KyberWeave.Domain (26 classes)
+#### KyberWeave.Domain (24 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -372,8 +374,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterLedgerEvent` (`Arbiter/Facts/ArbiterLedgerEvent.cs`) | identifiers | 2.5 |
-| `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
-| `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
 | `ReviewConfigParser` (`Configuration/ReviewConfigParser.cs`) | paths | 2.5 |
