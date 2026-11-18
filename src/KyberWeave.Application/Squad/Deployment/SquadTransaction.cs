@@ -2580,13 +2580,8 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         using Stream stream = _files.OpenWriteNew(path);
         stream.Write(content);
-        if (!SyncToDisk)
-            return;
-
-        if (stream is FileStream disk)
-            disk.Flush(true);
-        else
-            stream.Flush();
+        if (SyncToDisk)
+            _files.FlushToStableStorage(stream);
     }
 
     private void CopyFileNoOverwrite(string sourcePath, string destinationPath) =>

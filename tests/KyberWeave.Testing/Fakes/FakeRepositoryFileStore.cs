@@ -129,6 +129,9 @@ internal sealed class FakeRepositoryFileStore(IRepositoryFileStore? inner = null
     public Stream OpenWriteNew(string path) => _inner.OpenWriteNew(path);
 
     /// <inheritdoc />
+    public void FlushToStableStorage(Stream stream) => _inner.FlushToStableStorage(stream);
+
+    /// <inheritdoc />
     public Stream OpenExclusive(string path) => _inner.OpenExclusive(path);
 
     /// <inheritdoc />

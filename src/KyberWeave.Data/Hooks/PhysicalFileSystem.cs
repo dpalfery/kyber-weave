@@ -82,6 +82,19 @@ public sealed partial class PhysicalFileSystem : IWritableFileSystem
         });
 
     /// <inheritdoc />
+    public void FlushToStableStorage(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (stream is FileStream disk)
+        {
+            disk.Flush(true);
+            return;
+        }
+
+        stream.Flush();
+    }
+
+    /// <inheritdoc />
     public Stream OpenExclusive(string path) =>
         new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 

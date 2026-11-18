@@ -160,6 +160,10 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
     public Stream OpenWriteNew(string path) => Do(nameof(OpenWriteNew), path, () => inner.OpenWriteNew(path));
 
     /// <inheritdoc />
+    public void FlushToStableStorage(Stream stream) =>
+        Do(nameof(FlushToStableStorage), "<stream>", () => inner.FlushToStableStorage(stream));
+
+    /// <inheritdoc />
     public Stream OpenGuarded(string path) => Do(nameof(OpenGuarded), path, () => inner.OpenGuarded(path));
 
     /// <inheritdoc />

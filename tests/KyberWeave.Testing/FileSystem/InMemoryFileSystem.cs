@@ -425,6 +425,13 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public void FlushToStableStorage(Stream stream)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        stream.Flush();
+    }
+
+    /// <inheritdoc />
     public Stream OpenExclusive(string path)
     {
         Enter(nameof(OpenExclusive), path);
