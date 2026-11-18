@@ -4,6 +4,7 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class CursorHookAdapterTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public string? SeenPreTarget;
@@ -121,9 +124,7 @@ public sealed class CursorHookAdapterTests
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static string Fixture(string name) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "cursor", name));
+        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/cursor/{name}");
 
     private static (int Exit, string Stdout, string Log) Run(
         string stdin,

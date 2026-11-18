@@ -11,6 +11,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -22,6 +23,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterFix1ContractTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
 
     public void Dispose() => _fixture.Dispose();
@@ -102,15 +105,11 @@ public sealed class ArbiterFix1ContractTests : IDisposable
     [Fact]
     public void Fix3_CoreHasNoHandWrittenUnsafe()
     {
-        string[] roots =
-        [
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Core"),
-            Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Data"),
-        ];
+        string[] roots = ["src/KyberWeave.Core", "src/KyberWeave.Data"];
         List<string> offenders = [];
-        foreach (string file in roots.SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)))
+        foreach (string file in roots.SelectMany(root => Corpus.EnumerateFiles(root, "*.cs")))
         {
-            foreach (string line in StripCommentsAndStrings(File.ReadAllText(file)).Split('\n'))
+            foreach (string line in StripCommentsAndStrings(Corpus.ReadText(file)).Split('\n'))
             {
                 if (System.Text.RegularExpressions.Regex.IsMatch(line, @"\bunsafe\b"))
                 {

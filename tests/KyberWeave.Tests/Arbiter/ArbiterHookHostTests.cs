@@ -4,6 +4,7 @@ using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -19,6 +20,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterHookHostTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public HookOutcome PreResult { get; set; } = new(HookOutcomeKind.Allow);
@@ -55,9 +58,7 @@ public sealed class ArbiterHookHostTests
         new() { Arbiter = new ArbiterConfig { Enabled = false } };
 
     private static string Fixture(string name) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "claude", name));
+        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/{name}");
 
     private static HookCommand CreateCommand(
         ScriptedEngine engine,

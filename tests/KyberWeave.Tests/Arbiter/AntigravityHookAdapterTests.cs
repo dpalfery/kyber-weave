@@ -5,6 +5,7 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -24,6 +25,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class AntigravityHookAdapterTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public List<(string? Target, string Prompt)> SeenPre { get; } = [];
@@ -113,9 +116,7 @@ public sealed class AntigravityHookAdapterTests
         new() { Arbiter = new ArbiterConfig { Enabled = false } };
 
     private static string Fixture(string name) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "antigravity", name));
+        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/antigravity/{name}");
 
     private static (int Exit, string Stdout, string Log) Run(
         string stdin,

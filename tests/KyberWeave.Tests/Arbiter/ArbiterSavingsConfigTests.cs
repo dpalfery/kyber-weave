@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -14,6 +15,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterSavingsConfigTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string[] SixProfiles =
     [
         "architect",
@@ -199,7 +202,7 @@ public sealed class ArbiterSavingsConfigTests
     [Fact]
     public void ThisRepositoryHostConfig_LoadsWithProviderKindNone()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(KyberWeaveTestPaths.ToolRoot);
+        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Corpus.Root);
 
         Assert.Equal(ArbiterProviderKind.None, config.Arbiter.Provider.Kind);
     }

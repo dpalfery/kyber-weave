@@ -1,4 +1,5 @@
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -14,6 +15,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterSavingsRoleContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The Squad prose file and one identifier it must carry.</summary>
     public static IEnumerable<object[]> RoleProseMustNameTheSurface() =>
     [
@@ -53,14 +56,10 @@ public sealed class ArbiterSavingsRoleContractTests
     [MemberData(nameof(RoleProseMustNameTheSurface))]
     public void TheRoleProseNamesTheArbiterSurface(string relativePath, string identifier)
     {
-        string path = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "products",
-            "kyber-squad",
-            relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string path = $"products/kyber-squad/{relativePath}";
 
-        Assert.True(File.Exists(path), $"The Squad prose file '{relativePath}' must exist at '{path}'.");
-        string prose = File.ReadAllText(path);
+        Assert.True(Corpus.Exists(path), $"The Squad prose file '{relativePath}' must exist at '{path}'.");
+        string prose = Corpus.ReadText(path);
         Assert.True(
             prose.Contains(identifier, StringComparison.Ordinal),
             $"'{relativePath}' must name '{identifier}' so the role uses the Arbiter surface it depends on.");

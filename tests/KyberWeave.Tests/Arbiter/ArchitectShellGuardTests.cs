@@ -2,6 +2,7 @@ using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -18,10 +19,12 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArchitectShellGuardTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string Worktree = "/w";
 
     private static readonly Lazy<IReadOnlyList<string>> PlanningDirectories = new(() =>
-        ReadGuard.ProtectedDirectories(KyberWeaveConfigLoader.Load(KyberWeaveTestPaths.ToolRoot)));
+        ReadGuard.ProtectedDirectories(KyberWeaveConfigLoader.Load(Corpus.Root)));
 
     private const string RuleId = ArchitectShellGuard.RuleId;
 

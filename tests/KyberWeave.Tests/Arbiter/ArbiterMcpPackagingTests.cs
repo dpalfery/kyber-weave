@@ -13,6 +13,7 @@ using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Validation;
 using ModelContextProtocol.Server;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -26,6 +27,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterMcpPackagingTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private sealed class RecordingEngine : IContextualHookDecisionEngine
     {
         public HookOutcome Outcome { get; set; } = new(HookOutcomeKind.Allow);
@@ -503,11 +506,9 @@ public sealed class ArbiterMcpPackagingTests
     [Fact]
     public void McpSourcesNeverWriteToStdout()
     {
-        string directory = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", "KyberWeave.Arbiter", "Mcp");
-
-        foreach (string file in Directory.GetFiles(directory, "*.cs"))
+        foreach (string file in Corpus.EnumerateFiles("src/KyberWeave.Arbiter/Mcp", "*.cs", recursive: false))
         {
-            string source = File.ReadAllText(file);
+            string source = Corpus.ReadText(file);
             Assert.DoesNotContain("Console.Write", source, StringComparison.Ordinal);
             Assert.DoesNotContain("Console.Out", source, StringComparison.Ordinal);
         }
@@ -534,8 +535,7 @@ public sealed class ArbiterMcpPackagingTests
     }
 
     private static XDocument LoadProject(string projectName) =>
-        XDocument.Load(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "src", projectName, $"{projectName}.csproj"));
+        XDocument.Parse(Corpus.ReadText($"src/{projectName}/{projectName}.csproj"));
 
     private static string? PackageVersion(XDocument doc, string name)
     {

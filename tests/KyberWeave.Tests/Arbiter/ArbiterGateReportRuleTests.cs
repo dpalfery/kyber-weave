@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -29,13 +30,15 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterGateReportRuleTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string GateReportRule = "KW-ARB-GATE-REPORT-001";
 
     private static readonly string[] RoleRulesPaths =
     [
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "conductor", "conductor.arbiter-rules.yml"),
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "architect", "architect.arbiter-rules.yml"),
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", "reviewer", "reviewer.arbiter-rules.yml")
+        "products/kyber-squad/standards/conductor/conductor.arbiter-rules.yml",
+        "products/kyber-squad/standards/architect/architect.arbiter-rules.yml",
+        "products/kyber-squad/standards/reviewer/reviewer.arbiter-rules.yml"
     ];
 
     /// <summary>
@@ -508,11 +511,11 @@ public sealed class ArbiterGateReportRuleTests
     [Fact]
     public void TheShippedFileCountsTheNewRuleAndRenumbersNone()
     {
-        Assert.All(RoleRulesPaths, path => Assert.True(File.Exists(path), $"the role rules file must live at '{path}'."));
+        Assert.All(RoleRulesPaths, path => Assert.True(Corpus.Exists(path), $"the role rules file must live at '{path}'."));
         string[] ids =
         [
             .. RoleRulesPaths
-                .SelectMany(File.ReadAllLines)
+                .SelectMany(Lines)
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())
@@ -542,5 +545,16 @@ public sealed class ArbiterGateReportRuleTests
             int.TryParse(declared, out int count),
             $"The first line of the shipped rules file must state its count as a number. Read: '{declared}'.");
         return count;
+    }
+
+    /// <summary>The file's lines, as <see cref="File.ReadAllLines(string)"/> would return them.</summary>
+    /// <param name="path">The corpus-relative path of the file.</param>
+    /// <returns>One entry per line, without its terminator.</returns>
+    private static string[] Lines(string path)
+    {
+        string text = Corpus.ReadText(path);
+        string[] lines = text.Split('\n');
+        int count = text.EndsWith('\n') ? lines.Length - 1 : lines.Length;
+        return [.. lines[..count].Select(line => line.TrimEnd('\r'))];
     }
 }

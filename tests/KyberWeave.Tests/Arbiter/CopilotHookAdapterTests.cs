@@ -4,6 +4,7 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class CopilotHookAdapterTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public int PreCalls;
@@ -73,14 +76,10 @@ public sealed class CopilotHookAdapterTests
         };
 
     private static string VsCodeFixture(string name) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "copilot-vscode", name));
+        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/copilot-vscode/{name}");
 
     private static string CliFixture(string name) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "copilot-cli", name));
+        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/copilot-cli/{name}");
 
     private static (int Exit, string Stdout, string Log) Run(
         string harness,

@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -15,17 +16,18 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArchitectShellGuardSyncTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string Worktree = "/w";
     private const string CommandSetMarker = "Your shell is limited to this command set:";
     private const string CommandSetEnd = "before you edit it.";
 
-    private static readonly string ArchitectFile = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents", "architect.md");
+    private const string ArchitectFile = "products/kyber-squad/agents/architect.md";
 
     private static readonly Regex BacktickSpan = new("`([^`]+)`", RegexOptions.CultureInvariant);
 
     private static readonly Lazy<IReadOnlyList<string>> PlanningDirectories = new(() =>
-        ReadGuard.ProtectedDirectories(KyberWeaveConfigLoader.Load(KyberWeaveTestPaths.ToolRoot)));
+        ReadGuard.ProtectedDirectories(KyberWeaveConfigLoader.Load(Corpus.Root)));
 
     public static IEnumerable<object[]> DocumentedKeys() =>
         ArchitectShellGuard.DocumentedForms.Keys.Select(key => new object[] { key });
@@ -33,7 +35,7 @@ public sealed class ArchitectShellGuardSyncTests
     [Fact]
     public void CommandSetClause_InTheArchitectFile_ListsExactlyTheDocumentedForms()
     {
-        string text = File.ReadAllText(ArchitectFile);
+        string text = Corpus.ReadText(ArchitectFile);
         int markerStart = text.IndexOf(CommandSetMarker, StringComparison.Ordinal);
         Assert.True(markerStart >= 0, $"'{ArchitectFile}' has no '{CommandSetMarker}' clause.");
 

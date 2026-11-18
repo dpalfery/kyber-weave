@@ -1,6 +1,7 @@
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -13,6 +14,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterSquadCatalogTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [Fact]
     public void EmbeddedCatalog_HasEveryCanonicalAgent()
     {
@@ -95,7 +98,7 @@ public sealed class ArbiterSquadCatalogTests
     [Fact]
     public void Catalog_EqualsTheCanonicalTree()
     {
-        string squadRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string squadRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         var source = SquadSourceLoader.Load(squadRoot);
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
 
