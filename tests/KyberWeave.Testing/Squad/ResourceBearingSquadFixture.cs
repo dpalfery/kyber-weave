@@ -53,7 +53,7 @@ internal sealed class ResourceBearingSquadFixture : IDisposable
     internal CanonicalSquadTree Tree =>
         _tree ?? throw new InvalidOperationException("This fixture was built on disk; build it with inMemory: true.");
 
-    internal static ResourceBearingSquadFixture Create(bool inMemory = false)
+    internal static ResourceBearingSquadFixture Create(bool inMemory = true)
     {
         ResourceBearingSquadFixture fixture = new(inMemory);
 
@@ -72,7 +72,7 @@ internal sealed class ResourceBearingSquadFixture : IDisposable
     /// An agent whose closure holds only non-markdown resources: the discovery guard is a
     /// no-op for it, so its projection is byte-identical to the native layout.
     /// </summary>
-    internal static ResourceBearingSquadFixture CreateWithTextOnlyAgentResources(bool inMemory = false)
+    internal static ResourceBearingSquadFixture CreateWithTextOnlyAgentResources(bool inMemory = true)
     {
         ResourceBearingSquadFixture fixture = new(inMemory);
 
@@ -87,7 +87,7 @@ internal sealed class ResourceBearingSquadFixture : IDisposable
     /// but no authored link in the body points at it, so the guard's degradation must not claim
     /// a link was rewritten.
     /// </summary>
-    internal static ResourceBearingSquadFixture CreateWithUnlinkedMarkdownResource(bool inMemory = false)
+    internal static ResourceBearingSquadFixture CreateWithUnlinkedMarkdownResource(bool inMemory = true)
     {
         ResourceBearingSquadFixture fixture = new(inMemory);
 

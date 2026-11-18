@@ -1,3 +1,5 @@
+using KyberWeave.Tests.FileSystem;
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using System.Text.RegularExpressions;
@@ -24,19 +26,12 @@ namespace KyberWeave.Tests;
 /// model resolution from <c>models.yml</c>, TOML structure and instruction encoding,
 /// and structured degradation accounting (<c>permission-not-expressible</c> with matching <c>InstructionDigest</c>).
 /// </remarks>
-public sealed class CodexRendererContractTests : IDisposable
+public sealed class CodexRendererContractTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
+    private readonly InMemoryFileSystem _files = new();
 
     /// <summary>
     ///     Codex's own decisions on the real corpus: every agent is a TOML agent file whose model
@@ -49,8 +44,8 @@ public sealed class CodexRendererContractTests : IDisposable
     public async Task RenderAsync_Codex_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await SquadTestRegistry.Create([new CodexRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Codex], SquadDeploymentScope.Project).Prepared());
+        SquadRenderResult result = await CanonicalSquadTree.Shared.Registry([new CodexRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Codex], SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadAgent agent in source.Agents)
@@ -111,7 +106,7 @@ public sealed class CodexRendererContractTests : IDisposable
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Codex],
-            SquadDeploymentScope.Global).Prepared();
+            SquadDeploymentScope.Global).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await new CodexRenderer().RenderAsync(request);
 
@@ -172,7 +167,7 @@ public sealed class CodexRendererContractTests : IDisposable
         SquadRenderResult result = await new CodexRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Codex],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
 
         SquadDeploymentFile rendered = Assert.Single(
             result.Files,
@@ -202,12 +197,12 @@ public sealed class CodexRendererContractTests : IDisposable
             "\"\"\"quoted block\"\"\"\n" +
             "trailing slash \\\n";
 
-        string sourceRoot = WriteMinimalSquadSource(_temp.Path, fixtureBody);
+        string sourceRoot = WriteMinimalSquadSource(Path.Combine(_files.Root, "squad"), fixtureBody);
 
         SquadRenderResult result = await new CodexRenderer().RenderAsync(new SquadRenderRequest(
             sourceRoot,
             [SquadTarget.Codex],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(_files));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadDeploymentFile agentFile = Assert.Single(
@@ -362,7 +357,7 @@ public sealed class CodexRendererContractTests : IDisposable
         return builder.ToString();
     }
 
-    private static string WriteMinimalSquadSource(string root, string agentBody)
+    private string WriteMinimalSquadSource(string root, string agentBody)
     {
         Write(root, "squad.yml", """
                                  schema: kyber-squad.squad/v1
@@ -494,10 +489,10 @@ public sealed class CodexRendererContractTests : IDisposable
                                          }
                                          """;
 
-    private static void Write(string root, string relativePath, string content)
+    private void Write(string root, string relativePath, string content)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content, new UTF8Encoding(false));
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, content);
     }
 }

@@ -1,3 +1,4 @@
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
@@ -26,10 +27,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class KiloRendererContractTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
     public void Dispose()
@@ -49,8 +48,8 @@ public sealed class KiloRendererContractTests : IDisposable
     public async Task RenderAsync_Kilo_RendersTheRealCanonicalCorpus()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await SquadTestRegistry.Create([new KiloRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Kilo], SquadDeploymentScope.Project).Prepared());
+        SquadRenderResult result = await CanonicalSquadTree.Shared.Registry([new KiloRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Kilo], SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadAgent agent in source.Agents)
@@ -105,13 +104,13 @@ public sealed class KiloRendererContractTests : IDisposable
         fixture.WriteAgentResource("references/x.markdown", "X markdown alias.\n");
         fixture.AppendAgentLink("[X md](bug-crusher-investigator/references/x.md)");
         fixture.AppendAgentLink("[X markdown](bug-crusher-investigator/references/x.markdown)");
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new KiloRenderer()]);
+        SquadRendererRegistry registry = fixture.Tree.Registry([new KiloRenderer()]);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
             registry.RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Kilo],
-                SquadDeploymentScope.Project).Prepared()));
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
 
         Assert.Contains(ResourceBearingSquadFixture.AgentName, exception.Message, StringComparison.Ordinal);
         Assert.Contains("references/x.md", exception.Message, StringComparison.Ordinal);
@@ -126,11 +125,11 @@ public sealed class KiloRendererContractTests : IDisposable
     public async Task RenderAsync_Kilo_TextOnlyAgentResourcesProjectVerbatim()
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithTextOnlyAgentResources();
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new KiloRenderer()]);
+        SquadRendererRegistry registry = fixture.Tree.Registry([new KiloRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(fixture.Tree);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -154,7 +153,7 @@ public sealed class KiloRendererContractTests : IDisposable
             body,
             StringComparison.Ordinal);
 
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        SquadSource source = fixture.Tree.Load();
         SquadAgent agent = Assert.Single(
             source.Agents,
             a => string.Equals(a.Name, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
@@ -188,7 +187,7 @@ public sealed class KiloRendererContractTests : IDisposable
         SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(fixture.Tree);
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
@@ -212,12 +211,12 @@ public sealed class KiloRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Kilo_ResolvesConcreteModelsAndSuppressesInheritedModels()
     {
-        using KiloModelResolutionSquadFixture fixture = KiloModelResolutionSquadFixture.Create();
+        KiloModelResolutionSquadFixture fixture = KiloModelResolutionSquadFixture.Create();
         KiloRenderer renderer = new();
-        SquadRenderRequest request = new SquadRenderRequest(
+        SquadRenderRequest request = fixture.Services.RenderInputReader().Prepare(new SquadRenderRequest(
             fixture.Path,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project));
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
@@ -367,7 +366,7 @@ public sealed class KiloRendererContractTests : IDisposable
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Kilo],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         Task<SquadRenderResult>[] tasks = Enumerable.Range(0, 10)
             .Select(_ => Task.Run(() => renderer.RenderAsync(request)))
@@ -411,7 +410,7 @@ public sealed class KiloRendererContractTests : IDisposable
     ///     explicit non-inherit model, explicit inherit override, fallback to non-inherit default,
     ///     and fallback to inherit default.
     /// </summary>
-    private sealed class KiloModelResolutionSquadFixture : IDisposable
+    private sealed class KiloModelResolutionSquadFixture
     {
         internal const string ExplicitModelAgent = "explicit-model-agent";
         internal const string InheritModelAgent = "inherit-model-agent";
@@ -421,18 +420,11 @@ public sealed class KiloRendererContractTests : IDisposable
         internal const string ExplicitKiloModel = "kilo-custom-v1";
         internal const string FallbackDefaultModel = "default-custom-v2";
 
-        private readonly TempDirectory _tempDirectory = new();
+        internal InMemoryFileSystem Files { get; } = new();
 
-        private KiloModelResolutionSquadFixture()
-        {
-        }
+        internal string Path => System.IO.Path.Combine(Files.Root, "kilo-model-resolution");
 
-        internal string Path => _tempDirectory.Path;
-
-        public void Dispose()
-        {
-            _tempDirectory.Dispose();
-        }
+        internal InMemorySquadServices Services => new(Files);
 
         internal static KiloModelResolutionSquadFixture Create()
         {
@@ -565,9 +557,9 @@ public sealed class KiloRendererContractTests : IDisposable
             string fullPath =
                 System.IO.Path.Combine(Path, relativePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
             string? directory = System.IO.Path.GetDirectoryName(fullPath);
-            if (directory is not null) Directory.CreateDirectory(directory);
+            if (directory is not null) Files.CreateDirectory(directory);
 
-            File.WriteAllText(fullPath, content, new UTF8Encoding(false));
+            Files.WriteAllText(fullPath, content);
         }
     }
 }

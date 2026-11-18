@@ -1,3 +1,4 @@
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
@@ -28,10 +29,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class OpenCodeRendererContractTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     /// <summary>
     /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent
@@ -132,11 +131,11 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new OpenCodeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -526,13 +525,13 @@ public sealed class OpenCodeRendererContractTests : IDisposable
         fixture.WriteAgentResource("references/x.markdown", "X markdown alias.\n");
         fixture.AppendAgentLink("[X md](bug-crusher-investigator/references/x.md)");
         fixture.AppendAgentLink("[X markdown](bug-crusher-investigator/references/x.markdown)");
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = fixture.Tree.Registry([new OpenCodeRenderer()]);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
             registry.RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.OpenCode],
-                SquadDeploymentScope.Project).Prepared()));
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
 
         Assert.Contains(ResourceBearingSquadFixture.AgentName, exception.Message, StringComparison.Ordinal);
         Assert.Contains("references/x.md", exception.Message, StringComparison.Ordinal);
@@ -547,11 +546,11 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     public async Task RenderAsync_OpenCode_TextOnlyAgentResourcesProjectVerbatim()
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithTextOnlyAgentResources();
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = fixture.Tree.Registry([new OpenCodeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(fixture.Tree);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -574,7 +573,7 @@ public sealed class OpenCodeRendererContractTests : IDisposable
             body,
             StringComparison.Ordinal);
 
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        SquadSource source = fixture.Tree.Load();
         SquadAgent agent = Assert.Single(
             source.Agents,
             a => string.Equals(a.Name, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
@@ -603,11 +602,11 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     public async Task RenderAsync_OpenCode_UnlinkedMarkdownResourceReportsRenameWithoutLinkRewrite()
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        SquadRendererRegistry registry = fixture.Tree.Registry([new OpenCodeRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             fixture.ProductRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(fixture.Tree);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
@@ -633,22 +632,26 @@ public sealed class OpenCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_NativeSingleProjectionRule_SharedIdentityEmitsAgentAndSuppressesSkill()
     {
-        using SharedIdentitySquadFixture fixture = SharedIdentitySquadFixture.Create();
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new OpenCodeRenderer()]);
+        InMemoryFileSystem files = new();
+        string sourceRoot = Path.Combine(files.Root, "shared-identity-squad");
+        InMemorySquadSourceTree.Write(files, sourceRoot);
+        SquadRendererRegistry registry = new(
+            [new OpenCodeRenderer()],
+            new InMemorySquadServices(files).RenderInputReader());
         SquadRenderRequest request = new SquadRenderRequest(
-            fixture.Path,
+            sourceRoot,
             [SquadTarget.OpenCode],
-            SquadDeploymentScope.Project).Prepared();
+            SquadDeploymentScope.Project).Prepared(files);
 
         SquadRenderResult result = await registry.RenderAsync(request);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.Contains(
             result.Files,
-            file => file.RelativePath == $".opencode/agents/{SharedIdentitySquadFixture.Identity}.md");
+            file => file.RelativePath == $".opencode/agents/{InMemorySquadSourceTree.Identity}.md");
         Assert.DoesNotContain(
             result.Files,
-            file => file.RelativePath == $".opencode/skills/{SharedIdentitySquadFixture.Identity}/SKILL.md");
+            file => file.RelativePath == $".opencode/skills/{InMemorySquadSourceTree.Identity}/SKILL.md");
     }
 
     /// <summary>

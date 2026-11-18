@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
@@ -38,10 +39,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class DevinRendererContractTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     private static readonly (string Capability, string[] Tools)[] CapabilityToolContract =
     [
@@ -106,7 +105,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_RendersTheRealCanonicalCorpus()
     {
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.All(result.Files, f => Assert.True(
             f.RelativePath.StartsWith(".devin/agents/", StringComparison.Ordinal) ||
@@ -138,7 +137,7 @@ public sealed class DevinRendererContractTests : IDisposable
     public async Task RenderAsync_Devin_EachSubagentHasCanonicalFrontmatterAndBody()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         Assert.NotEmpty(SquadMcpGrantProjection.DeclaredServers(source));
@@ -185,7 +184,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [InlineData("architect")]
     public async Task RenderAsync_Devin_AuthoringRolesReceiveExecutionTools(string agentName)
     {
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile file = Assert.Single(
@@ -238,7 +237,7 @@ public sealed class DevinRendererContractTests : IDisposable
             r => r.RelativePath == "references/spec-authoring.md");
         Assert.Contains(initialiseInstruction, specAuthoring.Content, StringComparison.Ordinal);
 
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile architectFile = Assert.Single(
@@ -274,7 +273,7 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_AgentsDirectoryHoldsOnlyAgentDirectories()
     {
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadDeploymentFile file in result.Files.Where(f =>
@@ -300,7 +299,7 @@ public sealed class DevinRendererContractTests : IDisposable
     public async Task RenderAsync_Devin_LowersThePrimaryAgentToASkill()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent conductor = Assert.Single(source.Agents, a => a.Name == "conductor");
@@ -343,7 +342,7 @@ public sealed class DevinRendererContractTests : IDisposable
             .Select(a => a.Name)
             .ToHashSet(StringComparer.Ordinal);
 
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         IReadOnlyList<SquadDeploymentFile> skills = result.Files
@@ -368,7 +367,7 @@ public sealed class DevinRendererContractTests : IDisposable
     public async Task RenderAsync_Devin_RecordsDegradationsPerContract()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         Assert.All(result.Degradations, d => Assert.Equal("devin", d.Target));
@@ -426,7 +425,7 @@ public sealed class DevinRendererContractTests : IDisposable
     public async Task RenderAsync_Devin_RecordsCapabilityNotIsolableForShellImpliesWrite()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadAgent[] shellWithoutWrite = source.Agents
@@ -458,9 +457,9 @@ public sealed class DevinRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Devin_ResolvesModelOverridesPerHarness()
     {
-        using DevinModelOverrideFixture fixture = DevinModelOverrideFixture.Create();
+        DevinModelOverrideFixture fixture = DevinModelOverrideFixture.Create();
 
-        SquadRenderResult result = await RenderDevinAsync(fixture.ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(fixture.Tree);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile overridden = Assert.Single(
@@ -508,7 +507,7 @@ public sealed class DevinRendererContractTests : IDisposable
             .ToArray();
         Assert.NotEmpty(agents);
 
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         foreach (SquadAgent agent in agents)
@@ -530,7 +529,7 @@ public sealed class DevinRendererContractTests : IDisposable
         SquadAgent conductor = Assert.Single(source.Agents, a => a.Name == "conductor");
         Assert.True(string.IsNullOrEmpty(conductor.ModelProfile));
 
-        SquadRenderResult result = await RenderDevinAsync(ProductRoot);
+        SquadRenderResult result = await RenderDevinAsync(CanonicalSquadTree.Shared);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile skillFile = Assert.Single(
@@ -548,28 +547,28 @@ public sealed class DevinRendererContractTests : IDisposable
         SquadSource baseline = TestSquadCorpus.CanonicalSource;
         SquadAgent primary = Assert.Single(baseline.Agents, a => a.Name == "conductor");
 
-        using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primary.Name);
+        PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primary.Name);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
             new DevinRenderer().RenderAsync(new SquadRenderRequest(
                 fixture.ProductRoot,
                 [SquadTarget.Devin],
-                SquadDeploymentScope.Project).Prepared()));
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
         Assert.Contains(primary.Name, exception.Message, StringComparison.Ordinal);
     }
 
-    private static async Task<SquadRenderResult> RenderDevinAsync(string sourceDirectory)
+    private static async Task<SquadRenderResult> RenderDevinAsync(CanonicalSquadTree tree)
     {
-        if (string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal))
+        if (ReferenceEquals(tree, CanonicalSquadTree.Shared))
         {
             return await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Devin);
         }
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new DevinRenderer()]);
+        SquadRendererRegistry registry = tree.Registry([new DevinRenderer()]);
         return await registry.RenderAsync(new SquadRenderRequest(
-            sourceDirectory,
+            tree.ProductRoot,
             [SquadTarget.Devin],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project).Prepared(tree));
     }
 
     private static IReadOnlyList<string> ComputeExpectedBuiltInTools(SquadCapabilityProfile profile)
@@ -667,7 +666,7 @@ public sealed class DevinRendererContractTests : IDisposable
 /// <c>devin:</c> value to a different model and another's to an explicit <c>inherit</c>, so
 /// both branches of model resolution are observable without hand-authoring a minimal corpus.
 /// </summary>
-internal sealed class DevinModelOverrideFixture : IDisposable
+internal sealed class DevinModelOverrideFixture
 {
     internal const string OverriddenProfile = "general";
     internal const string OverriddenAgentName = "dev-medium";
@@ -675,34 +674,23 @@ internal sealed class DevinModelOverrideFixture : IDisposable
     internal const string InheritProfile = "fast";
     internal const string InheritAgentName = "dev-easy";
 
-    private readonly TempDirectory _temp = new();
 
-    private DevinModelOverrideFixture()
-    {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
-    }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
 
     internal static DevinModelOverrideFixture Create()
     {
         DevinModelOverrideFixture fixture = new();
-        PiCorpusFixtureHelpers.CopyDirectory(
-            Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad"),
-            fixture.ProductRoot);
 
         string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
-        string original = File.ReadAllText(modelsPath).Replace("\r\n", "\n", StringComparison.Ordinal);
+        string original = fixture.Tree.Files.ReadAllText(modelsPath).Replace("\r\n", "\n", StringComparison.Ordinal);
         string mutated = SetHarnessValue(original, OverriddenProfile, OverrideModel);
         mutated = SetHarnessValue(mutated, InheritProfile, "inherit");
 
-        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(false));
+        fixture.Tree.Files.WriteAllText(modelsPath, mutated);
         return fixture;
-    }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
     }
 
     /// <summary>

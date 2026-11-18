@@ -154,3 +154,14 @@ public static class CanonicalSquadTreeExtensions
     public static SquadRenderRequest Prepared(this SquadRenderRequest request, CanonicalSquadTree tree) =>
         tree.Prepare(request);
 }
+
+/// <summary>Reads a render request's inputs from an in-memory file system holding a Squad source.</summary>
+public static class InMemoryRenderRequestExtensions
+{
+    /// <summary>Reads the render's inputs onto the request from the file system.</summary>
+    /// <param name="request">The request to prepare.</param>
+    /// <param name="files">The file system holding the Squad source.</param>
+    /// <returns>The prepared request.</returns>
+    public static SquadRenderRequest Prepared(this SquadRenderRequest request, InMemoryFileSystem files) =>
+        new InMemorySquadServices(files).RenderInputReader().Prepare(request);
+}

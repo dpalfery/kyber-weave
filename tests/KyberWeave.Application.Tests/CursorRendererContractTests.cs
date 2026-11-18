@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
@@ -24,10 +25,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class CursorRendererContractTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
 
     /// <summary>
     /// Mirrors CursorRenderer's governed capability set so the degradation oracle applies
@@ -70,8 +69,8 @@ public sealed class CursorRendererContractTests
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
         HashSet<string> sharedIdentities = SharedIdentities(source);
-        SquadRenderResult result = await SquadTestRegistry.Create([new CursorRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Cursor], SquadDeploymentScope.Project).Prepared());
+        SquadRenderResult result = await CanonicalSquadTree.Shared.Registry([new CursorRenderer()]).RenderAsync(
+            new SquadRenderRequest(ProductRoot, [SquadTarget.Cursor], SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
@@ -134,11 +133,11 @@ public sealed class CursorRendererContractTests
     public async Task RenderAsync_Cursor_LowersThePrimaryAgentToASkillOnly()
     {
         SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new CursorRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -227,11 +226,11 @@ public sealed class CursorRendererContractTests
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new CursorRenderer()]);
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Global).Prepared();
+            Scope: SquadDeploymentScope.Global).Prepared(CanonicalSquadTree.Shared);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -267,19 +266,19 @@ public sealed class CursorRendererContractTests
         SquadSource source = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new CursorRenderer()]);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new CursorRenderer()]);
         SquadRenderRequest skillRequest = new SquadRenderRequest(
             SourceDirectory: ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
         SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
         Assert.True(skillResult.Success, string.Join("; ", skillResult.Errors));
 
-        using ClaudeNoPrimaryAgentFixture omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit");
+        ClaudeNoPrimaryAgentFixture omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit");
         SquadRenderRequest omitRequest = new SquadRenderRequest(
             SourceDirectory: omitFixture.ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(omitFixture.Tree);
         SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
         Assert.True(omitResult.Success, string.Join("; ", omitResult.Errors));
 
@@ -326,13 +325,13 @@ public sealed class CursorRendererContractTests
         SquadSource baselineSource = TestSquadCorpus.CanonicalSource;
         SquadAgent primaryAgent = Assert.Single(baselineSource.Agents, agent => agent.Name == "conductor");
 
-        using PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
+        PiPrimaryIdentityCollisionFixture fixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
 
         CursorRenderer renderer = new();
         SquadRenderRequest request = new SquadRenderRequest(
             SourceDirectory: fixture.ProductRoot,
             Targets: [SquadTarget.Cursor],
-            Scope: SquadDeploymentScope.Project).Prepared();
+            Scope: SquadDeploymentScope.Project).Prepared(fixture.Tree);
 
         SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(
             () => renderer.RenderAsync(request));
