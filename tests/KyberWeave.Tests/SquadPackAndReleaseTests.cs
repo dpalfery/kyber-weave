@@ -553,8 +553,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         string[] projectFilePaths =
         [
             "src/KyberWeave.Cli/KyberWeave.Cli.csproj",
-            "src/KyberWeave.Core/KyberWeave.Core.csproj",
-            "src/KyberWeave.Core.Squad/KyberWeave.Core.Squad.csproj",
             "src/KyberWeave.Mcp/KyberWeave.Mcp.csproj",
             "src/KyberWeave.Domain/KyberWeave.Domain.csproj",
             .. LayerPropsFiles("KyberWeave.Domain")

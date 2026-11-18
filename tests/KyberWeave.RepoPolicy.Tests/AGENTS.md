@@ -8,7 +8,7 @@ scans such as the spawn-site audit and the root instruction pointers. Read
 
 - A test belongs here when it reads a repository file as its subject. A test that calls product
   code to check its behaviour belongs in `KyberWeave.Tests`, even if it reads a fixture.
-- The project references `KyberWeave.Core` only, for `ProcessRunner`. Needing another product
+- The project references `KyberWeave.Kernel` only, for `ProcessRunner`. Needing another product
   assembly means the test is a behaviour test.
 - Classes keep the `KyberWeave.Tests` namespace, so a fully-qualified class name means the same
   test in either project. `KyberWeaveTestPaths`, `TempDirectory` and `TestTempRoot` come from the
