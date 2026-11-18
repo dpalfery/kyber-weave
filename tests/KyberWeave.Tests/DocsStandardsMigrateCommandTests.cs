@@ -343,8 +343,126 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
-    /// A standards folder kept as a symbolic link out of the repository is refused: a migration
-    /// writes stubs beside the host's standard and must not put them outside the tree it was given.
+    /// Writing the temporary is this tool's own I/O, not another actor's file appearing, so a
+    /// failure there is reported and never answered with a skip. The temporary's name adds a dot, a
+    /// GUID and <c>.tmp</c>, so a target name near the platform's limit makes the temporary's name
+    /// too long while the target's own name is fine.
+    /// </summary>
+    [Fact]
+    public void ATemporaryWriteFailureIsReportedRatherThanTreatedAsARace()
+    {
+        using TempDirectory repo = new();
+        string scope = new('a', 220);
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", scope);
+        Directory.CreateDirectory(folder);
+        string target = $"{scope}.rules.md";
+
+        Assert.ThrowsAny<IOException>(() => new StandardsFolderMigration(repo.Path, Declared).Apply(
+            [
+                new StandardsFolderChange(
+                    StandardsFolderChangeKind.Add, string.Empty, $"6-Docs/standards/{scope}/{target}")
+            ],
+            scope,
+            null,
+            null));
+
+        Assert.False(File.Exists(Path.Combine(folder, target)));
+    }
+
+    /// <summary>
+    /// A target that already holds a file makes the change a no-op before anything is written, so
+    /// the outcome does not depend on what a write attempt would have done: no temporary is created,
+    /// and a directory the process may not write to is never touched. That is also what keeps the
+    /// move's own failure readable: with the target absent beforehand, a failure while a file exists
+    /// afterwards means the file appeared in between, not that an I/O error was masked as a race.
+    /// </summary>
+    [Fact]
+    public void AnAddWhoseTargetAlreadyExistsIsSkippedBeforeAnyWrite()
+    {
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string rules = Path.Combine(folder, "csharp.rules.md");
+        File.WriteAllText(rules, "theirs");
+        UnixFileMode folderMode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        if (!TrySetMode(folder, UnixFileMode.UserRead | UnixFileMode.UserExecute))
+            Assert.Skip("A read-only directory needs a POSIX mode, so this case cannot be arranged here.");
+
+        List<StandardsFolderChange> applied;
+        try
+        {
+            applied = new StandardsFolderMigration(repo.Path, Declared).Apply(
+                [new StandardsFolderChange(StandardsFolderChangeKind.Add, string.Empty, "6-Docs/standards/csharp/csharp.rules.md")],
+                "csharp",
+                null,
+                null);
+        }
+        finally
+        {
+            TrySetMode(folder, folderMode);
+        }
+
+        Assert.Empty(applied);
+        Assert.Equal("theirs", File.ReadAllText(rules));
+    }
+
+    /// <summary>
+    /// A symbolic link sitting where the migration writes is refused, not replaced by a regular
+    /// file. The migration refuses links everywhere else, and a reshape that quietly turned a
+    /// host's link into a plain file would leave the host's own copy behind, no longer the file
+    /// the corpus reads.
+    /// </summary>
+    [Fact]
+    public void AStandardKeptInsideTheRepositoryAsASymbolicLinkIsRefusedNotReplaced()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
+
+        using TempDirectory repo = new();
+        string shared = Path.Combine(repo.Path, "6-Docs", "shared", "csharp-standard.md");
+        Directory.CreateDirectory(Path.GetDirectoryName(shared)!);
+        File.WriteAllText(shared, LegacyCsharpWithOwnHeadings);
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        File.CreateSymbolicLink(StandardPath(repo.Path, "csharp"), shared);
+
+        IOException error = Assert.Throws<IOException>(() =>
+            new StandardsFolderMigration(repo.Path, Declared).Run());
+
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.NotNull(new FileInfo(StandardPath(repo.Path, "csharp")).LinkTarget);
+        Assert.Equal(LegacyCsharpWithOwnHeadings, File.ReadAllText(shared));
+    }
+
+    /// <summary>
+    /// The rename is one move, not a copy followed by a delete: the prefixed standard keeps the
+    /// file it was — its bytes, its mode and its identity — and there is no moment at which both
+    /// names hold the standard. A copy would leave the source behind until the delete succeeds, and
+    /// a crash between the two leaves two standards for one scope with nothing left to report it.
+    /// </summary>
+    [Fact]
+    public void TheRenameMovesTheStandardRatherThanCopyingIt()
+    {
+        if (OperatingSystem.IsWindows())
+            Assert.Skip("Comparing a file's mode needs a POSIX mode, so this case cannot be arranged here.");
+
+        using TempDirectory repo = new();
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
+        Directory.CreateDirectory(folder);
+        string legacy = Path.Combine(folder, "README.md");
+        File.WriteAllText(legacy, LegacyCsharp);
+        UnixFileMode hostMode = UnixFileMode.UserRead | UnixFileMode.UserWrite;
+        if (!TrySetMode(legacy, hostMode))
+            Assert.Skip("Comparing a file's mode needs a POSIX mode, so this case cannot be arranged here.");
+
+        new StandardsFolderMigration(repo.Path, Declared).Run();
+
+        Assert.Equal(hostMode, ModeOf(StandardPath(repo.Path, "csharp")));
+    }
+
+    /// <summary>
+    /// A standards folder kept as a symbolic link is refused: a migration writes stubs beside the
+    /// host's standard and must not put them at the end of a link.
     /// </summary>
     [Fact]
     public void AFolderThatIsASymlinkOutsideTheRepositoryIsRefused()
@@ -361,7 +479,7 @@ public class DocsStandardsMigrateCommandTests
         IOException error = Assert.Throws<IOException>(() =>
             new StandardsFolderMigration(repo.Path, Declared).Run());
 
-        Assert.Contains("outside the repository root", error.Message, StringComparison.Ordinal);
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
     }
 
@@ -453,6 +571,20 @@ public class DocsStandardsMigrateCommandTests
             RestoreReadable(standard);
         }
     }
+
+    /// <summary>Sets a file's POSIX mode, answering false on a platform that has none.</summary>
+    private static bool TrySetMode(string path, UnixFileMode mode)
+    {
+        if (OperatingSystem.IsWindows())
+            return false;
+
+        File.SetUnixFileMode(path, mode);
+        return true;
+    }
+
+    /// <summary>Reads a file's POSIX mode, or null on a platform that has none.</summary>
+    private static UnixFileMode? ModeOf(string path) =>
+        OperatingSystem.IsWindows() ? null : File.GetUnixFileMode(path);
 
     /// <summary>Clears a file's read bits, answering false on a platform that has none.</summary>
     private static bool TryMakeUnreadable(string path)

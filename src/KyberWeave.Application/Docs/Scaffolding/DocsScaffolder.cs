@@ -108,19 +108,28 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             .Ontology.WithDocsRoot(resolvedDocsRoot);
 
         // The two choices add to each other rather than replace each other: an operator may ask
-        // for every shipped technology and one role folder in the same run.
+        // for every shipped technology and one role folder in the same run. Only the technology
+        // folders this run was asked for are remembered: naming one folder is not a request to
+        // restyle a technology the host already declared, and that folder keeps the stub it would
+        // have been given without either flag. A delivery platform ships a template and is stored
+        // as a technology, so "every folder except a role" is the set --kyber-standards names.
+        HashSet<string> templatedTechnologies = new(StringComparer.Ordinal);
         if (kyberStandards)
         {
             IReadOnlyList<string> mergedTechnologies = ontology.Technologies
                 .Union(KyberStandardsTemplates.All, StringComparer.Ordinal)
                 .ToList();
             ontology = ontology.Clone(technologies: mergedTechnologies);
+            templatedTechnologies.UnionWith(KyberStandardsTemplates.AllFolders.Where(
+                name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
         }
 
         bool writesShippedTemplates = kyberStandards;
         if (standards is { Count: > 0 })
         {
             ontology = WithChosenStandards(ontology, standards);
+            templatedTechnologies.UnionWith(standards.Where(
+                name => !KyberStandardsTemplates.Roles.Contains(name, StringComparer.Ordinal)));
             writesShippedTemplates = true;
         }
 
@@ -169,7 +178,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 }
 
                 string content =
-                    writesShippedTemplates
+                    templatedTechnologies.Contains(technology)
                     && KyberStandardsTemplates.TryRenderPart(
                         technology, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
@@ -442,8 +451,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         string absolute = Path.GetFullPath(
             Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 
-        string boundary = repoRoot.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        if (!IsWithinRepositoryBoundary(absolute, boundary, OperatingSystem.IsWindows()))
+        string boundary = RepositoryBoundary.For(repoRoot, Path.DirectorySeparatorChar);
+        if (!RepositoryBoundary.IsWithin(absolute, boundary, OperatingSystem.IsWindows()))
         {
             throw new ArgumentException(
                 $"Refusing to write outside the repository root: '{relativePath}' resolves to '{absolute}'.",
@@ -452,15 +461,6 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
         return absolute;
     }
-
-    /// <summary>
-    /// Applies the path-comparison semantics of the target platform to a normalized path
-    /// and repository boundary. Kept separate so Windows behavior is testable on every CI host.
-    /// </summary>
-    internal static bool IsWithinRepositoryBoundary(string absolutePath, string boundary, bool isWindows) =>
-        absolutePath.StartsWith(
-            boundary,
-            isWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
     /// <summary>
     /// Creates the host config when the repository has none — with the <c>mcp:</c> declaration

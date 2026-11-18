@@ -171,6 +171,22 @@ public class DocsStandardsDiffCommandTests : IDisposable
         File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
+    /// <summary>
+    /// The frontmatter block is the file's first line and the delimiter that closes it. A file
+    /// whose first line is not a delimiter has no frontmatter at all, so a <c>---</c> further down
+    /// is a rule or an example in the body: reading it as an opening delimiter would drop the
+    /// lines under it from the comparison, hiding an edit to one of them.
+    /// </summary>
+    [Fact]
+    public void ABodyDelimiterCannotOpenAFrontmatterBlockInAFileThatHasNone()
+    {
+        const string host = "# C# standard\n\nSome prose.\n\n---\n\nstatus: reviewed in the body\n";
+
+        string normalized = StandardsTemplateDiff.Normalize(host);
+
+        Assert.Contains("status: reviewed in the body", normalized, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void ANameThatIsNotDeclaredIsRefusedWithTheNearestMatch()
     {

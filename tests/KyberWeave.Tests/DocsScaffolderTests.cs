@@ -618,7 +618,9 @@ public sealed class DocsScaffolderTests : IDisposable
 
     /// <summary>
     /// Windows resolves paths case-insensitively while Unix does not. Exercise both modes
-    /// directly so the regression remains covered on the project's Unix CI runners.
+    /// directly so the regression remains covered on the project's Unix CI runners. A root that is
+    /// itself a filesystem root keeps its own separator as the boundary, so the check still means
+    /// "inside this repository" rather than "starts with nothing".
     /// </summary>
     [Fact]
     public void ContainmentComparisonUsesTargetPlatformCasingRules()
@@ -626,10 +628,18 @@ public sealed class DocsScaffolderTests : IDisposable
         const string boundary = @"C:\work\repo\";
         const string differentlyCasedChild = @"c:\WORK\REPO\docs\catalog.md";
 
-        Assert.True(DocsScaffolder.IsWithinRepositoryBoundary(
+        Assert.Equal(boundary, RepositoryBoundary.For(@"C:\work\repo", '\\'));
+        Assert.True(RepositoryBoundary.IsWithin(
             differentlyCasedChild, boundary, isWindows: true));
-        Assert.False(DocsScaffolder.IsWithinRepositoryBoundary(
+        Assert.False(RepositoryBoundary.IsWithin(
             differentlyCasedChild, boundary, isWindows: false));
+
+        Assert.Equal(@"C:\", RepositoryBoundary.For(@"C:\", '\\'));
+        Assert.True(RepositoryBoundary.IsWithin(@"C:\docs\catalog.md", @"C:\", isWindows: true));
+        Assert.False(RepositoryBoundary.IsWithin(@"D:\docs\catalog.md", @"C:\", isWindows: true));
+
+        Assert.Equal("/", RepositoryBoundary.For("/", '/'));
+        Assert.True(RepositoryBoundary.IsWithin("/docs/catalog.md", "/", isWindows: false));
     }
 
     /// <summary>
