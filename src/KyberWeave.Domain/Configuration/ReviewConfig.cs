@@ -206,19 +206,6 @@ public sealed class ReviewPolicy
     /// <summary>The lowest severity a fix round takes (<c>review.policy.fix-level</c>).</summary>
     public ReviewFixLevel FixLevel { get; init; } = ReviewFixLevel.Minor;
 
-    /// <summary>Whether a fix round takes <paramref name="finding"/>: its severity is at or above <see cref="FixLevel"/>.</summary>
-    public bool FixRoundTakes(ReviewFinding finding)
-    {
-        ArgumentNullException.ThrowIfNull(finding);
-        return finding.Severity >= FixLevel switch
-        {
-            ReviewFixLevel.Critical => ReviewSeverity.Critical,
-            ReviewFixLevel.Major => ReviewSeverity.Major,
-            ReviewFixLevel.Minor => ReviewSeverity.Minor,
-            _ => ReviewSeverity.Nitpick
-        };
-    }
-
     /// <summary>The level's name as the configuration spells it.</summary>
     public string FixLevelName => FixLevel switch
     {
