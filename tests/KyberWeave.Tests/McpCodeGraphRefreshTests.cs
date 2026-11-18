@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Doctor;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -229,11 +230,11 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
     [Fact]
     public void NonSharingViolationIOException_IsNotTreatedAsBusyLock()
     {
-        Assert.False(CodeGraphIndexRules.IsSharingViolation(new PathTooLongException("path too long")));
-        Assert.False(CodeGraphIndexRules.IsSharingViolation(new IOException("disk sector error", unchecked((int)0x80070017))));
+        Assert.False(FileCodeGraphIndexWorkspace.IsSharingViolation(new PathTooLongException("path too long")));
+        Assert.False(FileCodeGraphIndexWorkspace.IsSharingViolation(new IOException("disk sector error", unchecked((int)0x80070017))));
 
-        Assert.True(CodeGraphIndexRules.IsSharingViolation(new IOException("sharing violation", unchecked((int)0x80070020))));
-        Assert.True(CodeGraphIndexRules.IsSharingViolation(new IOException("The process cannot access the file because it is being used by another process.")));
+        Assert.True(FileCodeGraphIndexWorkspace.IsSharingViolation(new IOException("sharing violation", unchecked((int)0x80070020))));
+        Assert.True(FileCodeGraphIndexWorkspace.IsSharingViolation(new IOException("The process cannot access the file because it is being used by another process.")));
     }
 
     /// <summary>

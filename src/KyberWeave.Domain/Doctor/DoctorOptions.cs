@@ -18,7 +18,20 @@ public sealed record DoctorOptions(
     ///     The pauses before each further <c>codegraph sync</c> when one finds CodeGraph's own index lock held. A
     ///     test replaces them so it does not wait in real time.
     /// </summary>
-    public IReadOnlyList<TimeSpan> HeldLockRetryPauses { get; init; } = CodeGraphIndexRules.HeldLockRetryPauses;
+    public IReadOnlyList<TimeSpan> HeldLockRetryPauses { get; init; } = DefaultHeldLockRetryPauses;
+
+    /// <summary>
+    ///     The pauses before the second and third <c>codegraph sync</c> when the first finds CodeGraph's own index
+    ///     lock held.
+    /// </summary>
+    /// <remarks>
+    ///     Measured against CodeGraph 1.6.2: a sync that finds the lock held returns in about 0.15 seconds, and a
+    ///     sync with nothing to do holds the lock for about 0.3 seconds. Three attempts one second apart in total
+    ///     outlast that and the short syncs a file watcher runs, and cost the caller at most about 1.5 seconds. A
+    ///     longer hold is an index rebuild, which no wait an interactive call can afford would outlast.
+    /// </remarks>
+    public static IReadOnlyList<TimeSpan> DefaultHeldLockRetryPauses { get; } =
+        [TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(700)];
 
     /// <summary>The default bound on one CodeGraph index run, in seconds. Run-start and review commands reuse it.</summary>
     public const int DefaultIndexTimeoutSeconds = 600;

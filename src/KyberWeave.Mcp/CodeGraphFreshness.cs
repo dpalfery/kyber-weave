@@ -41,7 +41,7 @@ namespace KyberWeave.Mcp;
 /// <para>
 /// A sync can still lose the race and find the lock taken after the look. That is contention on a
 /// healthy index, so it gets a few short retries
-/// (<see cref="CodeGraphIndexRules.HeldLockRetryPauses"/>), each after its own look, then a note,
+/// (<see cref="DoctorOptions.DefaultHeldLockRetryPauses"/>), each after its own look, then a note,
 /// never a failure. Every other sync failure still fails the tool.
 /// </para>
 /// <para>
