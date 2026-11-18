@@ -1,5 +1,6 @@
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -14,8 +15,12 @@ public sealed class FileTextFactsOverSeamsTests
     private const string Root = "/repo";
 
     private readonly InMemoryFileSystem _files = new();
+    private readonly FakePathResolver _paths;
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/kw/work");
 
-    private FileTextFacts Facts() => new(new InMemoryRepositoryFileStore(_files));
+    public FileTextFactsOverSeamsTests() => _paths = new FakePathResolver(_files);
+
+    private FileTextFacts Facts() => new(new InMemoryRepositoryFileStore(_files), _paths, _environment);
 
     private void Write(string relative, string content)
     {
@@ -36,6 +41,17 @@ public sealed class FileTextFactsOverSeamsTests
         Assert.StartsWith("line 40\n", excerpt.Text, StringComparison.Ordinal);
         Assert.EndsWith("line 60", excerpt.Text, StringComparison.Ordinal);
         Assert.False(excerpt.Truncated);
+    }
+
+    [Fact]
+    public void ARelativeRepositoryRootResolvesAgainstTheInjectedCurrentDirectory()
+    {
+        _files.CreateDirectory("/kw/work/repo/src");
+        _files.WriteAllText("/kw/work/repo/src/Widget.cs", "one\ntwo\nthree");
+
+        FileExcerpt excerpt = Assert.IsType<FileExcerpt>(Facts().ReadExcerpt("repo", "src/Widget.cs", 2));
+
+        Assert.Equal("one\ntwo\nthree", excerpt.Text);
     }
 
     [Fact]

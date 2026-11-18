@@ -1,5 +1,6 @@
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -17,10 +18,16 @@ public sealed class GateReportFactsOverSeamsTests
 
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 13, 10, 0, 0, TimeSpan.Zero));
     private readonly InMemoryFileSystem _files;
+    private readonly FakePathResolver _paths;
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/kw/work");
 
-    public GateReportFactsOverSeamsTests() => _files = new InMemoryFileSystem(_clock);
+    public GateReportFactsOverSeamsTests()
+    {
+        _files = new InMemoryFileSystem(_clock);
+        _paths = new FakePathResolver(_files);
+    }
 
-    private GateReportFacts Facts() => new(new InMemoryRepositoryFileStore(_files));
+    private GateReportFacts Facts() => new(new InMemoryRepositoryFileStore(_files), _paths, _environment);
 
     private static GateReport Passing() => new(
         GateReport.CurrentSchema,
@@ -41,6 +48,14 @@ public sealed class GateReportFactsOverSeamsTests
         _files.CreateDirectory(Path.GetDirectoryName(path)!);
         _files.WriteAllText(path, ReviewJson.Write(report));
         return path;
+    }
+
+    [Fact]
+    public void ARelativeRepositoryRootResolvesAgainstTheInjectedCurrentDirectory()
+    {
+        _ = Write("/kw/work/repo/artifacts/task-gate.json", Passing());
+
+        Assert.True(Facts().Agrees(Claim("artifacts/task-gate.json"), "repo"));
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
 using KyberWeave.Core.Arbiter.Sections;
@@ -10,7 +11,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// repository root is never read. Every read goes through the repository file-store seam.
 /// </summary>
 /// <param name="store">The repository checkout the excerpts are read from.</param>
-public sealed class FileTextFacts(IRepositoryFileStore store) : IFileTextFacts
+/// <param name="paths">Turns the root, the cited path and a contained file into full paths.</param>
+/// <param name="environment">Names the directory a relative root is resolved against.</param>
+public sealed class FileTextFacts(
+    IRepositoryFileStore store,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IFileTextFacts
 {
     /// <summary>The most characters one excerpt carries.</summary>
     public const int MaxExcerptCharacters = 4000;
@@ -144,10 +150,8 @@ public sealed class FileTextFacts(IRepositoryFileStore store) : IFileTextFacts
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        string root = Path.GetFullPath(repoRoot);
-        string candidate = Path.IsPathRooted(path)
-            ? Path.GetFullPath(path)
-            : Path.GetFullPath(Path.Combine(root, path));
+        string root = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
+        string candidate = paths.GetFullPath(path, root);
         string relative = Path.GetRelativePath(root, candidate);
         if (Path.IsPathRooted(relative)
             || string.Equals(relative, "..", StringComparison.Ordinal)
@@ -174,7 +178,7 @@ public sealed class FileTextFacts(IRepositoryFileStore store) : IFileTextFacts
             return null;
         }
 
-        string root = Path.GetFullPath(repoRoot);
+        string root = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         string relative = Path.GetRelativePath(root, full);
         return store.IsContainedFile(root, relative, []) ? full : null;
     }
