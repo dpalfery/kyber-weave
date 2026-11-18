@@ -5,6 +5,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console.Testing;
 using Xunit;
@@ -455,12 +456,46 @@ public sealed class TaskPromptServiceTests
         Assert.Equal(before, Snapshot(fixture));
     }
 
-    private static Dictionary<string, (long Length, DateTime Written)> Snapshot(DocFixture fixture) =>
-        fixture.Memory!.EnumerateFiles(fixture.Root, "*", recursive: true)
-            .ToDictionary(
-                file => Path.GetRelativePath(fixture.Root, file).Replace('\\', '/'),
-                file => (fixture.Memory.GetLength(file), fixture.Memory.GetLastWriteTimeUtc(file)),
-                StringComparer.Ordinal);
+    /// <summary>
+    /// The no-write contract covers the folders a recursive file-system enumerate hides by default: a prompt build that
+    /// spilled a lock under <c>.git</c> or an artifact under <c>bin</c> must still fail
+    /// <see cref="BuildingAPromptWritesNoFile" />.
+    /// </summary>
+    [Theory]
+    [InlineData(".git")]
+    [InlineData("bin")]
+    [InlineData("obj")]
+    public void TheNoWriteSnapshotSeesFilesUnderFoldersARecursiveEnumerateHides(string folder)
+    {
+        using DocFixture fixture = Ready();
+        Dictionary<string, (long Length, DateTime Written)> before = Snapshot(fixture);
+        fixture.Write($"{folder}/spilled.txt", "a file the build must not write");
+
+        Assert.NotEqual(before, Snapshot(fixture));
+    }
+
+    private static Dictionary<string, (long Length, DateTime Written)> Snapshot(DocFixture fixture)
+    {
+        InMemoryFileSystem files = fixture.Memory!;
+        Dictionary<string, (long Length, DateTime Written)> seen = new(StringComparer.Ordinal);
+        Stack<string> pending = new([fixture.Root]);
+        while (pending.Count > 0)
+        {
+            string directory = pending.Pop();
+            foreach (string file in files.EnumerateFiles(directory, "*", recursive: false))
+            {
+                seen[Path.GetRelativePath(fixture.Root, file).Replace('\\', '/')] =
+                    (files.GetLength(file), files.GetLastWriteTimeUtc(file));
+            }
+
+            foreach (string child in files.EnumerateDirectories(directory))
+            {
+                pending.Push(child);
+            }
+        }
+
+        return seen;
+    }
 
     private static string Between(string prompt, string tag)
     {
