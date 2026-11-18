@@ -3,6 +3,8 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -125,8 +127,9 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     public void ProviderNone_BuildsNoPicker_AndMakesNoCall()
     {
         using TempDirectory home = new();
+        ConfiguredArbiterProviderFactory providers = new(new FakeArbiterUserSettings());
 
-        Assert.Null(ConfiguredProvider.TryCreate(KyberWeaveConfig.ProductDefaults, home.Path));
+        Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home.Path));
     }
 
     private PlanTaskFile Write(IPlanTaskAgentPicker? picker)
