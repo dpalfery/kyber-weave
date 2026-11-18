@@ -1,34 +1,14 @@
-# KyberWeave.Core
+# KyberWeave.Application
 
-**This directory holds no source files.** The project stays, but do not delete it and do not add
-code here.
+The engine: the logic that parses, validates, searches, renders and deploys. It sits above
+`Contracts`, `Domain`, `Data` and `Kernel`; `LayerReferenceTests` pins the layering.
 
-Every class that used to live here moved when the engine was split into layers:
-
-| It was | It now lives in |
-|---|---|
-| logic — a parser, renderer, validator, resolver, planner or service | [`../KyberWeave.Application`](../KyberWeave.Application) |
-| data — a record, value object, enum, options bag or constants | [`../KyberWeave.Domain`](../KyberWeave.Domain) |
-| an interface | [`../KyberWeave.Contracts`](../KyberWeave.Contracts) |
-| an adapter over a resource — file system, process, git, HTTP | [`../KyberWeave.Data`](../KyberWeave.Data) |
-
-A static locator that fronted one of those was deleted rather than moved: its callers take the
-`Contracts` interface and the container registers the `Application` implementation.
-
-## Why the empty project is still here
-
-`LayerReferenceTests` pins what `KyberWeave.Core` may reference — only `KyberWeave.Contracts`,
-`KyberWeave.Domain` and `KyberWeave.Kernel` — and `CoreAssemblySplitTests` pins the hosts' and the
-feature assemblies' reference sets against it. Removing the project would delete the layer those
-tests describe.
-
-That reference set is also why new code does not go here: `KyberWeave.Core` cannot reach
-`KyberWeave.Application` or `KyberWeave.Data`, so logic written here could not use the engine.
+Dependencies: a new package needs a justification you can state. Every dependency the engine takes
+is one every host repository takes with it.
 
 ## The engine does not construct its own collaborators
 
-This constraint used to be stated in this file for `KyberWeave.Core`; it now applies to
-`KyberWeave.Application`. A class defines or takes **ports** — a `Contracts` interface, or a seam
+A class defines or takes **ports** — a `Contracts` interface, or a seam
 such as `IFileSystem`, `IProcessRunner` or `TimeProvider` — as constructor arguments.
 **Composition roots** decide which implementation is used: the CLI's `*CommandComposition` types,
 `Program.cs` in the MCP server, and `ServiceCollectionExtensions` in `Application` itself.

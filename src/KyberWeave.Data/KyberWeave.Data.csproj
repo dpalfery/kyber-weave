@@ -21,10 +21,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.Core" />
     <InternalsVisibleTo Include="KyberWeave.Application" />
     <!-- The provider's transport constructor is driven directly by the embedding client tests. -->
     <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Data.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
   </ItemGroup>

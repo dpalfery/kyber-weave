@@ -27,7 +27,6 @@ The helpers both this project and `tests/KyberWeave.Integration.Tests` use live 
 
 ## Internals are in scope
 
-`InternalsVisibleTo` exposes the internals of `KyberWeave.Core`, `KyberWeave.Core.Docs` and
-`KyberWeave.Core.Squad` here, so helpers like link normalization, vocabulary parsing, and
+`InternalsVisibleTo` exposes the internals of the product projects here, so helpers like link normalization, vocabulary parsing, and
 docs-root detection are tested directly. Marking a helper `internal` is not a reason to test
 it only through a command.

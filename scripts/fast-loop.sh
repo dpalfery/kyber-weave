@@ -84,11 +84,16 @@ TEST_DLL="tests/KyberWeave.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Tests.d
 INTEGRATION_TEST_DLL="tests/KyberWeave.Integration.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Integration.Tests.dll"
 POLICY_TEST_DLL="tests/KyberWeave.RepoPolicy.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.RepoPolicy.Tests.dll"
 PROMPT_TEST_DLL="tests/KyberWeave.PromptContent.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.PromptContent.Tests.dll"
-# The layer projects (Domain, Application, Hooks, Architecture): pure or fake-backed, so they run whole
+# The unit projects (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data, Architecture): pure or fake-backed, so they run whole
 # on every .NET loop, whatever --class / --method names a legacy project.
 LAYER_TEST_DLLS=(
   "tests/KyberWeave.Application.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Application.Tests.dll"
   "tests/KyberWeave.Hooks.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Hooks.Tests.dll"
+  "tests/KyberWeave.Kernel.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Kernel.Tests.dll"
+  "tests/KyberWeave.Mcp.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Mcp.Tests.dll"
+  "tests/KyberWeave.Arbiter.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Arbiter.Tests.dll"
+  "tests/KyberWeave.Cli.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Cli.Tests.dll"
+  "tests/KyberWeave.Data.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Data.Tests.dll"
   "tests/KyberWeave.Architecture.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Architecture.Tests.dll"
 )
 CLASS_LIST="scripts/fast-loop-classes.txt"
@@ -311,7 +316,7 @@ else
           # A C#-only edit to product code or product tests runs only the policy source scans:
           # the rest of the policy tests read scripts, workflows, project files and docs.
           case "$file" in
-            src/*.cs | tests/KyberWeave.Tests/*.cs | tests/KyberWeave.Integration.Tests/*.cs | tests/KyberWeave.Testing/*.cs) ;;
+            src/*.cs | tests/KyberWeave.Tests/*.cs | tests/KyberWeave.Integration.Tests/*.cs | tests/KyberWeave.Testing/*.cs | tests/KyberWeave.Kernel.Tests/*.cs | tests/KyberWeave.Mcp.Tests/*.cs | tests/KyberWeave.Arbiter.Tests/*.cs | tests/KyberWeave.Cli.Tests/*.cs | tests/KyberWeave.Data.Tests/*.cs) ;;
             *) needs_policy=1 ;;
           esac
           ;;
@@ -436,8 +441,8 @@ if [[ "${needs_dotnet}" -eq 1 ]]; then
       policy_status=1
     fi
   fi
-  step "layer tests (Domain, Application, Hooks, Architecture)"
-  # The four projects are independent and small, so they run at the same time. Each is its own background
+  step "unit tests (Application, Hooks, Kernel, Mcp, Arbiter, Cli, Data, Architecture)"
+  # The projects are independent and small, so they run at the same time. Each is its own background
   # process and its status comes back through `wait <pid>`: a variable set inside a backgrounded command
   # never reaches this shell, which is how a failing project would otherwise read as a pass.
   layers_status=0
