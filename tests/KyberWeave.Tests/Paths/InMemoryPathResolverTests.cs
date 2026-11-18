@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Paths;
 using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fakes;
 using Xunit;
@@ -43,5 +44,21 @@ public sealed class FakePathResolverBehaviourTests
 
         Assert.True(insensitive.AreSame(root, root.ToUpperInvariant()));
         Assert.False(sensitive.AreSame(rootCopy, rootCopy.ToUpperInvariant()));
+    }
+
+    [Fact]
+    public void AListingScopeNeverAnswersOneFileSystemFromAnother()
+    {
+        InMemoryFileSystem first = new(caseSensitive: false);
+        InMemoryFileSystem second = new(caseSensitive: false);
+        first.CreateDirectory("/scope/One");
+        second.CreateDirectory("/scope/Two");
+        FakePathResolver one = new(first);
+        FakePathResolver two = new(second);
+
+        using IDisposable scope = FileSystemPathResolver.BeginListingScope();
+
+        Assert.Equal("/scope/One", one.Canonicalize("/scope/one"));
+        Assert.Equal("/scope/Two", two.Canonicalize("/scope/two"));
     }
 }

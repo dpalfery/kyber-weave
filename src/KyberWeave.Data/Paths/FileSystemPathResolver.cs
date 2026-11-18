@@ -22,10 +22,12 @@ namespace KyberWeave.Data.Paths;
 public class FileSystemPathResolver : IPathResolver
 {
     /// <summary>
-    ///     The parent listings one operation may reuse. Null outside a scope, so the ordinary answer is always read
-    ///     from the file system.
+    ///     The parent listings one operation may reuse, keyed by the file system that answered them so two resolvers
+    ///     in the same flow never trade entries. Null outside a scope, so the ordinary answer is always read from the
+    ///     file system.
     /// </summary>
-    private static readonly AsyncLocal<Dictionary<string, FileSystemEntry[]>?> ScopedListings = new();
+    private static readonly AsyncLocal<Dictionary<IFileSystem, Dictionary<string, FileSystemEntry[]>>?>
+        ScopedListings = new();
 
     private readonly IFileSystem _files;
     private readonly StringComparison _nameComparison;
@@ -44,14 +46,15 @@ public class FileSystemPathResolver : IPathResolver
 
     /// <summary>
     ///     Reuses the listings a preflight reads while it inspects a tree it does not change. Scoped to the caller:
-    ///     the cache dies with the returned scope, so no answer outlives the operation that read it. A caller must
-    ///     not mutate the tree while the scope is open.
+    ///     the cache dies with the returned scope, so no answer outlives the operation that read it, and each file
+    ///     system keeps its own entries. A caller must not mutate the tree while the scope is open.
     /// </summary>
     /// <returns>The scope that restores the previous listing cache when it is disposed.</returns>
     internal static IDisposable BeginListingScope()
     {
-        Dictionary<string, FileSystemEntry[]>? prior = ScopedListings.Value;
-        ScopedListings.Value = new Dictionary<string, FileSystemEntry[]>(StringComparer.Ordinal);
+        Dictionary<IFileSystem, Dictionary<string, FileSystemEntry[]>>? prior = ScopedListings.Value;
+        ScopedListings.Value = new Dictionary<IFileSystem, Dictionary<string, FileSystemEntry[]>>(
+            ReferenceEqualityComparer.Instance);
         return new ListingScope(prior);
     }
 
@@ -164,10 +167,16 @@ public class FileSystemPathResolver : IPathResolver
             return null;
         }
 
-        Dictionary<string, FileSystemEntry[]>? scope = ScopedListings.Value;
-        if (scope is not null)
+        Dictionary<IFileSystem, Dictionary<string, FileSystemEntry[]>>? scoped = ScopedListings.Value;
+        if (scoped is not null)
         {
-            return ResolveFromEntries(parentPath, ListingsFor(scope, parentPath), segment);
+            if (!scoped.TryGetValue(_files, out Dictionary<string, FileSystemEntry[]>? listings))
+            {
+                listings = new Dictionary<string, FileSystemEntry[]>(StringComparer.Ordinal);
+                scoped[_files] = listings;
+            }
+
+            return ResolveFromEntries(parentPath, ListingsFor(listings, parentPath), segment);
         }
 
         // Outside a scope the walk stops as soon as the exact spelling is found, so a directory with thousands of
@@ -303,7 +312,8 @@ public class FileSystemPathResolver : IPathResolver
         return Path.TrimEndingDirectorySeparator(Path.GetFullPath(path)).Normalize(NormalizationForm.FormC);
     }
 
-    private sealed class ListingScope(Dictionary<string, FileSystemEntry[]>? prior) : IDisposable
+    private sealed class ListingScope(
+        Dictionary<IFileSystem, Dictionary<string, FileSystemEntry[]>>? prior) : IDisposable
     {
         public void Dispose() => ScopedListings.Value = prior;
     }
