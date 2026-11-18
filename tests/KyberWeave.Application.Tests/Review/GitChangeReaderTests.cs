@@ -85,6 +85,104 @@ public sealed class GitChangeReaderTests
     }
 
     [Fact]
+    public void ResolveSinceKeepsADeletedPathBecauseTheCallerComparesAgainstAKnownCommit()
+    {
+        _ = _git
+            .Script(
+                "git",
+                new ProcessRunResult(0, "src/gone.cs\0src/kept.cs\0", false),
+                "diff",
+                "-z",
+                "--name-only",
+                "--relative",
+                "abc123",
+                "--")
+            .Script(
+                "git",
+                new ProcessRunResult(0, "src/untracked.cs\0", false),
+                "ls-files",
+                "-z",
+                "--others",
+                "--exclude-standard",
+                "--");
+
+        Assert.Equal(["src/gone.cs", "src/kept.cs", "src/untracked.cs"], Reader().ResolveSince(Root, "abc123"));
+    }
+
+    [Fact]
+    public void HeadAndMergeBaseCommitsAreTheTrimmedCommitNames()
+    {
+        _ = _git
+            .Script("git", new ProcessRunResult(0, "abc123\n", false), "rev-parse", "--verify", "HEAD")
+            .Script("git", new ProcessRunResult(0, "def456\n", false), "merge-base", "main", "HEAD");
+
+        Assert.Equal("abc123", Reader().HeadCommit(Root));
+        Assert.Equal("def456", Reader().MergeBaseCommit(Root, "main"));
+    }
+
+    [Fact]
+    public void DiffSinceAsksForTheDiffAgainstTheCommitItWasGiven()
+    {
+        _ = _git.Script(
+            "git",
+            new ProcessRunResult(0, "diff --git a/x.cs b/x.cs\n", false),
+            "diff",
+            "--no-color",
+            "--relative",
+            "abc123",
+            "--");
+
+        Assert.Contains("diff --git", Reader().DiffSince(Root, "abc123"), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ACopyAndATypeChangeKeepTheirOwnKinds()
+    {
+        _ = _git
+            .Script("git", new ProcessRunResult(0, "abc123\n", false), "merge-base", "main", "HEAD")
+            .Script(
+                "git",
+                new ProcessRunResult(0, "C075\0src/old.cs\0src/copy.cs\0T\0src/mode.cs\0", false),
+                "diff",
+                "-z",
+                "--name-status",
+                "-M",
+                "--relative",
+                "abc123",
+                "--")
+            .Script(
+                "git",
+                new ProcessRunResult(0, string.Empty, false),
+                "ls-files",
+                "-z",
+                "--others",
+                "--exclude-standard",
+                "--");
+
+        Assert.Equal(
+            [new ChangedPath("src/copy.cs", ChangeKind.Copied), new ChangedPath("src/mode.cs", ChangeKind.Modified)],
+            Reader().ResolveSinceMergeBase(Root, "main"));
+    }
+
+    [Fact]
+    public void ADiffFailureSurfacesRatherThanReturningAnEmptyPatch()
+    {
+        _ = _git.Script(
+            "git",
+            new ProcessRunResult(128, string.Empty, false) { StandardError = "fatal: bad revision\n" },
+            "diff",
+            "--no-color",
+            "--relative",
+            "abc123",
+            "--");
+
+        InvalidOperationException error = Assert.Throws<InvalidOperationException>(
+            () => Reader().DiffSince(Root, "abc123"));
+
+        Assert.Contains("fatal: bad revision", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void DiffSinceMergeBaseReportsTheMergeBaseItDiffedFrom()
     {
         _ = _git

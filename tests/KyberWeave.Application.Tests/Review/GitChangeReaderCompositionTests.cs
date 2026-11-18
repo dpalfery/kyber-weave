@@ -6,8 +6,8 @@ using Xunit;
 namespace KyberWeave.Application.Tests.Review;
 
 /// <summary>
-/// The git change reader lives in Application now, so the application composition root registers it: a host that only
-/// called the data layer would get nothing to resolve.
+/// The git change reader lives in Application now, so the application composition root registers it: this fails if
+/// the registration is dropped, which is what a reader left unregistered would surface as only at run time.
 /// </summary>
 public sealed class GitChangeReaderCompositionTests
 {
