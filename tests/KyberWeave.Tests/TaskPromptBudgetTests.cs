@@ -135,7 +135,8 @@ public sealed class TaskPromptBudgetTests
             DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
             DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),
             DocsTestCommands.Services().GetRequiredService<IFileSystem>(),
-            Index(fixture, config).StandardsFor)
+            Index(fixture, config).StandardsFor,
+            DocsTestCommands.Services().GetRequiredService<IProcessEnvironment>())
         .Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", RetryText: retryText), config);
 
     private static DocumentIndex Index(DocFixture fixture, KyberWeaveConfig config) =>
@@ -257,7 +258,8 @@ public sealed class TaskPromptBudgetTests
             DocsTestCommands.Services().GetRequiredService<IPlanTaskService>(),
             DocsTestCommands.Services().GetRequiredService<IPacketHostFacts>(),
             DocsTestCommands.Services().GetRequiredService<IFileSystem>(),
-            index.StandardsFor);
+            index.StandardsFor,
+            DocsTestCommands.Services().GetRequiredService<IProcessEnvironment>());
 
         foreach (string technology in technologies)
         {

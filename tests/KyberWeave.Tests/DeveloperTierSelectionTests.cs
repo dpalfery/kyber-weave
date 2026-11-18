@@ -146,7 +146,8 @@ public sealed class DeveloperTierSelectionTests
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IFileSystem>(),
-            _ => null);
+            _ => null,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     /// <summary>

@@ -25,11 +25,13 @@ namespace KyberWeave.Core.Docs.Validation;
 /// The one standards lookup the docs tool also answers from: a technology to its shared rules, parent rules and
 /// skills, rules, skills and standard, or null when the host has no folder for it.
 /// </param>
+/// <param name="environment">Names the working directory a relative repository root is resolved against.</param>
 public sealed class TaskPromptService(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
     IFileSystem files,
-    Func<string, StandardsBundle?> standardsFor) : ITaskPromptService
+    Func<string, StandardsBundle?> standardsFor,
+    IProcessEnvironment environment) : ITaskPromptService
 {
     /// <summary>What the last part says when the budget cut nothing.</summary>
     public const string NothingLeftOut = "Nothing was left out.";
@@ -144,7 +146,7 @@ public sealed class TaskPromptService(
         ArgumentNullException.ThrowIfNull(config);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.RepoRoot);
 
-        string root = Path.GetFullPath(request.RepoRoot);
+        string root = Path.GetFullPath(request.RepoRoot, environment.CurrentDirectory);
         string? taskId = Clean(request.TaskId);
 
         PlanTaskFileEntry? entry = null;
@@ -299,7 +301,7 @@ public sealed class TaskPromptService(
         // and that target is what a read would return to the worker.
         absolute = RealPath(files, Path.GetFullPath(path, root));
         string scratch = Path.TrimEndingDirectorySeparator(
-            RealPath(files, Path.GetFullPath(Path.Combine(root, ScratchFolder))));
+            RealPath(files, Path.GetFullPath(ScratchFolder, root)));
         return string.Equals(absolute, scratch, StringComparison.Ordinal)
             ? false
             : absolute.StartsWith(scratch + Path.DirectorySeparatorChar, StringComparison.Ordinal);

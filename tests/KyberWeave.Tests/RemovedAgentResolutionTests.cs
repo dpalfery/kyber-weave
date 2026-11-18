@@ -293,7 +293,8 @@ public sealed class RemovedAgentResolutionTests
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IFileSystem>(),
-            _ => null);
+            _ => null,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     /// <summary>The prompt the service builds for the plan's one task, under the roster of <paramref name="config"/>.</summary>

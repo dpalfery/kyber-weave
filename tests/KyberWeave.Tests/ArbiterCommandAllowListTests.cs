@@ -584,7 +584,8 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IFileSystem>(),
-            index.StandardsFor);
+            index.StandardsFor,
+            provider.GetRequiredService<IProcessEnvironment>());
 
         TaskPromptResult result = service.Build(new TaskPromptRequest(fixture.Root, TaskId: null, Technology: technology), config);
 

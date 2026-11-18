@@ -140,7 +140,8 @@ public sealed class TaskPromptServiceTests
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IFileSystem>(),
-            index.StandardsFor);
+            index.StandardsFor,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     private static TaskPromptResult Build(DocFixture fixture, string? taskId = "T1", string? technology = null)

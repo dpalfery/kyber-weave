@@ -144,7 +144,8 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IFileSystem>(),
-            technology => host.Current().StandardsFor(technology));
+            technology => host.Current().StandardsFor(technology),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     /// <summary>The analysis reader over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
