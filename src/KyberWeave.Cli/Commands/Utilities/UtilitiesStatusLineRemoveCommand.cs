@@ -19,17 +19,24 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
 {
     private readonly IProcessEnvironment _environment;
     private readonly IStatusLineDeploymentService _plans;
+    private readonly IAnsiConsole _console;
 
     /// <summary>Creates the command over the process environment its per-user roots are read from.</summary>
     /// <param name="environment">The process state the roots are read from.</param>
     /// <param name="plans">Plans and applies the removal.</param>
-    public UtilitiesStatusLineRemoveCommand(IProcessEnvironment environment, IStatusLineDeploymentService plans)
+    /// <param name="console">Receives everything the operator reads.</param>
+    public UtilitiesStatusLineRemoveCommand(
+        IProcessEnvironment environment,
+        IStatusLineDeploymentService plans,
+        IAnsiConsole console)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(console);
 
         _environment = environment;
         _plans = plans;
+        _console = console;
     }
 
     /// <inheritdoc />
@@ -51,11 +58,11 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
         }
         catch (ArgumentException ex)
         {
-            UtilitiesStatusLineCommandComposition.WriteClientInputError(ex.Message);
+            UtilitiesStatusLineCommandComposition.WriteClientInputError(_console, ex.Message);
             return 2;
         }
 
-        AnsiConsole.MarkupLine("[bold]Kyber Utilities status line — remove[/]");
+        _console.MarkupLine("[bold]Kyber Utilities status line — remove[/]");
 
         bool anyReceipt = false;
         bool hasIssues = false;
@@ -75,7 +82,7 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
                 ex is StatusLineDeploymentConflictException or InvalidDataException or
                     IOException or UnauthorizedAccessException or ArgumentException)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [red]invalid[/] {Markup.Escape(token)}: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
                 continue;
@@ -88,7 +95,7 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [red]kyber-weave utilities statusline: error:[/] {Markup.Escape(ex.Message)}");
                 hasIssues = true;
                 continue;
@@ -96,28 +103,28 @@ public sealed class UtilitiesStatusLineRemoveCommand : Command<UtilitiesStatusLi
 
             int removed = plan.PlannedFileChanges.Count;
             removedTotal += removed;
-            AnsiConsole.MarkupLine($"  [green]ok[/] {Markup.Escape(token)}: removed {removed} file(s)");
+            _console.MarkupLine($"  [green]ok[/] {Markup.Escape(token)}: removed {removed} file(s)");
 
             foreach (StatusLineOwnedFile retained in plan.Receipt.Files)
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"  [yellow]kept[/] {Markup.Escape(token)}: {Markup.Escape(retained.RelativePath)} " +
                     "(modified locally)");
         }
 
-        AnsiConsole.WriteLine();
+        _console.WriteLine();
         if (!anyReceipt && !hasIssues)
         {
-            AnsiConsole.MarkupLine("[grey]No Kyber Utilities status-line deployment found. Nothing to remove.[/]");
+            _console.MarkupLine("[grey]No Kyber Utilities status-line deployment found. Nothing to remove.[/]");
             return 0;
         }
 
         if (hasIssues)
         {
-            AnsiConsole.MarkupLine("[red]Some owned files could not be removed.[/]");
+            _console.MarkupLine("[red]Some owned files could not be removed.[/]");
             return 1;
         }
 
-        AnsiConsole.MarkupLine($"[green]Removed {removedTotal} owned status-line file(s).[/]");
+        _console.MarkupLine($"[green]Removed {removedTotal} owned status-line file(s).[/]");
         return 0;
     }
 
