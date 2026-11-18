@@ -319,7 +319,7 @@ public sealed class ReviewGatesService(
     ///     The cycle this council run is in, or null when no review folder can be named. The review folder comes from the
     ///     <c>--out</c> path when it sits in <c>review/cycle-&lt;n&gt;</c>, else from the task's only review folder in
     ///     the git work tree the command was run against. A cycle counts as prior only when it belongs to this change
-    ///     (<c>ReviewCycles.Belonging</c>); one that is finished, this one included, or that belongs to another
+    ///     (<c>ReviewCyclePlanning.Belonging</c>); one that is finished, this one included, or that belongs to another
     ///     change is never counted. When nothing says this is a later cycle, the run is a full one, which is the safe answer.
     /// </summary>
     private CouncilCycle? DetectCycle(
