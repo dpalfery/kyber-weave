@@ -1,6 +1,6 @@
-using System.Diagnostics;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Data.Arbiter.Credentials;
 using Xunit;
 
@@ -26,7 +26,7 @@ public sealed class MacKeychainWriteTests
 
         store.Write("https://api.typesafe.ai", key);
 
-        CapturedCall call = Assert.Single(runner.Calls);
+        CapturedCredentialCall call = Assert.Single(runner.Calls);
         Assert.Equal(["-i"], call.Argv);
         Assert.DoesNotContain(key, string.Join(" ", call.Argv), StringComparison.Ordinal);
         // The key must be quoted so `security -i` parses it as one argument.
@@ -44,21 +44,5 @@ public sealed class MacKeychainWriteTests
 
         Assert.DoesNotContain("abc\ndef", failure.Message, StringComparison.Ordinal);
         Assert.Empty(runner.Calls);
-    }
-
-    private sealed record CapturedCall(string FileName, string[] Argv, string StandardInput);
-
-    private sealed class FakeCredentialProcessRunner : ICredentialProcessRunner
-    {
-        public List<CapturedCall> Calls { get; } = [];
-
-        public ProcessResult NextResult { get; set; } = new(0, string.Empty, string.Empty);
-
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
-        {
-            string[] argv = [.. startInfo.ArgumentList];
-            Calls.Add(new CapturedCall(startInfo.FileName, argv, standardInput));
-            return NextResult;
-        }
     }
 }

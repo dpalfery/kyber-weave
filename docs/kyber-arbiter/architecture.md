@@ -910,7 +910,7 @@ publishes no accuracy or calibration comparison between the two, so the figures 
 this project's own.
 
 **Method.** 120 invented cases, 30 for each of the four step-1 rules, in
-`tests/KyberWeave.Tests/Fixtures/arbiter-calibration/cases.jsonl`. Two Claude models labelled
+`tests/KyberWeave.Integration.Tests/Fixtures/arbiter-calibration/cases.jsonl`. Two Claude models labelled
 them independently and agreed on all 120; no person reviewed them. Each case went through the
 production request builder, over OpenRouter, as `typesafe/jev-1.13` and `typesafe/jev-1.14`,
 in four full runs. A direct TypeSafe run was not made, so OpenRouter and TypeSafe were not
