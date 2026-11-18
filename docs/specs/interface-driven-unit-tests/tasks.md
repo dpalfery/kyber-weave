@@ -175,12 +175,38 @@ from this file when it is marked Ready.
 - [ ] 2.5 Move Domain's logic to Application, one Domain folder per task
   - **Objective:** the logic classes in each of Domain's folders (`Agents`, `Arbiter`, `Docs`, `Review`,
     `Squad` and the rest) move to the matching folder in `KyberWeave.Application`; the 33 direct resource
-    sites and 17 services built inside services among them move onto seams as they go.
+    sites and 17 services built inside services among them move onto seams as they go. Each move follows
+    the route the 2.1 plan gives its caller rows: a Domain type that holds data and adds a method keeps
+    the data in `Domain` and moves the method, a pure static helper moves as a static helper and each
+    `Data` caller either moves with it or keeps a raw-I/O adapter, and a stateful service moves behind a
+    `Contracts` interface.
+  - **Order, with acceptance criteria:**
+    1. **Step 0a — the 36 `Contracts` findings.** Each of the 22 types gets its recorded decision
+       (`split`, `move the interface`, `narrow`). Acceptance: `KyberWeave.Contracts` names no type that
+       will move, and the change lands with the unit or contract test that fails without it, written
+       first.
+    2. **Step 0b — the splits and the caller routes.** The 20 data-with-method types keep their data and
+       move their methods, the 8 services move behind their interfaces, and the 65 `Data` and 13 `Core`
+       rows take their routes. Acceptance: every row is either moved, split or recorded as naming data
+       only; `Data` and `Core` still do not reference `Application`; each split row's adapter implements
+       a `Contracts` interface and holds no decision; each change lands with the test that fails without
+       it, written first.
+    3. **Step 1 — the 24 folder tasks below**, in the order the `depends on` column gives: a group moves
+       before the groups its code names, because `Domain` has no `Application` reference. Acceptance:
+       each folder task meets the acceptance criteria below, and `dotnet build src/KyberWeave.Domain`
+       after its `git mv` proves the order.
+  - **Rules for every folder task:** a move commit is `git mv` only, with the build and the tests green
+    before and after it; a seam conversion is a separate commit; each move updates the path-keyed
+    artefacts — document code references and `kyber-weave docs drift .`,
+    `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json`, the `Domain` rows of
+    `docs/reference/seams.md`, and the `KyberWeave.Domain.Tests` files of the moved classes.
+    `Security` (2.5.10) is the pilot, and `Configuration` (2.5.1) waits for 2.3.
   - **Files:** `src/KyberWeave.Domain/<folder>/**`, `src/KyberWeave.Application/<folder>/**`, their callers
     per the 2.1 plan; split any folder over about 30 classes
   - **Acceptance criteria:** the folder in `Domain` holds data only; the moved classes call no resource
     directly; each moved class keeps or gains a unit test through fakes; behaviour unchanged.
-  - **Depends on:** 2.1
+  - **Depends on:** 2.1 and task 2.3 (which needs 2.2); its own steps 0a and 0b run before its folder
+    tasks
   - _Requirements: 1.2, 1.4, 2.1 to 2.9, 4.2, 4.3_
 
 - [ ] 2.6 Domain holds data only
