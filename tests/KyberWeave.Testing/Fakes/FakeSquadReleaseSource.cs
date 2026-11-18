@@ -63,7 +63,7 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     /// <summary>How many extractions the fake attempted, including ones it failed.</summary>
     internal int CallCount => Requests.Count;
 
-    /// <summary>The directory copied into the destination; when null the minimal corpus below is written.</summary>
+    /// <summary>The directory copied into the destination; when neither this nor <see cref="ArchivePath"/> is set, the minimal corpus is written.</summary>
     internal string? SourceDirectory { get; init; }
 
     /// <summary>The pack archive extracted into the destination, in place of a source directory.</summary>
@@ -100,6 +100,7 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     {
         ArgumentNullException.ThrowIfNull(request);
         ValidateRequest(request);
+        ValidateSource();
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
         {
@@ -155,6 +156,19 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     public void Dispose()
     {
         // No unmanaged resources.
+    }
+
+    /// <summary>
+    /// A fake extracts one thing. Configuring both a source directory and an archive is a typo, so it fails
+    /// here instead of silently preferring one.
+    /// </summary>
+    private void ValidateSource()
+    {
+        if (SourceDirectory is not null && ArchivePath is not null)
+        {
+            throw new InvalidOperationException(
+                "A fake release source extracts an archive or a source directory, not both.");
+        }
     }
 
     /// <summary>
@@ -288,7 +302,8 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
         {
             if (entry.LinkTarget is not null)
             {
-                continue;
+                throw new InvalidDataException(
+                    $"The Squad corpus contains a symbolic link entry: '{entry.FullName}'.");
             }
 
             string targetPath = Path.Combine(destinationDirectory, entry.Name);

@@ -104,6 +104,46 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task ConfiguringASourceDirectoryAndAnArchiveIsRefused()
+    {
+        string sourceRoot = Path.Combine(_temp.Path, "ambiguous-source");
+        WriteFile(sourceRoot, "squad.yml", "source");
+        string archivePath = Path.Combine(_temp.Path, "ambiguous.zip");
+        await ZipFile.CreateFromDirectoryAsync(sourceRoot, archivePath);
+        FakeSquadReleaseSource source = new()
+        {
+            SourceDirectory = sourceRoot,
+            ArchivePath = archivePath,
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            () => source.DownloadAndExtractAsync(Request("ambiguous")));
+
+        Assert.Empty(source.Requests);
+    }
+
+    [Fact]
+    public async Task ASymbolicLinkInTheSourceDirectoryIsRefused()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("Creating a symbolic link needs a privilege Windows test runs do not have.");
+        }
+
+        string sourceRoot = Path.Combine(_temp.Path, "linked-source");
+        WriteFile(sourceRoot, "squad.yml", "linked corpus");
+        File.CreateSymbolicLink(
+            Path.Combine(sourceRoot, "linked.yml"),
+            Path.Combine(sourceRoot, "squad.yml"));
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromDirectory(sourceRoot);
+        SquadReleaseRequest request = Request("linked");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
+
+        Assert.False(File.Exists(Path.Combine(request.DestinationPath, "linked.yml")));
+    }
+
+    [Fact]
     public async Task AFileContentPathThatEscapesTheDestinationIsRefused()
     {
         FakeSquadReleaseSource source = new()
