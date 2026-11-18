@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.RunStart;
@@ -19,10 +20,13 @@ internal static class RunStartServiceCollectionExtensions
     {
         services.TryAddSingleton<IRunStateStore>(sp => new FileRunStateStore(
             sp.GetRequiredService<IWritableFileSystem>(),
-            sp.GetRequiredService<ICheckedOutBranchReader>()));
+            sp.GetRequiredService<ICheckedOutBranchReader>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(
             sp.GetRequiredService<IWritableFileSystem>(),
-            sp.GetRequiredService<IRunStateStore>()));
+            sp.GetRequiredService<IRunStateStore>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         return services;
     }
 }

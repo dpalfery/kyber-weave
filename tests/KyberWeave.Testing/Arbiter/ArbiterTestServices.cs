@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Application;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Arbiter;
@@ -119,6 +120,7 @@ internal static class ArbiterTestServices
             Get<IRunCheckout>(),
             Get<IRunStateStore>(),
             Get<IProcessEnvironment>(),
+            Get<IPathResolver>(),
             Get<TimeProvider>(),
             workingDirectory,
             homeDirectory,

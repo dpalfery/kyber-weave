@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 
@@ -12,9 +13,10 @@ public sealed class HookGitFactsFactory(
     IRunCheckout checkouts,
     IRunStateStore runStates,
     IProcessEnvironment process,
+    IPathResolver paths,
     TimeProvider clock) : IHookGitFactsFactory
 {
     /// <inheritdoc/>
     public IArbiterGitFacts Create(string workingDirectory, string? homeDirectory = null, string? arbiterDirectory = null) =>
-        new HookGitFacts(git, planPaths, snapshots, windows, checkouts, runStates, process, clock, workingDirectory, homeDirectory, arbiterDirectory);
+        new HookGitFacts(git, planPaths, snapshots, windows, checkouts, runStates, process, paths, clock, workingDirectory, homeDirectory, arbiterDirectory);
 }

@@ -15,13 +15,13 @@ namespace KyberWeave.Data.RunStart;
 /// directory. A run that branched in place works in the canonical checkout itself, so nothing it writes there
 /// is stray. Every unreadable fact answers "no live run", which allows.
 /// </remarks>
-public sealed class RunCheckoutGuard(IWritableFileSystem files, IRunStateStore store) : IRunCheckout
+public sealed class RunCheckoutGuard(IWritableFileSystem files, IRunStateStore store, IProcessEnvironment environment) : IRunCheckout
 {
     private const string GitEntry = ".git";
     private const string HeadRefPrefix = "ref: refs/heads/";
     private const int MaxLinkDepth = 16;
 
-    private static StringComparison PathComparison => RunBaseStateFormat.PathComparison;
+    private StringComparison PathComparison => RunBaseStateFormat.PathComparison(environment);
 
     /// <summary>The canonical checkout of a common git directory: its parent when it is a <c>.git</c> directory, else null.</summary>
     public string? CanonicalCheckoutOf(string commonDirectory)
@@ -191,7 +191,7 @@ public sealed class RunCheckoutGuard(IWritableFileSystem files, IRunStateStore s
         return null;
     }
 
-    private static bool SamePath(string left, string right) =>
+    private bool SamePath(string left, string right) =>
         string.Equals(left.TrimEnd('/', '\\'), right.TrimEnd('/', '\\'), PathComparison);
 
     /// <summary>

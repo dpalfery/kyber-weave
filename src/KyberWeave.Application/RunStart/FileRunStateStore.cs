@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.RunStart;
@@ -7,7 +8,13 @@ namespace KyberWeave.Data.RunStart;
 /// <summary>Keeps the run records as one JSON file per branch under the operator's home.</summary>
 /// <param name="files">The file system the records live on.</param>
 /// <param name="branches">Reads the branch a recorded worktree has checked out.</param>
-public sealed class FileRunStateStore(IWritableFileSystem files, ICheckedOutBranchReader branches) : IRunStateStore
+/// <param name="paths">Resolves the directories two records are compared by.</param>
+/// <param name="environment">Supplies the platform and the current directory those comparisons use.</param>
+public sealed class FileRunStateStore(
+    IWritableFileSystem files,
+    ICheckedOutBranchReader branches,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IRunStateStore
 {
     /// <inheritdoc />
     public void Write(string homeDirectory, string branch, string baseRef, RunStartPlace? place = null)
@@ -67,7 +74,7 @@ public sealed class FileRunStateStore(IWritableFileSystem files, ICheckedOutBran
             return null;
         }
 
-        string wanted = RunBaseStateFormat.NormalizeDirectory(repository);
+        string wanted = RunBaseStateFormat.NormalizeDirectory(repository, paths, environment);
         foreach (string file in recordFiles)
         {
             string json;
@@ -81,7 +88,7 @@ public sealed class FileRunStateStore(IWritableFileSystem files, ICheckedOutBran
             }
 
             if (RunBaseStateFormat.TryReadRecord(json, out RunRecord? record)
-                && string.Equals(RunBaseStateFormat.NormalizeDirectory(record!.Repository), wanted, RunBaseStateFormat.PathComparison)
+                && string.Equals(RunBaseStateFormat.NormalizeDirectory(record!.Repository, paths, environment), wanted, RunBaseStateFormat.PathComparison(environment))
                 && files.DirectoryExists(record.Worktree)
                 && string.Equals(branches.Read(record.Worktree), record.Branch, StringComparison.Ordinal))
             {

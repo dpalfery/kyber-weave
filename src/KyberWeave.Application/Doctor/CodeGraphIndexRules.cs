@@ -20,7 +20,7 @@ public static class CodeGraphIndexRules
     public static IReadOnlyList<string> InitConfigFiles { get; } = [];
 
     /// <summary>Returns the lock path for a root: a file in <paramref name="lockDirectory"/> named by a hash of the root.</summary>
-    /// <param name="root">The repository root.</param>
+    /// <param name="root">The repository root as a full path; the caller resolves a relative one first.</param>
     /// <param name="lockDirectory">The directory that holds lock files, normally the OS temp directory.</param>
     public static string LockPathFor(string root, string lockDirectory)
     {
@@ -47,9 +47,6 @@ public static class CodeGraphIndexRules
     public static bool IsBusy(DoctorCheck check) =>
         check.Reason?.StartsWith("codegraph.index busy", StringComparison.Ordinal) == true;
 
-    /// <summary>The file CodeGraph keeps its own lock in, inside <see cref="IndexDirectoryName"/>.</summary>
-    public const string IndexLockFileName = "codegraph.lock";
-
     /// <summary>
     ///     How long the docs server waits before each further look at CodeGraph's lock file, when a refresh finds
     ///     the file present. The owner set the schedule: 1, 5, then 30 seconds, and a failure after the last look.
@@ -60,20 +57,7 @@ public static class CodeGraphIndexRules
     /// <summary>Returns CodeGraph's own lock file for a repository root: <c>.codegraph/codegraph.lock</c>.</summary>
     /// <param name="root">The repository root.</param>
     public static string IndexLockPathFor(string root) =>
-        Path.Combine(root, IndexDirectoryName, IndexLockFileName);
-
-    /// <summary>
-    ///     The pauses before the second and third <c>codegraph sync</c> when the first finds CodeGraph's own index
-    ///     lock held.
-    /// </summary>
-    /// <remarks>
-    ///     Measured against CodeGraph 1.6.2: a sync that finds the lock held returns in about 0.15 seconds, and a
-    ///     sync with nothing to do holds the lock for about 0.3 seconds. Three attempts one second apart in total
-    ///     outlast that and the short syncs a file watcher runs, and cost the caller at most about 1.5 seconds. A
-    ///     longer hold is an index rebuild, which no wait an interactive call can afford would outlast.
-    /// </remarks>
-    public static IReadOnlyList<TimeSpan> HeldLockRetryPauses { get; } =
-        [TimeSpan.FromMilliseconds(300), TimeSpan.FromMilliseconds(700)];
+        Path.Combine(root, IndexDirectoryName, CodeGraphIndexFiles.IndexLockFileName);
 
     /// <summary>
     ///     Whether a failed check reports that <c>codegraph sync</c> found CodeGraph's own index lock held by another
@@ -94,25 +78,9 @@ public static class CodeGraphIndexRules
         && reason.StartsWith("codegraph sync exited ", StringComparison.Ordinal)
         && reason.Contains("Sync could not acquire the file lock", StringComparison.Ordinal);
 
-    /// <summary>
-    ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.
-    /// </summary>
-    /// <param name="ex">The exception.</param>
-    public static bool IsSharingViolation(IOException ex)
-    {
-        int hr = ex.HResult;
-        if (hr is unchecked((int)0x80070020) or unchecked((int)0x80070021) || (hr & 0xFFFF) is 32 or 33)
-            return true;
-
-        string msg = ex.Message;
-        return msg.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
-            || msg.Contains("sharing violation", StringComparison.OrdinalIgnoreCase)
-            || msg.Contains("locked", StringComparison.OrdinalIgnoreCase);
-    }
-
     private static bool NeedsQuoting(string path) =>
         path.Length == 0 || path.Any(c => !char.IsAsciiLetterOrDigit(c) && c != '/' && c != '\\' && c != '.' && c != '-' && c != '_');
 
     private static string Normalise(string root) =>
-        Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 }
