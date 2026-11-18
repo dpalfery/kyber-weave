@@ -943,7 +943,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
             ]);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 projectRoot,
                 SquadDeploymentScope.Global,
                 GlobalLock(["pi"]),
@@ -983,7 +983,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
             [owned]);
         SquadReceipt sibling = receipt;
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             projectRoot,
             SquadDeploymentScope.Global,
             receipt,

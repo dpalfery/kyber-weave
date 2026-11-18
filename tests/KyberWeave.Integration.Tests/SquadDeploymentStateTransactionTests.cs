@@ -53,7 +53,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
                     "codex",
                     false)
             ]);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -380,7 +380,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         string fixturePath = fixture.Path;
         const string generatedPath = ".warp/roles/reviewer.md";
         const string externalPath = ".warp/roles/operator-note.md";
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixturePath,
             SquadDeploymentScope.Project,
             Lock(),
@@ -502,7 +502,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         Directory.CreateDirectory(targetRoot);
         Directory.CreateSymbolicLink(aliasRoot, targetRoot);
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan activePlan = RealSquadDeployment.Planner.CreateInstall(
             targetRoot,
             activeScope,
             Lock(),
@@ -512,7 +512,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             new FixedTimeProvider(InstalledAt));
         string contenderRoot = useSymlinkAlias ? aliasRoot : targetRoot;
         string contenderFile = AgentRelativePath(contenderScope, "contender.toml");
-        SquadDeploymentPlan contenderPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan contenderPlan = RealSquadDeployment.Planner.CreateInstall(
             contenderRoot,
             contenderScope,
             Lock(),
@@ -576,7 +576,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -955,7 +955,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         string root,
         SquadReceipt receipt)
     {
-        return SquadDeploymentPlanner.CreateUpdate(
+        return RealSquadDeployment.Planner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),

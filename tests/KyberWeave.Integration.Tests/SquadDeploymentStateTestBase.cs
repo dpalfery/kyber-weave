@@ -272,7 +272,7 @@ public abstract class SquadDeploymentStateTestBase
         string renderedBody = string.Equals(subject, "target", StringComparison.Ordinal)
             ? "updated claim body"
             : installedBody;
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -441,7 +441,7 @@ public abstract class SquadDeploymentStateTestBase
             "codex",
             false));
         WriteState(root, Lock(), previousReceipt);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -658,7 +658,7 @@ public abstract class SquadDeploymentStateTestBase
                 ? [Rendered(relativePath, "updated file body")]
                 : [];
             return new ActiveTransitionScenario(
-                SquadDeploymentPlanner.CreateUpdate(
+                RealSquadDeployment.Planner.CreateUpdate(
                     root,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -691,7 +691,7 @@ public abstract class SquadDeploymentStateTestBase
                 ? [Rendered(relativePath, "updated link body")]
                 : [];
             return new ActiveTransitionScenario(
-                SquadDeploymentPlanner.CreateUpdate(
+                RealSquadDeployment.Planner.CreateUpdate(
                     root,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -707,7 +707,7 @@ public abstract class SquadDeploymentStateTestBase
         WriteState(root, Lock(), emptyReceipt);
         if (scenario is "lock-write" or "receipt-write")
             return new ActiveTransitionScenario(
-                SquadDeploymentPlanner.CreateUpdate(
+                RealSquadDeployment.Planner.CreateUpdate(
                     root,
                     SquadDeploymentScope.Project,
                     Lock("1.2.4"),
@@ -720,7 +720,7 @@ public abstract class SquadDeploymentStateTestBase
 
         if (scenario is "lock-delete" or "receipt-delete")
             return new ActiveTransitionScenario(
-                SquadDeploymentPlanner.CreateUninstall(
+                RealSquadDeployment.Planner.CreateUninstall(
                     root,
                     SquadDeploymentScope.Project,
                     emptyReceipt),
@@ -1284,7 +1284,7 @@ public abstract class SquadDeploymentStateTestBase
 
     internal static SquadDeploymentPlan CreateGlobalInstallPlan(string targetRoot)
     {
-        return SquadDeploymentPlanner.CreateInstall(
+        return RealSquadDeployment.Planner.CreateInstall(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -2782,7 +2782,7 @@ public abstract class SquadDeploymentStateTestBase
 
         public SquadDeploymentPlan CreateUpdatePlan()
         {
-            return SquadDeploymentPlanner.CreateUpdate(
+            return RealSquadDeployment.Planner.CreateUpdate(
                 Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -2832,7 +2832,7 @@ public abstract class SquadDeploymentStateTestBase
 
         public SquadDeploymentPlan CreateUpdatePlan()
         {
-            return SquadDeploymentPlanner.CreateUpdate(
+            return RealSquadDeployment.Planner.CreateUpdate(
                 Path,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
