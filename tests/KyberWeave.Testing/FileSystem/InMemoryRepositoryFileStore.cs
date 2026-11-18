@@ -151,6 +151,9 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public Stream OpenExclusive(string path) => _fs.OpenExclusive(path);
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) => _fs.OpenGuarded(path);
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path) => _fs.OpenAppendShared(path);
 
     /// <inheritdoc />

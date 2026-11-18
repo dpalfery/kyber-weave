@@ -43,11 +43,11 @@ public sealed class SquadHookBlockReviewFixTests
         using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
         SquadDeploymentPlan install = Install(fixture.Path, CursorBlock("one"));
-        new SquadTransaction(store).Execute(install);
+        RealSquadDeployment.Transaction(store).Execute(install);
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
-        new SquadTransaction(store).Execute(Update(fixture.Path, previous, CursorBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Update(fixture.Path, previous, CursorBlock("one")));
 
         Assert.Equal(1, CountOccurrences(Read(fixture.Path, ".cursor/hooks.json"), "kyber-weave-arbiter hook --harness cursor"));
     }
@@ -59,7 +59,7 @@ public sealed class SquadHookBlockReviewFixTests
         SquadStateStore store = Store(fixture.Path);
         Write(fixture.Path, ".codex/hooks.json", string.Empty);
 
-        new SquadTransaction(store).Execute(Install(fixture.Path, CodexBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, CodexBlock("one")));
 
         JsonNode parsed = JsonNode.Parse(Read(fixture.Path, ".codex/hooks.json"))!;
         Assert.Single(parsed["hooks"]!["PreToolUse"]!.AsArray());
@@ -67,7 +67,7 @@ public sealed class SquadHookBlockReviewFixTests
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
         Assert.False(Assert.Single(receipt.Blocks).CreatedFile);
 
-        new SquadTransaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
+        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path, SquadDeploymentScope.Project, receipt));
 
         // Squad did not create the file, so uninstall leaves it behind without our entries.
@@ -88,7 +88,7 @@ public sealed class SquadHookBlockReviewFixTests
             SquadHookBlockFormat.Cursor,
             [new SquadRenderedBlockEntry("preToolUse", entry)]);
 
-        new SquadTransaction(Store(fixture.Path)).Execute(Install(fixture.Path, block));
+        RealSquadDeployment.Transaction(Store(fixture.Path)).Execute(Install(fixture.Path, block));
 
         Assert.DoesNotContain("sentinel", Read(fixture.Path, ".cursor/hooks.json"), StringComparison.Ordinal);
     }
@@ -100,12 +100,12 @@ public sealed class SquadHookBlockReviewFixTests
         SquadStateStore store = Store(fixture.Path);
         Write(fixture.Path, ".cursor/hooks.json", UserFile());
 
-        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
         Assert.Contains("lint && fmt 'x' <y> é", Read(fixture.Path, ".cursor/hooks.json"), StringComparison.Ordinal);
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
-        new SquadTransaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
+        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
             fixture.Path, SquadDeploymentScope.Project, receipt));
 
         string after = Read(fixture.Path, ".cursor/hooks.json");
@@ -118,7 +118,7 @@ public sealed class SquadHookBlockReviewFixTests
     {
         using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
@@ -130,7 +130,7 @@ public sealed class SquadHookBlockReviewFixTests
 
         SquadDeploymentPlan update = Update(fixture.Path, previous, CursorBlock("two"));
         Assert.Empty(update.BlockDrifts);
-        new SquadTransaction(store).Execute(update);
+        RealSquadDeployment.Transaction(store).Execute(update);
 
         string content = Read(fixture.Path, ".cursor/hooks.json");
         Assert.Contains("lint && fmt", content, StringComparison.Ordinal);
@@ -143,7 +143,7 @@ public sealed class SquadHookBlockReviewFixTests
     {
         using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
         Write(fixture.Path, ".cursor/hooks.json", string.Empty);
@@ -159,7 +159,7 @@ public sealed class SquadHookBlockReviewFixTests
     {
         using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        new SquadTransaction(store).Execute(Install(fixture.Path, TwoIdenticalCursorEntries()));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, TwoIdenticalCursorEntries()));
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
@@ -185,7 +185,7 @@ public sealed class SquadHookBlockReviewFixTests
     {
         using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
         Write(fixture.Path, ".cursor/hooks.json", string.Empty);
@@ -202,7 +202,7 @@ public sealed class SquadHookBlockReviewFixTests
         Assert.NotEqual(SquadStateMutation.Delete, uninstall.ReceiptMutation);
         Assert.NotEmpty(uninstall.Receipt!.Blocks);
 
-        new SquadTransaction(store).Execute(uninstall);
+        RealSquadDeployment.Transaction(store).Execute(uninstall);
 
         SquadReceipt after = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
@@ -214,7 +214,7 @@ public sealed class SquadHookBlockReviewFixTests
     {
         using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
@@ -236,7 +236,7 @@ public sealed class SquadHookBlockReviewFixTests
     {
         using TempDirectory fixture = new();
         SquadStateStore store = Store(fixture.Path);
-        new SquadTransaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
+        RealSquadDeployment.Transaction(store).Execute(Install(fixture.Path, CursorBlock("one")));
         SquadReceipt previous = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(fixture.Path, SquadDeploymentScope.Project));
 
@@ -253,7 +253,7 @@ public sealed class SquadHookBlockReviewFixTests
     {
         using TempDirectory fixture = new();
         SquadRenderedBlock block = format == SquadHookBlockFormat.Cursor ? CursorBlock("one") : CodexBlock("one");
-        new SquadTransaction(Store(fixture.Path)).Execute(Install(fixture.Path, block));
+        RealSquadDeployment.Transaction(Store(fixture.Path)).Execute(Install(fixture.Path, block));
         string viaPlan = Read(fixture.Path, SquadHookJsonBlock.RelativePath(format));
 
         string filePath = Path.Combine(fixture.Path, "direct", "hooks.json");

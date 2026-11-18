@@ -41,7 +41,12 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IFileSystemPathSemantics>(),
             sp.GetRequiredService<IPathResolver>()));
-        services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<ISquadStateStore>()));
+        services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(
+            sp.GetRequiredService<ISquadStateStore>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<ILease>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadResponseGuidanceStore, FileSquadResponseGuidanceStore>();
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();
         services.TryAddSingleton<ISquadInstanceLinkSync, FileSquadInstanceLinkSync>();

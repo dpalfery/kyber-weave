@@ -84,6 +84,10 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
         new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) =>
+        new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path) =>
         new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
 

@@ -68,7 +68,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             store.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global),
             store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global));
 
-        new SquadTransaction(store, observer).Execute(plan);
+        RealSquadDeployment.Transaction(store, observer).Execute(plan);
 
         Assert.True(observer.SawDurableIntentInJournal);
         Assert.True(observer.SawStagingInJournal);
@@ -332,7 +332,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             SquadDeploymentScope.Project,
             fixture.RelativePath,
             replacementCheckpoint);
-        SquadTransaction transaction = new(store, observer);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
 
         Exception? exception = Record.Exception(() => transaction.Execute(updatePlan));
@@ -521,7 +521,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             false,
             new FixedTimeProvider(InstalledAt));
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = new(store, blocker);
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
         Task activeExecution = BlockedTransaction.Start(() =>
             activeTransaction.Execute(activePlan));
         BlockedTransaction.WaitForStep(
@@ -535,7 +535,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         IReadOnlyDictionary<string, TreeEntry>? afterContention;
         try
         {
-            SquadTransaction storeTransaction = new(store);
+            SquadTransaction storeTransaction = RealSquadDeployment.Transaction(store);
             if (expectContention)
                 recoveryException = Record.Exception(() => storeTransaction.Recover(
                     contenderRoot,
@@ -589,7 +589,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             relativePath,
             artifact);
 
-        Exception? exception = Record.Exception(() => new SquadTransaction(store, observer).Execute(plan));
+        Exception? exception = Record.Exception(() => RealSquadDeployment.Transaction(store, observer).Execute(plan));
 
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
         string reportedArtifact = artifact == "target-file"
@@ -740,7 +740,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             subject,
             mutation);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
-        SquadTransaction transaction = new(store, observer);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
 
         Exception? exception = Record.Exception(() =>
             transaction.Execute(updatePlan));

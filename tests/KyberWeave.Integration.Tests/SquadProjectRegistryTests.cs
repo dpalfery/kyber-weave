@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -34,7 +35,7 @@ public sealed class SquadProjectRegistryTests
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
 
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
         Assert.Equal(SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).PhysicalPath, entry.Path);
@@ -53,10 +54,10 @@ public sealed class SquadProjectRegistryTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         DateTimeOffset updatedAt = InstalledAt.AddDays(1);
 
-        new SquadTransaction(store).Execute(RealSquadDeployment.Planner.CreateUpdate(
+        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
@@ -82,9 +83,9 @@ public sealed class SquadProjectRegistryTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
 
-        new SquadTransaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
+        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
             root,
             SquadDeploymentScope.Project,
             Assert.IsType<SquadReceipt>(store.ReadReceipt(root, SquadDeploymentScope.Project))));
@@ -107,7 +108,7 @@ public sealed class SquadProjectRegistryTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         Directory.Delete(root, recursive: true);
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
@@ -129,7 +130,7 @@ public sealed class SquadProjectRegistryTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         string key = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
         string registry = File.ReadAllText(RegistryPath(home), Encoding.UTF8);
         File.WriteAllText(
@@ -153,7 +154,7 @@ public sealed class SquadProjectRegistryTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         File.Delete(store.ResolveReceiptPath(root, SquadDeploymentScope.Project));
 
         SquadProjectRegistryEntry entry = Assert.Single(store.ListProjects());
@@ -176,8 +177,8 @@ public sealed class SquadProjectRegistryTests
         Directory.CreateDirectory(firstRoot);
         Directory.CreateDirectory(secondRoot);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(firstRoot, SquadDeploymentScope.Project));
-        new SquadTransaction(store).Execute(Install(secondRoot, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(firstRoot, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(secondRoot, SquadDeploymentScope.Project));
         File.Delete(RegistryPath(home));
 
         IReadOnlyList<SquadProjectRegistryEntry> entries = store.ListProjects();
@@ -206,7 +207,7 @@ public sealed class SquadProjectRegistryTests
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
 
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
 
         Assert.Equal(
             ExpectedSquadEntries,
@@ -228,7 +229,7 @@ public sealed class SquadProjectRegistryTests
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(otherRoot);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         Assert.True(File.Exists(RegistryPath(home)), "A committed install must leave a registry file to fail against.");
         File.Delete(RegistryPath(home));
         Directory.CreateDirectory(RegistryPath(home));
@@ -258,7 +259,7 @@ public sealed class SquadProjectRegistryTests
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
 
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Global));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Global));
 
         Assert.Empty(store.ListProjects());
         Assert.False(File.Exists(RegistryPath(home)));
@@ -280,7 +281,7 @@ public sealed class SquadProjectRegistryTests
         SquadStateStore store = StoreFor(home);
 
         Exception? failure = Record.Exception(() =>
-            new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project)));
+            RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project)));
 
         Assert.Null(failure);
         Assert.Equal("alpha", File.ReadAllText(Path.Combine(root, ".codex", "agents", "alpha.toml")));
@@ -300,7 +301,7 @@ public sealed class SquadProjectRegistryTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         File.Delete(RegistryPath(home));
 
         SquadProjectRegistryEntry? entry = store.FindProject(root);
@@ -324,8 +325,8 @@ public sealed class SquadProjectRegistryTests
         Directory.CreateDirectory(corruptRoot);
         Directory.CreateDirectory(healthyRoot);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(corruptRoot, SquadDeploymentScope.Project));
-        new SquadTransaction(store).Execute(Install(healthyRoot, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(corruptRoot, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(healthyRoot, SquadDeploymentScope.Project));
         File.Delete(RegistryPath(home));
         File.WriteAllText(store.ResolveReceiptPath(corruptRoot, SquadDeploymentScope.Project), "{ corrupt receipt \n");
 
@@ -347,7 +348,7 @@ public sealed class SquadProjectRegistryTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(Install(root, SquadDeploymentScope.Project));
+        RealSquadDeployment.Transaction(store).Execute(Install(root, SquadDeploymentScope.Project));
         string registry = File.ReadAllText(RegistryPath(home), Encoding.UTF8);
         File.WriteAllText(
             RegistryPath(home),

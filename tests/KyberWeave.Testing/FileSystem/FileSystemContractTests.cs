@@ -599,6 +599,31 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void OpenGuardedReadsTheFileAndRefusesAnExclusiveOpenWhileHeld()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "journal.txt", "held");
+
+        using (Stream guard = files.OpenGuarded(path))
+        {
+            using StreamReader reader = new(guard);
+            Assert.Equal("held", reader.ReadToEnd());
+            _ = Assert.Throws<IOException>(() => files.OpenExclusive(path));
+        }
+
+        Assert.Equal("held", files.ReadAllText(path));
+        files.OpenExclusive(path).Dispose();
+    }
+
+    [Fact]
+    public void OpenGuardedRefusesAMissingFile()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.ThrowsAny<IOException>(() => files.OpenGuarded(At(root, "absent.txt")));
+    }
+
+    [Fact]
     public void OpenExclusiveCanBeTakenAgainOnceTheFirstIsDisposed()
     {
         IWritableFileSystem files = Starting(out string root);

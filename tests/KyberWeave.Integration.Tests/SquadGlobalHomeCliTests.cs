@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Testing.Squad;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
@@ -14,6 +15,7 @@ using KyberWeave.Tests.Fakes;
 using Harness = KyberWeave.Tests.Fakes.SquadHomeHarness;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Data.Host;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -1440,7 +1442,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
 
         string leaseKey = h.Store.ResolveLeaseIdentity(h.Home, SquadDeploymentScope.Global);
         CommandExecution refused;
-        using (SquadTransaction.AcquireLease(leaseKey))
+        using (new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero))
         {
             refused = Capture(() => command.Execute(null!, GlobalUpdate(anchor)));
         }
@@ -1480,12 +1482,10 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
         string leaseKey = h.Store.ResolveLeaseIdentity(h.Home, SquadDeploymentScope.Global);
         bool ran = false;
 
-        new SquadTransaction(h.Store).Execute(plan, leasedPlan =>
+        RealSquadDeployment.Transaction(h.Store).Execute(plan, leasedPlan =>
         {
             ran = true;
-            InvalidOperationException refused =
-                Assert.Throws<InvalidOperationException>(() => SquadTransaction.AcquireLease(leaseKey).Dispose());
-            Assert.Contains("transaction is active", refused.Message, StringComparison.OrdinalIgnoreCase);
+            _ = Assert.Throws<LeaseTimeoutException>(() => new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero).Dispose());
             leasedPlan.AttachHomeFiles([record]);
         });
 
@@ -1495,7 +1495,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
         Assert.Contains(
             committed.HomeFiles,
             file => file.RelativePath == record.RelativePath && file.Sha256 == record.Sha256);
-        using (SquadTransaction.AcquireLease(leaseKey))
+        using (new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero))
         {
         }
     }
@@ -1515,7 +1515,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
         SquadDeploymentPlan plan = PlanGlobalReceiptRewrite(h);
 
         InvalidOperationException failure = Assert.Throws<InvalidOperationException>(() =>
-            new SquadTransaction(h.Store).Execute(
+            RealSquadDeployment.Transaction(h.Store).Execute(
                 plan,
                 _ => throw new InvalidOperationException("the callback broke its contract")));
 
@@ -1525,7 +1525,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
             "A callback that failed before the commit must leave the receipt exactly as it was.");
 
         // The next run neither finds an unfinished transaction nor a lease still held.
-        new SquadTransaction(h.Store).Execute(PlanGlobalReceiptRewrite(h));
+        RealSquadDeployment.Transaction(h.Store).Execute(PlanGlobalReceiptRewrite(h));
     }
 
     /// <summary>
@@ -1534,7 +1534,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
     /// </summary>
     private static void RewriteGlobalReceiptWithoutGuidance(Harness h)
     {
-        new SquadTransaction(h.Store).Execute(PlanGlobalReceiptRewrite(h));
+        RealSquadDeployment.Transaction(h.Store).Execute(PlanGlobalReceiptRewrite(h));
     }
 
     /// <summary>A plan that re-plans the files already deployed over the global receipt, ready to commit.</summary>

@@ -426,6 +426,20 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path)
+    {
+        Enter(nameof(OpenGuarded), path);
+        Node file = ResolveRequiredFile(path);
+        if (file.ExclusiveHeld || file.AppendersOpen > 0)
+        {
+            throw new IOException($"The process cannot access the file '{path}' because it is being used by another process.");
+        }
+
+        file.ExclusiveHeld = true;
+        return new GuardStream(file);
+    }
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path)
     {
         Enter(nameof(OpenAppendShared), path);
@@ -1150,6 +1164,30 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
                 _released = true;
                 _file.Content = ToArray();
                 _file.LastWriteTimeUtc = _time.GetUtcNow().UtcDateTime;
+                _file.ExclusiveHeld = false;
+            }
+
+            base.Dispose(disposing);
+        }
+    }
+
+    /// <summary>A read-only stream over a guarded file; the guard ends when it is disposed and the file is never written.</summary>
+    private sealed class GuardStream : MemoryStream
+    {
+        private readonly Node _file;
+        private bool _released;
+
+        internal GuardStream(Node file)
+            : base(file.Content, writable: false)
+        {
+            _file = file;
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && !_released)
+            {
+                _released = true;
                 _file.ExclusiveHeld = false;
             }
 

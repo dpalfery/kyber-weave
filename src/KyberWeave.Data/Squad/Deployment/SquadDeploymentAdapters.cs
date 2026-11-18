@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
@@ -15,10 +16,20 @@ public sealed class FileSquadSourceLoader : ISquadSourceLoader
 
 /// <summary>Creates deployment transactions over the state store.</summary>
 /// <param name="stateStore">The state store the transactions journal in.</param>
-public sealed class SquadTransactionFactory(ISquadStateStore stateStore) : ISquadTransactionFactory
+/// <param name="files">The file system the transactions read and write through.</param>
+/// <param name="semantics">The path rules the transactions resolve deployment paths with.</param>
+/// <param name="lease">The lease that serialises deployments of one root.</param>
+/// <param name="ids">Names each transaction and its temporary files.</param>
+public sealed class SquadTransactionFactory(
+    ISquadStateStore stateStore,
+    IWritableFileSystem files,
+    IFileSystemPathSemantics semantics,
+    ILease lease,
+    IIdGenerator ids) : ISquadTransactionFactory
 {
     /// <inheritdoc />
-    public ISquadTransaction Create(ISquadTransactionObserver? observer) => new SquadTransaction(stateStore, observer);
+    public ISquadTransaction Create(ISquadTransactionObserver? observer) =>
+        new SquadTransaction(stateStore, files, semantics, lease, ids, observer);
 }
 
 /// <summary>Reads and deploys the response guidance under the user's home.</summary>

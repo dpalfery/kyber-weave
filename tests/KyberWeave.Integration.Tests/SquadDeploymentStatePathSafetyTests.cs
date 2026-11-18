@@ -290,7 +290,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             fixture.Path,
             SquadTransactionCheckpointKind.Prepared);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            new SquadTransaction(store, observer).Execute(plan));
+            RealSquadDeployment.Transaction(store, observer).Execute(plan));
         RestoreTree(
             fixture.Path,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
@@ -308,7 +308,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         WriteJsonObject(intentPath, intent);
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixture.Path);
 
-        Exception? exception = Record.Exception(() => new SquadTransaction(store).Recover(
+        Exception? exception = Record.Exception(() => RealSquadDeployment.Transaction(store).Recover(
             targetRoot,
             SquadDeploymentScope.Global));
 
@@ -405,7 +405,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             store.ResolveReceiptPath(lowerRoot, SquadDeploymentScope.Global));
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = new(store, blocker);
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
         SquadDeploymentPlan upperPlan = RealSquadDeployment.Planner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
@@ -422,7 +422,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         Exception? siblingFailure;
         try
         {
-            SquadTransaction siblingTransaction = new(store);
+            SquadTransaction siblingTransaction = RealSquadDeployment.Transaction(store);
             SquadDeploymentPlan lowerPlan = RealSquadDeployment.Planner.CreateInstall(
                 lowerRoot,
                 SquadDeploymentScope.Project,

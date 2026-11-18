@@ -108,6 +108,9 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public Stream OpenExclusive(string path) => _inner.OpenExclusive(path);
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) => _inner.OpenGuarded(path);
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path) => _inner.OpenAppendShared(path);
 
     /// <inheritdoc />

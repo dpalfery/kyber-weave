@@ -138,7 +138,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
         int applyStart = source.IndexOf("private void ApplyFiles", StringComparison.Ordinal);
         int restoreStart =
-            source.IndexOf("private static IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
+            source.IndexOf("private IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);
         Assert.True(applyStart >= 0 && restoreStart > applyStart);
         string liveApplySource = source[applyStart..restoreStart];
 
@@ -209,7 +209,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
             fixture.Path,
             SquadTransactionCheckpointKind.Prepared);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            new SquadTransaction(store, observer).Execute(CreateGlobalInstallPlan(targetRoot)));
+            RealSquadDeployment.Transaction(store, observer).Execute(CreateGlobalInstallPlan(targetRoot)));
         RestoreTree(
             fixture.Path,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
@@ -222,7 +222,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
         JsonArray createdDirectories = Assert.IsType<JsonArray>(intent["createdDirectories"]);
         AssertCreatedDirectoryAuthorityIsCanonical(createdDirectories);
 
-        new SquadTransaction(store).Recover(targetRoot, SquadDeploymentScope.Global);
+        RealSquadDeployment.Transaction(store).Recover(targetRoot, SquadDeploymentScope.Global);
 
         AssertTreesEqual(before, CaptureTree(fixture.Path));
     }
@@ -269,7 +269,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
             fixture.Path,
             checkpoint,
             recoveryScenario.Subject);
-        SquadTransaction transaction = new(store, observer);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
 
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
             transaction.Execute(recoveryScenario.Plan));

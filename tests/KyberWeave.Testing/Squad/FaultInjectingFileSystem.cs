@@ -147,6 +147,9 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
     public Stream OpenWriteNew(string path) => Do(nameof(OpenWriteNew), path, () => inner.OpenWriteNew(path));
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) => Do(nameof(OpenGuarded), path, () => inner.OpenGuarded(path));
+
+    /// <inheritdoc />
     public Stream OpenExclusive(string path) => Do(nameof(OpenExclusive), path, () => inner.OpenExclusive(path));
 
     /// <inheritdoc />

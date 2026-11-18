@@ -132,6 +132,9 @@ internal sealed class FakeRepositoryFileStore(IRepositoryFileStore? inner = null
     public Stream OpenExclusive(string path) => _inner.OpenExclusive(path);
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) => _inner.OpenGuarded(path);
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path) => _inner.OpenAppendShared(path);
 
     /// <inheritdoc />

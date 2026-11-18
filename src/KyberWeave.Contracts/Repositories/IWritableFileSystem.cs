@@ -140,6 +140,18 @@ public interface IWritableFileSystem : IFileSystem
     /// <exception cref="IOException">An exclusive opener holds the file, or the file could not be opened.</exception>
     Stream OpenAppendShared(string path);
 
+    /// <summary>Opens an existing file for reading and keeps anyone else from changing or deleting it while the stream is open.</summary>
+    /// <param name="path">The file to guard.</param>
+    /// <returns>A read-only stream; disposing it ends the guard.</returns>
+    /// <remarks>
+    /// Other readers still read the file. Another <see cref="OpenExclusive(string)"/> on it is refused, and on a
+    /// platform that enforces sharing a write or a delete of it is refused too. The file's content is never changed by
+    /// this stream.
+    /// </remarks>
+    /// <exception cref="FileNotFoundException">The file does not exist.</exception>
+    /// <exception cref="IOException">Another open already holds the file in a way that conflicts.</exception>
+    Stream OpenGuarded(string path);
+
     /// <summary>Moves a directory and everything under it to a path that must be free, as one rename.</summary>
     /// <param name="sourcePath">The directory to move.</param>
     /// <param name="destinationPath">Where it goes; nothing may be there, and its parent directory must exist.</param>

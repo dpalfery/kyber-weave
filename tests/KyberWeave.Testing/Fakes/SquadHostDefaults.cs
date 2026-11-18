@@ -84,7 +84,7 @@ internal static class SquadHostDefaults
         SquadStateStore? stateStore = null,
         ISquadUserPaths? userPaths = null,
         ISquadTransactionObserver? observer = null) =>
-        new(stateStore ?? ResolveStateStore(userPaths), observer);
+        RealSquadDeployment.Transaction(stateStore ?? ResolveStateStore(userPaths), observer);
 
     /// <summary>Creates a lifecycle service over the physical adapters, replacing whichever collaborators are given.</summary>
     [SuppressMessage(
@@ -137,7 +137,7 @@ internal static class SquadHostDefaults
             new FileSquadSourceLoader(),
             new FileSquadModelPresetValidator(),
             RealSquadDeployment.Planner,
-            new SquadTransactionFactory(stateStore),
+            RealSquadDeployment.TransactionFactory(stateStore),
             new FileSquadResponseGuidanceStore(),
             new FileFactoryHooksShadowing(),
             new SquadCanonicalProfileStore(stateStore.UserPaths),

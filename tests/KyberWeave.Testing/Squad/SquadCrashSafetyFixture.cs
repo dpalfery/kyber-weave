@@ -214,7 +214,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     public override IReadOnlyList<string> ExecuteClean(SquadCrashFlow flow)
     {
         RecordingObserver observer = new(Capture);
-        new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
+        RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
         return observer.FaultPoints;
     }
 
@@ -225,7 +225,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         string? problem = null;
         try
         {
-            new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
+            RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
             problem = "The flow completed without reaching the fault point.";
         }
         catch (SquadCrashInjectedException)
@@ -250,7 +250,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
         RecordingObserver observer = new(failAt: faultPoint);
         try
         {
-            new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
+            RealSquadDeployment.Transaction(StateStore, observer).Execute(CreatePlan(flow));
             return "The flow completed without reaching the fault point.";
         }
         catch (SquadCrashInjectedException)
@@ -266,8 +266,8 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     /// <inheritdoc />
     public override void Recover()
     {
-        new SquadTransaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
-        new SquadTransaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
+        RealSquadDeployment.Transaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
+        RealSquadDeployment.Transaction(StateStore).Recover(Root, SquadDeploymentScope.Project);
     }
 
     /// <inheritdoc />

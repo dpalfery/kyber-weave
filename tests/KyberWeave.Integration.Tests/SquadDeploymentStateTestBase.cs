@@ -1300,7 +1300,7 @@ public abstract class SquadDeploymentStateTestBase
         string targetRoot = Path.Combine(fixture.Path, "target");
         Directory.CreateDirectory(targetRoot);
         RecordingObserver observer = new(targetRoot);
-        new SquadTransaction(
+        RealSquadDeployment.Transaction(
             Store(Path.Combine(fixture.Path, "application-data")),
             observer).Execute(CreateGlobalInstallPlan(targetRoot));
         return observer.Steps.Count;
@@ -1513,7 +1513,7 @@ public abstract class SquadDeploymentStateTestBase
         string applicationData,
         ISquadTransactionObserver? observer = null)
     {
-        return new SquadTransaction(Store(applicationData), observer);
+        return RealSquadDeployment.Transaction(Store(applicationData), observer);
     }
 
     internal static bool IsHeldWithExclusiveFileShare(string path)
