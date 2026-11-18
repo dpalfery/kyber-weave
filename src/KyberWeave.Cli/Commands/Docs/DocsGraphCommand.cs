@@ -15,7 +15,8 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsExportGraphCommand(
     IManagedGlossaryFactory glossaries,
     ICodeGraphPortsFactory codeGraph,
-    IKyberWeaveConfigRepository configs) : Command<DocsExportGraphSettings>
+    IKyberWeaveConfigRepository configs,
+    IWritableFileSystem files) : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
@@ -57,7 +58,7 @@ public sealed class DocsExportGraphCommand(
                 ManagedGlossary.ValidationRuleCode);
             return 1;
         }
-        DocGraphExportResult result = new DocGraphExporter(resolver).Export(
+        DocGraphExportResult result = new DocGraphExporter(resolver, files).Export(
             set,
             settings.Out,
             contributors: [glossaryContributor]);

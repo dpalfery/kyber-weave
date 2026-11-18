@@ -313,7 +313,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
-| `DocGraphExporter` (`Docs/Export/DocGraphExporter.cs`) | file system | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
 | `DocumentLoader` (`Docs/Parsing/DocumentLoader.cs`) | file system, paths | 4.4 |
 | `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: 4.9 |

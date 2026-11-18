@@ -111,7 +111,8 @@ internal static class DocsTestCommands
     public static DocsExportGraphCommand ExportGraph() => new(
         Services().GetRequiredService<IManagedGlossaryFactory>(),
         Services().GetRequiredService<ICodeGraphPortsFactory>(),
-        Services().GetRequiredService<IKyberWeaveConfigRepository>());
+        Services().GetRequiredService<IKyberWeaveConfigRepository>(),
+        Services().GetRequiredService<IWritableFileSystem>());
 
     public static DocsRootRegistry Registry(string root, Func<string, DocsTools> factory)
     {

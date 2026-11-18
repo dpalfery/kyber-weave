@@ -16,11 +16,12 @@ namespace KyberWeave.Core.Docs.Export;
 /// export carries document nodes and the document-to-code join edges only. An external
 /// ingester consumes it alongside the CodeGraph index, not instead of it.
 /// </remarks>
-public sealed class DocGraphExporter(ICodeGraphResolver resolver)
+public sealed class DocGraphExporter(ICodeGraphResolver resolver, IWritableFileSystem files)
 {
     private static readonly JsonSerializerOptions Compact = new() { WriteIndented = false };
 
     private readonly ICodeGraphResolver _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
+    private readonly IWritableFileSystem _files = files ?? throw new ArgumentNullException(nameof(files));
 
     public DocGraphExportResult Export(DocumentSet set, string outputDirectory)
     {
@@ -36,11 +37,10 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver)
         ArgumentNullException.ThrowIfNull(set);
         ArgumentException.ThrowIfNullOrWhiteSpace(outputDirectory);
 
-        Directory.CreateDirectory(outputDirectory);
+        _files.CreateDirectory(outputDirectory);
         string nodesPath = Path.Combine(outputDirectory, "nodes.jsonl");
         string edgesPath = Path.Combine(outputDirectory, "edges.jsonl");
 
-        // Data cannot reach the Application builder, so the port is bound to the pure projection here.
         List<DocGraphContribution>? contributions = contributors?
             .Select(contributor => contributor.Contribute(set, _resolver)
                                    ?? throw new InvalidOperationException(
@@ -55,11 +55,14 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver)
         List<string> nodeLines = projection.Nodes.Select(Node).ToList();
         List<string> edgeLines = projection.Edges.Select(Edge).ToList();
 
-        File.WriteAllLines(nodesPath, nodeLines);
-        File.WriteAllLines(edgesPath, edgeLines);
+        _files.WriteAllText(nodesPath, Joined(nodeLines));
+        _files.WriteAllText(edgesPath, Joined(edgeLines));
 
         return new DocGraphExportResult(nodeLines.Count, edgeLines.Count, nodesPath, edgesPath);
     }
+
+    private static string Joined(IEnumerable<string> lines) =>
+        string.Concat(lines.Select(line => line + Environment.NewLine));
 
     private static string Node(DocGraphNode node)
     {
