@@ -82,6 +82,24 @@ public sealed class SquadUninstallCommandTests
     }
 
     [Fact]
+    public void Execute_AnInterruptedTransactionWasRecovered_PrintsTheRecoveryNotice()
+    {
+        FakeSquadLifecycleService lifecycle = new(_state)
+        {
+            Result = new SquadLifecycleResult(true, Warnings: ["Recovered an unfinished Squad transaction at '/kw/work/.kyber-weave/.squad-transaction': it had not committed, so its changes were rolled back."])
+        };
+
+        int exit = Command(lifecycle).Execute(null!, new SquadUninstallSettings());
+
+        Assert.Equal(0, exit);
+        Assert.Contains(
+            "warning: Recovered an unfinished Squad transaction at '/kw/work/.kyber-weave/.squad-transaction': " +
+            "it had not committed, so its changes were rolled back.\n",
+            Output(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Execute_YesFlag_SkipsTheQuestionAndRemoves()
     {
         FakeSquadLifecycleService lifecycle = new(_state);

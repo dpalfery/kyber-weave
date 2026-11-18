@@ -197,6 +197,7 @@ internal sealed class SquadUninstallCommand : Command<SquadUninstallSettings>
                 {
                     _output.Ansi.MarkupLine(
                         $"[grey]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/]. Nothing to uninstall.[/]");
+                    _output.WriteTransactionWarnings(result.Warnings);
                     return 0;
                 }
 
