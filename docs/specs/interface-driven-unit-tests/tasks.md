@@ -199,6 +199,14 @@ from this file when it is marked Ready.
     3. **Step 1 — the folder tasks below**, in the order the `depends on` column gives. Acceptance: each
        folder task meets the acceptance criteria below, and `dotnet build src/KyberWeave.Domain` after
        its `git mv` proves the order.
+    Step 0 outcomes recorded 2026-11-18: these `Data` files wait for phase 3, because squad deployment
+    code names them or they need the lease semantics task 3.4 settles: `Squad/Rendering`'s
+    `FileSquadRenderInputReader`, `CopilotMcpServerProbe` and `SquadOperatorChannelOverlayFile` (they move
+    together once `SquadWorkerBaselineFile` has an interface), `Squad/Presets/SquadModelPresetValidator`, and
+    `Squad/Instances/SquadInstanceLinkSync` (its unbounded, in-process-queuing mutex wait needs an `ILease`
+    acquire that waits; decide it with 3.4). These stay adapters in `Data`, each now a phase 4 conversion
+    rather than a move: `Doctor/FileCodeGraphIndexWorkspace` (task 4.9), `Update/CopilotPromptRefresher`
+    (task 4.1); and `Configuration/FileKyberWeaveConfigRepository` is narrowed under step 0b.
     The squad deployment classes in `Data/Squad/Deployment` are not moved by this task: they reach
     `Application` in tasks 3.2 to 3.4, behind the crash-safety contract tests and the second reviewer
     requirement 10.2 asks for, and the Domain group they pin (2.5.3) moves after 3.4.
