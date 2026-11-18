@@ -9,24 +9,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class InMemorySquadCrashSafetyTests : SquadCrashSafetyContractTests
 {
-    /// <summary>
-    /// Stop points that leave recovery refusing the journal today. Each entry is a symptom, matched at any point of the
-    /// flow because the sweep reaches it at many operations; an entry goes when its fix lands.
-    /// </summary>
-    protected override IReadOnlyList<SquadCrashKnownWeakness> KnownWeaknesses =>
-    [
-        .. new[] { SquadCrashFlow.Install, SquadCrashFlow.Update, SquadCrashFlow.Uninstall }.SelectMany(flow => new[]
-        {
-            Weakness(flow, "no authoritative intent journal", "a kill during cleanup deletes the journal before the backups, so recovery refuses what is left"),
-            Weakness(flow, "a file the flow must not touch is missing", "a kill during cleanup is recovered as a rollback that removes an adopted file"),
-            Weakness(flow, "is missing or has the wrong node kind", "a kill during cleanup removes backups before the journal, so recovery refuses the journal"),
-            Weakness(flow, "is neither the whole old tree", "a kill leaves a tree that is neither the old nor the new one")
-        })
-    ];
+    /// <summary>Every stop point now recovers to the old or the complete new tree, so nothing is known to fail.</summary>
+    protected override IReadOnlyList<SquadCrashKnownWeakness> KnownWeaknesses => [];
 
     /// <inheritdoc />
     protected override SquadCrashSafetyFixture CreateFixture() => new InMemorySquadCrashSafetyFixture();
-
-    private static SquadCrashKnownWeakness Weakness(SquadCrashFlow flow, string symptom, string reason) =>
-        new(flow, SquadCrashKnownWeakness.AnyPoint, symptom, reason);
 }

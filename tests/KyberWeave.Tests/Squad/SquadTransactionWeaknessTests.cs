@@ -83,6 +83,89 @@ public sealed class SquadTransactionWeaknessTests
             }));
     }
 
+    [Fact]
+    public void AKillDuringCleanupAfterTheCommitIsFinishedByRecoveryAtEveryStep()
+    {
+        foreach (SquadCrashFlow flow in new[] { SquadCrashFlow.Install, SquadCrashFlow.Update, SquadCrashFlow.Uninstall })
+        {
+            IReadOnlyDictionary<string, SquadTreeEntry> newTree;
+            int deletesBeforeTheLastJournalWrite = 0;
+            using (InMemorySquadCrashSafetyFixture clean = new())
+            {
+                clean.CreateBaseline(flow);
+                int seen = 0;
+                clean.Files.KillWhen(operation =>
+                {
+                    if (IsTransactionDelete(operation))
+                    {
+                        seen++;
+                    }
+                    else if (operation.Name == "MoveFile" && operation.DestinationPath!.EndsWith("intent.json", StringComparison.Ordinal))
+                    {
+                        deletesBeforeTheLastJournalWrite = seen;
+                    }
+
+                    return false;
+                });
+                clean.Transaction().Execute(clean.Plan(flow));
+                clean.Files.ClearFaults();
+                newTree = clean.Capture();
+            }
+
+            for (int step = 1; step < 200; step++)
+            {
+                using InMemorySquadCrashSafetyFixture fixture = new();
+                fixture.CreateBaseline(flow);
+                SquadDeploymentPlan plan = fixture.Plan(flow);
+                int deletes = 0;
+                int target = deletesBeforeTheLastJournalWrite + step;
+                fixture.Files.KillWhen(operation => IsTransactionDelete(operation) && ++deletes == target);
+
+                Exception? stopped = Record.Exception(() => fixture.Transaction().Execute(plan));
+                if (stopped is null)
+                {
+                    Assert.True(step > 1, "Cleanup never deleted anything.");
+                    break;
+                }
+
+                Assert.True(InMemorySquadCrashSafetyFixture.IsKill(stopped), "The flow failed without being killed.");
+                fixture.Files.ClearFaults();
+                fixture.Recover();
+
+                Assert.Null(SquadTreeComparison.Difference(newTree, fixture.Capture()));
+            }
+        }
+    }
+
+    [Fact]
+    public void AJournalWrittenBeforeTheCommittedPhaseStillRecoversToTheOldTree()
+    {
+        using InMemorySquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Update);
+        IReadOnlyDictionary<string, SquadTreeEntry> oldTree = fixture.Capture();
+        SquadDeploymentPlan plan = fixture.Plan(SquadCrashFlow.Update);
+        fixture.Files.KillWhen(operation =>
+            InMemorySquadCrashSafetyFixture.IsMutating(operation)
+            && !operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal)
+            && !operation.Path.Contains(".squad-transaction", StringComparison.Ordinal));
+
+        Exception? stopped = Record.Exception(() => fixture.Transaction().Execute(plan));
+        Assert.True(stopped is not null && InMemorySquadCrashSafetyFixture.IsKill(stopped), "The flow was not killed.");
+        fixture.Files.ClearFaults();
+        string journal = fixture.Files.ReadAllText(
+            fixture.Files.EnumerateFiles(fixture.Root, "intent.json", true).Single());
+        Assert.Contains("\"prepared\"", journal, StringComparison.Ordinal);
+        Assert.DoesNotContain("committed", journal, StringComparison.Ordinal);
+
+        fixture.Recover();
+
+        Assert.Null(SquadTreeComparison.Difference(oldTree, fixture.Capture()));
+    }
+
+    private static bool IsTransactionDelete(FileSystemOperation operation) =>
+        operation.Name.StartsWith("Delete", StringComparison.Ordinal)
+        && operation.Path!.Contains(".kyber-weave", StringComparison.Ordinal);
+
     private static bool IsIntentTemporary(string? path) =>
         path is not null && Path.GetFileName(path).StartsWith("intent.json.", StringComparison.Ordinal)
         && path.EndsWith(".tmp", StringComparison.Ordinal);

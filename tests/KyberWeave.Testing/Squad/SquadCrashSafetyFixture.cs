@@ -170,8 +170,10 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     public IReadOnlyList<string> UntouchedPaths(SquadCrashFlow flow) => flow switch
     {
         SquadCrashFlow.Install => [RelativeKey(ForeignPath), RelativeKey(AdoptedPath)],
-        SquadCrashFlow.Update or SquadCrashFlow.Uninstall =>
-            [RelativeKey(ForeignPath), RelativeKey(AdoptedPath), RelativeKey(EditedPath)],
+        SquadCrashFlow.Update => [RelativeKey(ForeignPath), RelativeKey(AdoptedPath), RelativeKey(EditedPath)],
+
+        // Uninstall removes the adopted file as it removes every file the install owns and the host has not changed.
+        SquadCrashFlow.Uninstall => [RelativeKey(ForeignPath), RelativeKey(EditedPath)],
         _ => throw new ArgumentOutOfRangeException(nameof(flow), flow, null)
     };
 

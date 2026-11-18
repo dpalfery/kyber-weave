@@ -343,7 +343,8 @@ public sealed class SquadTransaction : ISquadTransaction
             }
 
             lease.ReleaseJournal();
-            CleanupOwnedArtifacts(journalDirectory, workDirectory);
+            MarkCleanupOnly(intentPath, intent);
+            CleanupOwnedArtifacts(journalDirectory, workDirectory, keepIntent: true);
             RecordProjectRegistration(plan, stateDirectory);
         }
         catch
@@ -362,7 +363,7 @@ public sealed class SquadTransaction : ISquadTransaction
             // every path and skips anything non-empty. On success that is the state directory itself.
             if (ownsNewTransaction && !retainTransaction)
             {
-                DeleteEmptyDirectory(journalDirectory);
+                RemoveJournal(journalDirectory, journalDirectoriesCreated);
                 RemoveCreatedDirectories(workDirectoriesCreated);
                 RemoveCreatedDirectories(stateDirectoriesCreated);
                 RemoveCreatedDirectories(journalDirectoriesCreated);
@@ -397,13 +398,16 @@ public sealed class SquadTransaction : ISquadTransaction
                 DiscardUnpublishedIntentTemporaries(journalDirectory);
             else
             {
-                if (HasAnyFile(journalDirectory) ||
+                // A kill inside the very first journal write leaves only that unpublished temporary file. With any
+                // other file the temporary file may be the only copy of the journal, so it is left for the refusal.
+                if (HasAnyFileOtherThanIntentTemporaries(journalDirectory) ||
                     (!_semantics.AreSame(journalDirectory, workDirectory) && HasAnyFile(workDirectory)))
                     throw new InvalidDataException(
                         "Squad transaction has preparation artifacts but no authoritative intent journal.");
 
                 // The intent is written before anything else, so a transaction with no intent and no file has
                 // changed nothing: only the folders it made are left, and they are empty.
+                DiscardUnpublishedIntentTemporaries(journalDirectory);
                 CleanupOwnedArtifacts(journalDirectory, workDirectory);
                 RemoveEmptyDirectoriesUpTo(
                     journalDirectory,
@@ -423,6 +427,15 @@ public sealed class SquadTransaction : ISquadTransaction
                 _stateStore.ResolveHomeStateDirectory());
             string lockPath = PhysicalLeaf(_stateStore.ResolveLockPath(root, scope));
             string receiptPath = PhysicalLeaf(_stateStore.ResolveReceiptPath(root, scope));
+            if (intent.Phase == TransactionPhase.Committed)
+            {
+                // The deployment finished; a kill during cleanup left a partial transaction tree. Finish forward.
+                createdDirectoriesToRemove = intent.CreatedDirectories;
+                CleanupOwnedArtifacts(journalDirectory, workDirectory);
+                recoveryCompleted = true;
+                return;
+            }
+
             ResolveActiveClaims(
                 intent,
                 journalDirectory,
@@ -437,6 +450,7 @@ public sealed class SquadTransaction : ISquadTransaction
                     "The verified journal was retained for recovery.");
             createdDirectoriesToRemove = intent.CreatedDirectories;
 
+            MarkCleanupOnly(intentPath, intent);
             CleanupOwnedArtifacts(journalDirectory, workDirectory);
             recoveryCompleted = true;
         }
@@ -2213,7 +2227,8 @@ public sealed class SquadTransaction : ISquadTransaction
 
     private void CleanupOwnedArtifacts(
         string journalDirectory,
-        string workDirectory)
+        string workDirectory,
+        bool keepIntent = false)
     {
         if (!_semantics.AreSame(journalDirectory, workDirectory) &&
             _files.DirectoryExists(workDirectory))
@@ -2222,14 +2237,73 @@ public sealed class SquadTransaction : ISquadTransaction
         if (!_files.DirectoryExists(journalDirectory))
             return;
 
-        foreach (FileSystemEntry entry in _files.EnumerateEntries(journalDirectory))
-            if (entry.IsLink)
+        // The journal goes last: a kill in between leaves a journal that still names the transaction, so recovery
+        // finishes the cleanup instead of meeting leftovers with no journal.
+        string? intentEntry = null;
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(journalDirectory).ToArray())
+            if (!entry.IsLink && !entry.IsDirectory &&
+                string.Equals(Path.GetFileName(entry.Path), IntentFileName, StringComparison.Ordinal))
+                intentEntry = entry.Path;
+            else if (entry.IsLink)
                 _files.DeleteTreeNoFollow(entry.Path);
             else if (entry.IsDirectory)
                 DeleteDirectoryTree(entry.Path);
             else
                 _files.DeleteFile(entry.Path);
+
+        if (intentEntry is not null && !keepIntent)
+            _files.DeleteFile(intentEntry);
     }
+
+    /// <summary>
+    ///     Removes the journal and the folders this transaction made for it. When the journal is all that is left, the
+    ///     topmost folder it made goes in one step, intent included: a kill then leaves either the whole committed
+    ///     journal or nothing, never a bare folder that nothing explains.
+    /// </summary>
+    private void RemoveJournal(string journalDirectory, IReadOnlyList<string> journalDirectoriesCreated)
+    {
+        string intentPath = Path.Combine(journalDirectory, IntentFileName);
+        string? top = journalDirectoriesCreated.Count > 0 ? journalDirectoriesCreated[^1] : null;
+        if (top is not null &&
+            (_semantics.AreSame(top, journalDirectory) || _semantics.IsWithin(top, journalDirectory)) &&
+            GetEntryKind(top) == OriginalEntryKind.Directory &&
+            ContainsNothingBut(top, intentPath))
+        {
+            _files.DeleteTreeNoFollow(top);
+            return;
+        }
+
+        if (_files.FileExists(intentPath))
+            _files.DeleteFile(intentPath);
+        DeleteEmptyDirectory(journalDirectory);
+    }
+
+    private bool ContainsNothingBut(string directory, string intentPath)
+    {
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(directory))
+            if (entry.IsLink ||
+                (entry.IsDirectory
+                    ? !ContainsNothingBut(entry.Path, intentPath)
+                    : !_semantics.AreSame(entry.Path, intentPath)))
+                return false;
+
+        return true;
+    }
+
+    /// <summary>
+    ///     Records that the transaction is decided and only cleanup is left, so a kill while the backups and the
+    ///     staging area are being deleted is finished forward instead of refused for the pieces already gone.
+    /// </summary>
+    private void MarkCleanupOnly(string intentPath, IntentDocument intent) =>
+        WriteIntent(
+            intentPath,
+            intent with
+            {
+                Phase = TransactionPhase.Committed,
+                Artifacts = Array.Empty<IntentArtifact>(),
+                ActiveTransitions = Array.Empty<IntentTransition>()
+            },
+            true);
 
     private void WriteIntent(
         string intentPath,
@@ -2275,13 +2349,29 @@ public sealed class SquadTransaction : ISquadTransaction
     {
         foreach (FileSystemEntry entry in _files.EnumerateEntries(journalDirectory))
         {
-            string name = Path.GetFileName(entry.Path);
-            if (!entry.IsDirectory &&
-                !entry.IsLink &&
-                name.StartsWith(IntentFileName + ".", StringComparison.Ordinal) &&
-                name.EndsWith(".tmp", StringComparison.Ordinal))
+            if (!entry.IsDirectory && !entry.IsLink && IsIntentTemporary(entry.Path))
                 _files.DeleteFile(entry.Path);
         }
+    }
+
+    private bool HasAnyFileOtherThanIntentTemporaries(string directory)
+    {
+        if (!_files.DirectoryExists(directory))
+            return false;
+
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(directory))
+            if (entry.IsLink ||
+                (entry.IsDirectory ? HasAnyFile(entry.Path) : !IsIntentTemporary(entry.Path)))
+                return true;
+
+        return false;
+    }
+
+    private static bool IsIntentTemporary(string path)
+    {
+        string name = Path.GetFileName(path);
+        return name.StartsWith(IntentFileName + ".", StringComparison.Ordinal) &&
+               name.EndsWith(".tmp", StringComparison.Ordinal);
     }
 
     private bool HasAnyFile(string directory)
@@ -2417,7 +2507,7 @@ public sealed class SquadTransaction : ISquadTransaction
             else if (intent.Artifacts.Count != 0 || intent.ActiveTransitions.Count != 0)
             {
                 throw new InvalidDataException(
-                    "Squad preparing journal cannot claim published artifacts.");
+                    "Squad preparing or committed journal cannot claim published artifacts.");
             }
 
             return intent;
@@ -2461,7 +2551,7 @@ public sealed class SquadTransaction : ISquadTransaction
         RequireCanonicalJsonEnum(
             document.RootElement,
             "phase",
-            ["preparing", "prepared"],
+            ["preparing", "prepared", "committed"],
             "transaction intent");
         RequireCanonicalNodeKind(document.RootElement, "lockKind", "transaction intent");
         RequireCanonicalNodeKind(document.RootElement, "lockAfterKind", "transaction intent");
@@ -3337,7 +3427,12 @@ public sealed class SquadTransaction : ISquadTransaction
     private enum TransactionPhase
     {
         Preparing,
-        Prepared
+        Prepared,
+
+        // Every after-image is published and the transaction is final. Only cleanup is left, and cleanup deletes the
+        // backups and the staging area piecemeal, so a kill leaves a partial tree that recovery finishes forward
+        // instead of rolling back. A journal written before this phase existed never carries it and recovers as before.
+        Committed
     }
 
     private enum OriginalEntryKind
