@@ -1,19 +1,16 @@
-using System.Diagnostics;
 using System.Xml.Linq;
 using KyberWeave.Cli;
-using KyberWeave.Core.Processes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Every command and branch of the real CLI must render its <c>--help</c>. Spectre.Console parses an option
-/// description as markup, so an unescaped <c>[0, 1]</c> in one makes the help fail after the usage line.
+/// description as markup, so an unescaped <c>[0, 1]</c> in one makes the help fail after the usage line. The
+/// built host program renders its root help in <c>CliRealHostHelpTests</c> in the integration project.
 /// </summary>
 public sealed class CliHelpRenderingTests
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
-
     private const int TailLength = 160;
 
     [Theory]
@@ -35,17 +32,6 @@ public sealed class CliHelpRenderingTests
         Assert.EndsWith("the end", tail, StringComparison.Ordinal);
         Assert.DoesNotContain('\r', tail);
         Assert.DoesNotContain('\n', tail);
-    }
-
-    [Fact]
-    public void TheRealHostRendersTheRootHelp()
-    {
-        ProcessResult result = RunCli(["--help"]);
-        string output = result.StandardOutput + "\n" + result.StandardError;
-
-        Assert.Equal(0, result.ExitCode);
-        Assert.DoesNotContain("Could not find color or style", output, StringComparison.Ordinal);
-        Assert.DoesNotContain("Error:", output, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -99,23 +85,5 @@ public sealed class CliHelpRenderingTests
     private static CapturedConsoleExecution<int> RunInProcess(string[] args, int width = 0)
     {
         return ProcessConsoleCapture.Run(() => CliApplication.Create().Run(args), width);
-    }
-
-    private static ProcessResult RunCli(string[] args)
-    {
-        string host = Path.Combine(AppContext.BaseDirectory, OperatingSystem.IsWindows() ? "kyber-weave.exe" : "kyber-weave");
-        Assert.True(File.Exists(host), $"The kyber-weave host '{host}' is missing from the test output directory.");
-        ProcessStartInfo startInfo = new(host)
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        foreach (string argument in args)
-            startInfo.ArgumentList.Add(argument);
-
-        return ProcessRunner.Run(startInfo, string.Empty, Timeout);
     }
 }
