@@ -116,7 +116,7 @@ review:
     # and invisible in the report, which records one line per gate regardless. The build
     # gate above is what makes `--no-build` safe; that coupling is why it stays here.
     - id: skill-validate
-      include: &skill-authoring-paths [".apm/skills/kyber-docs-authoring/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-authoring-paths [".apm/skills/kyber-docs-authoring/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-authoring]
       blocking: true
     - id: skill-lint
@@ -136,7 +136,7 @@ review:
     # per skill, one per verb, or a new skill is discoverable to an agent but
     # never gated.
     - id: skill-validate-cli
-      include: &skill-cli-paths [".apm/skills/kyber-weave-cli/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-cli-paths [".apm/skills/kyber-weave-cli/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-cli]
       blocking: true
     - id: skill-lint-cli
@@ -150,7 +150,7 @@ review:
     # The integrity-review skill moved out of .apm's retired
     # `doc-corpus-integrity-review` directory to its Kyber-Docs name.
     - id: skill-validate-integrity-review
-      include: &skill-integrity-paths [".apm/skills/kyber-docs-integrity-review/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-integrity-paths [".apm/skills/kyber-docs-integrity-review/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-integrity-review]
       blocking: true
     - id: skill-lint-integrity-review
@@ -164,7 +164,7 @@ review:
     # The onboarding-and-assessment skill moved out of Squad's `second-brain`
     # directory to its Kyber-Docs home under .apm/skills.
     - id: skill-validate-onboarding-and-assessment
-      include: &skill-onboarding-paths [".apm/skills/kyber-docs-onboarding-and-assessment/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-onboarding-paths [".apm/skills/kyber-docs-onboarding-and-assessment/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-onboarding-and-assessment]
       blocking: true
     - id: skill-lint-onboarding-and-assessment
@@ -182,7 +182,7 @@ review:
     # than a Kyber-Weave product surface: it drives `kyber-weave doctor` and never runs
     # `codegraph` itself, so the gates below pin its trigger wording like any other skill.
     - id: skill-validate-codegraph
-      include: &skill-codegraph-paths [".apm/skills/codegraph/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-codegraph-paths [".apm/skills/codegraph/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/codegraph]
       blocking: true
     - id: skill-lint-codegraph
@@ -194,7 +194,7 @@ review:
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/codegraph, --fail-on, critical]
       blocking: true
     - id: skill-validate-model-profile
-      include: &skill-model-profile-paths [".apm/skills/kyber-weave-model-profile/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-model-profile-paths [".apm/skills/kyber-weave-model-profile/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-model-profile]
       blocking: true
     - id: skill-lint-model-profile
@@ -208,7 +208,7 @@ review:
     # The onboarding skill walks a new user through the whole setup, so its command examples
     # and per-harness tables are gated like the other skills' surfaces.
     - id: skill-validate-kw-onboarding
-      include: &skill-kw-onboarding-paths [".apm/skills/kw-onboarding/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-kw-onboarding-paths [".apm/skills/kw-onboarding/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kw-onboarding]
       blocking: true
     - id: skill-lint-kw-onboarding
@@ -222,7 +222,7 @@ review:
     # The spec-conductor skill orchestrates delivery of an existing specification bundle, so
     # its trigger wording and command examples are gated like the other skills' surfaces.
     - id: skill-validate-spec-conductor
-      include: &skill-spec-conductor-paths [".apm/skills/spec-conductor/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-spec-conductor-paths [".apm/skills/spec-conductor/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/spec-conductor]
       blocking: true
     - id: skill-lint-spec-conductor

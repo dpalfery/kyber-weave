@@ -4,7 +4,7 @@ title: Skill governance
 doc-type: architecture
 status: current
 component: ContextHygiene
-source-root: src/KyberWeave.Domain/Skills
+source-root: src/KyberWeave.Application/Skills
 owner: dpalfery
 last-reviewed: 2026-11-17
 code-refs:
