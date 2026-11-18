@@ -60,7 +60,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
-        services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
         services.TryAddSingleton<ISeverityOverrideSource>(_ => new FileSeverityOverrideSource());
         services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());

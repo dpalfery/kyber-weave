@@ -131,6 +131,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
         services.TryAddSingleton<IRepositoryTreeProbe>(sp => new FileRepositoryTreeProbe(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<INotSeatedStore>(sp => new FileNotSeatedStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();

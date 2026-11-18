@@ -327,7 +327,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CheckoutProductRootLocator` (`Host/CheckoutProductRootLocator.cs`) | paths | 4.4 |
 | `FileCitedSourceFiles` (`Review/FileCitedSourceFiles.cs`) | file system, paths | 4.4 |
 | `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
-| `FileNotSeatedStore` (`Review/FileNotSeatedStore.cs`) | file system | 4.4 |
 | `FileProjectFileLocator` (`Review/FileProjectFileLocator.cs`) | file system, paths | 4.4 |
 | `FileRepositoryFileLister` (`Review/FileRepositoryFileLister.cs`) | file system | 4.4 |
 | `FileReviewCycleStore` (`Review/FileReviewCycleStore.cs`) | file system, paths | 4.4 |

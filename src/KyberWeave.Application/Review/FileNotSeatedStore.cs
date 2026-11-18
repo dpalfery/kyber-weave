@@ -6,7 +6,8 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Keeps the not-seated record of a review cycle in its folder.</summary>
-public sealed class FileNotSeatedStore : INotSeatedStore
+/// <param name="files">Reads and writes the record and lists the cycle folders.</param>
+public sealed class FileNotSeatedStore(IWritableFileSystem files) : INotSeatedStore
 {
     /// <inheritdoc />
     public void Add(string cycleFolder, IReadOnlyDictionary<string, string> decisions) =>
@@ -18,8 +19,8 @@ public sealed class FileNotSeatedStore : INotSeatedStore
         ArgumentNullException.ThrowIfNull(cycleFolder);
         string text = NotSeatedRecord.Merge(Read(cycleFolder), owned, decisions);
 
-        Directory.CreateDirectory(cycleFolder);
-        File.WriteAllText(Path.Combine(cycleFolder, NotSeatedRecord.FileName), text);
+        files.CreateDirectory(cycleFolder);
+        files.WriteAllText(Path.Combine(cycleFolder, NotSeatedRecord.FileName), text);
     }
 
     /// <inheritdoc />
@@ -29,7 +30,7 @@ public sealed class FileNotSeatedStore : INotSeatedStore
         string path = Path.Combine(cycleFolder, NotSeatedRecord.FileName);
         try
         {
-            return NotSeatedRecord.Parse(File.Exists(path) ? File.ReadAllText(path) : null);
+            return NotSeatedRecord.Parse(files.FileExists(path) ? files.ReadAllText(path) : null);
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
         {
@@ -41,12 +42,12 @@ public sealed class FileNotSeatedStore : INotSeatedStore
     public string? LatestCycle(string reviewFolder)
     {
         ArgumentNullException.ThrowIfNull(reviewFolder);
-        if (!Directory.Exists(reviewFolder))
+        if (!files.DirectoryExists(reviewFolder))
             return null;
 
-        return Directory.EnumerateDirectories(reviewFolder, "cycle-*")
+        return files.EnumerateDirectories(reviewFolder)
             .Select(folder => (folder, number: NotSeatedRecord.CycleNumber(Path.GetFileName(folder))))
-            .Where(entry => entry.number > 0 && Directory.Exists(Path.Combine(entry.folder, "seats")))
+            .Where(entry => entry.number > 0 && files.DirectoryExists(Path.Combine(entry.folder, "seats")))
             .OrderByDescending(entry => entry.number)
             .Select(entry => entry.folder)
             .FirstOrDefault();
