@@ -293,8 +293,8 @@ from this file when it is marked Ready.
 Each task below is one folder; split further where the inventory shows more than about 30 sites.
 
 - [x] 4.1 `KyberWeave.Application/Update` (`SelfUpdater`, 29 sites)
-- [ ] 4.2 `KyberWeave.Application/Docs` (56 sites: `StandardsFolderMigration`, `TaskPromptService`, `DocumentIndexHost` and the rest)
-- [ ] 4.3 `KyberWeave.Application/Review` and `Arbiter` (71 sites: `GateRunService` deadline onto `TimeProvider`, `ReviewVerdictService` paths)
+- [x] 4.2 `KyberWeave.Application/Docs` (56 sites: `StandardsFolderMigration`, `TaskPromptService`, `DocumentIndexHost` and the rest)
+- [x] 4.3 `KyberWeave.Application/Review` and `Arbiter` (71 sites: `GateRunService` deadline onto `TimeProvider`, `ReviewVerdictService` paths)
 - [ ] 4.4 `KyberWeave.Data` outside `Squad/` (`Arbiter`, `Review`, `Hooks`, `Docs`, `Configuration` and the rest: about 630 sites)
 - [x] 4.5 `KyberWeave.Cli` (181 sites; `CommandHelpers`, `PlanArguments` and `SquadCommandComposition` first)
 - [x] 4.6 `KyberWeave.Mcp` (32 sites; `CodeGraphFreshness` first)
