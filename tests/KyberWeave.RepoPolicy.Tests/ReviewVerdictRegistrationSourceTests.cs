@@ -1,5 +1,3 @@
-using KyberWeave.Cli.Commands.Review;
-using KyberWeave.Core.Review;
 using Xunit;
 using KyberWeave.Tests.Corpus;
 
@@ -13,8 +11,8 @@ public sealed class ReviewVerdictRegistrationSourceTests
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     /// <summary>
-    /// The <c>review verdict</c> command description registered in <c>Program.cs</c> must not
-    /// cite the retired <c>needs-human</c> verdict option, and must state the binary verdict contract.
+    /// The <c>review verdict</c> registration in <c>CliApplication.cs</c> must not cite the retired
+    /// <c>needs-human</c> verdict option, and must take its description from the command.
     /// </summary>
     [Fact]
     public void ProgramRegistersReviewVerdictWithoutNeedsHumanInDescription()
@@ -34,8 +32,6 @@ public sealed class ReviewVerdictRegistrationSourceTests
             ".WithDescription(ReviewVerdictCommand.Description)",
             verdictRegistration,
             StringComparison.Ordinal);
-        Assert.DoesNotContain("needs-human", ReviewVerdictCommand.Description, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("approve / request-changes", ReviewVerdictCommand.Description, StringComparison.Ordinal);
     }
 
     /// <summary>

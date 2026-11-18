@@ -1,5 +1,4 @@
-using KyberWeave.Tests.Configuration;
-
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Graph;
@@ -7,6 +6,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Corpus;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -18,14 +18,24 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DocLinkFragmentValidationTests
 {
-    private static readonly string RepositoryRoot = CheckoutCorpusSource.Checkout.Root;
+    private const string HostConfig = ".kyber-weave/kyber-weave.yml";
+
+    private const string DocsRoot = "docs";
 
     [Fact]
     public void KnownBrokenCorpusFragmentsReportKWDOCLINK001()
     {
-        KyberWeaveConfig config = ConfigFileReader.Load(RepositoryRoot);
-        DocumentSet set = RealDocumentLoader.Create(RepositoryRoot, config.Ontology).Load();
-        DiagnosticReport report = RealDocSpecValidator.Create(RepositoryRoot, config.Ontology).Validate(set);
+        ICorpusSource corpus = CheckoutCorpusSource.Checkout;
+        MemoryDocsHost host = new();
+        host.WriteBytesInRepo(HostConfig, corpus.ReadBytes(HostConfig));
+        foreach (string path in corpus.EnumerateFiles(DocsRoot))
+        {
+            host.WriteBytesInRepo(path, corpus.ReadBytes(path));
+        }
+
+        KyberWeaveConfig config = host.Services().GetRequiredService<IKyberWeaveConfigRepository>().Load(host.Repo);
+        DocumentSet set = new DocumentLoader(host.Store, host.Repo, host.Paths, host.Environment, config.Ontology).Load();
+        DiagnosticReport report = new DocSpecValidator(host.Repo, config.Ontology, host.Store, host.Paths, host.Environment).Validate(set);
 
         List<LinkFragmentFinding> findings = report.Items
             .Where(item => item.Code == DocSpecValidator.BrokenLinkFragment)

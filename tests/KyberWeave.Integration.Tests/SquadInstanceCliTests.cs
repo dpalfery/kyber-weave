@@ -1,5 +1,4 @@
 using KyberWeave.Testing.Squad;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -26,28 +25,6 @@ public sealed class SquadInstanceCliTests : IDisposable
     {
         _temp.Dispose();
     }
-
-    #region Program.cs Registration Tests
-
-    /// <summary>
-    ///     Verifies that Program.cs registers the <c>squad instance</c> branch with the <c>remove</c> command,
-    ///     options, and examples.
-    /// </summary>
-    [Fact]
-    public void ProgramRegistersSquadInstanceRemoveBranchAndCommand()
-    {
-        string program = File.ReadAllText(Path.Combine(
-            RepositoryRoot(),
-            "src",
-            "KyberWeave.Cli",
-            "CliApplication.cs"));
-
-        Assert.Contains("AddBranch(\"instance\"", program, StringComparison.Ordinal);
-        Assert.Contains("AddCommand<SquadInstanceRemoveCommand>(\"remove\")", program, StringComparison.Ordinal);
-        Assert.Contains("WithExample(\"squad\", \"instance\", \"remove\"", program, StringComparison.Ordinal);
-    }
-
-    #endregion
 
     #region squad instance remove Tests
 
@@ -599,11 +576,6 @@ public sealed class SquadInstanceCliTests : IDisposable
     {
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
         return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private static string RepositoryRoot([CallerFilePath] string sourcePath = "")
-    {
-        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);

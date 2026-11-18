@@ -1,8 +1,7 @@
-using System.Runtime.CompilerServices;
-using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// The CLI's command registration, read from the checkout's own source file: the analyze, review and glossary
@@ -13,11 +12,7 @@ public sealed class DocsAnalysisCommandRegistrationTests
     [Fact]
     public void ProgramRegistersAnalyzeReviewAndGlossaryCommands()
     {
-        string program = File.ReadAllText(Path.Combine(
-            RepositoryRoot(),
-            "src",
-            "KyberWeave.Cli",
-            "CliApplication.cs"));
+        string program = CheckoutCorpusSource.Checkout.ReadText("src/KyberWeave.Cli/CliApplication.cs");
 
         Assert.Contains("AddCommand<DocsIntegrityCheckCommand>(\"integrity-check\")", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<DocsExportGraphCommand>(\"export-graph\")", program, StringComparison.Ordinal);
@@ -26,7 +21,4 @@ public sealed class DocsAnalysisCommandRegistrationTests
         Assert.Contains("AddCommand<DocsReviewImportCommand>(\"import\")", program, StringComparison.Ordinal);
         Assert.Contains("AddCommand<DocsGlossaryCommand>(\"glossary\")", program, StringComparison.Ordinal);
     }
-
-    private static string RepositoryRoot([CallerFilePath] string sourcePath = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
 }
