@@ -170,7 +170,7 @@ public static class KyberWeaveConfigAssembler
             return WorkerRosters.Tiered;
 
         string roster = value.Trim();
-        if (WorkerRosters.IsKnown(roster))
+        if (WorkerRosterRules.IsKnown(roster))
             return roster;
 
         if (string.Equals(roster, WorkerRosters.Technology, StringComparison.Ordinal))

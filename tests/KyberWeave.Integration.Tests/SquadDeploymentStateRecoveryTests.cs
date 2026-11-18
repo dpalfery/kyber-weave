@@ -135,7 +135,7 @@ public sealed class SquadDeploymentStateRecoveryTests : SquadDeploymentStateTest
     [Fact]
     public void ExecuteClaimPublicationUsesNoOverwrite()
     {
-        string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
+        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
         int applyStart = source.IndexOf("private void ApplyFiles", StringComparison.Ordinal);
         int restoreStart =
             source.IndexOf("private IReadOnlyList<string> RestoreIntent", StringComparison.Ordinal);

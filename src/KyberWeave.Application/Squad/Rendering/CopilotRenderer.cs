@@ -544,7 +544,7 @@ public sealed class CopilotRenderer : SquadHarnessRenderer
                     {
                         operatorChannelOverlay = inputs.OperatorChannelOverlayFailure is { } overlayFailure
                             ? throw overlayFailure
-                            : SquadOperatorChannelOverlay.FromFileText(
+                            : SquadOperatorChannelOverlays.FromFileText(
                                 inputs.OperatorChannelOverlayText ?? string.Empty,
                                 serverName);
                         warnings.Add(SquadOperatorChannel.OverlayApplied());

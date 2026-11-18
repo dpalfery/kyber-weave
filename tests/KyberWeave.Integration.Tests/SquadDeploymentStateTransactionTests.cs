@@ -778,7 +778,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void PublishStageNoOverwriteVerifiesAuthorityAtAdjacentMoveBoundary()
     {
-        string source = Corpus.ReadText("src/KyberWeave.Data/Squad/Deployment/SquadTransaction.cs");
+        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
         string declaration = ExtractMethodDeclaration(source, "PublishStageNoOverwrite");
         string method = ExtractMethod(source, "PublishStageNoOverwrite");
 

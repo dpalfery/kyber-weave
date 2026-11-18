@@ -166,5 +166,5 @@ public sealed class SquadInstalledPresetProjectTemplate
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.KeyOf(canonicalRoot));
+            SquadPhysicalRootIdentities.KeyOf(canonicalRoot));
 }

@@ -43,12 +43,12 @@ public sealed class SquadStateTestLayout
     /// <summary>Gets the canonical spelling of a path that exists.</summary>
     /// <param name="path">The path.</param>
     /// <returns>The physical path.</returns>
-    public string PhysicalOf(string path) => SquadPhysicalRootIdentity.Resolve(path, _semantics).PhysicalPath;
+    public string PhysicalOf(string path) => SquadPhysicalRootIdentities.Resolve(path, _semantics).PhysicalPath;
 
     /// <summary>Gets the key a legacy directory and a registry entry are named by.</summary>
     /// <param name="root">An existing root.</param>
     /// <returns>The root key.</returns>
-    public string KeyOf(string root) => SquadPhysicalRootIdentity.Resolve(root, _semantics).Key;
+    public string KeyOf(string root) => SquadPhysicalRootIdentities.Resolve(root, _semantics).Key;
 
     /// <summary>Gets the legacy per-user directory that held a root's global state.</summary>
     /// <param name="root">The root the legacy state was installed from.</param>

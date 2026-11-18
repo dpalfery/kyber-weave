@@ -29,7 +29,7 @@ public sealed class SquadLifecycleTests : IClassFixture<SquadInstalledProjectTem
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).Key);
+            SquadPhysicalRootIdentities.Resolve(projectRoot, SquadFileSystemPathSemantics.Instance).Key);
 
     #region Install Lifecycle Contracts
 

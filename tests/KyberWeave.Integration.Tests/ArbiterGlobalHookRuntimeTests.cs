@@ -69,7 +69,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
             stdout,
             stderr);
 
-        string rootKey = SquadPhysicalRootIdentity.KeyOf(projectRoot);
+        string rootKey = SquadPhysicalRootIdentities.KeyOf(projectRoot);
         string ledgerRoot = Path.Combine(home, ".kyber-weave", "arbiter", "projects", rootKey);
 
         Assert.Equal(0, exit);

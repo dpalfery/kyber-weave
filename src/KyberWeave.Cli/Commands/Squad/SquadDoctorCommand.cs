@@ -570,7 +570,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 string fullPath;
                 try
                 {
-                    fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
+                    fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
                 {
@@ -939,7 +939,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             string fullPath;
             try
             {
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
+                fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(
                     receipt,
                     workingDirectory,
                     globalRoots,

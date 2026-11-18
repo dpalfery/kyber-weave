@@ -21,16 +21,8 @@ public sealed class DomainPurityTests
         @"(?<![\w.])File\.|(?<![\w.])Directory\.|(?<![\w.])Environment\.|(?<![\w.])Process\.|DateTime\.UtcNow|(?<![\w.])Console\.",
         RegexOptions.CultureInvariant);
 
-    // Folders still held by the other wave-4 packages, which move their I/O out under their own
-    // tasks. Shrink this list as those land; never grow it.
-    private static readonly string[] Pending =
-    [
-        "src/KyberWeave.Domain/Docs/",   // wave4-DC: the MCP wiring receipt and the spec validator
-        "src/KyberWeave.Domain/Squad/"   // wave4-SQ: the physical-root port
-    ];
-
     [Fact]
-    public void DomainUsesNoAmbientIoOutsideTheFoldersTheOtherWaveFourPackagesOwn()
+    public void DomainUsesNoAmbientIo()
     {
         List<string> violations = [];
 
@@ -43,9 +35,6 @@ public sealed class DomainPurityTests
             {
                 continue;
             }
-
-            if (Pending.Any(prefix => relative.StartsWith(prefix, StringComparison.Ordinal)))
-                continue;
 
             string[] lines = Corpus.ReadText(relative).ReplaceLineEndings("\n").Split('\n');
             for (int index = 0; index < lines.Length; index++)

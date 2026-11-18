@@ -201,7 +201,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
-        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, _semantics));
+        string key = SquadPhysicalRootIdentities.KeyOf(SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(root, _semantics));
         return ListProjectsWithoutRebuild()
             .FirstOrDefault(entry => string.Equals(entry.RootKey, key, StringComparison.Ordinal));
     }
@@ -211,7 +211,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
-        string key = SquadPhysicalRootIdentity.KeyOf(SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, _semantics));
+        string key = SquadPhysicalRootIdentities.KeyOf(SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(root, _semantics));
         return ReadRegistry().ContainsKey(key);
     }
 
@@ -289,7 +289,7 @@ public sealed class SquadStateStore : ISquadStateStore
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentNullException.ThrowIfNull(targets);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, _semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(root, _semantics);
 
         // The registry is shared by every project of this user, so two writers reading it before either writes would
         // drop one entry. The lease makes the read-modify-write one step, across processes.
@@ -311,8 +311,8 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
 
-        string key = SquadPhysicalRootIdentity.KeyOf(
-            SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(root, _semantics));
+        string key = SquadPhysicalRootIdentities.KeyOf(
+            SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(root, _semantics));
         using (_lease.Acquire(RegistryLeaseName(), _registryLeaseTimeout))
         {
             Dictionary<string, RegistryRecord> registry = ReadRegistry();
@@ -581,7 +581,7 @@ public sealed class SquadStateStore : ISquadStateStore
     /// <summary>
     ///     Builds the in-memory receipt from an already shape-validated JSON document. A v1 Global
     ///     receipt carries no <c>layout</c> field, so its layout is classified from its own owned
-    ///     files' paths (<see cref="SquadDeploymentPlan.ClassifyGlobalLayout" />) — the only signal
+    ///     files' paths (<see cref="SquadDeploymentPlanRules.ClassifyGlobalLayout" />) — the only signal
     ///     #91 left behind. A v2 receipt is always Global (A3) regardless of whether its optional
     ///     <c>scope</c> field was present, and its explicit <c>layout</c> field is trusted as-is.
     /// </summary>
@@ -648,7 +648,7 @@ public sealed class SquadStateStore : ISquadStateStore
             // what let a mismatched label reach a later, resolver-supplied run (#91).
             if (files.Count > 0)
             {
-                SquadReceiptLayout classified = SquadDeploymentPlan.ClassifyGlobalLayout(files);
+                SquadReceiptLayout classified = SquadDeploymentPlanRules.ClassifyGlobalLayout(files);
                 if (classified != layout)
                 {
                     string classifiedText = classified == SquadReceiptLayout.SingleRoot
@@ -663,7 +663,7 @@ public sealed class SquadStateStore : ISquadStateStore
         }
         else if (scope == SquadDeploymentScope.Global)
         {
-            layout = SquadDeploymentPlan.ClassifyGlobalLayout(files);
+            layout = SquadDeploymentPlanRules.ClassifyGlobalLayout(files);
         }
         else
         {
@@ -721,7 +721,7 @@ public sealed class SquadStateStore : ISquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project => SquadPathPolicy.ResolveFile(
-                SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath,
+                SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).PhysicalPath,
                 JournalRelativePath, _semantics),
             SquadDeploymentScope.Global => SquadPathPolicy.ResolveFile(ResolveHomeStateRoot(), JournalRelativePath, _semantics),
             SquadDeploymentScope.Instance => SquadPathPolicy.ResolveFile(
@@ -771,7 +771,7 @@ public sealed class SquadStateStore : ISquadStateStore
         return scope switch
         {
             SquadDeploymentScope.Project =>
-                SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath,
+                SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).PhysicalPath,
             SquadDeploymentScope.Global => ResolveHomeCreationBoundary(),
             SquadDeploymentScope.Instance =>
                 ResolveInstanceAuthorityRoot(targetRoot),
@@ -790,8 +790,8 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         return scope switch
         {
-            SquadDeploymentScope.Project => SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).Key,
-            SquadDeploymentScope.Global => SquadPhysicalRootIdentity.KeyOf(ResolveHomeRoot()),
+            SquadDeploymentScope.Project => SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).Key,
+            SquadDeploymentScope.Global => SquadPhysicalRootIdentities.KeyOf(ResolveHomeRoot()),
             SquadDeploymentScope.Instance => ResolveInstanceLeaseIdentity(targetRoot),
             _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, "Unknown Squad scope.")
         };
@@ -804,7 +804,7 @@ public sealed class SquadStateStore : ISquadStateStore
     public string ResolveHomeRoot()
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(UserPaths.HomeDirectory);
-        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(UserPaths.HomeDirectory, _semantics);
+        return SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(UserPaths.HomeDirectory, _semantics);
     }
 
     /// <summary>
@@ -832,7 +832,7 @@ public sealed class SquadStateStore : ISquadStateStore
 
     private string ResolveProjectStateDirectory(string targetRoot)
     {
-        string key = SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).Key;
+        string key = SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).Key;
         return ResolveDirectoryUnder(ResolveHomeRoot(), $"{ProjectsRelativeDirectory}/{key}");
     }
 
@@ -902,17 +902,17 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         ValidateInstanceRoot(targetRoot);
         return _files.DirectoryExists(targetRoot)
-            ? SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath
-            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, _semantics);
+            ? SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).PhysicalPath
+            : SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(targetRoot, _semantics);
     }
 
     private string ResolveInstanceLeaseIdentity(string targetRoot)
     {
         ValidateInstanceRoot(targetRoot);
         string canonical = _files.DirectoryExists(targetRoot)
-            ? SquadPhysicalRootIdentity.Resolve(targetRoot, _semantics).PhysicalPath
-            : SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(targetRoot, _semantics);
-        return SquadPhysicalRootIdentity.KeyOf(canonical);
+            ? SquadPhysicalRootIdentities.Resolve(targetRoot, _semantics).PhysicalPath
+            : SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(targetRoot, _semantics);
+        return SquadPhysicalRootIdentities.KeyOf(canonical);
     }
 
     private string ResolveDirectoryUnder(string root, string relativeDirectory)
@@ -1016,7 +1016,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         try
         {
-            return string.Equals(SquadPhysicalRootIdentity.Resolve(path, _semantics).Key, key, StringComparison.Ordinal);
+            return string.Equals(SquadPhysicalRootIdentities.Resolve(path, _semantics).Key, key, StringComparison.Ordinal);
         }
         catch (SquadDeploymentConflictException)
         {
@@ -1473,7 +1473,7 @@ public sealed class SquadStateStore : ISquadStateStore
     /// scope deploys each target beneath its own root, so the same portable path names a
     /// different physical file per target and the target is part of the identity. Both receipt
     /// loops call this one rule so they cannot disagree, and it mirrors
-    /// <see cref="SquadDeploymentPlan.DeployedFileIdentity" />, the identity the deployment engine
+    /// <see cref="SquadDeploymentPlanRules.DeployedFileIdentity" />, the identity the deployment engine
     /// itself uses.
     /// </summary>
     private static string StoredDeploymentIdentity(
@@ -1483,7 +1483,7 @@ public sealed class SquadStateStore : ISquadStateStore
     {
         return scope is SquadDeploymentScope.Project or SquadDeploymentScope.Instance
             ? portablePath
-            : SquadDeploymentPlan.DeployedFileIdentity(target, portablePath);
+            : SquadDeploymentPlanRules.DeployedFileIdentity(target, portablePath);
     }
 
     private static void ValidateCanonicalTarget(string? value, string fieldName)

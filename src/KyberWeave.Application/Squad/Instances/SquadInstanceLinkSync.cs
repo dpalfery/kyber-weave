@@ -57,7 +57,7 @@ public sealed class SquadInstanceLinkSync(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceRoot);
         string canonical = paths.Canonicalize(instanceRoot);
-        return SquadLeaseNames.ForRoot(SquadPhysicalRootIdentity.KeyOf(canonical));
+        return SquadLeaseNames.ForRoot(SquadPhysicalRootIdentities.KeyOf(canonical));
     }
 
     /// <summary>

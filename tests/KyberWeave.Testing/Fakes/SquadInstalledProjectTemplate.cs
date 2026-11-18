@@ -113,5 +113,5 @@ public sealed class SquadInstalledProjectTemplate : IDisposable
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.KeyOf(canonicalRoot));
+            SquadPhysicalRootIdentities.KeyOf(canonicalRoot));
 }

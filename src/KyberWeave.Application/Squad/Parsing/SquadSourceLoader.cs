@@ -50,12 +50,6 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
         FallbackProfilesSchemaDocument
     ];
 
-    public static readonly IReadOnlySet<string> ModelProfileFields = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "default", "codex", "cursor", "claude", "copilot", "opencode", "kilo",
-        "antigravity", "warp", "factory", "pi", "zcode", "devin", "commandcode"
-    };
-
     /// <remarks>
     /// Internal so the canonical-content pin can compare the published schema enum
     /// and the <c>target:</c> markers in capabilities.yml against the same set the
@@ -237,7 +231,7 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
             }
 
             YamlMappingNode profile = RequireMapping(node, name, file.RelativePath, true);
-            EnsureOnlyFields(profile, ModelProfileFields, file.RelativePath);
+            EnsureOnlyFields(profile, SquadModelProfileFields.Names, file.RelativePath);
             string defaultModel = RequireScalar(profile, "default", file.RelativePath);
             SortedDictionary<string, string> harnessModels = new(StringComparer.Ordinal);
             foreach ((string? key, YamlNode? value) in MappingEntries(profile, file.RelativePath))
@@ -328,7 +322,7 @@ public sealed class SquadSourceLoader(IFileSystem files, IPathResolver paths, IP
             }
 
             YamlMappingNode categoryMapping = RequireMapping(pair.Value, categoryName, file.RelativePath, true);
-            EnsureOnlyFields(categoryMapping, ModelProfileFields, file.RelativePath);
+            EnsureOnlyFields(categoryMapping, SquadModelProfileFields.Names, file.RelativePath);
 
             HashSet<string> seenHarnesses = new(StringComparer.Ordinal);
             string? defaultModel = null;

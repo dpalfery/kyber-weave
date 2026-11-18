@@ -219,7 +219,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
 
         List<string> imported = [];
         List<string> warnings = [];
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(root, _semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentities.Resolve(root, _semantics);
         string projectDirectory = _stateStore.ResolveStateDirectory(identity.PhysicalPath, SquadDeploymentScope.Project);
         string inRepoDirectory = Path.Combine(identity.PhysicalPath, InRepoStateDirectoryName);
         string inRepoReceiptPath = Path.Combine(inRepoDirectory, ReceiptFileName);
@@ -712,7 +712,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
     {
         try
         {
-            physical = SquadPhysicalRootIdentity.Resolve(path, _semantics).PhysicalPath;
+            physical = SquadPhysicalRootIdentities.Resolve(path, _semantics).PhysicalPath;
             return true;
         }
         catch (Exception exception) when (
@@ -724,7 +724,7 @@ public sealed class SquadStateMigration : ISquadStateMigration
     }
 
     private static bool KeyMatches(string physicalPath, string key) =>
-        string.Equals(SquadPhysicalRootIdentity.KeyOf(physicalPath), key, StringComparison.Ordinal);
+        string.Equals(SquadPhysicalRootIdentities.KeyOf(physicalPath), key, StringComparison.Ordinal);
 
     /// <summary>
     /// Writes the bytes to a temporary file beside the target and renames it into place. The target is replaced

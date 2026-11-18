@@ -130,7 +130,7 @@ internal static class SquadCommandComposition
         if (onlyTarget is { } chosen)
             targets = [.. targets.Where(target => target == chosen)];
 
-        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        if (SquadDeploymentPlanRules.IsLegacySingleRootReceipt(receipt))
             return [.. targets.Select(target => (target, targetRoot))];
 
         return ResolveGlobalTargetRoots(targets, injectedGlobalRoots);

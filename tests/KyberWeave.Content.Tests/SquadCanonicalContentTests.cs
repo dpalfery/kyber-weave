@@ -362,9 +362,8 @@ public sealed class SquadCanonicalContentTests
         Assert.True(
             Corpus.Exists(defaultPath),
             $"The shipped response-guidance default must live at '{defaultPath}' before the build can own it.");
-        string corePath = Path.Combine(Corpus.Root, "src", "KyberWeave.Domain");
-        string areasPath = Path.Combine(corePath, "Areas");
-        XDocument project = XDocument.Parse(Corpus.ReadText("src/KyberWeave.Domain/Areas/Squad.props"));
+        string corePath = Path.Combine(Corpus.Root, "src", "KyberWeave.Application");
+        XDocument project = XDocument.Parse(Corpus.ReadText("src/KyberWeave.Application/Areas/Squad.props"));
 
         string? canonical = project
             .Descendants("CanonicalResponseGuidance")
@@ -380,7 +379,7 @@ public sealed class SquadCanonicalContentTests
         Assert.NotNull(embedded);
         Assert.Equal(
             defaultFullPath,
-            Path.GetFullPath(ResolveProjectPath(areasPath, canonical)));
+            Path.GetFullPath(ResolveProjectPath(corePath, canonical)));
         Assert.True(
             Corpus.ReadBytes(CorpusRelativePath(ResolveProjectPath(corePath, embedded)))
                 .AsSpan()
@@ -1248,13 +1247,14 @@ public sealed class SquadCanonicalContentTests
 
     /// <summary>
     /// Resolves an MSBuild item path relative to the project directory, expanding the
-    /// <c>$(MSBuildThisFileDirectory)</c> property and normalising Windows separators.
+    /// <c>$(MSBuildThisFileDirectory)</c> and <c>$(MSBuildProjectDirectory)</c> properties and normalising Windows separators.
     /// </summary>
     private static string ResolveProjectPath(string projectDirectory, string item)
     {
         return Path.Combine(
             projectDirectory,
             item.Replace("$(MSBuildThisFileDirectory)", string.Empty, StringComparison.Ordinal)
+                .Replace("$(MSBuildProjectDirectory)\\", string.Empty, StringComparison.Ordinal)
                 .Replace('\\', Path.DirectorySeparatorChar));
     }
 

@@ -43,7 +43,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        string physicalHome = SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath;
+        string physicalHome = SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
         // The planner cannot know the home anchor, so it records the unanchored marker. The transaction
         // stamps the physical home on the plan as it writes, which is what this test asserts afterwards.
@@ -107,7 +107,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Assert.Equal("agents/first.toml", Assert.Single(sharedReceipt.Files).RelativePath);
 
         string globalState = Path.Combine(
-            SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+            SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
             ".kyber-weave",
             "squad",
             "global");
@@ -269,7 +269,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Directory.CreateSymbolicLink(aliasRoot, targetRoot);
         SquadStateStore store = Store(applicationData);
         string globalState = Path.Combine(
-            SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+            SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
             ".kyber-weave",
             "squad",
             "global");
@@ -311,7 +311,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Directory.CreateDirectory(home);
         SquadStateStore store = Store(applicationData);
         string expected = Path.Combine(
-            SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+            SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
             ".kyber-weave",
             "squad",
             "global",
@@ -333,16 +333,16 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         if (Directory.Exists(lowerRoot))
         {
             Assert.Equal(
-                SquadPhysicalRootIdentity.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance),
-                SquadPhysicalRootIdentity.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance));
+                SquadPhysicalRootIdentities.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance),
+                SquadPhysicalRootIdentities.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance));
             return;
         }
 
         Directory.CreateDirectory(lowerRoot);
         Directory.CreateSymbolicLink(symlinkRoot, upperRoot);
-        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentity.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
-        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentity.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
-        SquadPhysicalRootIdentity symlinkIdentity = SquadPhysicalRootIdentity.Resolve(symlinkRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentities.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentities.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity symlinkIdentity = SquadPhysicalRootIdentities.Resolve(symlinkRoot, SquadFileSystemPathSemantics.Instance);
         SquadStateStore store = Store(applicationData);
 
         Assert.NotEqual(upperIdentity.PhysicalPath, lowerIdentity.PhysicalPath);
@@ -403,9 +403,9 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(actualRoot);
         Directory.CreateSymbolicLink(symlinkAlias, actualRoot);
-        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentity.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentities.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
 
-        Assert.Equal(actualIdentity, SquadPhysicalRootIdentity.Resolve(symlinkAlias, SquadFileSystemPathSemantics.Instance));
+        Assert.Equal(actualIdentity, SquadPhysicalRootIdentities.Resolve(symlinkAlias, SquadFileSystemPathSemantics.Instance));
         if (!Directory.Exists(caseAlias))
         {
             Assert.NotEqual(
@@ -414,7 +414,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             return;
         }
 
-        SquadPhysicalRootIdentity aliasIdentity = SquadPhysicalRootIdentity.Resolve(caseAlias, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity aliasIdentity = SquadPhysicalRootIdentities.Resolve(caseAlias, SquadFileSystemPathSemantics.Instance);
         SquadStateStore store = Store(applicationData);
         Assert.Equal(actualIdentity.PhysicalPath, aliasIdentity.PhysicalPath);
         Assert.Equal(actualIdentity.Key, aliasIdentity.Key);
@@ -1147,7 +1147,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         Assert.Equal(
-            SquadDeploymentPlan.ClassifyGlobalLayout(plan.Receipt.Files),
+            SquadDeploymentPlanRules.ClassifyGlobalLayout(plan.Receipt.Files),
             plan.Receipt.Layout);
         Assert.Equal(SquadReceiptLayout.SingleRoot, plan.Receipt.Layout);
     }
