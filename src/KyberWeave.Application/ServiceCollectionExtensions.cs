@@ -65,7 +65,10 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ISquadBriefBuilder, SquadBriefBuilder>();
         services.TryAddSingleton<IConfigLoadService, ConfigLoadService>();
         services.TryAddSingleton<IManagedGlossaryFactory>(sp => new ManagedGlossaryFactory(
-            sp.GetRequiredService<IRepositoryFileStore>(), sp.GetRequiredService<TimeProvider>()));
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanTaskService>(sp => new PlanTaskService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -83,7 +86,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPacketHostFacts>(),
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<ICodeGraphPortsFactory>(),
-            sp.GetRequiredService<IDocumentSourceFactory>()));
+            sp.GetRequiredService<IDocumentSourceFactory>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),

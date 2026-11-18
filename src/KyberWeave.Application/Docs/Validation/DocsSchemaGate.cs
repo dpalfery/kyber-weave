@@ -66,7 +66,9 @@ public sealed class DocsSchemaGate(
                 root,
                 config,
                 timeProvider,
-                files).Validate().Items);
+                files,
+                paths,
+                environment).Validate().Items);
         }
         catch (Exception exception) when (IsOperationalGlossaryFailure(exception))
         {
