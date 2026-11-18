@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -30,7 +31,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class McpRenameRepoGuardTests
 {
-    private static string RepoRoot => KyberWeaveTestPaths.ToolRoot;
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static string RepoRoot => Corpus.Root;
 
     // The retired tool names. Matched word-bounded, so a descriptive name that carries one as a
     // fragment is not a finding: `docs_validate_governed_document_schema` and
@@ -317,7 +320,7 @@ public sealed class McpRenameRepoGuardTests
     [Fact]
     public void CheckedInManifestDeclaresTheKwDocsKeyAndNoRetiredServerKey()
     {
-        string content = File.ReadAllText(Path.Combine(RepoRoot, ".kyber-weave", "kyber-weave.yml"));
+        string content = Corpus.ReadText(".kyber-weave/kyber-weave.yml");
 
         Assert.True(
             content.Contains("required-servers:", StringComparison.Ordinal),
@@ -345,7 +348,7 @@ public sealed class McpRenameRepoGuardTests
     [Fact]
     public void CheckedInEditorConfigDeclaresNoFirstPartyEntry()
     {
-        string content = File.ReadAllText(Path.Combine(RepoRoot, ".vscode", "mcp.json"));
+        string content = Corpus.ReadText(".vscode/mcp.json");
 
         using JsonDocument document = JsonDocument.Parse(
             content,
@@ -610,7 +613,7 @@ public sealed class McpRenameRepoGuardTests
 
     private static IReadOnlyList<ServerEntry> ReadServerEntries(string relativePath)
     {
-        string content = File.ReadAllText(Path.Combine(RepoRoot, relativePath));
+        string content = Corpus.ReadText(relativePath);
         using JsonDocument document = JsonDocument.Parse(
             content,
             new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
@@ -682,7 +685,7 @@ public sealed class McpRenameRepoGuardTests
 
     private static string ReadAsLatin1(string repoRelativePath)
     {
-        byte[] bytes = File.ReadAllBytes(Path.Combine(RepoRoot, repoRelativePath));
+        byte[] bytes = Corpus.ReadBytes(repoRelativePath);
 
         // Latin-1 maps every byte to a char, so the ASCII forms are found in text and in the
         // fixtures beside it (JSONL event logs, SBOM fixtures) without throwing on invalid UTF-8.
