@@ -134,4 +134,44 @@ public abstract class FileSystemFaultContractTests
 
         Assert.Equal(3, files.OperationCount);
     }
+
+    [Fact]
+    public void AnEnumerationCountsOneOperationPerCallRatherThanPerPass()
+    {
+        InMemoryFileSystem files = CreateFileSystem();
+        string root = files.CreateTemporaryDirectory("kw-fs-fault-");
+        string path = At(root, "counted.txt");
+        files.WriteAllText(path, "line");
+        int before = files.OperationCount;
+
+        IEnumerable<FileSystemEntry> entries = files.EnumerateEntries(root);
+        Assert.Equal(before + 1, files.OperationCount);
+        Assert.Single(entries);
+        Assert.Single(entries);
+        Assert.Equal(before + 1, files.OperationCount);
+
+        IEnumerable<string> lines = files.ReadLines(path);
+        Assert.Equal(before + 2, files.OperationCount);
+        Assert.Single(lines);
+        Assert.Single(lines);
+        Assert.Equal(before + 2, files.OperationCount);
+    }
+
+    [Fact]
+    public void AFaultAtAStreamingCallThrowsWhenTheCallIsMade()
+    {
+        AssertFaultsAtCall(files => _ = files.EnumerateFiles("/", "*", recursive: false));
+        AssertFaultsAtCall(files => _ = files.EnumerateDirectories("/"));
+        AssertFaultsAtCall(files => _ = files.EnumerateEntries("/"));
+        AssertFaultsAtCall(files => _ = files.ReadLines("/absent.txt"));
+    }
+
+    private void AssertFaultsAtCall(Action<InMemoryFileSystem> call)
+    {
+        InMemoryFileSystem files = CreateFileSystem();
+        _ = files.CreateTemporaryDirectory("kw-fs-fault-");
+        files.FailAt(files.OperationCount + 1);
+
+        _ = Assert.Throws<IOException>(() => call(files));
+    }
 }

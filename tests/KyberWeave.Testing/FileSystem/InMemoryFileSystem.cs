@@ -160,13 +160,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     public IEnumerable<string> ReadLines(string path)
     {
         Enter(nameof(ReadLines), path);
-        Node node = ResolveRequiredFile(path);
-        using MemoryStream stream = new(node.Content, writable: false);
-        using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-        while (reader.ReadLine() is { } line)
-        {
-            yield return line;
-        }
+        return ReadLinesCore(path);
     }
 
     /// <inheritdoc />
@@ -207,47 +201,21 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive, bool followLinks)
     {
         Enter(nameof(EnumerateFiles), directory);
-        foreach (string file in EnumerateFilesCore(directory, searchPattern, recursive, followLinks, []))
-        {
-            yield return file;
-        }
+        return EnumerateFilesCore(directory, searchPattern, recursive, followLinks, []);
     }
 
     /// <inheritdoc />
     public IEnumerable<string> EnumerateDirectories(string directory)
     {
         Enter(nameof(EnumerateDirectories), directory);
-        Node? resolved = Follow(Resolve(directory, followFinal: false));
-        if (resolved is not { IsDirectory: true })
-        {
-            yield break;
-        }
-
-        string currentPath = Full(directory);
-        foreach (Node child in Ordered(resolved))
-        {
-            if (IsDirectoryEntry(child))
-            {
-                yield return Path.Combine(currentPath, child.Name);
-            }
-        }
+        return EnumerateDirectoriesCore(directory);
     }
 
     /// <inheritdoc />
     public IEnumerable<FileSystemEntry> EnumerateEntries(string directory)
     {
         Enter(nameof(EnumerateEntries), directory);
-        Node? resolved = Follow(Resolve(directory, followFinal: false));
-        if (resolved is not { IsDirectory: true })
-        {
-            yield break;
-        }
-
-        string currentPath = Full(directory);
-        foreach (Node child in Ordered(resolved))
-        {
-            yield return new FileSystemEntry(Path.Combine(currentPath, child.Name), IsDirectoryEntry(child), child.LinkTarget is not null);
-        }
+        return EnumerateEntriesCore(directory);
     }
 
     /// <inheritdoc />
@@ -835,6 +803,50 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
             LinkNamesDirectory = namesDirectory,
             Attributes = FileAttributes.ReparsePoint,
         };
+    }
+
+    private IEnumerable<string> ReadLinesCore(string path)
+    {
+        Node node = ResolveRequiredFile(path);
+        using MemoryStream stream = new(node.Content, writable: false);
+        using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        while (reader.ReadLine() is { } line)
+        {
+            yield return line;
+        }
+    }
+
+    private IEnumerable<string> EnumerateDirectoriesCore(string directory)
+    {
+        Node? resolved = Follow(Resolve(directory, followFinal: false));
+        if (resolved is not { IsDirectory: true })
+        {
+            yield break;
+        }
+
+        string currentPath = Full(directory);
+        foreach (Node child in Ordered(resolved))
+        {
+            if (IsDirectoryEntry(child))
+            {
+                yield return Path.Combine(currentPath, child.Name);
+            }
+        }
+    }
+
+    private IEnumerable<FileSystemEntry> EnumerateEntriesCore(string directory)
+    {
+        Node? resolved = Follow(Resolve(directory, followFinal: false));
+        if (resolved is not { IsDirectory: true })
+        {
+            yield break;
+        }
+
+        string currentPath = Full(directory);
+        foreach (Node child in Ordered(resolved))
+        {
+            yield return new FileSystemEntry(Path.Combine(currentPath, child.Name), IsDirectoryEntry(child), child.LinkTarget is not null);
+        }
     }
 
     private IEnumerable<string> EnumerateFilesCore(string directory, string searchPattern, bool recursive, bool followLinks, HashSet<Node> visited)
