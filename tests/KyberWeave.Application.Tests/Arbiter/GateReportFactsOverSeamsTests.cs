@@ -1,5 +1,6 @@
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -17,10 +18,20 @@ public sealed class GateReportFactsOverSeamsTests
 
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 13, 10, 0, 0, TimeSpan.Zero));
     private readonly InMemoryFileSystem _files;
+    private readonly FakePathResolver _paths;
+    private readonly FakeProcessEnvironment _environment;
 
-    public GateReportFactsOverSeamsTests() => _files = new InMemoryFileSystem(_clock);
+    public GateReportFactsOverSeamsTests()
+    {
+        _files = new InMemoryFileSystem(_clock);
+        _paths = new FakePathResolver(_files);
+        // The environment's case rule is the file system's, so the two seams agree about the world under test.
+        _environment = new FakeProcessEnvironment(
+            currentDirectory: "/kw/work",
+            isFileSystemCaseInsensitive: !_files.CaseSensitive);
+    }
 
-    private GateReportFacts Facts() => new(new InMemoryRepositoryFileStore(_files));
+    private GateReportFacts Facts() => new(new InMemoryRepositoryFileStore(_files), _paths, _environment);
 
     private static GateReport Passing() => new(
         GateReport.CurrentSchema,
@@ -41,6 +52,47 @@ public sealed class GateReportFactsOverSeamsTests
         _files.CreateDirectory(Path.GetDirectoryName(path)!);
         _files.WriteAllText(path, ReviewJson.Write(report));
         return path;
+    }
+
+    [Fact]
+    public void ARelativeRepositoryRootResolvesAgainstTheInjectedCurrentDirectory()
+    {
+        _ = Write("/kw/work/repo/artifacts/task-gate.json", Passing());
+
+        Assert.True(Facts().Agrees(Claim("artifacts/task-gate.json"), "repo"));
+    }
+
+    [Fact]
+    public void ARelativeRootFindsTheDefaultReportToo()
+    {
+        _ = Write("/kw/work/repo/artifacts/gates.json", Failing());
+
+        Assert.NotNull(Facts().TryRead("repo"));
+        Assert.True(Facts().FailedGateCorroborates("repo"));
+    }
+
+    [Fact]
+    public void AFailingClaimForTheSameReportInARelativeSpellingInvalidatesThePass()
+    {
+        _ = Write(ReportPath, Passing());
+        string text = Claim("artifacts/task-gate.json", "FAIL") + "\n" + Claim(ReportPath, "PASS");
+
+        Assert.False(Facts().Agrees(text, Root));
+    }
+
+    [Fact]
+    public void AMalformedReportPathIsUndecidableRatherThanAThrow()
+    {
+        Assert.Null(Facts().Agrees("TASK_GATE: PASS report=a\0b", Root));
+        Assert.Null(Facts().TryReadFile("a\0b"));
+    }
+
+    [Fact]
+    public void AClaimInAnotherCaseIsTheSameReportOnACaseInsensitiveFileSystem()
+    {
+        _ = Write(ReportPath, Passing());
+
+        Assert.True(Facts().Agrees(Claim("/REPO/artifacts/task-gate.json"), Root));
     }
 
     [Fact]

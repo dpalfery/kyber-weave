@@ -1,6 +1,8 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text;
 using KyberWeave.Core.Arbiter.Sections;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Arbiter.Facts;
 
@@ -10,7 +12,12 @@ namespace KyberWeave.Core.Arbiter.Facts;
 /// repository root is never read. Every read goes through the repository file-store seam.
 /// </summary>
 /// <param name="store">The repository checkout the excerpts are read from.</param>
-public sealed class FileTextFacts(IRepositoryFileStore store) : IFileTextFacts
+/// <param name="paths">Turns the root, the cited path and a contained file into full paths.</param>
+/// <param name="environment">Names the directory a relative root is resolved against.</param>
+public sealed class FileTextFacts(
+    IRepositoryFileStore store,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IFileTextFacts
 {
     /// <summary>The most characters one excerpt carries.</summary>
     public const int MaxExcerptCharacters = 4000;
@@ -138,23 +145,51 @@ public sealed class FileTextFacts(IRepositoryFileStore store) : IFileTextFacts
     /// Resolves <paramref name="path"/> against <paramref name="repoRoot"/> and returns the full path only when it stays
     /// under the root.
     /// </summary>
+    /// <remarks>
+    /// The containment decision is the one both entry points make before they read anything, so it checks links as
+    /// well as spelling: every component below the root is probed, and a component that is a link refuses the path.
+    /// </remarks>
     /// <returns>The full path, or null when the path would leave the root.</returns>
     public string? ResolveWithinRoot(string repoRoot, string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        string root = Path.GetFullPath(repoRoot);
-        string candidate = Path.IsPathRooted(path)
-            ? Path.GetFullPath(path)
-            : Path.GetFullPath(Path.Combine(root, path));
-        string relative = Path.GetRelativePath(root, candidate);
+        string? root = FullRoot(repoRoot);
+        if (root is null)
+        {
+            return null;
+        }
+
+        string candidate;
+        string relative;
+        try
+        {
+            candidate = paths.GetFullPath(path, root);
+            relative = Path.GetRelativePath(root, candidate);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            // A name the file system cannot take is a path that never names a file under the root.
+            return null;
+        }
+
         if (Path.IsPathRooted(relative)
             || string.Equals(relative, "..", StringComparison.Ordinal)
             || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal)
             || relative.StartsWith("../", StringComparison.Ordinal))
         {
             return null;
+        }
+
+        string current = root;
+        foreach (string segment in relative.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            current = Path.Combine(current, segment);
+            if (store.GetLinkTarget(current) is not null)
+            {
+                return null;
+            }
         }
 
         return candidate;
@@ -174,13 +209,25 @@ public sealed class FileTextFacts(IRepositoryFileStore store) : IFileTextFacts
             return null;
         }
 
-        string root = Path.GetFullPath(repoRoot);
-        string relative = Path.GetRelativePath(root, full);
-        return store.IsContainedFile(root, relative, []) ? full : null;
+        string? root = FullRoot(repoRoot);
+        return root is not null && store.IsContainedFile(root, Path.GetRelativePath(root, full), []) ? full : null;
     }
 
     /// <inheritdoc/>
     public long LengthOf(string fullPath) => store.GetLength(fullPath);
+
+    /// <summary>The repository root as a full path, or null when the caller's spelling names no path.</summary>
+    private string? FullRoot(string repoRoot)
+    {
+        try
+        {
+            return paths.GetFullPath(repoRoot, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return null;
+        }
+    }
 
     /// <summary>
     /// Reads one line into <paramref name="line"/>, keeping at most <see cref="MaxLineCharacters"/> characters and
