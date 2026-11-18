@@ -120,6 +120,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // global run, which has no project whose gates could be missing, keeps the load
         // failure fatal.
         KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+            _configs,
             targetRoot,
             scope,
             stateStore.UserPaths.HomeDirectory);

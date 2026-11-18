@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Doctor;
@@ -28,16 +29,23 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
     private readonly IMcpWiringService _wiring;
     private readonly IDocsScaffoldingService _scaffolder;
     private readonly IRepositoryDoctor _doctor;
+    private readonly IKyberWeaveConfigRepository _configs;
 
     /// <summary>Creates the command over the services the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
     /// <param name="scaffolder">Bootstraps the documentation corpus.</param>
     /// <param name="doctor">Runs the provisioning doctor when <c>--provision</c> is given.</param>
-    public DocsInitCommand(IMcpWiringService wiring, IDocsScaffoldingService scaffolder, IRepositoryDoctor doctor)
+    /// <param name="configs">Reads back the configuration the scaffold wrote.</param>
+    public DocsInitCommand(
+        IMcpWiringService wiring,
+        IDocsScaffoldingService scaffolder,
+        IRepositoryDoctor doctor,
+        IKyberWeaveConfigRepository configs)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
         _scaffolder = scaffolder ?? throw new ArgumentNullException(nameof(scaffolder));
         _doctor = doctor ?? throw new ArgumentNullException(nameof(doctor));
+        _configs = configs ?? throw new ArgumentNullException(nameof(configs));
     }
 
     /// <summary>The package APM installs to obtain the authoring skill.</summary>
@@ -421,13 +429,13 @@ public sealed class DocsInitCommand : Command<DocsInitSettings>
         }
 
         string root = Path.GetFullPath(settings.Path);
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
+        KyberWeaveConfigLoadResult loaded = _configs.TryLoad(root);
 
         if (!loaded.Success)
         {
             AnsiConsole.WriteLine();
             AnsiConsole.MarkupLine(
-                $"[red]{Markup.Escape(KyberWeaveConfigLoader.ConfigLoadErrorCode)}[/]: "
+                $"[red]{Markup.Escape(KyberWeaveConfigDiagnosticCodes.LoadError)}[/]: "
                 + Markup.Escape(loaded.Error ?? "kyber-weave.yml could not be read."));
             return 1;
         }

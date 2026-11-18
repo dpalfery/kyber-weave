@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -19,7 +20,7 @@ public sealed class DocsStandardsDiffSettings : DocsSettings
 /// Prints how each installed standards folder differs from the current template, and writes
 /// nothing.
 /// </summary>
-public sealed class DocsStandardsDiffCommand : Command<DocsStandardsDiffSettings>
+public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs) : Command<DocsStandardsDiffSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -28,7 +29,7 @@ public sealed class DocsStandardsDiffCommand : Command<DocsStandardsDiffSettings
         CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!DocsCommandComposition.TryResolveConfig(settings, report, out _, out OntologyConfig ontology))
+        if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out _, out OntologyConfig ontology))
         {
             CommandHelpers.Finish(report, settings, "docs standards diff", "Folder");
             return 1;

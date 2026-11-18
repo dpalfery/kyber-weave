@@ -4,7 +4,7 @@ namespace KyberWeave.Core.Configuration;
 
 /// <summary>Shared YAML parse helpers for <c>.kyber-weave/kyber-weave.yml</c>.</summary>
 /// <remarks>
-/// This half is pure; the legacy <c>KyberWeaveYamlFile</c> reads the file and delegates here.
+/// This half is pure; <c>FileKyberWeaveConfigRepository</c> reads the file and delegates here.
 /// </remarks>
 internal static class KyberWeaveYamlParser
 {

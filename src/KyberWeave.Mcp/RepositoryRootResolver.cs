@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Mcp;
@@ -26,15 +27,17 @@ public static class RepositoryRootResolver
     public const string ExpectRootEnvironmentVariable = "KYBER_WEAVE_EXPECT_ROOT";
 
     public static string Resolve(
+        IKyberWeaveConfigRepository configs,
         IReadOnlyList<string> args,
         string workingDirectory,
         string? environmentRoot)
     {
+        ArgumentNullException.ThrowIfNull(configs);
         ArgumentNullException.ThrowIfNull(args);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
         string baseDirectory = Path.GetFullPath(workingDirectory);
-        string resolved = ResolveBoundRoot(args, baseDirectory, environmentRoot);
+        string resolved = ResolveBoundRoot(configs, args, baseDirectory, environmentRoot);
 
         // A client-asserted expectation is a safety rail, not part of binding: the root is
         // resolved first (so the error can name both paths) and only then compared. It
@@ -76,6 +79,7 @@ public static class RepositoryRootResolver
             StringComparison.Ordinal);
 
     private static string ResolveBoundRoot(
+        IKyberWeaveConfigRepository configs,
         IReadOnlyList<string> args,
         string baseDirectory,
         string? environmentRoot)
@@ -84,6 +88,7 @@ public static class RepositoryRootResolver
         if (explicitRoot is not null)
         {
             return RequireInitializedRoot(
+                configs,
                 ResolvePath(explicitRoot, baseDirectory),
                 "--repo-root");
         }
@@ -91,11 +96,12 @@ public static class RepositoryRootResolver
         if (!string.IsNullOrWhiteSpace(environmentRoot))
         {
             return RequireInitializedRoot(
+                configs,
                 ResolvePath(environmentRoot, baseDirectory),
                 EnvironmentVariable);
         }
 
-        return RequireInitializedRoot(baseDirectory, "the working directory");
+        return RequireInitializedRoot(configs, baseDirectory, "the working directory");
     }
 
     private static string? ExpectRootArgument(IReadOnlyList<string> args)
@@ -171,9 +177,9 @@ public static class RepositoryRootResolver
     private static string ResolvePath(string path, string baseDirectory) =>
         Path.GetFullPath(path, baseDirectory);
 
-    private static string RequireInitializedRoot(string root, string source)
+    private static string RequireInitializedRoot(IKyberWeaveConfigRepository configs, string root, string source)
     {
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
+        KyberWeaveConfigLoadResult loaded = configs.TryLoad(root);
         if (loaded.ConfigPath is not null)
         {
             return root;

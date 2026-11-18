@@ -7,7 +7,7 @@ owner: dpalfery
 last-reviewed: 2026-11-17
 code-refs:
   - KyberWeaveConfig
-  - KyberWeaveConfigLoader
+  - KyberWeaveConfigDiagnosticCodes
   - OntologyConfig
   - SquadConfig
   - ArbiterConfigLoader

@@ -17,15 +17,18 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
     private readonly DocsAnalysisCompositionFactories _factories;
     private readonly IManagedGlossaryFactory _glossaries;
     private readonly IDocumentSourceFactory _documents;
+    private readonly IKyberWeaveConfigRepository _configs;
 
     public RepositoryDocsAnalysisCommandService(
         DocsAnalysisCompositionFactories factories,
         IManagedGlossaryFactory glossaries,
-        IDocumentSourceFactory documents)
+        IDocumentSourceFactory documents,
+        IKyberWeaveConfigRepository configs)
     {
         _factories = factories ?? throw new ArgumentNullException(nameof(factories));
         _glossaries = glossaries ?? throw new ArgumentNullException(nameof(glossaries));
         _documents = documents ?? throw new ArgumentNullException(nameof(documents));
+        _configs = configs ?? throw new ArgumentNullException(nameof(configs));
     }
 
     public DocumentationAnalysisResult Analyze(DocsIntegrityCheckSettings settings)
@@ -80,6 +83,7 @@ internal sealed class RepositoryDocsAnalysisCommandService : IDocsAnalysisComman
     {
         DiagnosticReport compositionDiagnostics = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateAnalysisRuntime(
+                _configs,
                 settings,
                 compositionDiagnostics,
                 _factories,

@@ -458,14 +458,18 @@ internal static class SquadCommandComposition
     ///     whatever root its receipt anchors at; reading it as a project config would reject that block as
     ///     <c>KW-ARB-CONFIG-011</c>. Only a project-scope run loads <paramref name="targetRoot" /> as a project.
     /// </summary>
+    /// <param name="configs">The repository the configuration is read through.</param>
     /// <param name="targetRoot">The root the run is anchored at.</param>
     /// <param name="scope">Whether the run is global or project scope.</param>
     /// <param name="homeDirectory">The home directory the run's user paths name.</param>
     public static KyberWeaveConfigLoadResult TryLoadScopeConfig(
+        IKyberWeaveConfigRepository configs,
         string targetRoot,
         SquadDeploymentScope scope,
         string homeDirectory)
     {
+        ArgumentNullException.ThrowIfNull(configs);
+
         if (string.IsNullOrWhiteSpace(targetRoot))
             return KyberWeaveConfigLoadResult.Fail("The target root must not be empty.", null);
         if (string.IsNullOrWhiteSpace(homeDirectory))
@@ -474,12 +478,12 @@ internal static class SquadCommandComposition
         try
         {
             if (scope != SquadDeploymentScope.Global)
-                return KyberWeaveConfigLoader.TryLoad(targetRoot);
+                return configs.TryLoad(targetRoot);
 
             // A global run always reads the home user-level config, whatever root its receipt anchors at (home, or
             // the root a legacy single-root receipt records), so the answer does not depend on how the path is spelled.
             string home = Path.GetFullPath(homeDirectory);
-            KyberWeaveConfigLoadResult user = KyberWeaveConfigLoader.TryLoadUserConfig(home);
+            KyberWeaveConfigLoadResult user = configs.TryLoadUserConfig(home);
 
             // Only a home with no user-level file falls back, and only to the explicit legacy root-level file, so a
             // user file created meanwhile is never re-probed and read as a project config.
@@ -487,7 +491,7 @@ internal static class SquadCommandComposition
                 return user;
 
             string legacy = Path.Combine(home, "kyber-weave.yml");
-            return File.Exists(legacy) ? KyberWeaveConfigLoader.TryLoad(home, legacy) : user;
+            return File.Exists(legacy) ? configs.TryLoad(home, legacy) : user;
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {

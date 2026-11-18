@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Data.Review;
@@ -57,7 +58,8 @@ public sealed class ReviewMigrateTaskGatesSettings : CommandSettings
 ///     which case no byte is written.
 /// </para>
 /// </remarks>
-public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGatesSettings>
+public sealed class ReviewMigrateTaskGatesCommand(IKyberWeaveConfigRepository configs)
+    : Command<ReviewMigrateTaskGatesSettings>
 {
     private static readonly FileRepositoryTreeProbe Tree = new();
 
@@ -88,7 +90,7 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
         ArgumentNullException.ThrowIfNull(settings);
 
         string root = Path.GetFullPath(settings.Path);
-        string? path = ResolveConfigPath(root, settings.Config);
+        string? path = ResolveConfigPath(configs, root, settings.Config);
         if (path is null)
         {
             return Refuse(
@@ -418,7 +420,7 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
     /// <summary>A line without its line ending, which is what makes two spellings of the same line compare equal.</summary>
     private static string Trim(string line) => line.TrimEnd('\r');
 
-    private static string? ResolveConfigPath(string root, string? config)
+    private static string? ResolveConfigPath(IKyberWeaveConfigRepository configs, string root, string? config)
     {
         if (!string.IsNullOrWhiteSpace(config))
         {
@@ -426,12 +428,12 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
             return File.Exists(named) ? Path.GetFullPath(named) : null;
         }
 
-        return KyberWeaveConfigLoader.FindConfigPath(root);
+        return configs.FindConfigPath(root);
     }
 
     private static int Refuse(string message)
     {
-        AnsiConsole.MarkupLine($"[red]{Markup.Escape(KyberWeaveConfigLoader.ConfigLoadErrorCode)}[/] " +
+        AnsiConsole.MarkupLine($"[red]{Markup.Escape(KyberWeaveConfigDiagnosticCodes.LoadError)}[/] " +
                                Markup.Escape(TerminalText.Line(message)));
         return 1;
     }

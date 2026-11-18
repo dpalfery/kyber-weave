@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -47,7 +48,7 @@ public sealed class DocsOnboardingSettings : CommandSettings
 /// written.
 /// </para>
 /// </remarks>
-public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
+public sealed class DocsOnboardingCommand(IKyberWeaveConfigRepository configs) : Command<DocsOnboardingSettings>
 {
     /// <summary>The verb as the operator types it, for messages.</summary>
     private const string CommandName = "kyber-weave docs onboarding";
@@ -104,7 +105,7 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
             return RefusedInput;
         }
 
-        string? configPath = KyberWeaveConfigLoader.FindConfigPath(root);
+        string? configPath = configs.FindConfigPath(root);
         if (configPath is null)
         {
             AnsiConsole.MarkupLine(
@@ -192,7 +193,7 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
     /// asked to record one value should not hand an operator a scaffold they did not ask for. A block that is
     /// absent from an existing file is appended, which is what <c>docs init</c> does with the same renderer.
     /// </remarks>
-    private static int RefreshRegistry(string root)
+    private int RefreshRegistry(string root)
     {
         string agentsPath = Path.Combine(root, AgentsFile);
         if (!File.Exists(agentsPath))
@@ -211,7 +212,7 @@ public sealed class DocsOnboardingCommand : Command<DocsOnboardingSettings>
             return Failed;
         }
 
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(root);
+        KyberWeaveConfigLoadResult loaded = configs.TryLoad(root);
         if (!loaded.Success || loaded.Config is null)
         {
             AnsiConsole.MarkupLine(

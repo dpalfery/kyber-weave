@@ -136,7 +136,7 @@ public sealed class DocsRootRegistry
 
         // stderr, never stdout: stdout is the JSON-RPC transport.
         Console.Error.WriteLine(
-            $"{KyberWeaveConfigLoader.ConfigLoadErrorCode}: Failed to load " +
+            $"{KyberWeaveConfigDiagnosticCodes.LoadError}: Failed to load " +
             $"'{loaded.ConfigPath ?? "kyber-weave.yml"}': {loaded.Error ?? "unknown error"}. " +
             "Serving the default ontology; the corpus may be empty.");
 
