@@ -17,8 +17,72 @@ public enum SquadStateMigrationFlow
 /// <summary>One crash-safety symptom of the state migration that is known and not yet fixed.</summary>
 /// <param name="Flow">The migration that fails.</param>
 /// <param name="DetailContains">The symptom this weakness records; another symptom stays unexplained.</param>
+/// <param name="Points">The exact stop points (operation ordinals of the clean run) at which the symptom shows. A symptom at any other point stays unexplained, and a point listed here that no longer fails is a stale entry.</param>
 /// <param name="Reason">One line saying what goes wrong and why.</param>
-public sealed record SquadStateMigrationKnownWeakness(SquadStateMigrationFlow Flow, string DetailContains, string Reason);
+public sealed record SquadStateMigrationKnownWeakness(
+    SquadStateMigrationFlow Flow,
+    string DetailContains,
+    IReadOnlyCollection<int> Points,
+    string Reason);
+
+/// <summary>Sorts the failures of a crash-safety run into those a known weakness explains exactly and those it does not.</summary>
+public static class SquadStateMigrationFailureClassifier
+{
+    /// <summary>The failures no known weakness explains: its flow, its stop point and its symptom must all match.</summary>
+    /// <param name="flow">The migration that ran.</param>
+    /// <param name="failures">Every failure of the run, by stop point.</param>
+    /// <param name="known">The listed weaknesses.</param>
+    /// <returns>The unexplained failures.</returns>
+    public static IReadOnlyList<(int Point, string Detail)> Unexplained(
+        SquadStateMigrationFlow flow,
+        IReadOnlyList<(int Point, string Detail)> failures,
+        IReadOnlyList<SquadStateMigrationKnownWeakness> known)
+    {
+        ArgumentNullException.ThrowIfNull(failures);
+        ArgumentNullException.ThrowIfNull(known);
+        return [.. failures.Where(failure => !known.Any(weakness => Explains(weakness, flow, failure.Point, failure.Detail)))];
+    }
+
+    /// <summary>
+    /// The stop points a listed weakness names that do not fail with its symptom: a fixed or narrowed weakness whose
+    /// entry was left behind, which would let the symptom come back unnoticed at those points.
+    /// </summary>
+    /// <param name="flow">The migration that ran.</param>
+    /// <param name="failures">Every failure of the run, by stop point.</param>
+    /// <param name="known">The listed weaknesses.</param>
+    /// <returns>One line per stale point.</returns>
+    public static IReadOnlyList<string> Stale(
+        SquadStateMigrationFlow flow,
+        IReadOnlyList<(int Point, string Detail)> failures,
+        IReadOnlyList<SquadStateMigrationKnownWeakness> known)
+    {
+        ArgumentNullException.ThrowIfNull(failures);
+        ArgumentNullException.ThrowIfNull(known);
+        return
+        [
+            .. known
+                .Where(weakness => weakness.Flow == flow)
+                .SelectMany(weakness => weakness.Points
+                    .Where(point => !failures.Any(failure => failure.Point == point && Explains(weakness, flow, failure.Point, failure.Detail)))
+                    .Select(point => $"'{weakness.DetailContains}' no longer fails at operation {point}")),
+        ];
+    }
+
+    /// <summary>Whether a failure is exactly the symptom of a weakness at one of its stop points.</summary>
+    /// <param name="weakness">The listed weakness.</param>
+    /// <param name="flow">The migration that ran.</param>
+    /// <param name="point">The stop point of the failure.</param>
+    /// <param name="detail">What failed.</param>
+    /// <returns>True when flow, point and symptom all match.</returns>
+    public static bool Explains(SquadStateMigrationKnownWeakness weakness, SquadStateMigrationFlow flow, int point, string detail)
+    {
+        ArgumentNullException.ThrowIfNull(weakness);
+        ArgumentNullException.ThrowIfNull(detail);
+        return weakness.Flow == flow &&
+            weakness.Points.Contains(point) &&
+            detail.Contains(weakness.DetailContains, StringComparison.Ordinal);
+    }
+}
 
 /// <summary>
 /// The crash-safety contract of the Squad state migration: stop it at every file operation, restart the process and
@@ -138,10 +202,10 @@ public abstract class SquadStateMigrationCrashSafetyContractTests
                 continue;
             }
 
-            string? difference = SquadTreeComparison.Difference(after, workspace.Capture());
-            if (difference is not null)
+            IReadOnlyList<string> differences = SquadTreeComparison.Differences(after, workspace.Capture());
+            if (differences.Count > 0)
             {
-                failures.Add((point, $"after running again the tree is not the clean run's tree: {difference} (stopped at: {stop.Message})"));
+                failures.Add((point, $"after running again the tree is not the clean run's tree: {string.Join("; ", differences)} (stopped at: {stop.Message})"));
             }
         }
 
@@ -197,35 +261,26 @@ public abstract class SquadStateMigrationCrashSafetyContractTests
 
     private void Report(SquadStateMigrationFlow flow, List<(int Point, string Detail)> failures, int operations)
     {
+        IReadOnlyList<(int Point, string Detail)> unexplained =
+            SquadStateMigrationFailureClassifier.Unexplained(flow, failures, KnownWeaknesses);
+        IReadOnlyList<string> stale = SquadStateMigrationFailureClassifier.Stale(flow, failures, KnownWeaknesses);
+        Assert.True(
+            unexplained.Count == 0 && stale.Count == 0,
+            $"{flow} has {unexplained.Count} crash-safety failure(s) that no known weakness explains and {stale.Count} stale known weakness point(s):\n" +
+            string.Join("\n", unexplained.Select(failure => $"{flow} stopped at operation {failure.Point}: {failure.Detail}")) +
+            string.Join("\n", stale));
+
         if (failures.Count == 0)
         {
             return;
         }
-
-        List<(int Point, string Detail)> unexplained = failures
-            .Where(failure => !KnownWeaknesses.Any(weakness => Explains(weakness, flow, failure.Detail)))
-            .ToList();
-        Assert.True(
-            unexplained.Count == 0,
-            $"{flow} has {unexplained.Count} crash-safety failure(s) that no known weakness explains:\n" +
-            string.Join("\n", unexplained.Select(failure => $"{flow} stopped at operation {failure.Point}: {failure.Detail}")));
 
         Assert.Skip(
             "Known weakness: " +
             string.Join(
                 " ",
                 KnownWeaknesses
-                    .Where(weakness => failures.Any(failure => Explains(weakness, flow, failure.Detail)))
-                    .Select(weakness =>
-                    {
-                        List<(int Point, string Detail)> matched = failures
-                            .Where(failure => Explains(weakness, flow, failure.Detail))
-                            .ToList();
-                        return $"[{weakness.Flow}] {weakness.Reason} It shows at {matched.Count} of {operations} operations, " +
-                            $"from {matched[0].Point} to {matched[^1].Point}; the first stop was {matched[0].Detail}";
-                    })));
+                    .Where(weakness => weakness.Flow == flow)
+                    .Select(weakness => $"[{weakness.Flow}] {weakness.Reason} It shows at {weakness.Points.Count} of {operations} operations.")));
     }
-
-    private static bool Explains(SquadStateMigrationKnownWeakness weakness, SquadStateMigrationFlow flow, string detail) =>
-        weakness.Flow == flow && detail.Contains(weakness.DetailContains, StringComparison.Ordinal);
 }

@@ -36,6 +36,31 @@ public static class SquadTreeComparison
         return null;
     }
 
+    /// <summary>Every way the actual tree differs from the expected one, so a second difference cannot hide behind the first.</summary>
+    /// <param name="expected">The tree that should be there.</param>
+    /// <param name="actual">The tree that is there.</param>
+    /// <returns>Empty when they match; otherwise one line per difference, missing paths first and then unexpected ones, in ordinal path order.</returns>
+    public static IReadOnlyList<string> Differences(
+        IReadOnlyDictionary<string, SquadTreeEntry> expected,
+        IReadOnlyDictionary<string, SquadTreeEntry> actual)
+    {
+        ArgumentNullException.ThrowIfNull(expected);
+        ArgumentNullException.ThrowIfNull(actual);
+
+        List<string> differences = [];
+        differences.AddRange(expected.Keys.Where(path => !actual.ContainsKey(path)).Order(StringComparer.Ordinal).Select(path => $"'{path}' is missing"));
+        differences.AddRange(actual.Keys.Where(path => !expected.ContainsKey(path)).Order(StringComparer.Ordinal).Select(path => $"'{path}' is unexpected"));
+        foreach ((string path, SquadTreeEntry expectedEntry) in expected.OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (actual.TryGetValue(path, out SquadTreeEntry? actualEntry) && EntryDifference(path, expectedEntry, actualEntry) is { } difference)
+            {
+                differences.Add(difference);
+            }
+        }
+
+        return differences;
+    }
+
     /// <summary>What differs between one expected entry and the entry actually there.</summary>
     /// <param name="path">The path, for the message.</param>
     /// <param name="expected">The entry that should be there.</param>
