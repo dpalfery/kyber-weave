@@ -1,6 +1,3 @@
-using System.Text.RegularExpressions;
-using KyberWeave.Core.Configuration;
-
 namespace KyberWeave.Core.Arbiter.Facts;
 
 /// <summary>One dispatch classified to its trigger, or passing with no trigger.</summary>

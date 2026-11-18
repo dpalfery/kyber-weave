@@ -1,5 +1,3 @@
-using KyberWeave.Core.Configuration;
-
 namespace KyberWeave.Core.Review;
 
 /// <summary>What the cited-line check did to one finding.</summary>

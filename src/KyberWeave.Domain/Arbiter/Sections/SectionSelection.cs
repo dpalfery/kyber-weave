@@ -1,7 +1,3 @@
-using System.Text;
-using KyberWeave.Core.Arbiter.Providers;
-using KyberWeave.Core.Arbiter.Rules;
-
 namespace KyberWeave.Core.Arbiter.Sections;
 
 /// <summary>The outcome of selecting the sections of one document for a task.</summary>
