@@ -1,4 +1,5 @@
 using KyberWeave.Core.Docs.Analysis.Claims;
+using KyberWeave.Core.Docs.Graph;
 
 namespace KyberWeave.Core.Docs.Analysis.Candidates;
 

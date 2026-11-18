@@ -46,7 +46,7 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver, IWritableFileS
                                    ?? throw new InvalidOperationException(
                                        "A DocGraph contributor returned null."))
             .ToList();
-        DocGraphProjection projection = DocGraphProjection.Build(
+        DocGraphProjection projection = DocGraphProjectionBuilder.Build(
             set,
             _resolver.ResolveSymbol,
             _resolver.ResolveRoute,
@@ -112,6 +112,6 @@ public sealed class DocGraphExporter(ICodeGraphResolver resolver, IWritableFileS
     /// <summary>Resolves a relative link against the linking document's directory.</summary>
     internal static string? ResolveLink(string fromRelativePath, string link)
     {
-        return DocGraphProjection.ResolveLink(fromRelativePath, link);
+        return DocumentLinkPaths.Resolve(fromRelativePath, link);
     }
 }

@@ -1096,7 +1096,7 @@ public sealed class DocSpecValidator
 
                 string? targetPath = string.IsNullOrEmpty(link.Path)
                     ? doc.RelativePath
-                    : DocGraphProjection.ResolveLink(doc.RelativePath, link.Path);
+                    : DocumentLinkPaths.Resolve(doc.RelativePath, link.Path);
                 if (targetPath is null
                     || !byPath.TryGetValue(targetPath, out DocumentModel? target)
                     || !headingSlugsByPath.TryGetValue(targetPath, out IReadOnlySet<string>? slugs))

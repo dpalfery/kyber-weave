@@ -630,7 +630,7 @@ public sealed partial class ArchiveCloseoutValidator
     {
         foreach (string link in DocumentLoader.ExtractRelativeLinks(destination))
         {
-            string? target = DocGraphProjection.ResolveLink(entryPath, link);
+            string? target = DocumentLinkPaths.Resolve(entryPath, link);
             if (target is null)
                 continue;
 
@@ -725,7 +725,7 @@ public sealed partial class ArchiveCloseoutValidator
             bool tracked = false;
             foreach (string link in DocumentLoader.ExtractRelativeLinks(row.Destination))
             {
-                string? target = DocGraphProjection.ResolveLink(entryPath, link);
+                string? target = DocumentLinkPaths.Resolve(entryPath, link);
                 if (target is null)
                     continue;
 
