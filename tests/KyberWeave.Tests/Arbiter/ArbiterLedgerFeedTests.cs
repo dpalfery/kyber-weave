@@ -43,6 +43,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
     private readonly FakeArbiterProvider _provider = new()
     {
         DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+        ScoreDefaultAnswer = true,
         Confidence = 0.95,
         Model = "stub",
     };

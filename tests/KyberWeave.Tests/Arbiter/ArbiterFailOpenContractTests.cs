@@ -134,6 +134,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         {
             Answers = { ["KW-ARB-PLAN-001"] = "no-plan" },
             DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            ScoreDefaultAnswer = true,
             Confidence = 0.5,
         })
             .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
@@ -152,6 +153,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         {
             Answers = { ["KW-ARB-PLAN-001"] = "no-plan" },
             DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            ScoreDefaultAnswer = true,
             Confidence = 0.95,
         })
             .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);

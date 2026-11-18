@@ -111,6 +111,12 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
     /// <summary>The answer for a rule no other source answered; null leaves the rule out of the result.</summary>
     internal string? DefaultAnswer { get; init; }
 
+    /// <summary>
+    /// Whether a rule answered by <see cref="DefaultAnswer"/> also carries a score. Off by default: a
+    /// <c>not-evaluated</c> default answer reports no confidence, as a provider that never answered does.
+    /// </summary>
+    internal bool ScoreDefaultAnswer { get; init; }
+
     /// <summary>The confidence recorded for every answered rule without an explicit score; null records no score.</summary>
     internal double? Confidence { get; init; }
 
@@ -185,13 +191,25 @@ internal sealed class FakeArbiterProvider : IArbiterProvider
             string? answer =
                 Answers.TryGetValue(rule.Id, out string? named) ? named
                 : AnswerRule?.Invoke(call, rule)
-                ?? (rule.Ask is not null ? AnswerAsked ?? AnswerAll ?? DefaultAnswer : AnswerAll);
+                ?? (rule.Ask is not null ? AnswerAsked ?? AnswerAll : AnswerAll);
+            bool defaulted = false;
+            if (answer is null && rule.Ask is not null && DefaultAnswer is not null)
+            {
+                answer = DefaultAnswer;
+                defaulted = true;
+            }
+
             if (answer is null)
             {
                 continue;
             }
 
             answers[rule.Id] = answer;
+            if (defaulted && !ScoreDefaultAnswer)
+            {
+                continue;
+            }
+
             if (Score(rule) is { } score)
             {
                 scores[rule.Id] = score;

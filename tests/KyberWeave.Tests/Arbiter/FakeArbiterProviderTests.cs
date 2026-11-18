@@ -36,6 +36,24 @@ public sealed class FakeArbiterProviderTests
     }
 
     [Fact]
+    public async Task OnlyAnAnswerTheTestGaveCarriesAScore()
+    {
+        FakeArbiterProvider provider = new()
+        {
+            Answers = { [First] = "yes" },
+            DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            Confidence = 0.95,
+        };
+
+        ArbiterStep1BatchResult result = await provider.AskStep1Async([Rule(First), Rule(Second)], Facts());
+
+        Assert.Equal(0.95, result.ScoresByRule?[First].Confidence);
+        Assert.False(
+            result.ScoresByRule!.ContainsKey(Second),
+            "a not-evaluated answer reports no confidence, not the provider's 0.95");
+    }
+
+    [Fact]
     public async Task AnswersAllAskedRulesWithOneAnswerAndRecordsTheFactsSent()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering("yes", confidence: 0.97);
