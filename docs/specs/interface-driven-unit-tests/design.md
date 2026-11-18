@@ -126,7 +126,7 @@ a seam), `FileStream` (only inside the file-system adapter). Each is listed with
 `KyberWeave.Testing` provides `InMemoryFileSystem`, implementing the full file-system seam. It is the
 hardest fake, because the product's crash-safety code relies on exact semantics: atomic replace,
 exclusive create, case-insensitive but case-preserving names on macOS and Windows, case-sensitive on
-Linux (chosen per instance), links with one-hop and final resolution, deletion without following
+Linux (chosen per instance, and per directory as Windows allows), links with one-hop and final resolution, deletion without following
 links. It also supports fault injection (fail or "kill" at the Nth operation), which the install and
 recovery tests need and cannot do reliably against a real disk today.
 
