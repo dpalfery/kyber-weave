@@ -5,6 +5,7 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -25,6 +26,11 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class FactoryHookAdapterTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private const string TranscriptFixturePath =
+        "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/factory/transcript-background-task.jsonl";
+
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public string? SeenPreTarget;
@@ -139,9 +145,7 @@ public sealed class FactoryHookAdapterTests
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static string Fixture(string name) =>
-        File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "factory", name));
+        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/factory/{name}");
 
     private static (int Exit, string Stdout, string Log) Run(
         string stdin,
@@ -439,7 +443,7 @@ public sealed class FactoryHookAdapterTests
 
     private static string TwoLaunches(string firstTask, string secondTask)
     {
-        string fixture = File.ReadAllText(TranscriptFixture());
+        string fixture = Corpus.ReadText(TranscriptFixturePath);
         string first = fixture.Replace("TASK: T9", "TASK: " + firstTask, StringComparison.Ordinal);
         string second = fixture
             .Replace("TASK: T9", "TASK: " + secondTask, StringComparison.Ordinal)
@@ -525,7 +529,7 @@ public sealed class FactoryHookAdapterTests
     [Fact]
     public void SubagentStop_OnAFileThatIsNotATranscript_RecordsNothing()
     {
-        string notTranscript = TemporaryTranscript(File.ReadAllText(TranscriptFixture()), ".txt");
+        string notTranscript = TemporaryTranscript(Corpus.ReadText(TranscriptFixturePath), ".txt");
         try
         {
             ContextualEngine engine = new();
@@ -586,9 +590,7 @@ public sealed class FactoryHookAdapterTests
     }
 
     private static string TranscriptFixture() =>
-        Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "factory", "transcript-background-task.jsonl");
+        Path.Combine(Corpus.Root, TranscriptFixturePath);
 
     [Fact]
     public void SubagentStop_RecordsTheReportAgainstItsDispatch()
@@ -612,7 +614,7 @@ public sealed class FactoryHookAdapterTests
         string transcript = Path.Combine(Path.GetTempPath(), "kw-factory-" + Guid.NewGuid().ToString("N") + ".jsonl");
         File.WriteAllText(
             transcript,
-            File.ReadAllText(TranscriptFixture()).Replace("\"echoer\"", "\"dev-medium\"", StringComparison.Ordinal));
+            Corpus.ReadText(TranscriptFixturePath).Replace("\"echoer\"", "\"dev-medium\"", StringComparison.Ordinal));
         try
         {
             ContextualEngine engine = new();

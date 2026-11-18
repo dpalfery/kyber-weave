@@ -78,12 +78,13 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         string searchPattern = "*",
         bool recursive = true)
     {
-        string directory = CorpusPath.Normalize(relativeDirectory);
+        string directory = CorpusPath.NormalizeDirectory(relativeDirectory);
         string pattern = string.IsNullOrEmpty(searchPattern) ? "*" : searchPattern;
+        string prefix = directory.Length == 0 ? string.Empty : directory + "/";
 
         return _files.Keys
             .Where(path => recursive
-                ? path.StartsWith(directory + "/", Comparison)
+                ? path.StartsWith(prefix, Comparison)
                     && !CorpusListing.HasSkippedDirectory(directory, path, Comparison)
                 : CorpusPath.IsDirectChild(directory, path, Comparison))
             .Where(path => FileSystemName.MatchesSimpleExpression(
@@ -97,7 +98,8 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     /// <inheritdoc />
     public IEnumerable<string> EnumerateDirectories(string relativeDirectory)
     {
-        string prefix = CorpusPath.Normalize(relativeDirectory) + "/";
+        string directory = CorpusPath.NormalizeDirectory(relativeDirectory);
+        string prefix = directory.Length == 0 ? string.Empty : directory + "/";
 
         return _files.Keys
             .Where(path => path.StartsWith(prefix, Comparison))

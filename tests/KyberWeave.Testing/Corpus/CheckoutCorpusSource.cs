@@ -63,7 +63,7 @@ public sealed class CheckoutCorpusSource : ICorpusSource
         string searchPattern = "*",
         bool recursive = true)
     {
-        string directory = CorpusPath.Resolve(Root, CorpusPath.Normalize(relativeDirectory));
+        string directory = CorpusPath.Resolve(Root, CorpusPath.NormalizeDirectory(relativeDirectory));
 
         return _files
             .EnumerateFiles(directory, string.IsNullOrEmpty(searchPattern) ? "*" : searchPattern, recursive)
@@ -74,7 +74,7 @@ public sealed class CheckoutCorpusSource : ICorpusSource
     /// <inheritdoc />
     public IEnumerable<string> EnumerateDirectories(string relativeDirectory)
     {
-        string directory = CorpusPath.Resolve(Root, CorpusPath.Normalize(relativeDirectory));
+        string directory = CorpusPath.Resolve(Root, CorpusPath.NormalizeDirectory(relativeDirectory));
 
         return _files
             .EnumerateDirectories(directory)

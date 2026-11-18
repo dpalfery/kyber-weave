@@ -4,6 +4,7 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -21,6 +22,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ModelOverrideCapabilityTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string SubAgentsDocs = "https://code.claude.com/docs/en/sub-agents";
 
     private static readonly string[] ExpectedClaudeAliases = new[] { "fable", "haiku", "opus", "sonnet" };
@@ -177,9 +180,7 @@ public sealed class ModelOverrideCapabilityTests
         int exit = command.Run(
             "claude",
             "conductor",
-            File.ReadAllText(Path.Combine(
-                KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-                "Fixtures", "arbiter-hooks", "claude", "pre-agent-dispatch.json")),
+            Corpus.ReadText("tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json"),
             stdout,
             log);
 

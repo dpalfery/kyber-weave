@@ -1,6 +1,7 @@
 using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -12,10 +13,12 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterSemanticProfilesParityTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [Fact]
     public void SemanticProfiles_MatchTheSquadModelProfileKeysExactly()
     {
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         IReadOnlyList<string> squadProfiles = [.. SquadSourceLoader.Load(productRoot)
             .ModelProfiles.Profiles.Keys
             .Order(StringComparer.Ordinal)];

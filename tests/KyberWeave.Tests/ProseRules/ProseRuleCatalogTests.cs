@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Tests.ProseRules;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -11,7 +12,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed partial class ProseRuleCatalogTests
 {
-    private static readonly string Root = KyberWeaveTestPaths.ToolRoot;
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static readonly Lazy<ProseRuleCatalog> Catalog = new(() => ProseRuleCatalog.Load(ProseRuleCatalog.DefaultPath()));
 
@@ -38,12 +39,12 @@ public sealed partial class ProseRuleCatalogTests
         {
             IEnumerable<ProseDocumentRef> documents = rule.StatedIn.Concat(rule.Retired?.AbsentFrom ?? []);
             missing.AddRange(documents
-                .Where(document => ProseRuleCatalog.Resolve(Root, document).Count == 0)
+                .Where(document => ProseRuleCatalog.Resolve(Corpus, document).Count == 0)
                 .Select(document => $"{rule.Id}: {document.Pattern} matches no file"));
             missing.AddRange(rule.Controls
-                .Where(control => !File.Exists(Path.Combine(Root, control.Path)))
+                .Where(control => !Corpus.Exists(control.Path))
                 .Select(control => $"{rule.Id}: control {control.Path} does not exist"));
-            if (rule.Retired?.SeedInto is { } seed && !File.Exists(Path.Combine(Root, seed)))
+            if (rule.Retired?.SeedInto is { } seed && !Corpus.Exists(seed))
             {
                 missing.Add($"{rule.Id}: seed-into {seed} does not exist");
             }
@@ -60,14 +61,14 @@ public sealed partial class ProseRuleCatalogTests
         {
             foreach (ProseDocumentRef document in rule.StatedIn.Concat(rule.Retired?.AbsentFrom ?? []).Where(item => item.Section is not null))
             {
-                missing.AddRange(ProseRuleCatalog.Resolve(Root, document)
+                missing.AddRange(ProseRuleCatalog.Resolve(Corpus, document)
                     .Where(path => ProseRuleCatalog.Section(Read(path), document.Section!) is null)
                     .Select(path => $"{rule.Id}: {path} has no heading '{document.Section}'"));
             }
 
             missing.AddRange(rule.Controls
                 .Where(control => control.WithoutSection is not null
-                    && File.Exists(Path.Combine(Root, control.Path))
+                    && Corpus.Exists(control.Path)
                     && ProseRuleCatalog.Section(Read(control.Path), control.WithoutSection) is null)
                 .Select(control => $"{rule.Id}: control {control.Path} has no heading '{control.WithoutSection}'"));
         }
@@ -83,7 +84,7 @@ public sealed partial class ProseRuleCatalogTests
         {
             foreach (ProseDocumentRef document in rule.StatedIn.Where(item => item.Anchor is not null))
             {
-                missing.AddRange(ProseRuleCatalog.Resolve(Root, document)
+                missing.AddRange(ProseRuleCatalog.Resolve(Corpus, document)
                     .Where(path => !Read(path).Contains(document.Anchor!, StringComparison.Ordinal))
                     .Select(path => $"{rule.Id}: {path} lacks its anchor '{document.Anchor}'"));
             }
@@ -134,6 +135,34 @@ public sealed partial class ProseRuleCatalogTests
             Assert.True(rows.ContainsKey(id), $"Catalog rule {id} carries a rule-map id the map has no row for."));
     }
 
+    /// <summary>
+    /// A glob needs no directory prefix: the catalog allows <c>*</c> and <c>**</c> anywhere, so a rule may
+    /// cover root files or a whole subtree without naming a directory the corpus must list first.
+    /// </summary>
+    [Fact]
+    public void Resolve_ExpandsAGlobAtTheCorpusRoot()
+    {
+        InMemoryCorpusSource corpus = new InMemoryCorpusSource()
+            .Add("AGENTS.md", "root")
+            .Add("docs/AGENTS.md", "nested")
+            .Add("docs/guides/AGENTS.md", "deeper")
+            .Add("docs/notes.txt", "other");
+
+        Assert.Equal(["AGENTS.md"], ProseRuleCatalog.Resolve(corpus, new ProseDocumentRef("*.md", null)));
+        Assert.Equal(
+            ["AGENTS.md", "docs/AGENTS.md", "docs/guides/AGENTS.md"],
+            ProseRuleCatalog.Resolve(corpus, new ProseDocumentRef("**/AGENTS.md", null)));
+    }
+
+    /// <summary>The checkout answers a root listing the same way the in-memory corpus does.</summary>
+    [Fact]
+    public void TheCheckoutListsFilesAtItsRoot()
+    {
+        Assert.Contains(
+            "AGENTS.md",
+            CheckoutCorpusSource.Checkout.EnumerateFiles(string.Empty, "AGENTS.md", recursive: false));
+    }
+
     [Fact]
     public void Section_EndsAtTheNextHeadingOfTheSameOrHigherLevel()
     {
@@ -182,7 +211,7 @@ public sealed partial class ProseRuleCatalogTests
         }
     }
 
-    private static string Read(string path) => File.ReadAllText(Path.Combine(Root, path));
+    private static string Read(string path) => Corpus.ReadText(path);
 
     [GeneratedRegex("^(?:[A-G][0-9]+|[A-G][0-9]+(?:-[a-z0-9]+)+|[a-z0-9]+(?:-[a-z0-9]+)+)$", RegexOptions.CultureInvariant)]
     private static partial Regex IdPattern();

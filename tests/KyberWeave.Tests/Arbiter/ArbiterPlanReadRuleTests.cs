@@ -3,6 +3,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -31,11 +32,12 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterPlanReadRuleTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string PlanReadRule = "KW-ARB-PLANREAD-001";
 
-    private static readonly string ConductorRulesPath = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot,
-        "products", "kyber-squad", "standards", "conductor", "conductor.arbiter-rules.yml");
+    private const string ConductorRulesPath =
+        "products/kyber-squad/standards/conductor/conductor.arbiter-rules.yml";
 
     /// <summary>A dispatch prompt with the routing header block, a task, and a body.</summary>
     private static string Prompt(string body) =>
@@ -214,11 +216,11 @@ public sealed class ArbiterPlanReadRuleTests
     public void TheShippedFileDeclaresTheRuleAsTheTwentySixth()
     {
         Assert.True(
-            File.Exists(ConductorRulesPath),
+            Corpus.Exists(ConductorRulesPath),
             $"the conductor rules file must live at '{ConductorRulesPath}'.");
         string[] ids =
         [
-            .. File.ReadAllLines(ConductorRulesPath)
+            .. CorpusLines.Split(Corpus.ReadText(ConductorRulesPath))
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())

@@ -9,6 +9,7 @@ using System.Text;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Squad;
 
@@ -30,8 +31,10 @@ namespace KyberWeave.Tests.Squad;
 /// </remarks>
 public sealed class SquadRendererSharedContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>
     /// Where each harness puts the resource-bearing fixture's agent, and how it treats links inside

@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Squad;
 
@@ -16,8 +17,10 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed class CopilotRendererTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private static readonly Regex ToolsFlowSequenceRegex =
         new(@"^tools:\s*\[(?<items>.*)\]$", RegexOptions.Compiled | RegexOptions.Multiline);
@@ -437,9 +440,11 @@ public sealed class CopilotRendererTests
         Directory.CreateDirectory(Path.Combine(root, "agents"));
         Directory.CreateDirectory(Path.Combine(root, "schemas"));
 
-        foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
+        foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
         {
-            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), true);
+            File.WriteAllBytes(
+                Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
+                Corpus.ReadBytes(schemaFile));
         }
 
         File.WriteAllText(Path.Combine(root, "squad.yml"), """
@@ -532,9 +537,11 @@ public sealed class CopilotRendererTests
         Directory.CreateDirectory(Path.Combine(root, "agents"));
         Directory.CreateDirectory(Path.Combine(root, "schemas"));
 
-        foreach (string schemaFile in Directory.GetFiles(Path.Combine(ProductRoot, "schemas"), "*.json"))
+        foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
         {
-            File.Copy(schemaFile, Path.Combine(root, "schemas", Path.GetFileName(schemaFile)), true);
+            File.WriteAllBytes(
+                Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
+                Corpus.ReadBytes(schemaFile));
         }
 
         File.WriteAllText(Path.Combine(root, "squad.yml"), """

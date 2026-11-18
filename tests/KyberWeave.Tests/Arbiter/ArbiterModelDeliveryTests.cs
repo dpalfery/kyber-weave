@@ -11,6 +11,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -29,6 +30,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterModelDeliveryTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string ScopeRule = "KW-ARB-SCOPE-002";
@@ -257,9 +260,8 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
 
     private static string AgentDispatchPayload()
     {
-        JsonNode root = JsonNode.Parse(File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "KyberWeave.Tests",
-            "Fixtures", "arbiter-hooks", "claude", "pre-agent-dispatch.json")))
+        JsonNode root = JsonNode.Parse(Corpus.ReadText(
+            "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json"))
             ?? throw new InvalidOperationException("The shipped Claude fixture is not a JSON document.");
         root["tool_input"] = new JsonObject
         {

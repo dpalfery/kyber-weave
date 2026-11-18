@@ -1,5 +1,6 @@
 using KyberWeave.Core.Arbiter.Plans;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -11,23 +12,22 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterPlanParserTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string FixtureRootRelativePath = "tests/KyberWeave.Tests/Fixtures/arbiter-plans";
 
-    private static readonly string ArchivePlansRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "docs", "archive", "plans");
+    private const string ArchivePlansRoot = "docs/archive/plans";
 
-    private static readonly string ArchivedSpecTasksPath = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "docs", "archive", "specs", "kyberdash-context-surfaces", "tasks.md");
+    private const string ArchivedSpecTasksPath = "docs/archive/specs/kyberdash-context-surfaces/tasks.md";
 
     private static PlanDocument ParseRepositoryFile(params string[] parts)
     {
-        return PlanDocumentParser.Parse(File.ReadAllText(Path.Combine([KyberWeaveTestPaths.ToolRoot, .. parts])));
+        return PlanDocumentParser.Parse(Corpus.ReadText(string.Join('/', parts)));
     }
 
     private static PlanDocument ParseFixture(string name)
     {
-        return PlanDocumentParser.Parse(
-            File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, FixtureRootRelativePath, name)));
+        return PlanDocumentParser.Parse(Corpus.ReadText($"{FixtureRootRelativePath}/{name}"));
     }
 
     private static PlanTask Task(PlanDocument plan, string id)
@@ -66,14 +66,14 @@ public sealed class ArbiterPlanParserTests
     [Fact]
     public void EveryArchivedPlanMarkdownParsesWithoutThrowing()
     {
-        List<string> plans = [.. Directory.EnumerateFiles(ArchivePlansRoot, "*.md")
+        List<string> plans = [.. Corpus.EnumerateFiles(ArchivePlansRoot, "*.md", recursive: false)
             .OrderBy(path => path, StringComparer.Ordinal)];
 
         Assert.True(plans.Count >= 8, $"expected the archived plan corpus to hold at least 8 files, found {plans.Count}");
 
         foreach (string path in plans)
         {
-            PlanDocument parsed = PlanDocumentParser.Parse(File.ReadAllText(path));
+            PlanDocument parsed = PlanDocumentParser.Parse(Corpus.ReadText(path));
 
             Assert.NotNull(parsed.Tasks);
             Assert.NotNull(parsed.OutOfScope);
@@ -179,7 +179,7 @@ public sealed class ArbiterPlanParserTests
     [Fact]
     public void ArchivedSpecTaskArtifactParsesCheckboxTasksWithInheritedPaths()
     {
-        PlanDocument parsed = PlanDocumentParser.Parse(File.ReadAllText(ArchivedSpecTasksPath));
+        PlanDocument parsed = PlanDocumentParser.Parse(Corpus.ReadText(ArchivedSpecTasksPath));
 
         Assert.True(parsed.HasTasks);
         Assert.Equal("archived", parsed.Status);

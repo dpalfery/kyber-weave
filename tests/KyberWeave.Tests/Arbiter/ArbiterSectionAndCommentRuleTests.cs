@@ -2,6 +2,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -18,6 +19,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterSectionAndCommentRuleTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string TrimRule = "KW-ARB-TRIM-001";
     private const string CommentRule = "KW-ARB-COMMENT-001";
 
@@ -28,8 +31,8 @@ public sealed class ArbiterSectionAndCommentRuleTests
         RoleRules("reviewer")
     ];
 
-    private static string RoleRules(string role) => Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", role, $"{role}.arbiter-rules.yml");
+    private static string RoleRules(string role) =>
+        $"products/kyber-squad/standards/{role}/{role}.arbiter-rules.yml";
 
     private static ArbiterRule Shipped(string id) =>
         Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
@@ -51,7 +54,7 @@ public sealed class ArbiterSectionAndCommentRuleTests
     [Fact]
     public void TheSectionTrimRuleIsDeclaredForEachSectionCandidate()
     {
-        string[] lines = File.ReadAllLines(RoleRulesPaths[0]);
+        string[] lines = CorpusLines.Split(Corpus.ReadText(RoleRulesPaths[0]));
         int start = Array.FindIndex(lines, line => line.Trim() == $"- id: {TrimRule}");
         Assert.True(start >= 0, $"{TrimRule} is not declared in conductor.arbiter-rules.yml.");
         int end = Array.FindIndex(lines, start + 1, line => line.TrimStart().StartsWith("- id: ", StringComparison.Ordinal));
