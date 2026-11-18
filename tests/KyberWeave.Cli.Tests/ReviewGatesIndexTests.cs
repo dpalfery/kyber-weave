@@ -3,11 +3,12 @@ using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
 using KyberWeave.Data.Host;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 ///     Pins that <c>kyber-weave review gates</c>, run over the repository rather than with <c>--agent</c>, makes sure
@@ -15,9 +16,10 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The command takes its CodeGraph child through <see cref="ReviewGatesCommand" />'s bounded process executor, so no real <c>codegraph</c> runs. Each gate writes a marker into the
-///         repository's git configuration when it starts; a case that must stop before any gate proves it by finding
-///         no marker there.
+///         The command takes its CodeGraph child through <see cref="ReviewGatesCommand" />'s bounded process executor, so no real <c>codegraph</c> runs. Each gate runs
+///         through the scripted process seam; a gate that writes a marker into the repository's git configuration
+///         has started when that call is among the seam's recorded calls, and a case that must stop before any gate
+///         proves it by finding no such call.
 ///     </para>
 ///     <para>
 ///         The report and the diagnostics are read back from the boundary a caller sees: standard output in
@@ -30,20 +32,21 @@ public sealed class ReviewGatesIndexTests : IDisposable
     private const string GateMarkerSection = "kw-index-gate";
     private const string MarkerGate = "repository-wide";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
     private readonly string _repo;
 
     public ReviewGatesIndexTests()
     {
-        _repo = Path.Combine(_temp.Path, "repo");
-        TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
+        _repo = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(_repo);
+        _services.ScriptProgram("git", TimeSpan.Zero);
     }
 
-    private string ReportPath => Path.Combine(_temp.Path, "gates.json");
+    private string ReportPath => Path.Combine(_services.Root, "gates.json");
 
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     [Fact]
@@ -142,7 +145,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
     /// <summary>Runs <c>review gates</c> over the repository with the scripted CodeGraph seam, writing the report to --out.</summary>
     private CapturedConsoleExecution<int> Run(ScriptedProcessExecutor executor)
     {
-        CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(ReviewTestServices.ReviewGates, new SystemConsole(), AnsiConsole.Console, executor)));
+        CommandApp app = new(new SeamRegistrar(_services.Ansi, new ReviewGatesCommand(_services.ReviewGates, _services.Console, _services.Ansi, executor)));
         app.Configure(configuration =>
         {
             configuration.SetApplicationName("kyber-weave");
@@ -151,21 +154,19 @@ public sealed class ReviewGatesIndexTests : IDisposable
         });
 
         string[] arguments = ["review", "gates", _repo, "--format", "json", "--out", ReportPath];
-        return ProcessConsoleCapture.Run(() => app.Run(arguments));
+        return _services.Run(app, arguments);
     }
 
     /// <summary>Whether the marker gate ran, which the gate does by writing its key into the repository's git configuration.</summary>
-    private bool GateStarted()
-    {
-        string config = Path.Combine(_repo, ".git", "config");
-        return File.Exists(config) && File.ReadAllText(config).Contains(GateMarkerSection, StringComparison.Ordinal);
-    }
+    private bool GateStarted() =>
+        _services.Processes.Calls.Any(call =>
+            call.Program == "git" && call.Arguments.Any(argument => argument.Contains(GateMarkerSection, StringComparison.Ordinal)));
 
     private void WriteRepositoryFile(string relativePath, string content)
     {
         string path = Path.Combine(_repo, relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
+        _services.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _services.Files.WriteAllText(path, content);
     }
 
     /// <summary>The diagnostics in the JSON output whose code matches, read as objects.</summary>
@@ -206,7 +207,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
         diagnostic.GetProperty("severity").GetString()!;
 
     /// <summary>Hands the command the test's instance, so the scripted seam reaches it.</summary>
-    private sealed class SeamRegistrar(ReviewGatesCommand command) : ITypeRegistrar
+    private sealed class SeamRegistrar(IAnsiConsole ansi, ReviewGatesCommand command) : ITypeRegistrar
     {
         public void Register(Type service, Type implementation)
         {
@@ -220,10 +221,10 @@ public sealed class ReviewGatesIndexTests : IDisposable
         {
         }
 
-        public ITypeResolver Build() => new SeamResolver(command);
+        public ITypeResolver Build() => new SeamResolver(ansi, command);
     }
 
-    private sealed class SeamResolver(ReviewGatesCommand command) : ITypeResolver
+    private sealed class SeamResolver(IAnsiConsole ansi, ReviewGatesCommand command) : ITypeResolver
     {
         public object? Resolve(Type? type)
         {
@@ -234,7 +235,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
                 return command;
 
             if (type == typeof(IAnsiConsole))
-                return AnsiConsole.Console;
+                return ansi;
 
             if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(IEnumerable<>))
                 return Array.CreateInstance(type.GetGenericArguments()[0], 0);

@@ -9,7 +9,9 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Doctor;
+using KyberWeave.Kernel.FileSystem;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Doctor;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,6 +94,8 @@ internal sealed class InMemoryReviewServices : IDisposable
         ArgumentNullException.ThrowIfNull(services);
         services.AddSingleton<IWritableFileSystem>(Files);
         services.AddSingleton<IFileSystem>(Files);
+        services.AddSingleton<IDoctorFileSystem>(new InMemoryDoctorFileSystem(Files));
+        services.AddSingleton<ICodeGraphIndexWorkspace>(new FakeCodeGraphIndexWorkspace());
         services.AddSingleton<IPathResolver>(Paths);
         services.AddSingleton<IProcessEnvironment>(Environment);
         services.AddSingleton<IIdGenerator>(Ids);
