@@ -61,6 +61,7 @@ public abstract class ProcessEnvironmentContractTests
     {
         IProcessEnvironment environment = CreateEnvironment();
 
+        Assert.NotNull(Facts.KnownVariableValue);
         Assert.Equal(Facts.KnownVariableValue, environment.GetVariable(Facts.KnownVariableName));
     }
 
