@@ -31,6 +31,21 @@ public abstract class CorpusSourceContractTests
     /// </summary>
     protected abstract (string Directory, string Pattern) BuildOutputProbe { get; }
 
+    /// <summary>Gets whether this corpus compares path names case-sensitively, as its host file system does.</summary>
+    protected abstract bool CaseSensitiveNames { get; }
+
+    [Fact]
+    public void MatchesNamesAsItsHostFileSystemDoes()
+    {
+        ICorpusSource corpus = CreateCorpus();
+        string otherCase = SampleFile.ToUpperInvariant();
+
+        Assert.Equal(!CaseSensitiveNames, corpus.Exists(otherCase));
+
+        if (!CaseSensitiveNames)
+            Assert.Equal(corpus.ReadText(SampleFile), corpus.ReadText(otherCase));
+    }
+
     [Fact]
     public void SkipsBuildOutputAndDependencyFoldersWhenListingFiles()
     {

@@ -5,9 +5,9 @@ namespace KyberWeave.Tests.RepoPolicy;
 
 /// <summary>Runs the corpus seam's contract suite against the checkout every content test reads.</summary>
 /// <remarks>
-/// The suite lives in the shared test library and is run once here against the real checkout and once in
-/// <see cref="InMemoryCorpusSourceContractTests"/> against the corpus held in memory. Both use the same two paths,
-/// which this repository ships, so a fixture corpus and the shipped content answer a test the same way.
+/// The suite lives in the shared test library and is run once here against the real checkout and twice in the
+/// in-memory runs against the corpus held in memory, once per case rule. All of them use the same two paths, which
+/// this repository ships, so a fixture corpus and the shipped content answer a test the same way.
 /// </remarks>
 public sealed class CheckoutCorpusSourceContractTests : CorpusSourceContractTests
 {
@@ -22,17 +22,20 @@ public sealed class CheckoutCorpusSourceContractTests : CorpusSourceContractTest
 
     /// <inheritdoc />
     protected override (string Directory, string Pattern) BuildOutputProbe => ("tests/KyberWeave.Testing", "*.cs");
+
+    /// <inheritdoc />
+    protected override bool CaseSensitiveNames => OperatingSystem.IsLinux();
 }
 
-/// <summary>Runs the corpus seam's contract suite against the corpus held in memory.</summary>
+/// <summary>Runs the corpus seam's contract suite against the corpus held in memory, once per case rule.</summary>
 /// <remarks>
 /// It sits beside the checkout run while the content tests still live in this project: task 5.4 of the
 /// interface-driven unit tests specification moves both into the content test project.
 /// </remarks>
-public sealed class InMemoryCorpusSourceContractTests : CorpusSourceContractTests
+public abstract class InMemoryCorpusContractTests : CorpusSourceContractTests
 {
     /// <inheritdoc />
-    protected override ICorpusSource CreateCorpus() => new InMemoryCorpusSource()
+    protected override ICorpusSource CreateCorpus() => new InMemoryCorpusSource(caseSensitive: CaseSensitiveNames)
         .Add("products/kyber-squad/agents/conductor.md", "---\nschema: kyber-squad.agent/v1\nname: conductor\n---\n")
         .Add("products/kyber-squad/agents/conductor/references/spec-path.md", "# Spec path\n")
         .Add("products/kyber-squad/agents/conductor/notes.txt", "not part of the md pattern\n")
@@ -57,4 +60,18 @@ public sealed class InMemoryCorpusSourceContractTests : CorpusSourceContractTest
 
         Assert.Equal("the original text", corpus.ReadText("products/sample.md"));
     }
+}
+
+/// <summary>Runs the in-memory contract with APFS and NTFS name rules.</summary>
+public sealed class InMemoryCorpusSourceContractTests : InMemoryCorpusContractTests
+{
+    /// <inheritdoc />
+    protected override bool CaseSensitiveNames => false;
+}
+
+/// <summary>Runs the in-memory contract with Linux name rules.</summary>
+public sealed class InMemoryCorpusSourceCaseSensitiveContractTests : InMemoryCorpusContractTests
+{
+    /// <inheritdoc />
+    protected override bool CaseSensitiveNames => true;
 }

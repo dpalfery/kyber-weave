@@ -58,8 +58,9 @@ internal static class CorpusPath
     /// <summary>Gets whether a canonical path names a file directly in a canonical directory.</summary>
     /// <param name="directory">The directory's canonical path.</param>
     /// <param name="path">The file's canonical path.</param>
+    /// <param name="comparison">The corpus's name comparison, which follows its host file system.</param>
     /// <returns>True when the file sits directly in the directory.</returns>
-    public static bool IsDirectChild(string directory, string path) =>
-        path.StartsWith(directory + Separator, StringComparison.Ordinal)
+    public static bool IsDirectChild(string directory, string path, StringComparison comparison) =>
+        path.StartsWith(directory + Separator, comparison)
         && path.IndexOf('/', directory.Length + 1) < 0;
 }

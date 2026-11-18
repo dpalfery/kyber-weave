@@ -8,7 +8,8 @@ namespace KyberWeave.Tests.Corpus;
 /// <para>
 /// Every path, given and returned, is relative to <see cref="Root"/> and written with forward slashes, so a test
 /// reads the same way on every platform. A path that is rooted, or that climbs above the root with <c>..</c>, is
-/// refused: a corpus read never leaves the corpus.
+/// refused: a corpus read never leaves the corpus. Name case follows the host file system, exactly as the file-system
+/// seam's adapter does, so a wrong-case path fails on Linux and resolves on APFS and NTFS.
 /// </para>
 /// <para>
 /// This is test infrastructure, not a product seam. It exists so a content test says what it reads instead of

@@ -5,14 +5,33 @@ namespace KyberWeave.Tests.Corpus;
 /// <summary>A corpus held in memory, for tests of the corpus seam itself and for tests whose subject is a fixture.</summary>
 /// <remarks>
 /// Nothing here touches a disk, the environment or the clock. Paths are repository-relative with forward slashes,
-/// exactly as <see cref="ICorpusSource"/> declares them, and names are compared case-sensitively.
+/// exactly as <see cref="ICorpusSource"/> declares them, and names follow the case rule this host's file system
+/// uses unless the caller chooses one.
 /// </remarks>
 public sealed class InMemoryCorpusSource : ICorpusSource
 {
-    private readonly Dictionary<string, byte[]> _files = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, byte[]> _files;
+    private readonly StringComparer _names;
+
+    /// <summary>Creates an empty corpus.</summary>
+    /// <param name="caseSensitive">
+    /// True for Linux name rules; false for the case-insensitive, case-preserving APFS and NTFS rules; null to take
+    /// this host's rule, so a fixture answers as the checkout on the same machine does.
+    /// </param>
+    public InMemoryCorpusSource(bool? caseSensitive = null)
+    {
+        CaseSensitive = caseSensitive ?? OperatingSystem.IsLinux();
+        _names = CaseSensitive ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+        _files = new Dictionary<string, byte[]>(_names);
+    }
+
+    /// <summary>Gets whether names are compared case-sensitively in this corpus.</summary>
+    public bool CaseSensitive { get; }
 
     /// <inheritdoc />
     public string Root { get; } = OperatingSystem.IsWindows() ? @"C:\in-memory-corpus" : "/in-memory-corpus";
+
+    private StringComparison Comparison => CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 
     /// <summary>Adds a text file, replacing one already at the path.</summary>
     /// <param name="relativePath">The file's path relative to the corpus root, with forward slashes.</param>
@@ -64,13 +83,13 @@ public sealed class InMemoryCorpusSource : ICorpusSource
 
         return _files.Keys
             .Where(path => recursive
-                ? path.StartsWith(directory + "/", StringComparison.Ordinal)
-                    && !CorpusListing.HasSkippedDirectory(directory, path)
-                : CorpusPath.IsDirectChild(directory, path))
+                ? path.StartsWith(directory + "/", Comparison)
+                    && !CorpusListing.HasSkippedDirectory(directory, path, Comparison)
+                : CorpusPath.IsDirectChild(directory, path, Comparison))
             .Where(path => FileSystemName.MatchesSimpleExpression(
                 pattern,
                 Path.GetFileName(path.Replace('/', Path.DirectorySeparatorChar)),
-                ignoreCase: false))
+                ignoreCase: !CaseSensitive))
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
     }
@@ -81,11 +100,11 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         string prefix = CorpusPath.Normalize(relativeDirectory) + "/";
 
         return _files.Keys
-            .Where(path => path.StartsWith(prefix, StringComparison.Ordinal))
+            .Where(path => path.StartsWith(prefix, Comparison))
             .Select(path => path[prefix.Length..])
             .Select(rest => rest.IndexOf('/', StringComparison.Ordinal) is int slash and >= 0 ? prefix + rest[..slash] : null)
             .OfType<string>()
-            .Distinct(StringComparer.Ordinal)
+            .Distinct(_names)
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToList();
     }

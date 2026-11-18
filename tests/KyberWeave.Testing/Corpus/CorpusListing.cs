@@ -12,16 +12,21 @@ internal static class CorpusListing
     /// <summary>Gets whether a canonical path sits in a directory a recursive listing skips.</summary>
     /// <param name="directory">The directory the listing started at, as a canonical path.</param>
     /// <param name="path">The file's canonical path.</param>
+    /// <param name="comparison">The corpus's name comparison, which follows its host file system.</param>
     /// <returns>True when a directory between the listing's directory and the file is a skipped one.</returns>
-    public static bool HasSkippedDirectory(string directory, string path)
+    public static bool HasSkippedDirectory(string directory, string path, StringComparison comparison)
     {
         string prefix = directory + "/";
-        if (!path.StartsWith(prefix, StringComparison.Ordinal))
+        if (!path.StartsWith(prefix, comparison))
             return false;
 
         string[] segments = path[prefix.Length..].Split('/');
+        StringComparer names = comparison == StringComparison.Ordinal
+            ? StringComparer.Ordinal
+            : StringComparer.OrdinalIgnoreCase;
+
         return segments
             .Take(segments.Length - 1)
-            .Any(segment => SkippedDirectoryNames.Contains(segment, StringComparer.Ordinal));
+            .Any(segment => SkippedDirectoryNames.Contains(segment, names));
     }
 }
