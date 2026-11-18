@@ -148,11 +148,18 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
         services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(sp.GetRequiredService<IRepositoryFileStore>()));
-        services.TryAddSingleton<IGitWorktreeIdentity>(sp => new GitWorktreeIdentity(sp.GetRequiredService<IProcessRunner>()));
+        services.TryAddSingleton<IGitWorktreeIdentity>(sp => new GitWorktreeIdentity(
+            sp.GetRequiredService<IProcessRunner>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IGitCheckoutProbe>(sp => new GitCheckoutProbe(
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IProcessRunner>()));
-        services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
+            sp.GetRequiredService<IProcessRunner>(),
+            sp.GetRequiredService<IPathResolver>()));
+        services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(
+            sp.GetRequiredService<IGitCheckoutProbe>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton(sp => new ReviewBlockWriter(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IRepositoryFileLister>(),

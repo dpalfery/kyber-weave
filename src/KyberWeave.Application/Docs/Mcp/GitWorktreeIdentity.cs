@@ -1,11 +1,13 @@
 using System.Globalization;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Mcp;
 
 namespace KyberWeave.Data.Docs.Mcp;
 
 /// <summary>Reads a working tree's identity from <c>git rev-parse</c> through the process seam, bounded by a five-second timeout.</summary>
-public sealed class GitWorktreeIdentity(IProcessRunner process) : IGitWorktreeIdentity
+public sealed class GitWorktreeIdentity(IProcessRunner process, IPathResolver paths, IProcessEnvironment environment)
+    : IGitWorktreeIdentity
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(5);
 
@@ -45,8 +47,8 @@ public sealed class GitWorktreeIdentity(IProcessRunner process) : IGitWorktreeId
                 return false;
             }
 
-            topLevel = Path.GetFullPath(lines[0].Trim());
-            commonDirectory = Path.GetFullPath(lines[1].Trim());
+            topLevel = paths.GetFullPath(lines[0].Trim(), environment.CurrentDirectory);
+            commonDirectory = paths.GetFullPath(lines[1].Trim(), environment.CurrentDirectory);
             failure = null;
             return true;
         }
