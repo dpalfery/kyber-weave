@@ -200,13 +200,14 @@ internal static class SquadTestCommands
     /// <summary>
     /// The real lifecycle service over an in-memory Squad state: its file system, state store, planner, transactions and
     /// clock, with the release source and renderer a test supplies. Nothing touches the disk. A global-scope run supplies
-    /// <paramref name="globalRoots"/>, the per-target roots the renderer anchors absolute links to.
+    /// <paramref name="globalRoots"/>, the per-target roots the renderer anchors absolute links to, and <paramref name="environmentReader"/> the variables it reads.
     /// </summary>
     public static SquadLifecycleService InMemoryLifecycle(
         InMemorySquadState state,
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        Func<string, string?>? environmentReader = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         InMemorySquadServices services = new(state.Files);
@@ -220,13 +221,14 @@ internal static class SquadTestCommands
             services.PresetValidator(),
             state.Planner,
             new InMemoryTransactions(state),
-            new SquadResponseGuidanceReader(state.Files),
+            new SquadResponseGuidanceReader(state.Files, state.Files, state.Semantics),
             new FactoryHooksShadowing(state.Files),
             new SquadCanonicalProfileStore(state.UserPaths, state.Files),
             new InMemorySquadFileAccess(state.Files),
             state.Semantics,
             state.Time,
-            globalRoots: globalRoots);
+            globalRoots: globalRoots,
+            environmentReader: environmentReader);
     }
 
     /// <summary><c>squad install</c> over the in-memory lifecycle of <paramref name="state"/>.</summary>
@@ -450,7 +452,7 @@ internal static class SquadTestCommands
             renderer ?? new SquadRendererRegistry(SquadHostDefaults.CreateRenderers(), services.RenderInputReader()),
             new SquadModelPresetStore(state.UserPaths, state.Files),
             state.Planner,
-            new SquadResponseGuidanceReader(state.Files),
+            new SquadResponseGuidanceReader(state.Files, state.Files, state.Semantics),
             state.Environment,
             new SquadPackSourceLocator(state.Files, state.Paths, state.Environment),
             services.SourceLoader(),
