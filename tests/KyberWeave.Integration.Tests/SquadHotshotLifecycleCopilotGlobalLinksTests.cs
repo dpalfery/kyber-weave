@@ -12,6 +12,7 @@ namespace KyberWeave.Integration.Tests;
 /// <summary>
 /// Pins the Copilot global-scope resource-link contract end to end through the real renderer,
 /// the lifecycle service, the receipt, and <c>squad doctor --global</c>.
+/// Unit twin: <c>SquadCopilotGlobalLinksUnitTests</c>.
 /// </summary>
 /// <remarks>
 /// A global Copilot install has no workspace, so a relative agent link such as

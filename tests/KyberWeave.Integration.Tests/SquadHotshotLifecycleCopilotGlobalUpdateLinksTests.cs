@@ -13,6 +13,7 @@ namespace KyberWeave.Integration.Tests;
 /// Pins the Copilot global-scope resource-link contract for the update path: the update must
 /// render with the same resolved global roots as the install, otherwise the rewritten
 /// conductor silently reverts to unanchored relative links.
+/// Unit twin: <c>SquadCopilotGlobalLinksUnitTests</c>.
 /// </summary>
 public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDisposable
 {
