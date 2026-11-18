@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Domain.CopilotPrompt;
+using KyberWeave.Kernel.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests.CopilotPrompt;
@@ -498,5 +499,38 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
             name => name == "HOME" ? "relative/home" : null, OSPlatform.Linux, false, _ => false);
 
         Assert.Null(environment.HomeDirectory);
+    }
+
+    [Fact]
+    public void Install_RefusesANullFileSystemAtConstruction()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
+            () => new CopilotPromptInstallCommand((IDoctorFileSystem)null!));
+
+        Assert.Equal("files", exception.ParamName);
+        _ = Assert.Throws<ArgumentNullException>(
+            () => new CopilotPromptInstallCommand(NewEnvironment(interactive: true), null!));
+    }
+
+    [Fact]
+    public void Uninstall_RefusesANullFileSystemAtConstruction()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
+            () => new CopilotPromptUninstallCommand((IDoctorFileSystem)null!));
+
+        Assert.Equal("files", exception.ParamName);
+        _ = Assert.Throws<ArgumentNullException>(
+            () => new CopilotPromptUninstallCommand(NewEnvironment(interactive: true), null!));
+    }
+
+    [Fact]
+    public void Status_RefusesANullFileSystemAtConstruction()
+    {
+        ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
+            () => new CopilotPromptStatusCommand((IDoctorFileSystem)null!));
+
+        Assert.Equal("files", exception.ParamName);
+        _ = Assert.Throws<ArgumentNullException>(
+            () => new CopilotPromptStatusCommand(NewEnvironment(interactive: true), null!));
     }
 }

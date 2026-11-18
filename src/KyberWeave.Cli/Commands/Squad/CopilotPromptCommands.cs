@@ -53,12 +53,14 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     /// <summary>Creates the command over the file-system seam the container resolves.</summary>
     public CopilotPromptInstallCommand(IDoctorFileSystem files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         _files = files;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
     internal CopilotPromptInstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         _environment = environment;
         _files = files;
     }
@@ -197,12 +199,14 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
     /// <summary>Creates the command over the file-system seam the container resolves.</summary>
     public CopilotPromptUninstallCommand(IDoctorFileSystem files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         _files = files;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
     internal CopilotPromptUninstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         _environment = environment;
         _files = files;
     }
@@ -339,12 +343,14 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
     /// <summary>Creates the command over the file-system seam the container resolves.</summary>
     public CopilotPromptStatusCommand(IDoctorFileSystem files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         _files = files;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
     internal CopilotPromptStatusCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
     {
+        ArgumentNullException.ThrowIfNull(files);
         _environment = environment;
         _files = files;
     }
