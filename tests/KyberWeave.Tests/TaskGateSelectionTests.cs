@@ -226,20 +226,29 @@ public sealed class TaskGateSelectionTests
         Assert.Empty(resolved);
     }
 
-    [Fact]
-    public void TestClassMappingMatchesDirectoryIgnoringCase()
+    /// <summary>
+    /// The changed path's <c>tests</c> directory is matched whatever its case, and the class's namespace comes from
+    /// the file's own directory when no declaration can be read. Both facts are needed: a miss, or a name with no
+    /// namespace, makes <c>dotnet test --filter</c> select nothing and exit zero, which reads afterwards as a suite
+    /// that ran and passed.
+    /// </summary>
+    [Theory]
+    [InlineData("Tests/KyberWeave.Tests/Coverage.cs")]
+    [InlineData("tests/KyberWeave.Tests/Coverage.cs")]
+    public void TestClassMappingMatchesTheTestsDirectoryWhateverItsCaseAndDerivesTheNamespaceFromThePath(string changed)
     {
-        const string File = "/repo/Tests/KyberWeave.Tests/TaskGateSelectionTests.cs";
+        // The tree holds the file under the real lowercase tests directory and declares no namespace, so the
+        // adjudication of the name has to come from the path. The file is named Coverage.cs, not CoverageTests.cs,
+        // so the class it resolves is Coverage only while the tests directory is read case-insensitively.
+        const string File = "/repo/tests/KyberWeave.Tests/Coverage.cs";
         FakeTestClassSources sources = new()
         {
-            SourcesByName = new Dictionary<string, string>(StringComparer.Ordinal) { ["TaskGateSelectionTests"] = File },
-            NamespacesByPath = new Dictionary<string, string>(StringComparer.Ordinal) { [File] = "KyberWeave.Tests" },
+            SourcesByName = new Dictionary<string, string>(StringComparer.Ordinal) { ["Coverage"] = File },
         };
 
-        IReadOnlyList<string> resolved = GateSelection(sources)
-            .ResolveTestClasses(null, ["Tests/KyberWeave.Tests/TaskGateSelectionTests.cs"]);
+        IReadOnlyList<string> resolved = GateSelection(sources).ResolveTestClasses("/repo", [changed]);
 
-        Assert.Contains(typeof(TaskGateSelectionTests).FullName!, resolved);
+        Assert.Equal("KyberWeave.Tests.Coverage", Assert.Single(resolved));
     }
 
     [Fact]
