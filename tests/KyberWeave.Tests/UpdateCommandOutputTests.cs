@@ -54,6 +54,16 @@ public sealed class UpdateCommandOutputTests
         Assert.Equal("downloading…\n", Output());
     }
 
+    /// <summary>A message that holds markup characters is printed as written, not parsed as markup.</summary>
+    [Fact]
+    public void Execute_MessageWithBrackets_WritesItLiterally()
+    {
+        int exit = Command(1, "failed [bold]the swap[/]").Execute(null!, new UpdateSettings());
+
+        Assert.Equal(1, exit);
+        Assert.Equal("downloading…\nkyber-weave: error: failed [bold]the swap[/]\n", Output());
+    }
+
     /// <summary>A missing updater is refused at construction, as every other command refuses its collaborators.</summary>
     [Fact]
     public void Constructor_NullUpdater_Throws()

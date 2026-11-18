@@ -54,6 +54,21 @@ public sealed class SquadDoctorSeamTests
     }
 
     /// <summary>
+    /// The Devin check reads its configuration through the injected file system: a switch that exists only there is
+    /// what the inspector sees, and the warning follows.
+    /// </summary>
+    [Fact]
+    public void Execute_DevinConfigurationInTheInjectedFileSystem_IsReadThroughTheSeam()
+    {
+        _files.CreateDirectory($"{Workspace}/.devin");
+        _files.WriteAllText($"{Workspace}/.devin/config.json", "read_config_from");
+
+        _ = Execute(new SquadDoctorSettings { Path = Workspace }, out string output);
+
+        Assert.Contains("Devin also loads 1 skill(s) from '.claude/skills/'", output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A retired skill folder that exists only in the injected file system is warned about, so the check reads the
     /// deployment tree through the seam.
     /// </summary>
@@ -180,7 +195,7 @@ public sealed class SquadDoctorSeamTests
             _locator,
             new UnusedSourceLoader(),
             new NoShadowing(),
-            new NoDevinOverlap(),
+            new ReadingDevinOverlap(),
             new NoZCodeMcp(),
             new SquadDoctorOptions(executor, WorkingDirectory: null),
             SquadFileSystemPathSemantics.Instance,
@@ -352,12 +367,19 @@ public sealed class SquadDoctorSeamTests
             IReadOnlySet<string> managedPaths) => [];
     }
 
-    private sealed class NoDevinOverlap : IDevinImportOverlapInspector
+    /// <summary>Reports one overlap when the caller's reader returns the import switch, so the test proves the read.</summary>
+    private sealed class ReadingDevinOverlap : IDevinImportOverlapInspector
     {
         public DevinImportOverlapReport Inspect(
             string workingDirectory,
             string? devinUserRoot,
-            Func<string, string?> readFileText) => new([]);
+            Func<string, string?> readFileText)
+        {
+            string? importSetting = readFileText($"{workingDirectory}/.devin/config.json");
+            return importSetting is null
+                ? new([])
+                : new([new DevinImportOverlapEntry(".claude/skills", "skill", importSetting, ["review"])]);
+        }
     }
 
     private sealed class NoZCodeMcp : IZCodeMcpInspector
