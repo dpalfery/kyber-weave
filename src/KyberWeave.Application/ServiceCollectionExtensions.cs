@@ -119,8 +119,16 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<PostCheckoutHookInstaller>();
         services.TryAddSingleton<IRepositoryDoctor, RepositoryDoctorService>();
         services.TryAddSingleton(sp => new McpWiringInspector(sp.GetRequiredService<IMcpConfigFiles>()));
-        services.TryAddSingleton(sp => new McpWiringRepairer(sp.GetRequiredService<IMcpConfigFiles>()));
-        services.TryAddSingleton(sp => new McpServerRenamer(sp.GetRequiredService<IMcpConfigFiles>(), sp.GetRequiredService<IMcpDeclarationReader>()));
+        services.TryAddSingleton<IMcpWiringReceipts>(sp => new McpWiringReceiptStore(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton(sp => new McpWiringRepairer(
+            sp.GetRequiredService<IMcpConfigFiles>(),
+            sp.GetRequiredService<IMcpWiringReceipts>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton(sp => new McpServerRenamer(
+            sp.GetRequiredService<IMcpConfigFiles>(),
+            sp.GetRequiredService<IMcpDeclarationReader>(),
+            sp.GetRequiredService<IMcpWiringReceipts>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton(sp => new McpWiringFixes(sp.GetRequiredService<IMcpConfigFiles>(), sp.GetRequiredService<McpServerRenamer>()));
         services.TryAddSingleton<IMcpWiringService>(sp => new McpWiringService(
             sp.GetRequiredService<McpWiringInspector>(),

@@ -250,7 +250,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         }
 
         Assert.True(File.Exists(ReceiptPath), "a real run records what it wrote");
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(".factory/mcp.json"));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".factory/mcp.json"));
     }
 
     /// <summary>
@@ -284,7 +284,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("mcp.json", execution.Output, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".vscode", "mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".vscode/mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".vscode/mcp.json"));
     }
 
     /// <summary>
@@ -349,7 +349,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         CapturedConsoleExecution<int> wire = Wire($"{Factory},{ClaudeCode}");
         Assert.Equal(0, wire.Result);
         Assert.True(File.Exists(Path.Combine(Repo, ".mcp.json")), "claude-code must be created");
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
 
         CapturedConsoleExecution<int> unwire = Unwire($"{Factory},{ClaudeCode}");
 
@@ -357,7 +357,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Equal(original, File.ReadAllBytes(Path.Combine(Repo, ".factory", "mcp.json")));
         Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")), "a file the repair created is deleted");
 
-        McpWiringReceipt receipt = McpWiringReceipt.Load(Repo);
+        McpWiringReceipt receipt = McpWiringTestServices.Receipts.Load(Repo);
         Assert.Null(receipt.Find(".factory/mcp.json"));
         Assert.Null(receipt.Find(".mcp.json"));
     }
@@ -441,7 +441,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
 
         Assert.Equal(0, execution.Result);
         Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
         Assert.Contains(ClaudeCode, execution.Output, StringComparison.Ordinal);
     }
 
@@ -477,7 +477,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
             Assert.Equal(BinaryPath, ExecutableOf(entry));
         }
 
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(configFile));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(configFile));
     }
 
     /// <summary>
@@ -934,7 +934,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
         Assert.Contains(RefusalCode, execution.Output, StringComparison.Ordinal);
         Assert.Contains("docs mcp-migrate", execution.Output, StringComparison.Ordinal);
         Assert.Equal(before, File.ReadAllBytes(InRepo(".factory/mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".factory/mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".factory/mcp.json"));
     }
 
     /// <summary>
@@ -976,7 +976,7 @@ public sealed class DocsMcpWireCommandTests : IDisposable
             new DocsMcpWireSettings { Path = Repo, Target = targets, DryRun = dryRun }));
 
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring).Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring, McpWiringTestServices.Receipts).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
 

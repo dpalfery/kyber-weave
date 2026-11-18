@@ -779,7 +779,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
         Assert.Equal(0, unwire.Result);
         Assert.False(File.Exists(InRepo(FactoryFile)), "a file the wire created is deleted on removal");
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(FactoryFile));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(FactoryFile));
     }
 
     /// <summary>
@@ -821,7 +821,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
         Assert.False(File.Exists(ReceiptPath));
 
         Assert.Equal(0, Migrate(ClaudeCode).Result);
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(ClaudeFile));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(ClaudeFile));
 
         CapturedConsoleExecution<int> unwire = Unwire(ClaudeCode);
 
@@ -1290,7 +1290,7 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
 
     /// <summary>Runs the removal verb against the receipt the wire and migrate verbs wrote.</summary>
     private CapturedConsoleExecution<int> Unwire(string targets) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring).Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpUnwireCommand(McpWiringTestServices.Wiring, McpWiringTestServices.Receipts).Execute(
             null!,
             new DocsMcpUnwireSettings { Path = Repo, Target = targets }));
 

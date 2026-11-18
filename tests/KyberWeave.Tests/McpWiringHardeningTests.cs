@@ -107,8 +107,8 @@ public sealed class McpWiringHardeningTests : IDisposable
 
         WriteReceipt(Record(escaping));
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(escaping));
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(escaping));
         Assert.Equal("""{"mcpServers": {}}""", File.ReadAllText(outside));
     }
 
@@ -123,7 +123,7 @@ public sealed class McpWiringHardeningTests : IDisposable
 
         WriteReceipt(Record(absolute));
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -364,7 +364,7 @@ public sealed class McpWiringHardeningTests : IDisposable
 
         WriteReceipt(Record(".MCP.json"));
 
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
     }
 
     // ---- A refusal for want of permission is not the same fact as a missing file.
@@ -535,7 +535,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -555,7 +555,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -576,7 +576,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -601,7 +601,7 @@ public sealed class McpWiringHardeningTests : IDisposable
                 ["writtenAtUtc"] = "2026-10-31T00:00:00+00:00"
             });
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -621,7 +621,7 @@ public sealed class McpWiringHardeningTests : IDisposable
     {
         WriteReceiptText(text);
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -645,7 +645,7 @@ public sealed class McpWiringHardeningTests : IDisposable
                 ["postSha256"] = "AA"
             });
 
-        Assert.Empty(McpWiringReceipt.Load(Repo).Files);
+        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
     }
 
     /// <summary>
@@ -664,7 +664,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             Convert.ToBase64String(pre),
             Digest(Encoding.UTF8.GetBytes("""{"mcpServers": {"kyber-weave": {}}}"""))));
 
-        McpWiringReceiptRecord record = McpWiringReceipt.Load(Repo).Find(".mcp.json")
+        McpWiringReceiptRecord record = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json")
             ?? throw new InvalidOperationException("the record this code writes must load");
 
         Assert.Equal(".mcp.json", record.Path);
@@ -730,7 +730,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.NotEqual(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written, "the pre-write bytes were already on disk, so nothing needed writing");
         Assert.Equal(pre, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
     }
 
     /// <summary>
@@ -747,7 +747,7 @@ public sealed class McpWiringHardeningTests : IDisposable
         Assert.NotEqual(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.False(change.Written);
         Assert.False(File.Exists(Path.Combine(Repo, ".mcp.json")));
-        Assert.Null(McpWiringReceipt.Load(Repo).Find(".mcp.json"));
+        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
     }
 
     // ---- The journal never trades one file's undo for another's.
@@ -784,7 +784,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             Digest(landed),
             ["other-server"]));
 
-        McpWiringRepairer.ReceiptJournal journal = new(Repo, [.. McpWiringReceipt.Load(Repo).Files]);
+        McpWiringRepairer.ReceiptJournal journal = new(McpWiringTestServices.Receipts, Repo, [.. McpWiringTestServices.Receipts.Load(Repo).Files]);
 
         DenyWritesToFile(ReceiptPath);
 
@@ -792,7 +792,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             journal.Record(Pending(".mcp.json", pre, landed)) is not null,
             "the save was expected to fail, so the case proves nothing if it was recorded");
 
-        string? afterFailure = McpWiringReceipt.Load(Repo).Find(".mcp.json")?.PostSha256;
+        string? afterFailure = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json")?.PostSha256;
         Assert.True(
             afterFailure == Digest(landed),
             $".mcp.json no longer holds the record of the write that landed (it holds {(afterFailure is null ? "no record" : "another record")}), so that file's undo is unreachable from mcp-unwire");
@@ -806,11 +806,11 @@ public sealed class McpWiringHardeningTests : IDisposable
                 Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""))) is null,
             "the second record was expected to save, so the clobber this case is about never happened");
 
-        string? afterNextRecord = McpWiringReceipt.Load(Repo).Find(".mcp.json")?.PostSha256;
+        string? afterNextRecord = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json")?.PostSha256;
         Assert.True(
             afterNextRecord == Digest(landed),
             $"the next record that saved dropped the undo of the write that landed (it holds {(afterNextRecord is null ? "no record" : "another record")}), because the failed save had cleared it from the journal");
-        Assert.NotNull(McpWiringReceipt.Load(Repo).Find(".vscode/mcp.json"));
+        Assert.NotNull(McpWiringTestServices.Receipts.Load(Repo).Find(".vscode/mcp.json"));
     }
 
     /// <summary>
@@ -864,7 +864,7 @@ public sealed class McpWiringHardeningTests : IDisposable
             AllowTraversal(Repo);
         }
 
-        McpWiringReceiptRecord? kept = McpWiringReceipt.Load(Repo).Find(".mcp.json");
+        McpWiringReceiptRecord? kept = McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json");
         string? keptPost = kept?.PostSha256;
 
         Assert.True(
