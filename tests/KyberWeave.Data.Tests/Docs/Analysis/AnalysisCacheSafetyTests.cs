@@ -11,10 +11,13 @@ namespace KyberWeave.Tests;
 /// <summary>The cache-safety check over an in-memory checkout and a scripted git.</summary>
 public sealed class AnalysisCacheSafetyTests
 {
-    private const string Root = "/work/repo";
-    private const string IgnoreFile = "/work/repo/.kyber-weave/.gitignore";
-
     private readonly InMemoryFileSystem _files = new();
+
+    private string WorkingDirectory => Path.Combine(_files.Root, "work");
+
+    private string Root => Path.Combine(WorkingDirectory, "repo");
+
+    private string IgnoreFile => Path.Combine(Root, ".kyber-weave", ".gitignore");
 
     [Fact]
     public void ACacheEntryInTheIgnoreFileWithNothingTrackedIsSafe()
@@ -89,11 +92,11 @@ public sealed class AnalysisCacheSafetyTests
     }
 
     private AnalysisCacheSafety Safety(ScriptedProcessExecutor git) =>
-        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: "/work"), git);
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: WorkingDirectory), git);
 
     private void WriteIgnore(string text)
     {
-        _files.CreateDirectory("/work/repo/.kyber-weave");
+        _files.CreateDirectory(Path.Combine(Root, ".kyber-weave"));
         _files.WriteAllText(IgnoreFile, text);
     }
 

@@ -14,9 +14,14 @@ namespace KyberWeave.Tests;
 public sealed class CodeGraphResolverAdapterSeamTests
 {
     private const char Sep = '\u001f';
-    private const string Database = "/work/repo/.codegraph/codegraph.db";
 
     private readonly InMemoryFileSystem _files = new();
+
+    private string WorkingDirectory => Path.Combine(_files.Root, "work");
+
+    private string Root => Path.Combine(WorkingDirectory, "repo");
+
+    private string Database => Path.Combine(Root, ".codegraph", "codegraph.db");
 
     [Fact]
     public void AnIndexThatIsThereIsReadOnceAndAnswersSymbolRouteAndPathQueries()
@@ -27,7 +32,7 @@ public sealed class CodeGraphResolverAdapterSeamTests
             Line("node", "n2", "route", "GET /api/widgets", "", "src/Api.cs", "csharp", "5", "5"),
             Line("edge", "n2", "n1", "calls", "", "", "", "", "")));
 
-        CodeGraphResolverAdapter graph = Open(sqlite, "/work/repo/.codegraph/codegraph.db");
+        CodeGraphResolverAdapter graph = Open(sqlite, Database);
 
         Assert.True(graph.IsAvailable);
         Assert.Equal("Widget", Assert.Single(graph.ResolveSymbol("Shop.Widget")).Name);
@@ -59,7 +64,7 @@ public sealed class CodeGraphResolverAdapterSeamTests
         Index();
         ScriptedProcessExecutor sqlite = new(_ => Output());
 
-        CodeGraphResolverAdapter graph = Open(sqlite, ".codegraph/codegraph.db", currentDirectory: "/work/repo");
+        CodeGraphResolverAdapter graph = Open(sqlite, ".codegraph/codegraph.db", currentDirectory: Root);
 
         Assert.Equal(Database, graph.DatabasePath);
         Assert.True(graph.IsAvailable);
@@ -110,18 +115,18 @@ public sealed class CodeGraphResolverAdapterSeamTests
 
     private void Index()
     {
-        _files.CreateDirectory("/work/repo/.codegraph");
+        _files.CreateDirectory(Path.Combine(Root, ".codegraph"));
         _files.WriteAllText(Database, "index");
     }
 
-    private CodeGraphResolverAdapter Open(ScriptedProcessExecutor sqlite, string path, string currentDirectory = "/work")
+    private CodeGraphResolverAdapter Open(ScriptedProcessExecutor sqlite, string path, string? currentDirectory = null)
     {
         FakePathResolver paths = new(_files);
         return new CodeGraphResolverAdapter(
             path,
             _files,
             paths,
-            new FakeProcessEnvironment(currentDirectory: currentDirectory),
+            new FakeProcessEnvironment(currentDirectory: currentDirectory ?? WorkingDirectory),
             sqlite,
             new CodeGraphIndexStaleness(_files, new ScriptedProcessRunner()));
     }
