@@ -137,9 +137,9 @@ they do it. They are not seams and no test fakes them; a smoke test proves the w
 
 Task 1.8 does not convert any of these; it lists them so phase 2, phase 3 and phase 4 have a
 worklist and so a reviewer can tell an adapter from a violation. A task number is the task whose
-file list or folder covers the class. `4.3 (split)` marks an `Application` folder that the phase 4
-task list does not name individually; it is converted by the per-folder split of task 4.3, which is
-also where those splits are recorded.
+file list or folder covers the class. **`unassigned` means the approved task list names no task
+for that class.** The register does not invent coverage: the gaps are listed after the tables and
+task 1.8's acceptance criterion is not met for them until `tasks.md` assigns an owner.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
@@ -163,7 +163,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `AgentFileReader` (`Agents/AgentFileReader.cs`) | paths | 4.3 (split) |
+| `AgentFileReader` (`Agents/AgentFileReader.cs`) | paths | unassigned |
 | `ArbiterEvaluator` (`Arbiter/ArbiterEvaluator.cs`) | clock | 4.3 |
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
@@ -199,10 +199,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PlanTaskService` (`Docs/Validation/PlanTaskService.cs`) | paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
-| `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | 4.3 (split) |
-| `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | 4.3 (split) |
-| `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | 4.3 (split) |
-| `EditHookService` (`Hooks/EditHookService.cs`) | file system, paths | 4.3 (split) |
+| `CodeGraphIndexProvisioner` (`Doctor/CodeGraphIndexProvisioner.cs`) | clock | unassigned |
+| `McpServerLiveProbe` (`Doctor/McpServerLiveProbe.cs`) | paths | unassigned |
+| `PostCheckoutHookInstaller` (`Doctor/PostCheckoutHookInstaller.cs`) | paths | unassigned |
+| `EditHookService` (`Hooks/EditHookService.cs`) | file system, paths | unassigned |
 | `GateRunService` (`Review/GateRunService.cs`) | paths, clock | 4.3 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
 | `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
@@ -219,14 +219,14 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
 | `SuppressionScanService` (`Review/SuppressionScanService.cs`) | paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
-| `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.3 (split) |
-| `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.3 (split) |
-| `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.3 (split) |
-| `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.3 (split) |
-| `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | 4.3 (split) |
-| `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | 4.3 (split) |
+| `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | unassigned |
+| `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | unassigned |
+| `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | unassigned |
+| `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | unassigned |
+| `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | unassigned |
+| `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | unassigned |
 | `SelfUpdater` (`Update/SelfUpdater.cs`) | file system, paths, environment, network | 4.1 |
-| `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | 4.3 (split) |
+| `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | unassigned |
 
 #### KyberWeave.Cli (49 classes)
 
