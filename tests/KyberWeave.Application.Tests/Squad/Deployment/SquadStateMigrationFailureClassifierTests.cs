@@ -1,7 +1,7 @@
 using KyberWeave.Testing.Squad;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// A state-migration crash failure is explained only when the flow, the stop point and the symptom all match, and a

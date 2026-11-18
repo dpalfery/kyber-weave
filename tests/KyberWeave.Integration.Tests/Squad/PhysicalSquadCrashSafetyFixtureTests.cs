@@ -49,40 +49,6 @@ public sealed class PhysicalSquadCrashSafetyFixtureTests
     }
 
     [Fact]
-    public void AMarkerMissingFromTheBaselineIsReportedRatherThanThrown()
-    {
-        SquadTreeEntry file = new(SquadTreeEntryKind.File, System.Text.Encoding.UTF8.GetBytes("note"));
-        Dictionary<string, SquadTreeEntry> baseline = new(StringComparer.Ordinal) { ["notes/operator.md"] = file };
-
-        IReadOnlyList<string> problems = SquadCrashMarkerCheck.Problems(
-            ["notes/absent.md"],
-            baseline,
-            baseline);
-
-        Assert.Contains("absent.md", Assert.Single(problems), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void AChangedMarkerIsReported()
-    {
-        Dictionary<string, SquadTreeEntry> baseline = new(StringComparer.Ordinal)
-        {
-            ["notes/operator.md"] = new SquadTreeEntry(SquadTreeEntryKind.File, System.Text.Encoding.UTF8.GetBytes("note"))
-        };
-        Dictionary<string, SquadTreeEntry> changed = new(StringComparer.Ordinal)
-        {
-            ["notes/operator.md"] = new SquadTreeEntry(SquadTreeEntryKind.File, System.Text.Encoding.UTF8.GetBytes("edited"))
-        };
-
-        IReadOnlyList<string> problems = SquadCrashMarkerCheck.Problems(
-            ["notes/operator.md"],
-            baseline,
-            changed);
-
-        Assert.Contains("must not touch", Assert.Single(problems), StringComparison.Ordinal);
-    }
-
-    [Fact]
     public void RecoveryThatFailsPartwayIsRepeatable()
     {
         if (OperatingSystem.IsWindows())

@@ -1,7 +1,7 @@
 using KyberWeave.Testing.Squad;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// A crash-safety run must never pass with an empty loop or an unchanged clean run, so a fixture that

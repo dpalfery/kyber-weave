@@ -1,7 +1,7 @@
 using KyberWeave.Testing.Squad;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// The crash-safety suite reports a failure as a known weakness only when the flow, the fault point
