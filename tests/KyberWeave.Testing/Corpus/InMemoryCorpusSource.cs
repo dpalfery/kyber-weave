@@ -55,6 +55,17 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     public bool Exists(string relativePath) => _files.ContainsKey(CorpusPath.Normalize(relativePath));
 
     /// <inheritdoc />
+    public bool DirectoryExists(string relativeDirectory)
+    {
+        string directory = CorpusPath.NormalizeDirectory(relativeDirectory);
+        if (directory.Length == 0)
+            return true;
+
+        string prefix = directory + "/";
+        return _files.Keys.Any(path => path.StartsWith(prefix, Comparison));
+    }
+
+    /// <inheritdoc />
     public string ReadText(string relativePath)
     {
         string path = CorpusPath.Normalize(relativePath);

@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -23,8 +24,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class AntigravityRendererContractTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     public void Dispose()
     {
@@ -75,11 +78,11 @@ public sealed class AntigravityRendererContractTests : IDisposable
     public void ToolRoot_ExistsForCanonicalCorpus()
     {
         Assert.True(
-            Directory.Exists(KyberWeaveTestPaths.ToolRoot),
-            $"Expected KyberWeaveTestPaths.ToolRoot at '{KyberWeaveTestPaths.ToolRoot}'.");
+            Corpus.DirectoryExists(string.Empty),
+            $"Expected the corpus root at '{Corpus.Root}'.");
         Assert.True(
-            Directory.Exists(ProductRoot),
-            $"Expected products/kyber-squad under ToolRoot at '{ProductRoot}'.");
+            Corpus.DirectoryExists("products/kyber-squad"),
+            $"Expected products/kyber-squad under the corpus root at '{ProductRoot}'.");
     }
 
     /// <summary>

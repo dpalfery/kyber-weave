@@ -29,6 +29,14 @@ public interface ICorpusSource
     /// <exception cref="ArgumentException">The path is rooted or climbs above the root.</exception>
     bool Exists(string relativePath);
 
+    /// <summary>Gets whether the corpus holds a directory at a relative path.</summary>
+    /// <param name="relativeDirectory">
+    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root itself.
+    /// </param>
+    /// <returns>True when the directory exists, including an empty one the corpus ships.</returns>
+    /// <exception cref="ArgumentException">The path is rooted or climbs above the root.</exception>
+    bool DirectoryExists(string relativeDirectory);
+
     /// <summary>Reads a file as text.</summary>
     /// <param name="relativePath">The file's path relative to <see cref="Root"/>, with forward slashes.</param>
     /// <returns>The file's text.</returns>

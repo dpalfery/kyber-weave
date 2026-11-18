@@ -106,6 +106,17 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void ReportsWhetherADirectoryExists()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        Assert.True(corpus.DirectoryExists(string.Empty), "The corpus root is itself a directory.");
+        Assert.True(corpus.DirectoryExists(SampleDirectory));
+        Assert.False(corpus.DirectoryExists(SampleDirectory + "/no-such-directory"));
+        Assert.False(corpus.DirectoryExists(SampleFile), "A file is not a directory.");
+    }
+
+    [Fact]
     public void ThrowsWhenAFileIsMissing()
     {
         ICorpusSource corpus = CreateCorpus();
