@@ -1,9 +1,10 @@
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Tests;
 using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Model;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Analysis.Claims;
 
 /// <summary>
 /// Ignore markup is deliberately strict: malformed suppression must become an
@@ -32,7 +33,7 @@ public sealed class IgnoreMarkupTests
             The Codex loop consumes model tokens.
             """;
         string originalBody = body;
-        DocumentModel document = ClaimExtractionTests.Document(body);
+        DocumentModel document = ClaimTestDocuments.Document(body);
 
         ClaimExtractionResult result = new ClaimExtractor().Extract(document);
 
@@ -63,7 +64,7 @@ public sealed class IgnoreMarkupTests
             {{markup}}
             """;
 
-        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimTestDocuments.Document(body));
 
         AssertOperationalIgnoreError(result.Diagnostics.Items);
     }
@@ -83,7 +84,7 @@ public sealed class IgnoreMarkupTests
             </kyber-ignore>
             """;
 
-        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimTestDocuments.Document(body));
 
         AssertOperationalIgnoreError(result.Diagnostics.Items);
     }
@@ -105,7 +106,7 @@ public sealed class IgnoreMarkupTests
             </kyber-ignore>
             """;
 
-        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimTestDocuments.Document(body));
 
         AssertOperationalIgnoreError(result.Diagnostics.Items);
     }
@@ -139,7 +140,7 @@ public sealed class IgnoreMarkupTests
             </kyber-ignore>
             """;
 
-        DocumentModel document = ClaimExtractionTests.Document(body, rawMarkdown, bodyStartLine: 10);
+        DocumentModel document = ClaimTestDocuments.Document(body, rawMarkdown, bodyStartLine: 10);
 
         ClaimExtractionResult result = new ClaimExtractor().Extract(document);
 
@@ -165,7 +166,7 @@ public sealed class IgnoreMarkupTests
             ~~~
             """;
 
-        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimExtractionTests.Document(body));
+        ClaimExtractionResult result = new ClaimExtractor().Extract(ClaimTestDocuments.Document(body));
 
         Assert.Empty(result.Diagnostics.Items);
         Assert.Equal(2, result.Claims.Count);
@@ -188,7 +189,7 @@ public sealed class IgnoreMarkupTests
             Preserve this original body verbatim.
             </kyber-ignore>
             """;
-        DocumentModel document = ClaimExtractionTests.Document(body);
+        DocumentModel document = ClaimTestDocuments.Document(body);
 
         _ = new ClaimExtractor().Extract(document);
 

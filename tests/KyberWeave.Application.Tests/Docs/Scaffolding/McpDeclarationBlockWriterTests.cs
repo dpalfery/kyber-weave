@@ -1,12 +1,10 @@
-using KyberWeave.Tests.Configuration;
-
 using System.Text;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Tests;
 using Xunit;
-using KyberWeave.Tests.Fakes;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Scaffolding;
 
 /// <summary>
 ///     <c>docs init</c> gives a host the <c>mcp:</c> declaration its agent instructions rely on,
@@ -19,7 +17,7 @@ namespace KyberWeave.Tests;
 ///     the file is created, appended when the file has none — and afterwards it belongs to the
 ///     host, <c>--force</c> included.
 /// </remarks>
-public sealed class McpDeclarationBlockWriterTests : IDisposable
+public sealed class McpDeclarationBlockWriterTests
 {
     /// <summary>
     ///     The block exactly as the design renders it: one server declared, and the third-party
@@ -59,16 +57,11 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
             - go
         """;
 
-    private readonly TempDirectory _temp = new();
+    private readonly MemoryScaffoldHost _host = new();
 
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
+    private const string ConfigPath = ".kyber-weave/kyber-weave.yml";
 
-    private string ConfigFile => Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml");
-
-    private string IgnoreFile => Path.Combine(_temp.Path, ".kyber-weave", ".gitignore");
+    private const string IgnorePath = ".kyber-weave/.gitignore";
 
     /// <summary>
     ///     A host that runs <c>docs init</c> for the first time is told which server its
@@ -79,9 +72,9 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void AFreshHostConfigDeclaresExactlyTheFirstPartyServer()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
+        _host.Scaffold();
 
-        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
+        KyberWeaveConfig config = _host.LoadConfig();
         KeyValuePair<string, RequiredMcpServer> declared = Assert.Single(config.Mcp.RequiredServers);
 
         // The scaffold names the shipped server kw-docs. The old kyber-weave key is retired and only
@@ -92,7 +85,7 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         Assert.Equal(McpProvenance.FirstParty, declared.Value.Provenance);
         Assert.Equal(McpRequirementLevel.Required, declared.Value.Level);
 
-        Assert.Equal(DeclarationBlock, ReadDeclarationSection(File.ReadAllText(ConfigFile)));
+        Assert.Equal(DeclarationBlock, ReadDeclarationSection(_host.Read(ConfigPath)));
     }
 
     /// <summary>
@@ -102,9 +95,9 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void ScaffoldedMcpDeclarationDoesNotCiteRetiredAlwaysHumanOrNeedsHumanPolicy()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
+        _host.Scaffold();
 
-        string configContent = File.ReadAllText(ConfigFile);
+        string configContent = _host.Read(ConfigPath);
 
         Assert.DoesNotContain("always-human", configContent, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("needs-human", configContent, StringComparison.OrdinalIgnoreCase);
@@ -147,15 +140,15 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     {
         string original = HandMaintainedConfig + "\n";
         WriteHostConfig(original);
-        byte[] originalBytes = File.ReadAllBytes(ConfigFile);
+        byte[] originalBytes = _host.Memory.ReadAllBytes(_host.FullPath(ConfigPath));
 
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, reviewGates: false);
+        _host.Scaffold(reviewGates: false);
 
         byte[] appended = Encoding.UTF8.GetBytes("\n" + DeclarationBlock + "\n");
-        Assert.Equal(originalBytes.Concat(appended), File.ReadAllBytes(ConfigFile));
+        Assert.Equal(originalBytes.Concat(appended), _host.Memory.ReadAllBytes(_host.FullPath(ConfigPath)));
         Assert.Equal(
             "kw-docs",
-            Assert.Single(ConfigFileReader.Load(_temp.Path).Mcp.RequiredServers).Key);
+            Assert.Single(_host.LoadConfig().Mcp.RequiredServers).Key);
     }
 
     /// <summary>
@@ -186,11 +179,11 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         // and this test would prove nothing about preservation.
         Assert.Equal(
             "codegraph",
-            Assert.Single(ConfigFileReader.Load(_temp.Path).Mcp.RequiredServers).Key);
+            Assert.Single(_host.LoadConfig().Mcp.RequiredServers).Key);
 
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: force, reviewGates: false);
+        _host.Scaffold(force: force, reviewGates: false);
 
-        Assert.Equal(handOwned, File.ReadAllText(ConfigFile));
+        Assert.Equal(handOwned, _host.Read(ConfigPath));
     }
 
     /// <summary>
@@ -225,9 +218,9 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void AFreshScaffoldIgnoresBothLocalStateDirectories()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, reviewGates: false);
+        _host.Scaffold(reviewGates: false);
 
-        string[] lines = File.ReadAllLines(IgnoreFile);
+        string[] lines = Lines(IgnorePath);
         Assert.Single(lines, line => string.Equals(line, "cache/", StringComparison.Ordinal));
         Assert.Single(lines, line => string.Equals(line, "receipts/", StringComparison.Ordinal));
     }
@@ -242,12 +235,12 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     {
         const string existing = "# operator entry\nlocal-notes/\ncache/\n";
         WriteIgnoreFile(existing);
-        byte[] originalBytes = File.ReadAllBytes(IgnoreFile);
+        byte[] originalBytes = _host.Memory.ReadAllBytes(_host.FullPath(IgnorePath));
 
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true, reviewGates: false);
+        _host.Scaffold(force: true, reviewGates: false);
 
-        Assert.Equal(originalBytes, File.ReadAllBytes(IgnoreFile).Take(originalBytes.Length));
-        string[] lines = File.ReadAllLines(IgnoreFile);
+        Assert.Equal(originalBytes, _host.Memory.ReadAllBytes(_host.FullPath(IgnorePath)).Take(originalBytes.Length));
+        string[] lines = Lines(IgnorePath);
         Assert.Contains("# operator entry", lines);
         Assert.Contains("local-notes/", lines);
         Assert.Single(lines, line => string.Equals(line, "cache/", StringComparison.Ordinal));
@@ -262,16 +255,16 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
     [Fact]
     public void ReRunningDocsInitChangesNeitherTheDeclarationNorTheIgnoreFile()
     {
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, reviewGates: false);
-        string configAfterFirstRun = File.ReadAllText(ConfigFile);
-        string ignoreAfterFirstRun = File.ReadAllText(IgnoreFile);
+        _host.Scaffold(reviewGates: false);
+        string configAfterFirstRun = _host.Read(ConfigPath);
+        string ignoreAfterFirstRun = _host.Read(IgnorePath);
 
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, force: true, reviewGates: false);
+        _host.Scaffold(force: true, reviewGates: false);
 
-        Assert.Equal(configAfterFirstRun, File.ReadAllText(ConfigFile));
-        Assert.Equal(ignoreAfterFirstRun, File.ReadAllText(IgnoreFile));
+        Assert.Equal(configAfterFirstRun, _host.Read(ConfigPath));
+        Assert.Equal(ignoreAfterFirstRun, _host.Read(IgnorePath));
         Assert.Single(
-            File.ReadAllLines(ConfigFile),
+            _host.Read(ConfigPath).Split('\n'),
             line => line.StartsWith("mcp:", StringComparison.Ordinal));
     }
 
@@ -313,15 +306,10 @@ public sealed class McpDeclarationBlockWriterTests : IDisposable
         return newline == "\n" ? text : text.Replace("\n", newline, StringComparison.Ordinal);
     }
 
-    private void WriteHostConfig(string yaml)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigFile)!);
-        File.WriteAllText(ConfigFile, yaml);
-    }
+    private void WriteHostConfig(string yaml) => _host.Write(ConfigPath, yaml);
 
-    private void WriteIgnoreFile(string content)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(IgnoreFile)!);
-        File.WriteAllText(IgnoreFile, content);
-    }
+    private void WriteIgnoreFile(string content) => _host.Write(IgnorePath, content);
+
+    private string[] Lines(string relativePath) =>
+        _host.Read(relativePath).Split('\n', StringSplitOptions.RemoveEmptyEntries);
 }
