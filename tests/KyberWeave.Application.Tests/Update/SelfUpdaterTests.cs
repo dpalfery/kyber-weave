@@ -89,8 +89,8 @@ public sealed class SelfUpdaterTests
     }
 
     /// <summary>
-    /// A commit failure after the running image is not possible by ordering, but any earlier binary must be put back
-    /// before the failure escapes: an update never leaves half of its binaries new.
+    /// A failure while committing the running image leaves the MCP binary new unless it is restored: the failure
+    /// happens after that commit, so a rollback that does nothing leaves half the update in place.
     /// </summary>
     [Fact]
     public void AFailedCommitRollsBackTheBinariesAlreadyReplaced()
@@ -98,7 +98,7 @@ public sealed class SelfUpdaterTests
         _files.WriteAllText(ProcessPath, "old-cli");
         _files.WriteAllText(McpPath, "old-mcp");
         _system.ReplaceFailure = destination =>
-            destination == McpPath ? new IOException("the MCP binary is locked") : null;
+            destination == ProcessPath ? new IOException("the running image is locked") : null;
         using MapHandler handler = ServeRelease(CliBaseName, McpBaseName);
 
         using SelfUpdater updater = CreateUpdater(handler);
@@ -106,10 +106,11 @@ public sealed class SelfUpdaterTests
             new SelfUpdateOptions("0.2.0", ReleaseCandidate: false, NoMcp: false, NoKyberDash: true, NoArbiter: true));
 
         Assert.Equal(1, outcome.ExitCode);
-        Assert.Equal("the MCP binary is locked", outcome.Message);
+        Assert.Equal("the running image is locked", outcome.Message);
         Assert.Equal("old-cli", _files.ReadAllText(ProcessPath));
+        // The MCP binary was replaced before the failure and must have been put back.
         Assert.Equal("old-mcp", _files.ReadAllText(McpPath));
-        Assert.NotEmpty(_system.Copies);
+        Assert.Contains(_system.Copies, copy => copy.Destination == McpPath);
     }
 
     /// <summary>
