@@ -13,23 +13,27 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed class SquadSourceLoaderUnitTests
 {
-    private const string Root = "/kw/squad";
-    private const string Outside = "/kw/outside";
-
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly string _root;
+    private readonly string _outside;
     private readonly SquadSourceLoader _loader;
 
     public SquadSourceLoaderUnitTests()
     {
-        _loader = new SquadSourceLoader(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: "/kw/work"));
-        Copy(SyntheticValidSquadReleaseSource.SyntheticCorpusRoot, Root);
-        _files.CreateDirectory(Outside);
+        _root = Path.Combine(_files.Root, "kw", "squad");
+        _outside = Path.Combine(_files.Root, "kw", "outside");
+        _loader = new SquadSourceLoader(
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: Path.Combine(_files.Root, "kw", "work")));
+        Copy(SyntheticValidSquadReleaseSource.SyntheticCorpusRoot, _root);
+        _files.CreateDirectory(_outside);
     }
 
     [Fact]
     public void ValidSourceLoadsItsManifestBundleAndAgents()
     {
-        SquadSource source = _loader.Load(Root);
+        SquadSource source = _loader.Load(_root);
 
         Assert.False(string.IsNullOrWhiteSpace(source.Manifest.Name));
         Assert.Equal(source.Manifest.DefaultBundle, source.Bundle.Name);
@@ -40,7 +44,7 @@ public sealed class SquadSourceLoaderUnitTests
     public void RootThatDoesNotExistIsRefusedWithAMessageNamingIt()
     {
         SquadSourceValidationException failure =
-            Assert.Throws<SquadSourceValidationException>(() => _loader.Load("/kw/missing"));
+            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(Path.Combine(_files.Root, "kw", "missing")));
 
         Assert.Contains("/kw/missing", failure.Message, StringComparison.Ordinal);
     }
@@ -54,10 +58,10 @@ public sealed class SquadSourceLoaderUnitTests
     [Fact]
     public void SchemaFileThatIsMissingIsRefusedByName()
     {
-        _files.DeleteFile($"{Root}/schemas/squad.schema.json");
+        _files.DeleteFile($"{_root}/schemas/squad.schema.json");
 
         SquadSourceValidationException failure =
-            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(Root));
+            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(_root));
 
         Assert.Contains("schemas/squad.schema.json", failure.Message, StringComparison.Ordinal);
     }
@@ -65,12 +69,12 @@ public sealed class SquadSourceLoaderUnitTests
     [Fact]
     public void SourceFileLinkedToAFileOutsideTheRootIsRefused()
     {
-        _files.WriteAllText($"{Outside}/toolchain.yml", _files.ReadAllText($"{Root}/toolchain.yml"));
-        _files.DeleteFile($"{Root}/toolchain.yml");
-        _files.CreateFileLink($"{Root}/toolchain.yml", $"{Outside}/toolchain.yml");
+        _files.WriteAllText($"{_outside}/toolchain.yml", _files.ReadAllText($"{_root}/toolchain.yml"));
+        _files.DeleteFile($"{_root}/toolchain.yml");
+        _files.CreateFileLink($"{_root}/toolchain.yml", $"{_outside}/toolchain.yml");
 
         SquadSourceValidationException failure =
-            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(Root));
+            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(_root));
 
         Assert.Contains("outside the Squad product root", failure.Message, StringComparison.Ordinal);
     }
@@ -78,12 +82,12 @@ public sealed class SquadSourceLoaderUnitTests
     [Fact]
     public void SourceFileLinkedToAFileInsideTheRootStillLoads()
     {
-        string schema = _files.ReadAllText($"{Root}/schemas/squad.schema.json");
-        _files.DeleteFile($"{Root}/schemas/squad.schema.json");
-        _files.WriteAllText($"{Root}/schemas/squad.schema.copy.json", schema);
-        _files.CreateFileLink($"{Root}/schemas/squad.schema.json", $"{Root}/schemas/squad.schema.copy.json");
+        string schema = _files.ReadAllText($"{_root}/schemas/squad.schema.json");
+        _files.DeleteFile($"{_root}/schemas/squad.schema.json");
+        _files.WriteAllText($"{_root}/schemas/squad.schema.copy.json", schema);
+        _files.CreateFileLink($"{_root}/schemas/squad.schema.json", $"{_root}/schemas/squad.schema.copy.json");
 
-        SquadSource source = _loader.Load(Root);
+        SquadSource source = _loader.Load(_root);
 
         Assert.False(string.IsNullOrWhiteSpace(source.Manifest.Name));
     }
@@ -91,10 +95,10 @@ public sealed class SquadSourceLoaderUnitTests
     [Fact]
     public void SourceFileThatIsNotValidUtf8IsRefused()
     {
-        _files.WriteAllBytes($"{Root}/toolchain.yml", [0xC3, 0x28, 0xFF]);
+        _files.WriteAllBytes($"{_root}/toolchain.yml", [0xC3, 0x28, 0xFF]);
 
         SquadSourceValidationException failure =
-            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(Root));
+            Assert.Throws<SquadSourceValidationException>(() => _loader.Load(_root));
 
         Assert.Contains("not valid UTF-8", failure.Message, StringComparison.Ordinal);
     }
@@ -102,13 +106,13 @@ public sealed class SquadSourceLoaderUnitTests
     [Fact]
     public void ByteOrderMarkAndWindowsLineEndingsDoNotChangeTheLoadedSource()
     {
-        SquadSource plain = _loader.Load(Root);
-        string toolchain = _files.ReadAllText($"{Root}/toolchain.yml");
+        SquadSource plain = _loader.Load(_root);
+        string toolchain = _files.ReadAllText($"{_root}/toolchain.yml");
         _files.WriteAllBytes(
-            $"{Root}/toolchain.yml",
+            $"{_root}/toolchain.yml",
             [0xEF, 0xBB, 0xBF, .. System.Text.Encoding.UTF8.GetBytes(toolchain.Replace("\n", "\r\n", StringComparison.Ordinal))]);
 
-        SquadSource decorated = _loader.Load(Root);
+        SquadSource decorated = _loader.Load(_root);
 
         Assert.Equal(plain.Toolchain.RequiredFeatures, decorated.Toolchain.RequiredFeatures);
         Assert.Equal(plain.Toolchain.ValidatedRelease, decorated.Toolchain.ValidatedRelease);
