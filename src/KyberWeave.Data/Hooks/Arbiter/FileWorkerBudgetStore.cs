@@ -5,58 +5,53 @@ using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Data.Hooks.Arbiter;
 
 /// <summary>The budget files as append-only files that parallel hook processes share.</summary>
-public sealed class FileWorkerBudgetStore : IWorkerBudgetStore
+public sealed class FileWorkerBudgetStore(IWritableFileSystem files) : IWorkerBudgetStore
 {
     private const string BudgetDirectoryName = "budgets";
 
     /// <inheritdoc/>
-    public void EnsureDirectory(string home) => Directory.CreateDirectory(DirectoryOf(home));
+    public void EnsureDirectory(string home) => files.CreateDirectory(DirectoryOf(home));
 
     /// <inheritdoc/>
-    public bool Exists(string home, string key) => File.Exists(PathOf(home, key));
+    public bool Exists(string home, string key) => files.FileExists(PathOf(home, key));
 
     /// <inheritdoc/>
     public string[] ReadLines(string home, string key)
     {
         string path = PathOf(home, key);
-        return File.Exists(path) ? File.ReadAllLines(path) : [];
+        return files.FileExists(path) ? [.. files.ReadLines(path)] : [];
     }
 
     /// <inheritdoc/>
-    public void Delete(string home, string key) => File.Delete(PathOf(home, key));
+    public void Delete(string home, string key) => files.DeleteFile(PathOf(home, key));
 
     /// <inheritdoc/>
     public void TryCreate(string home, string key, string content)
     {
-        string path = PathOf(home, key);
-        try
+        // Losing the race is the normal case: another hook process wrote the header first, and its limits stand.
+        if (files.TryCreateNewFile(PathOf(home, key)))
         {
-            using FileStream created = new(path, FileMode.CreateNew, FileAccess.Write, FileShare.ReadWrite);
-            created.Write(Encoding.UTF8.GetBytes(content));
-        }
-        catch (IOException) when (File.Exists(path))
-        {
-            // Another hook process wrote the header first; its limits stand.
+            Append(home, key, content);
         }
     }
 
     /// <inheritdoc/>
     public void Append(string home, string key, string content)
     {
-        using FileStream append = new(PathOf(home, key), FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+        using Stream append = files.OpenAppendShared(PathOf(home, key));
         append.Write(Encoding.UTF8.GetBytes(content));
     }
 
     /// <inheritdoc/>
     public void Sweep(string home, DateTimeOffset now, TimeSpan retention)
     {
-        foreach (string file in Directory.EnumerateFiles(DirectoryOf(home)))
+        foreach (string file in files.EnumerateFiles(DirectoryOf(home), "*", recursive: false))
         {
             try
             {
-                if (now - File.GetLastWriteTimeUtc(file) > retention)
+                if (now - files.GetLastWriteTimeUtc(file) > retention)
                 {
-                    File.Delete(file);
+                    files.DeleteFile(file);
                 }
             }
             catch (Exception ex) when (FileFailure.Is(ex))
