@@ -9,7 +9,7 @@ namespace KyberWeave.Tests.Review;
 /// <summary>The seat folder lists markdown entries one level deep, over an in-memory file system.</summary>
 public sealed class FileSeatFolderTests
 {
-    private static readonly string Folder = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "seats"));
+    private static readonly string Folder = Path.GetFullPath(Path.Combine(new InMemoryFileSystem().RootPath, "seats"));
 
     private readonly InMemoryFileSystem _files = new();
 

@@ -8,7 +8,7 @@ namespace KyberWeave.Tests.Review;
 /// <summary>The nearest project file for a changed file, found over an in-memory tree.</summary>
 public sealed class FileProjectFileLocatorTests
 {
-    private static readonly string Root = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "repo"));
+    private static readonly string Root = Path.GetFullPath(Path.Combine(new InMemoryFileSystem().RootPath, "repo"));
 
     private readonly InMemoryFileSystem _files = new();
     private readonly FileProjectFileLocator _locator;
