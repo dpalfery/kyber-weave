@@ -44,6 +44,9 @@ A converted command has one public constructor, and its parameters are contracts
 | `IRunStateStore` | The base and place each run recorded under the operator's home | `Data/RunStart/FileRunStateStore.cs` |
 | `TimeProvider` | The clock | `TimeProvider.System` |
 
+The full register — every seam, its adapter, the fake and contract suite that prove it, and the
+classes still to convert — is in [Seams, adapters and the exceptions they keep](seams.md).
+
 A command reads the current directory, the home directory and any environment variable only through
 `IProcessEnvironment`. It never calls `Environment` or `Directory.GetCurrentDirectory` itself.
 
