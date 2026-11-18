@@ -298,6 +298,10 @@ two classes carries two routes.
   raw-I/O adapter in place and the part that computes moves to `Application`. A split is the right
   route when the file already talks to a resource: requirement 3.1 leaves the adapter no decisions, so
   the adapter returns the raw value and the logic lives one layer up.
+  A `move` row whose file calls a resource directly is not moved as it stands: its seam conversion
+  lands first, in its own commit (rule 2), so `move` means "move once the class calls no resource
+  directly". `PlanRootResolver` is the case in point: it calls `Directory.Exists`, `File.Exists`,
+  `File.ReadAllText`, `File.GetLastWriteTimeUtc` and `Path.GetFullPath` today.
 - **(c) stateful service.** The type holds state or reads a resource, so it becomes an instance service
   behind a `Contracts` interface and the caller takes that interface.
 
@@ -360,7 +364,7 @@ Only 28 types are not (b); the other 53 move as static helpers and need no per-t
 | `Arbiter/Ledger/DecisionLog.cs` | `ArbiterDecisionQueries`, `ArbiterJson` | b | split: log append and read stay, the queries move |
 | `Arbiter/Ledger/InFlightLedger.cs` | `ArbiterJson`, `ArbiterLedgerQueries`, `ArbiterRunScope` | a, b | split: the log read stays, the queries move; `ArbiterRunScope` stays data |
 | `Arbiter/Plans/PlanFacts.cs` | `ArbiterFactSet`, `ArbiterTriggerCatalog`, `ModelTargetingRules`, `PlanDocument` … | a, b | move: both records stay in `Domain` |
-| `Arbiter/Plans/PlanRootResolver.cs` | `HeaderBlock` | b | move: already logic over `IGitRepositoryFacts` and `IPlanFileResolver` |
+| `Arbiter/Plans/PlanRootResolver.cs` | `HeaderBlock` | b | move after its seam conversion: `Directory.Exists`, `File.Exists`, `File.ReadAllText`, `File.GetLastWriteTimeUtc` and `Path.GetFullPath` return through `IFileSystem`, `ITimeProvider` and `IPathResolver` first |
 | `Arbiter/Providers/SystemOneClient.cs` | `ArbiterFactSet`, `ArbiterRule`, `LensInstructions`, `RuleEngine` … | a, b | split: the HTTP call stays, rule evaluation moves |
 | `Arbiter/Stores/ArbiterRunStore.cs` | `ArbiterJson`, `RefutationOutcome` | b | split: the ledger file stays, serialization and verdicts move |
 | `Configuration/FileKyberWeaveConfigRepository.cs` | `KyberWeaveConfigAssembler`, `KyberWeaveConfigLoadResult`, `KyberWeaveYamlParser`, `OntologyConfig` … | a, b | split: the file read stays, assembly and the `Ok`/`Fail` factories move; lands with task 2.3 |
