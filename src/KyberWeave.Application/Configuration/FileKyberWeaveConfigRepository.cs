@@ -109,22 +109,24 @@ public sealed class FileKyberWeaveConfigRepository(
                 config: KyberWeaveConfig.ProductDefaults,
                 configPath: path);
 
-        if (!string.IsNullOrWhiteSpace(configPath) && !files.FileExists(path))
-        {
-            return new KyberWeaveConfigLoadResult(
-                success: false,
-                error: $"Kyber-Weave config file not found: {path}",
-                configPath: path);
-        }
-
-        if (!files.FileExists(path))
-            return new KyberWeaveConfigLoadResult(
-                success: true,
-                config: KyberWeaveConfig.ProductDefaults,
-                configPath: path);
-
         try
         {
+            // The probes are inside the try because the file-system seam may throw where the static
+            // File.Exists answered false: a failure must come back as a result, as it does for TryLoad.
+            if (!string.IsNullOrWhiteSpace(configPath) && !files.FileExists(path))
+            {
+                return new KyberWeaveConfigLoadResult(
+                    success: false,
+                    error: $"Kyber-Weave config file not found: {path}",
+                    configPath: path);
+            }
+
+            if (!files.FileExists(path))
+                return new KyberWeaveConfigLoadResult(
+                    success: true,
+                    config: KyberWeaveConfig.ProductDefaults,
+                    configPath: path);
+
             string yaml = files.ReadAllText(path);
             return new KyberWeaveConfigLoadResult(
                 success: true,
