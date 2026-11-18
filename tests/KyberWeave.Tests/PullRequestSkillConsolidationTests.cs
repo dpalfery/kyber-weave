@@ -12,6 +12,7 @@ using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Testing.Squad;
 
 namespace KyberWeave.Tests;
 
@@ -142,8 +143,8 @@ public sealed class PullRequestSkillConsolidationTests
         using TempDirectory temp = new();
         string[] archives =
         [
-            SquadPacker.PackApm(ProductRoot, temp.Path, "consolidation"),
-            SquadPacker.PackPlugins(ProductRoot, temp.Path, "consolidation")
+            RealSquadPacker.Create().PackApm(ProductRoot, temp.Path, "consolidation"),
+            RealSquadPacker.Create().PackPlugins(ProductRoot, temp.Path, "consolidation")
         ];
         foreach (string archivePath in archives)
         {

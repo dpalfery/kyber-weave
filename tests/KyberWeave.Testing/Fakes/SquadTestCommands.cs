@@ -12,6 +12,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Review;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 
 namespace KyberWeave.Tests.Fakes;
@@ -114,7 +115,7 @@ internal static class SquadTestCommands
         new(new SquadPackService(
             new FakeProcessEnvironment(currentDirectory: workingDirectory ?? "/kw/work"),
             new FileSquadSourceLocator(),
-            new FileSquadPackager()));
+            new FileSquadPackager(RealSquadPacker.Create())));
 
     public static SquadRunCommand Run(
         ISquadUserPaths? userPaths = null,
