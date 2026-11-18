@@ -1,9 +1,10 @@
 using System.Text.Json;
 using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Cli.Commands.Arbiter;
+using Spectre.Console.Cli;
 using Xunit;
-using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for the review fix to <c>kyber-weave arbiter tune</c>: a step-1 confidence that is not a
@@ -25,17 +26,16 @@ public sealed class ArbiterTuneUnreadableConfidenceTests : IDisposable
 
     private static readonly DateTimeOffset At = new(2026, 11, 10, 9, 0, 0, TimeSpan.Zero);
 
-    private readonly TempDirectory _repo = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _repo.Dispose();
+    public void Dispose() => _host.Dispose();
 
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => Path.Combine(_host.WorkingDirectory, "artifacts", "arbiter");
 
     /// <summary>One valid shadow score of 0.95 and two out-of-range scores, 1.5 and -0.2.</summary>
     private async Task WriteFixtureAsync()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
-        DecisionLog decisions = RealArbiterState.Decisions(ArbiterDirectory);
+        DecisionLog decisions = _host.State.Decisions(ArbiterDirectory);
         await decisions.AppendAsync(Decision("d-1", "ledger-1", 0.95));
         await decisions.AppendAsync(Decision("d-2", "ledger-2", 1.5));
         await decisions.AppendAsync(Decision("d-3", "ledger-3", -0.2));
@@ -81,15 +81,13 @@ public sealed class ArbiterTuneUnreadableConfidenceTests : IDisposable
             5);
     }
 
-    private static CommandExecution RunTune(string repo, params string[] extra)
+    private ArbiterCommandRun RunTune(string repo, params string[] extra)
     {
         string[] arguments = ["arbiter", "tune", repo, .. extra];
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            CommandAppFixture.ArbiterTune().Run(arguments));
-        return new CommandExecution(execution.Result, execution.Output);
+        CommandApp app = _host.App(config =>
+            config.AddBranch("arbiter", arbiter => arbiter.AddCommand<ArbiterTuneCommand>("tune")));
+        return _host.Run(() => app.Run(arguments));
     }
-
-    private sealed record CommandExecution(int ExitCode, string Output);
 
     /// <summary>Out-of-range scores are not tallied: only the valid 0.95 reaches the histogram and the count.</summary>
     [Fact]
@@ -97,7 +95,7 @@ public sealed class ArbiterTuneUnreadableConfidenceTests : IDisposable
     {
         await WriteFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path, "--thresholds", Thresholds, "--json");
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory, "--thresholds", Thresholds, "--json");
 
         Assert.Equal(0, execution.ExitCode);
         using JsonDocument document = JsonDocument.Parse(execution.Output);
@@ -114,7 +112,7 @@ public sealed class ArbiterTuneUnreadableConfidenceTests : IDisposable
     {
         await WriteFixtureAsync();
 
-        CommandExecution execution = RunTune(_repo.Path, "--thresholds", Thresholds);
+        ArbiterCommandRun execution = RunTune(_host.WorkingDirectory, "--thresholds", Thresholds);
 
         Assert.Equal(0, execution.ExitCode);
         Assert.Contains("unreadable 2", execution.Output, StringComparison.Ordinal);

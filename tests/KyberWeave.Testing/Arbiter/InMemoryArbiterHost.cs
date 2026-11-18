@@ -1,4 +1,7 @@
+using KyberWeave.Application;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Composition;
+using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -6,6 +9,8 @@ using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Spectre.Console.Cli;
 using Microsoft.Extensions.Time.Testing;
 using Spectre.Console;
 using Spectre.Console.Testing;
@@ -21,6 +26,7 @@ namespace KyberWeave.Tests.Arbiter;
 internal sealed class InMemoryArbiterHost : IDisposable
 {
     private readonly ArbiterTestHost _host;
+    private readonly Action<IServiceCollection>? _configure;
     private readonly Dictionary<string, string?> _variables = new(StringComparer.Ordinal);
 
     private InMemoryArbiterHost(Action<IServiceCollection>? configure, string? workingDirectory, string? homeDirectory)
@@ -41,25 +47,28 @@ internal sealed class InMemoryArbiterHost : IDisposable
         Console = new TestConsole { EmitAnsiSequences = false };
         Console.Profile.Width = 400;
         State = new InMemoryArbiterState(Files);
-        _host = ArbiterTestHost.Create(services =>
-        {
-            _ = services.AddSingleton<IWritableFileSystem>(Files);
-            _ = services.AddSingleton<IFileSystem>(Files);
-            _ = services.AddSingleton<IPathResolver>(Paths);
-            _ = services.AddSingleton<IProcessEnvironment>(Environment);
-            _ = services.AddSingleton<IAnsiConsole>(Console);
-            _ = services.AddSingleton<IConsole>(Standard);
-            _ = services.AddSingleton<TimeProvider>(Clock);
-            _ = services.AddSingleton<IIdGenerator>(Ids);
-            _ = services.AddSingleton<IArbiterLogStore>(State.Log);
-            _ = services.AddSingleton<IRepositoryFileStore>(new InMemoryRepositoryFileStore(Files));
-            _ = services.AddSingleton<IProcessExecutor>(Processes);
-            _ = services.AddSingleton<IProcessRunner>(Runner);
-            _ = services.AddSingleton<ICredentialStore>(Credentials);
-            _ = services.AddSingleton<IFileStatReader>(new InMemoryFileStatReader(Files));
-            _ = services.AddSingleton<IBoundedFileReader>(new InMemoryBoundedFileReader(Files));
-            configure?.Invoke(services);
-        });
+        _configure = configure;
+        _host = ArbiterTestHost.Create(RegisterFakes);
+    }
+
+    private void RegisterFakes(IServiceCollection services)
+    {
+        _ = services.AddSingleton<IWritableFileSystem>(Files);
+        _ = services.AddSingleton<IFileSystem>(Files);
+        _ = services.AddSingleton<IPathResolver>(Paths);
+        _ = services.AddSingleton<IProcessEnvironment>(Environment);
+        _ = services.AddSingleton<IAnsiConsole>(new ForwardingAnsiConsole(() => Console));
+        _ = services.AddSingleton<IConsole>(Standard);
+        _ = services.AddSingleton<TimeProvider>(Clock);
+        _ = services.AddSingleton<IIdGenerator>(Ids);
+        _ = services.AddSingleton<IArbiterLogStore>(State.Log);
+        _ = services.AddSingleton<IRepositoryFileStore>(new InMemoryRepositoryFileStore(Files));
+        _ = services.AddSingleton<IProcessExecutor>(Processes);
+        _ = services.AddSingleton<IProcessRunner>(Runner);
+        _ = services.AddSingleton<ICredentialStore>(Credentials);
+        _ = services.AddSingleton<IFileStatReader>(new InMemoryFileStatReader(Files));
+        _ = services.AddSingleton<IBoundedFileReader>(new InMemoryBoundedFileReader(Files));
+        _configure?.Invoke(services);
     }
 
     /// <summary>Gets the directory the process is said to have started in.</summary>
@@ -113,6 +122,31 @@ internal sealed class InMemoryArbiterHost : IDisposable
         string? workingDirectory = null,
         string? homeDirectory = null) =>
         new(configure, workingDirectory, homeDirectory);
+
+    /// <summary>
+    /// Builds a command app over the same fakes, so a test drives the argument surface a user types. The app owns its
+    /// own container, whose services are the host's shared fakes.
+    /// </summary>
+    /// <param name="register">Adds the commands the app exposes.</param>
+    internal CommandApp App(Action<IConfigurator> register)
+    {
+        ServiceCollection services = [];
+        RegisterFakes(services);
+        _ = services.AddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
+        services.TryAddSingleton<IRepositoryToolSettings, KyberWeave.Core.Doctor.ConfigFileToolSettings>();
+        _ = services.AddSquadCliServices();
+        _ = services.AddArbiterCliServices();
+        _ = services.AddWeaveApplication();
+        CommandApp app = new(new ServiceCollectionTypeRegistrar(services));
+        app.Configure(config =>
+        {
+            config.SetApplicationName("kyber-weave");
+            config.ConfigureConsole(new ForwardingAnsiConsole(() => Console));
+            config.UseStrictParsing();
+            register(config);
+        });
+        return app;
+    }
 
     /// <summary>Builds a command, resolving each constructor parameter from the container.</summary>
     /// <typeparam name="T">The command type.</typeparam>
