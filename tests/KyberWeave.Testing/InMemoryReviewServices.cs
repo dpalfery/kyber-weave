@@ -37,13 +37,13 @@ internal sealed class InMemoryReviewServices : IDisposable
     {
         Time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         Files = files ?? new InMemoryFileSystem(Time, caseSensitive);
-        Root = Path.Combine(Files.RootPath, "work");
+        Root = Path.Combine(Files.Root, "work");
         Files.CreateDirectory(Root);
         Paths = new FakePathResolver(Files);
         Environment = new FakeProcessEnvironment(
             currentDirectory: Root,
-            homeDirectory: Path.Combine(Files.RootPath, "home"),
-            tempDirectory: Path.Combine(Files.RootPath, "temp"));
+            homeDirectory: Path.Combine(Files.Root, "home"),
+            tempDirectory: Path.Combine(Files.Root, "temp"));
         Ids = new FakeIdGenerator();
         Processes = new ScriptedProcessRunner();
         Log = new FakeArbiterLogStore();

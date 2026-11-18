@@ -26,7 +26,7 @@ public sealed class ArbiterHookMalformedProjectConfigCliTests
         Directory.CreateDirectory(projConfigDir);
         await File.WriteAllTextAsync(Path.Combine(projConfigDir, "kyber-weave.yml"), "invalid: yaml: : content");
 
-        string fixturePath = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
+        string fixturePath = "tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
 
         JsonNode root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(fixturePath))!.AsObject();
         root["cwd"] = projectDir.Path;

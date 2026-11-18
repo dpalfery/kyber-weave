@@ -31,7 +31,7 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadGlobalBlockReceiptTests
 {
-    private const string FixtureRelativePath = "tests/KyberWeave.Tests/Fixtures/squad-rc20-global";
+    private const string FixtureRelativePath = "tests/KyberWeave.Integration.Tests/Fixtures/squad-rc20-global";
     private const string SharedHooksPath = "hooks.json";
 
     private static readonly DateTimeOffset InstalledAt = new(2026, 11, 06, 9, 30, 00, TimeSpan.Zero);

@@ -1,6 +1,6 @@
 using KyberWeave.Testing.Squad;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// The Squad deployment crash-safety contract, run against the in-memory file system: a process killed at every

@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 /// Assertions match stable tokens in the hand-authored sections, not the generated Config Reg
 /// block. The rules those sections state in prose (the display layers,
 /// the full-suite ban, the quick-review threshold) are checked by the prose rule catalog,
-/// <c>tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml</c>.
+/// <c>tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml</c>.
 /// </remarks>
 public sealed class RootAgentsOperationalPointerTests
 {

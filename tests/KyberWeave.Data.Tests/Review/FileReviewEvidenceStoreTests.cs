@@ -7,7 +7,7 @@ namespace KyberWeave.Tests.Review;
 /// <summary>The evidence store writes a file whole through a sibling temporary, over an in-memory file system.</summary>
 public sealed class FileReviewEvidenceStoreTests
 {
-    private static readonly string Folder = Path.GetFullPath(Path.Combine(new InMemoryFileSystem().RootPath, "evidence"));
+    private static readonly string Folder = Path.GetFullPath(Path.Combine(new InMemoryFileSystem().Root, "evidence"));
     private static readonly string Target = Path.Combine(Folder, "round-1.md");
 
     private readonly InMemoryFileSystem _files = new();

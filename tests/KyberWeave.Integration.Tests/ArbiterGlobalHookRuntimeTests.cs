@@ -374,7 +374,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
     /// <summary>A Bash PreToolUse payload from the shipped fixture, run as the architect in the given project.</summary>
     private static string ShellPayload(string projectRoot, string command)
     {
-        const string ShellFixture = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-bash-denied.json";
+        const string ShellFixture = "tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/claude/pre-bash-denied.json";
 
         JsonObject root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(ShellFixture))!.AsObject();
         root["cwd"] = projectRoot;
@@ -414,7 +414,7 @@ public sealed class ArbiterGlobalHookRuntimeTests
 
     private static string BuildPayload(string projectRoot)
     {
-        const string PayloadFixture = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
+        const string PayloadFixture = "tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
 
         JsonNode root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(PayloadFixture))!.AsObject();
         root["cwd"] = projectRoot;
@@ -463,7 +463,7 @@ public sealed class ArbiterHookCommandTests
 
     private static string BuildPayload(string projectRoot)
     {
-        const string PayloadFixture = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
+        const string PayloadFixture = "tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json";
 
         JsonNode root = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(PayloadFixture))!.AsObject();
         root["cwd"] = projectRoot;

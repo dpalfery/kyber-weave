@@ -1060,7 +1060,7 @@ public sealed class SquadOwnedBlockLifecycleTests
     /// shape, which is what makes it evidence that an upgrade keeps its state.
     /// </summary>
     private static string Rc20GlobalReceiptJson() =>
-        Corpus.ReadText("tests/KyberWeave.Tests/Fixtures/squad-rc20-global/two-blocks.receipt.json");
+        Corpus.ReadText("tests/KyberWeave.Integration.Tests/Fixtures/squad-rc20-global/two-blocks.receipt.json");
 
     private static void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
     {

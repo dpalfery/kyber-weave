@@ -55,7 +55,7 @@ internal sealed partial record ProseRuleCatalog(double ConfidenceFloor, IReadOnl
     private static readonly string[] RetiredKeys = ["statement", "example", "absent-from", "seed-into"];
 
     /// <summary>The catalog, relative to the repository root.</summary>
-    public const string RelativePath = "tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml";
+    public const string RelativePath = "tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml";
 
     /// <summary>The full path of the catalog in this checkout.</summary>
     public static string DefaultPath() =>

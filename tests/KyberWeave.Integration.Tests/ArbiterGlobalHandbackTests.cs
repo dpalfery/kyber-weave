@@ -85,7 +85,7 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
 
     private static string Handback(string root)
     {
-        string fixturePath = "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-subagent-handback.json";
+        string fixturePath = "tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/claude/pre-subagent-handback.json";
         JsonObject payload = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(fixturePath))!.AsObject();
         payload["cwd"] = root;
         payload["transcript_path"] = Path.Combine(root, "transcript.jsonl");

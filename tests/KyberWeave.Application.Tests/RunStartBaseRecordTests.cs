@@ -26,7 +26,7 @@ public sealed class RunStartBaseRecordTests
             new FakeCheckedOutBranchReader(),
             new FakePathResolver(_files),
             new FakeProcessEnvironment());
-        _home = Path.Combine(_files.RootPath, "home");
+        _home = Path.Combine(_files.Root, "home");
     }
 
     /// <summary>A recorded base reads back for the hook that follows.</summary>

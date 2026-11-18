@@ -336,7 +336,7 @@ internal sealed class ArbiterGlobalHookScenario : IDisposable
 
     private static string Fixture(string root, string relativeFixture, Action<JsonObject> edit)
     {
-        string fixturePath = $"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/{relativeFixture.Replace('\\', '/')}";
+        string fixturePath = $"tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/{relativeFixture.Replace('\\', '/')}";
 
         JsonObject payload = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(fixturePath))!.AsObject();
         payload["cwd"] = root;

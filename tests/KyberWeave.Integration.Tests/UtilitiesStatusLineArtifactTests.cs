@@ -32,7 +32,7 @@ namespace KyberWeave.Integration.Tests;
 /// any script at all.
 /// </para>
 /// <para>
-/// Fixtures under <c>tests/KyberWeave.Tests/Fixtures/statusline/</c> are hand-written from
+/// Fixtures under <c>tests/KyberWeave.Integration.Tests/Fixtures/statusline/</c> are hand-written from
 /// published payload schemas and contain no real paths, conversation ids, or account data (C3).
 /// The Claude and <c>agy</c> variants are run under their declared interpreters inside a temp
 /// sandbox: a temp <c>HOME</c>, a <c>PATH</c> limited to stub directories and the directories of
@@ -73,7 +73,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         StatusLineRootRelativePath + "/commandcode/statusbar.ts";
     private const string CommandCodeHarnessFileName = "commandcode-harness.mjs";
 
-    private const string FixtureRootRelativePath = "tests/KyberWeave.Tests/Fixtures/statusline";
+    private const string FixtureRootRelativePath = "tests/KyberWeave.Integration.Tests/Fixtures/statusline";
     private const string ClaudeFixture = "claude-statusline.json";
     private const string ClaudeZeroContextFixture = "claude-statusline-zero-context.json";
     private const string ClaudeWithoutContextFixture = "claude-statusline-without-context.json";
