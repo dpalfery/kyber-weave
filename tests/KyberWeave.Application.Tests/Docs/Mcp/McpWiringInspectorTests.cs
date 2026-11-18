@@ -1,9 +1,11 @@
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Mcp;
 
 /// <summary>
 /// The wiring check: for every harness in play, does this repository's declared MCP server reach
@@ -26,7 +28,7 @@ namespace KyberWeave.Tests;
 /// binary that does not resolve, is reported as a gap rather than as a pass.
 /// </para>
 /// </remarks>
-public sealed class McpWiringInspectorTests : IDisposable
+public sealed class McpWiringInspectorTests
 {
     private const string ServerName = "kyber-weave";
 
@@ -58,28 +60,25 @@ public sealed class McpWiringInspectorTests : IDisposable
 
     private const string TomlMultilineDelimiter = "\"\"\"";
 
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryMcpWiring _wiring = McpWiringTestServices.InMemory();
 
     public McpWiringInspectorTests()
     {
-        Directory.CreateDirectory(Repo);
-        Directory.CreateDirectory(Bin);
-        Directory.CreateDirectory(EmptyBin);
+        _wiring.CreateDirectory("bin");
+        _wiring.CreateDirectory("empty-bin");
     }
 
-    private string Repo => Path.Combine(_root.Path, "repo");
+    private string Repo => _wiring.Root;
 
     /// <summary>Where a case puts the fake launch binaries it wants the resolver to find.</summary>
-    private string Bin => Path.Combine(_root.Path, "bin");
+    private string Bin => Path.Combine(_wiring.Files.Root, "bin");
 
     /// <summary>
     /// An empty search path, used whenever the case is about an absent binary. It is a real
     /// directory rather than a missing one so the resolver is asked to search and finds nothing,
     /// which is the situation R2.7 and R6 describe.
     /// </summary>
-    private string EmptyBin => Path.Combine(_root.Path, "empty-bin");
-
-    public void Dispose() => _root.Dispose();
+    private string EmptyBin => Path.Combine(_wiring.Files.Root, "empty-bin");
 
     public static TheoryData<string, string, string> WiredShapes() => new()
     {
@@ -137,9 +136,9 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void TheResolverFindsABinaryOnAnInjectedSearchPath()
     {
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
-        LaunchCommandResolver resolver = PhysicalLaunchCommands.Over([Bin]);
+        LaunchCommandResolver resolver = ResolverOver([Bin]);
 
         Assert.NotNull(resolver.Resolve(BinaryName));
     }
@@ -147,7 +146,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void TheResolverReportsNoPathForACommandNoSearchPathHolds()
     {
-        LaunchCommandResolver resolver = PhysicalLaunchCommands.Over([EmptyBin]);
+        LaunchCommandResolver resolver = ResolverOver([EmptyBin]);
 
         Assert.Null(resolver.Resolve(BinaryName));
     }
@@ -160,12 +159,11 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void TheResolverSearchesSearchPathsInOrder()
     {
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
-        string second = Path.Combine(_root.Path, "bin-second");
-        Directory.CreateDirectory(second);
-        File.WriteAllText(Path.Combine(second, BinaryName), string.Empty);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
+        string second = Path.Combine(_wiring.Files.Root, "bin-second");
+        McpWiringFixture.WriteExecutable(_wiring.Files, second, BinaryName);
 
-        LaunchCommandResolver resolver = PhysicalLaunchCommands.Over([Bin, second]);
+        LaunchCommandResolver resolver = ResolverOver([Bin, second]);
 
         string? resolved = resolver.Resolve(BinaryName);
 
@@ -184,7 +182,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     /// recognized by, and on Windows the colon outside the volume position makes
     /// <see cref="Path.GetFullPath(string, string)"/> answer <see cref="NotSupportedException"/>
     /// rather than a path. The resolver caught only the argument and length failures, so that
-    /// answer escaped out of <see cref="McpWiringTestServices.Wiring.Inspect(string, McpConfig, LaunchCommandResolver)"/>
+    /// answer escaped out of <see cref="_wiring.Wiring.Inspect(string, McpConfig, LaunchCommandResolver)"/>
     /// instead of becoming the <c>KW-MCP-WIRE-003</c> gap an absent binary produces.
     /// </para>
     /// <para>
@@ -205,9 +203,9 @@ public sealed class McpWiringInspectorTests : IDisposable
     {
         const string UrlCommand = "https://localhost:8765/mcp";
 
-        McpWiringFixture.WriteText(Repo, ".mcp.json", McpServersDocument(".", UrlCommand));
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", McpServersDocument(".", UrlCommand));
 
-        Assert.Null(PhysicalLaunchCommands.Over([EmptyBin]).Resolve(UrlCommand));
+        Assert.Null(ResolverOver([EmptyBin]).Resolve(UrlCommand));
 
         // Third-party, because a server Kyber-Weave ships is one whose command runs its own binary:
         // this case is about the shape of a name, not about which side installed it.
@@ -237,14 +235,14 @@ public sealed class McpWiringInspectorTests : IDisposable
     /// binary that was sitting in their checkout.
     /// </para>
     /// <para>
-    /// The compiled <see cref="McpWiringTestServices.Wiring.Inspect(string, McpConfig)"/> overload is driven
+    /// The compiled <see cref="_wiring.Wiring.Inspect(string, McpConfig)"/> overload is driven
     /// rather than an injected resolver, because the root it passes down is the whole behaviour
     /// under test. It reads nothing of the machine: a path-shaped command is resolved against the
     /// root and never searched for on <c>PATH</c>.
     /// </para>
     /// <para>
     /// The rootless contrast is asserted for the same command so the case has teeth: reverting the
-    /// overload to <see cref="PhysicalLaunchCommands.FromEnvironment()"/> restores
+    /// overload to <see cref="ResolverFromAnotherDirectory"/> restores
     /// <c>KW-MCP-WIRE-003</c> here, and the resolver-level assertion names what the revert broke
     /// even if the inspector's wording moves.
     /// </para>
@@ -253,25 +251,24 @@ public sealed class McpWiringInspectorTests : IDisposable
     public void ARepositoryRelativeLaunchCommandIsResolvedAgainstTheRepositoryRoot()
     {
         string relativeCommand = "./tools/kyber-weave-mcp";
-        McpWiringFixture.WriteExecutable(Path.Combine(Repo, "tools"), BinaryName);
-        McpWiringFixture.WriteText(Repo, ".mcp.json", McpServersDocument(".", relativeCommand));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Path.Combine(Repo, "tools"), BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".mcp.json", McpServersDocument(".", relativeCommand));
 
-        // The fixture is a temp directory, so the process cannot be standing in it. Without this
-        // the contrast below would prove nothing on a machine that happened to be rooted there.
-        Assert.NotEqual(Repo, Directory.GetCurrentDirectory());
-        Assert.Null(PhysicalLaunchCommands.FromEnvironment().Resolve(relativeCommand));
+        // The contrast resolver stands outside the repository, so the relative command cannot
+        // resolve; without it the check below would prove nothing about the root it was given.
+        Assert.Null(ResolverFromAnotherDirectory().Resolve(relativeCommand));
 
         McpConfig declared = McpWiringFixture.Declare(RepositoryRelativeServer(relativeCommand));
 
-        McpWiringReport rootless = McpWiringTestServices.Wiring.Inspect(
+        McpWiringReport rootless = _wiring.Wiring.Inspect(
             Repo,
             declared,
-            PhysicalLaunchCommands.FromEnvironment());
+            ResolverFromAnotherDirectory());
         Assert.Contains(
             FindingsFor(rootless, ClaudeCode),
             finding => finding.Code == BinaryAbsentCode);
 
-        McpWiringReport report = McpWiringTestServices.Wiring.Inspect(Repo, declared);
+        McpWiringReport report = _wiring.Wiring.Inspect(Repo, declared);
 
         AssertNoFindingFor(report, ClaudeCode);
     }
@@ -280,8 +277,8 @@ public sealed class McpWiringInspectorTests : IDisposable
     [MemberData(nameof(WiredShapes))]
     public void AServerWiredInEachHarnessShapeReportsNoGap(string harness, string path, string document)
     {
-        McpWiringFixture.WriteText(Repo, path, document);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, path, document);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -297,8 +294,8 @@ public sealed class McpWiringInspectorTests : IDisposable
         string configurationFile,
         bool writable)
     {
-        McpWiringFixture.WriteText(Repo, inPlayFile, inPlayContent);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, inPlayFile, inPlayContent);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -320,8 +317,8 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void ANotWiredFindingCarriesTheCopyReadyRepairCommand()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/.keep", string.Empty);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/.keep", string.Empty);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringFinding finding = SingleFindingFor(Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin), Factory);
 
@@ -371,8 +368,8 @@ public sealed class McpWiringInspectorTests : IDisposable
         string path,
         string document)
     {
-        McpWiringFixture.WriteText(Repo, path, document);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, path, document);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -383,7 +380,7 @@ public sealed class McpWiringInspectorTests : IDisposable
         Assert.Contains("is not a JSON object", finding.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("mcp-wire", finding.Hint, StringComparison.Ordinal);
         Assert.NotEmpty(finding.Hint);
-        Assert.Empty(McpWiringTestServices.Wiring.Derive(report, Repo));
+        Assert.Empty(_wiring.Wiring.Derive(report, Repo));
     }
 
     /// <summary>
@@ -393,8 +390,8 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void ARecommendedServerReportsAtInfoAndStillCarriesItsRuleId()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/.keep", string.Empty);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/.keep", string.Empty);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer(level: McpRequirementLevel.Recommended)), Bin);
 
@@ -431,9 +428,9 @@ public sealed class McpWiringInspectorTests : IDisposable
         string document,
         string wiredCommand)
     {
-        McpWiringFixture.WriteText(Repo, configFile, document);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
-        McpWiringFixture.WriteExecutable(Bin, "other-mcp");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, configFile, document);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, "other-mcp");
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -474,8 +471,8 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void AWiredEntryWithADifferentLaunchCommandNamesBothCommands()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/mcp.json", McpServersDocument("/wired/repo"));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/mcp.json", McpServersDocument("/wired/repo"));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer("/declared/repo")), Bin);
 
@@ -494,8 +491,8 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void TheSingleArrayCommandFormIsComparedAgainstTheDeclaration()
     {
-        McpWiringFixture.WriteText(Repo, "opencode.json", OpenCodeDocument("/wired/repo"));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, "opencode.json", OpenCodeDocument("/wired/repo"));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer("/declared/repo")), Bin);
 
@@ -513,7 +510,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void AWiredFirstPartyEntryWithAMissingBinaryPointsAtTheInstallRepair()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/mcp.json", McpServersDocument("."));
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/mcp.json", McpServersDocument("."));
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), EmptyBin);
 
@@ -532,7 +529,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void AWiredThirdPartyEntryWithAMissingBinaryPrintsTheDeclaredInstallText()
     {
-        McpWiringFixture.WriteText(Repo,
+        McpWiringFixture.WriteText(_wiring.Files, Repo,
             ".factory/mcp.json",
             """
             {
@@ -627,9 +624,9 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void AnEmptyOrAbsentDeclarationProducesNoFindings()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/.keep", string.Empty);
-        McpWiringFixture.WriteText(Repo, ".vscode/.keep", string.Empty);
-        McpWiringFixture.WriteText(Repo, "opencode.json", """{ "mcp": {} }""");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/.keep", string.Empty);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".vscode/.keep", string.Empty);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, "opencode.json", """{ "mcp": {} }""");
 
         AssertNoFindings(Inspect(McpConfig.ProductDefaults, EmptyBin));
         AssertNoFindings(Inspect(new McpConfig(), EmptyBin));
@@ -642,10 +639,10 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void TheSameTreeYieldsTheSameReportTwice()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/.keep", string.Empty);
-        McpWiringFixture.WriteText(Repo, "opencode.json", """{ "mcp": {} }""");
-        McpWiringFixture.WriteText(Repo, ".codex/config.toml", "[mcp_servers.other]\ncommand = \"other\"\n");
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/.keep", string.Empty);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, "opencode.json", """{ "mcp": {} }""");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".codex/config.toml", "[mcp_servers.other]\ncommand = \"other\"\n");
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
         RequiredMcpServer codegraph = new(
             "codegraph",
             ["codegraph", "serve", "--mcp"],
@@ -678,9 +675,9 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void FindingsForOneHarnessAreOrderedByServerName()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/.keep", string.Empty);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
-        McpWiringFixture.WriteExecutable(Bin, "codegraph");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/.keep", string.Empty);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, "codegraph");
         RequiredMcpServer codegraph = new("codegraph", ["codegraph", "serve", "--mcp"], McpProvenance.ThirdParty);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer(), codegraph), Bin);
@@ -697,22 +694,22 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void TheCheckWritesNothingToTheTree()
     {
-        McpWiringFixture.WriteText(Repo, ".factory/.keep", string.Empty);
-        McpWiringFixture.WriteText(Repo, ".cursor/mcp.json", McpServersDocument("."));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
-        TreeSnapshot before = DirectoryTreeSnapshot.SnapshotTree(_root.Path);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".factory/.keep", string.Empty);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".cursor/mcp.json", McpServersDocument("."));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
+        string[] before = TreeState();
 
         _ = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
-        DirectoryTreeSnapshot.AssertTreeUnchanged(_root.Path, before);
+        Assert.Equal(before, TreeState());
     }
 
     /// <summary>The <c>.zcode/</c> marker alone puts ZCode in play, as it does for Squad.</summary>
     [Fact]
     public void ZCodeInPlayByItsMarkerAloneReportsTheServerNotWired()
     {
-        McpWiringFixture.WriteText(Repo, ".zcode/.keep", string.Empty);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".zcode/.keep", string.Empty);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringFinding finding = SingleFindingFor(Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin), ZCode);
 
@@ -725,8 +722,8 @@ public sealed class McpWiringInspectorTests : IDisposable
     [MemberData(nameof(ZCodeProjectTierFiles))]
     public void AZCodeServerInAProjectTierIsWired(string tierFile)
     {
-        McpWiringFixture.WriteText(Repo, tierFile, ZCodeServersDocument("."));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, tierFile, ZCodeServersDocument("."));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -741,10 +738,10 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void AZCodeUserTierConfigurationIsNeverRead()
     {
-        McpWiringFixture.WriteText(Repo, ".zcode/.keep", string.Empty);
-        McpWiringFixture.WriteText(Repo, "zcode.json", """{ "mcp": { "servers": {} } }""");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".zcode/.keep", string.Empty);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, "zcode.json", """{ "mcp": { "servers": {} } }""");
         WriteOutsideRepository("zcode-storage/cli/config.json", McpServersDocument("."));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringFinding finding = SingleFindingFor(Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin), ZCode);
 
@@ -765,11 +762,10 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void ALinkedConfigurationFileIsNotRead()
     {
-        string outside = Path.Combine(_root.Path, "user-scope", "mcp.json");
-        McpWiringFixture.WriteText(_root.Path, "user-scope/mcp.json", McpServersDocument("."));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
-        string link = Path.Combine(Repo, ".mcp.json");
-        McpWiringFixture.CreateSymlink(link, outside);
+        string outside = Path.Combine(_wiring.Files.Root, "user-scope", "mcp.json");
+        McpWiringFixture.WriteText(_wiring.Files, _wiring.Files.Root, "user-scope/mcp.json", McpServersDocument("."));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
+        _wiring.Files.CreateFileLink(Path.Combine(Repo, ".mcp.json"), outside);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -792,10 +788,10 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void AZCodeConfigurationAboveTheWorktreeRootIsNeverRead()
     {
-        Directory.CreateDirectory(Path.Combine(Repo, ".git"));
-        McpWiringFixture.WriteText(Repo, "zcode.json", """{ "mcp": { "servers": {} } }""");
+        _wiring.CreateDirectory(".git");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, "zcode.json", """{ "mcp": { "servers": {} } }""");
         WriteOutsideRepository(".zcode/config.json", McpServersDocument("."));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringFinding finding = SingleFindingFor(Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin), ZCode);
 
@@ -805,14 +801,14 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void ACodexHeaderOutsideAStringRegionIsWired()
     {
-        McpWiringFixture.WriteText(Repo,
+        McpWiringFixture.WriteText(_wiring.Files, Repo,
             ".codex/config.toml",
             string.Join(
                 '\n',
                 "[mcp_servers.kyber-weave]",
                 "command = \"kyber-weave-mcp\"",
                 "args = [\"--repo-root\", \".\"]"));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -827,7 +823,7 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void ACodexHeaderInsideAMultilineStringIsNotWired()
     {
-        McpWiringFixture.WriteText(Repo,
+        McpWiringFixture.WriteText(_wiring.Files, Repo,
             ".codex/config.toml",
             string.Join(
                 '\n',
@@ -835,7 +831,7 @@ public sealed class McpWiringInspectorTests : IDisposable
                 "[mcp_servers.kyber-weave]",
                 TomlMultilineDelimiter,
                 "command = \"kyber-weave-mcp\""));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringFinding finding = SingleFindingFor(Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin), Codex);
 
@@ -850,14 +846,14 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void ACodexDocumentThatCannotBeClassifiedIsNotReportedAsWired()
     {
-        McpWiringFixture.WriteText(Repo,
+        McpWiringFixture.WriteText(_wiring.Files, Repo,
             ".codex/config.toml",
             string.Join(
                 '\n',
                 "[mcp_servers.kyber-weave]",
                 $"note = {TomlMultilineDelimiter}",
                 "command = \"kyber-weave-mcp\""));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringFinding finding = SingleFindingFor(Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin), Codex);
 
@@ -883,10 +879,10 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void ACodexEntryNamingAnotherBinaryIsADifference()
     {
-        McpWiringFixture.WriteText(Repo,
+        McpWiringFixture.WriteText(_wiring.Files, Repo,
             ".codex/config.toml",
             string.Join('\n', "[mcp_servers.kyber-weave]", "command = \"ls\""));
-        McpWiringFixture.WriteExecutable(Bin, "ls");
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, "ls");
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -910,8 +906,8 @@ public sealed class McpWiringInspectorTests : IDisposable
     [Fact]
     public void AZCodeEntryBodyIsComparedByNameOnly()
     {
-        McpWiringFixture.WriteText(Repo, "zcode.json", ZCodeServersDocument("/somewhere/else"));
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
+        McpWiringFixture.WriteText(_wiring.Files, Repo, "zcode.json", ZCodeServersDocument("/somewhere/else"));
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -968,9 +964,9 @@ public sealed class McpWiringInspectorTests : IDisposable
     [MemberData(nameof(SubTableCommandDocuments))]
     public void ACodexSubTableCommandIsNotTheServersLaunchCommand(string document)
     {
-        McpWiringFixture.WriteText(Repo, ".codex/config.toml", document);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
-        McpWiringFixture.WriteExecutable(Bin, "evil");
+        McpWiringFixture.WriteText(_wiring.Files, Repo, ".codex/config.toml", document);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
+        McpWiringFixture.WriteExecutable(_wiring.Files, Bin, "evil");
 
         McpWiringReport report = Inspect(McpWiringFixture.Declare(FirstPartyServer()), Bin);
 
@@ -981,7 +977,29 @@ public sealed class McpWiringInspectorTests : IDisposable
     }
 
     private McpWiringReport Inspect(McpConfig config, params string[] searchPaths) =>
-        McpWiringTestServices.Wiring.Inspect(Repo, config, PhysicalLaunchCommands.Over(searchPaths));
+        _wiring.Wiring.Inspect(Repo, config, ResolverOver(searchPaths));
+
+    private LaunchCommandResolver ResolverOver(params string[] searchPaths) =>
+        new(Repo, searchPaths, _wiring.Files, _wiring.Paths, _wiring.Environment);
+
+    /// <summary>
+    /// A resolver over a process standing somewhere other than the repository — the situation the
+    /// rootless overload had, modelled by the in-memory working directory.
+    /// </summary>
+    private LaunchCommandResolver ResolverFromAnotherDirectory(params string[] searchPaths) =>
+        new(
+            Path.Combine(_wiring.Files.Root, "elsewhere"),
+            searchPaths,
+            _wiring.Files,
+            _wiring.Paths,
+            new FakeProcessEnvironment(currentDirectory: Path.Combine(_wiring.Files.Root, "elsewhere")));
+
+    /// <summary>Every file in the in-memory tree with its text, so a case can prove nothing was written.</summary>
+    private string[] TreeState() =>
+        [.. _wiring.Files
+            .EnumerateFiles(_wiring.Files.Root, "*", recursive: true)
+            .Order(StringComparer.Ordinal)
+            .Select(path => path + "|" + _wiring.Files.ReadAllText(path))];
 
     private static RequiredMcpServer FirstPartyServer(
         string repoRootArgument = ".",
@@ -1095,13 +1113,6 @@ public sealed class McpWiringInspectorTests : IDisposable
     /// Writes beside the repository root — the place a user-scope file would sit if the check
     /// ever walked out of the tree it was given.
     /// </summary>
-    private void WriteOutsideRepository(string relativePath, string content)
-    {
-        string path = Path.Combine(_root.Path, relativePath);
-        string? directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-
-        File.WriteAllText(path, content);
-    }
+    private void WriteOutsideRepository(string relativePath, string content) =>
+        McpWiringFixture.WriteText(_wiring.Files, _wiring.Files.Root, relativePath, content);
 }
