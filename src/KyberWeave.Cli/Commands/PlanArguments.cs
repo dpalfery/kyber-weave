@@ -83,9 +83,13 @@ internal static class PlanArguments
     }
 
     /// <summary>The configuration to resolve a plan with; the product defaults when none loads, so resolving never fails on it.</summary>
-    public static KyberWeaveConfig ConfigForResolving(string root, string? configPath)
+    /// <param name="root">The repository root.</param>
+    /// <param name="configPath">An explicit <c>--config</c> path, or null for the repository's own.</param>
+    /// <param name="configs">The repository the configuration is read from.</param>
+    public static KyberWeaveConfig ConfigForResolving(string root, string? configPath, IKyberWeaveConfigRepository configs)
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(root, configPath);
+        ArgumentNullException.ThrowIfNull(configs);
+        KyberWeaveConfigLoadResult result = configs.TryLoad(root, configPath);
         return result is { Success: true, Config: { } loaded } ? loaded : KyberWeaveConfig.ProductDefaults;
     }
 

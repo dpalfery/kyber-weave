@@ -219,6 +219,7 @@ undetectable harness still reports one `info` line and nothing more.
 | `KW-SKILL-SEC-011` | `wget \| sh` |
 | `KW-SKILL-SEC-012` | `eval` of base64 |
 | `KW-SKILL-SEC-013` | Destructive command |
+| `KW-SKILL-SEC-014` | Bundled script could not be read, so it was not scanned |
 | `KW-SKILL-SEC-020` | AWS key |
 | `KW-SKILL-SEC-021` | GitHub token |
 | `KW-SKILL-SEC-022` | Private key |

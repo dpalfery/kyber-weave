@@ -9,7 +9,7 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Prints what the plan parser understood for a plan file.</summary>
-public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFileStore files) : Command<ArbiterSettings>
+public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFileStore files, IKyberWeaveConfigRepository configs) : Command<ArbiterSettings>
 {
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
@@ -26,7 +26,7 @@ public sealed class ArbiterPlanCommand(IArbiterPlanService plans, IRepositoryFil
     {
         DiagnosticReport report = new();
         string root = PlanArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
-        if (!PlanArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
+        if (!PlanArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config, configs), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
         {
             CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
             return 1;
