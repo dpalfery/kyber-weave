@@ -258,8 +258,10 @@ public abstract class CorpusSourceContractTests
 
         Assert.Throws<ArgumentException>(() => corpus.ReadText("/" + SampleFile));
         Assert.Throws<ArgumentException>(() => corpus.Exists("/" + SampleFile));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists("/" + SampleDirectory));
         Assert.Throws<ArgumentException>(() => corpus.EnumerateFiles("/" + SampleDirectory));
         Assert.Throws<ArgumentException>(() => corpus.ReadText("C:/" + SampleFile));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists("C:/" + SampleDirectory));
         Assert.Throws<ArgumentException>(() => corpus.ReadText(@"C:\" + SampleFile.Replace('/', '\\')));
     }
 
@@ -270,6 +272,8 @@ public abstract class CorpusSourceContractTests
 
         Assert.Throws<ArgumentException>(() => corpus.ReadText("../outside.md"));
         Assert.Throws<ArgumentException>(() => corpus.ReadText("products/../../outside.md"));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists("../outside"));
         Assert.Throws<ArgumentException>(() => corpus.EnumerateFiles(".."));
+        Assert.Throws<ArgumentException>(() => corpus.EnumerateDirectories(".."));
     }
 }
