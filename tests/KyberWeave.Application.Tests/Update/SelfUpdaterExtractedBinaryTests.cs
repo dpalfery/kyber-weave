@@ -11,8 +11,11 @@ namespace KyberWeave.Application.Tests.Update;
 /// </summary>
 public sealed class SelfUpdaterExtractedBinaryTests
 {
-    private const string Extract = "/kw/work/kyber-weave-extract";
     private const string FileName = "kyber-weave";
+
+    private static readonly string Root = new InMemoryFileSystem().Root;
+    private static readonly string Outside = Path.Combine(Root, "kw", "outside");
+    private static readonly string Extract = Path.Combine(Root, "kw", "work", "kyber-weave-extract");
 
     private readonly InMemoryFileSystem _files = new();
     private readonly FakeProcessEnvironment _environment = new();
@@ -20,28 +23,28 @@ public sealed class SelfUpdaterExtractedBinaryTests
     [Fact]
     public void FindsTheSingleBinaryInANestedFolder()
     {
-        _files.CreateDirectory(Extract + "/pkg");
-        _files.WriteAllText(Extract + "/pkg/" + FileName, "x");
+        _files.CreateDirectory(Path.Combine(Extract, "pkg"));
+        _files.WriteAllText(Path.Combine(Extract, "pkg", FileName), "x");
 
-        Assert.Equal(Extract + "/pkg/" + FileName, Find());
+        Assert.Equal(Path.Combine(Extract, "pkg", FileName), Find());
     }
 
     [Fact]
     public void ReturnsTheBinarySittingAtTheTopLevel()
     {
         _files.CreateDirectory(Extract);
-        _files.WriteAllText(Extract + "/" + FileName, "x");
+        _files.WriteAllText(Path.Combine(Extract, FileName), "x");
 
-        Assert.Equal(Extract + "/" + FileName, Find());
+        Assert.Equal(Path.Combine(Extract, FileName), Find());
     }
 
     [Fact]
     public void RefusesToGuessWhenMoreThanOneCandidateMatches()
     {
-        _files.CreateDirectory(Extract + "/one");
-        _files.CreateDirectory(Extract + "/two");
-        _files.WriteAllText(Extract + "/one/" + FileName, "x");
-        _files.WriteAllText(Extract + "/two/" + FileName, "x");
+        _files.CreateDirectory(Path.Combine(Extract, "one"));
+        _files.CreateDirectory(Path.Combine(Extract, "two"));
+        _files.WriteAllText(Path.Combine(Extract, "one", FileName), "x");
+        _files.WriteAllText(Path.Combine(Extract, "two", FileName), "x");
 
         Assert.Null(Find());
     }
@@ -49,10 +52,10 @@ public sealed class SelfUpdaterExtractedBinaryTests
     [Fact]
     public void DoesNotFollowADirectoryLinkOutOfTheExtractionDirectory()
     {
-        _files.CreateDirectory("/kw/outside");
-        _files.WriteAllText("/kw/outside/" + FileName, "x");
+        _files.CreateDirectory(Outside);
+        _files.WriteAllText(Path.Combine(Outside, FileName), "x");
         _files.CreateDirectory(Extract);
-        _files.CreateDirectoryLink(Extract + "/escape", "/kw/outside");
+        _files.CreateDirectoryLink(Path.Combine(Extract, "escape"), Outside);
 
         Assert.Null(Find());
     }
@@ -60,10 +63,10 @@ public sealed class SelfUpdaterExtractedBinaryTests
     [Fact]
     public void DoesNotReturnAFileThatIsItselfALink()
     {
-        _files.CreateDirectory("/kw/outside");
-        _files.WriteAllText("/kw/outside/" + FileName, "x");
+        _files.CreateDirectory(Outside);
+        _files.WriteAllText(Path.Combine(Outside, FileName), "x");
         _files.CreateDirectory(Extract);
-        _files.CreateFileLink(Extract + "/" + FileName, "/kw/outside/" + FileName);
+        _files.CreateFileLink(Path.Combine(Extract, FileName), Path.Combine(Outside, FileName));
 
         Assert.Null(Find());
     }
@@ -75,12 +78,12 @@ public sealed class SelfUpdaterExtractedBinaryTests
     [Fact]
     public void TheVolumesNameRuleDecidesWhetherACaseDifferenceStillMatches()
     {
-        _files.CreateDirectory(Extract + "/pkg");
-        _files.WriteAllText(Extract + "/pkg/" + FileName.ToUpperInvariant(), "x");
+        _files.CreateDirectory(Path.Combine(Extract, "pkg"));
+        _files.WriteAllText(Path.Combine(Extract, "pkg", FileName.ToUpperInvariant()), "x");
         FakeProcessEnvironment insensitive = new(isFileSystemCaseInsensitive: true);
 
         Assert.Equal(
-            Extract + "/pkg/" + FileName.ToUpperInvariant(),
+            Path.Combine(Extract, "pkg", FileName.ToUpperInvariant()),
             SelfUpdater.TryFindExtractedBinary(_files, insensitive, Extract, FileName));
         Assert.Null(Find());
     }

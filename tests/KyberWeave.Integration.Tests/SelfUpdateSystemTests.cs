@@ -15,9 +15,12 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SelfUpdateSystemTests
 {
-    private const string Work = "/kw/work";
-    private const string Install = "/kw/install";
-    private const string Destination = Install + "/kyber-weave";
+    private static readonly string Root = new InMemoryFileSystem().Root;
+    private static readonly string Kw = Path.Combine(Root, "kw");
+    private static readonly string Work = Path.Combine(Kw, "work");
+    private static readonly string Install = Path.Combine(Kw, "install");
+    private static readonly string Outside = Path.Combine(Kw, "outside");
+    private static readonly string Destination = Path.Combine(Install, "kyber-weave");
 
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
     private readonly FakeUpdateFileModes _modes = new();
@@ -44,53 +47,53 @@ public sealed class SelfUpdateSystemTests
             new ReleaseArchiveEntry("bin/", Type: TarEntryType.Directory),
             new ReleaseArchiveEntry("bin/kyber-weave", "new image")));
 
-        _system.ExtractArchive(archive, Work + "/extract", windows: false);
+        _system.ExtractArchive(archive, Path.Combine(Work, "extract"), windows: false);
 
-        Assert.Equal("new image", _files.ReadAllText(Work + "/extract/bin/kyber-weave"));
+        Assert.Equal("new image", _files.ReadAllText(Path.Combine(Work, "extract", "bin", "kyber-weave")));
         Assert.Equal(
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute
             | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute,
-            _modes.Modes[Work + "/extract/bin/kyber-weave"]);
+            _modes.Modes[Path.Combine(Work, "extract", "bin", "kyber-weave")]);
     }
 
     [Fact]
     public void AZipArchiveExtractsItsFilesOverWhatIsThere()
     {
-        _files.CreateDirectory(Work + "/extract");
-        _files.WriteAllText(Work + "/extract/kyber-weave.exe", "stale");
+        _files.CreateDirectory(Path.Combine(Work, "extract"));
+        _files.WriteAllText(Path.Combine(Work, "extract", "kyber-weave.exe"), "stale");
         string archive = Stage("release.zip", ReleaseArchiveBuilder.Zip(
             new ReleaseArchiveEntry("kyber-weave.exe", "new image"),
             new ReleaseArchiveEntry("docs/", Type: TarEntryType.Directory),
             new ReleaseArchiveEntry("docs/notice.txt", "notice")));
 
-        _system.ExtractArchive(archive, Work + "/extract", windows: true);
+        _system.ExtractArchive(archive, Path.Combine(Work, "extract"), windows: true);
 
-        Assert.Equal("new image", _files.ReadAllText(Work + "/extract/kyber-weave.exe"));
-        Assert.Equal("notice", _files.ReadAllText(Work + "/extract/docs/notice.txt"));
+        Assert.Equal("new image", _files.ReadAllText(Path.Combine(Work, "extract", "kyber-weave.exe")));
+        Assert.Equal("notice", _files.ReadAllText(Path.Combine(Work, "extract", "docs", "notice.txt")));
     }
 
     [Theory]
     [InlineData("../escape")]
     [InlineData("nested/../../escape")]
-    [InlineData("/kw/absolute-escape")]
+    [InlineData("<root>kw/absolute-escape")]
     [InlineData("..\\escape")]
     [InlineData("C:/escape")]
     public void AnEntryThatEscapesTheDestinationIsRefusedAndNothingIsWrittenOutside(string name)
     {
         string archive = Stage("hostile.tar.gz", ReleaseArchiveBuilder.TarGz(
             new ReleaseArchiveEntry("kyber-weave", "fine"),
-            new ReleaseArchiveEntry(name, "pwned")));
+            new ReleaseArchiveEntry(name.Replace("<root>", Root, StringComparison.Ordinal), "pwned")));
 
         SelfUpdateException refusal = Assert.Throws<SelfUpdateException>(
-            () => _system.ExtractArchive(archive, Work + "/extract", windows: false));
+            () => _system.ExtractArchive(archive, Path.Combine(Work, "extract"), windows: false));
 
         Assert.Contains("was refused", refusal.Message, StringComparison.Ordinal);
-        Assert.False(_files.PathExists("/kw/escape"));
-        Assert.False(_files.PathExists("/kw/absolute-escape"));
-        Assert.False(_files.PathExists(Work + "/escape"));
+        Assert.False(_files.PathExists(Path.Combine(Kw, "escape")));
+        Assert.False(_files.PathExists(Path.Combine(Kw, "absolute-escape")));
+        Assert.False(_files.PathExists(Path.Combine(Work, "escape")));
         Assert.Equal(
-            [Work + "/extract/kyber-weave"],
-            _files.EnumerateFiles("/kw", "*", recursive: true).Where(path => !path.EndsWith(".tar.gz", StringComparison.Ordinal)));
+            [Path.Combine(Work, "extract", "kyber-weave")],
+            _files.EnumerateFiles(Kw, "*", recursive: true).Where(path => !path.EndsWith(".tar.gz", StringComparison.Ordinal)));
     }
 
     [Theory]
@@ -101,9 +104,9 @@ public sealed class SelfUpdateSystemTests
     {
         string archive = Stage("hostile.zip", ReleaseArchiveBuilder.Zip(new ReleaseArchiveEntry(name, "pwned")));
 
-        _ = Assert.Throws<SelfUpdateException>(() => _system.ExtractArchive(archive, Work + "/extract", windows: true));
+        _ = Assert.Throws<SelfUpdateException>(() => _system.ExtractArchive(archive, Path.Combine(Work, "extract"), windows: true));
 
-        Assert.Equal([archive], _files.EnumerateFiles("/kw", "*", recursive: true));
+        Assert.Equal([archive], _files.EnumerateFiles(Kw, "*", recursive: true));
     }
 
     [Theory]
@@ -115,10 +118,10 @@ public sealed class SelfUpdateSystemTests
             new ReleaseArchiveEntry("kyber-weave", Type: type, LinkTarget: "/etc/passwd")));
 
         SelfUpdateException refusal = Assert.Throws<SelfUpdateException>(
-            () => _system.ExtractArchive(archive, Work + "/extract", windows: false));
+            () => _system.ExtractArchive(archive, Path.Combine(Work, "extract"), windows: false));
 
         Assert.Contains("plain files only", refusal.Message, StringComparison.Ordinal);
-        Assert.Empty(_files.EnumerateEntries(Work + "/extract"));
+        Assert.Empty(_files.EnumerateEntries(Path.Combine(Work, "extract")));
     }
 
     [Fact]
@@ -127,46 +130,46 @@ public sealed class SelfUpdateSystemTests
         string archive = Stage("nested.tar.gz", ReleaseArchiveBuilder.TarGz(
             new ReleaseArchiveEntry("a/b/c/kyber-weave", "deep")));
 
-        _system.ExtractArchive(archive, Work + "/extract", windows: false);
+        _system.ExtractArchive(archive, Path.Combine(Work, "extract"), windows: false);
 
-        Assert.Equal("deep", _files.ReadAllText(Work + "/extract/a/b/c/kyber-weave"));
+        Assert.Equal("deep", _files.ReadAllText(Path.Combine(Work, "extract", "a", "b", "c", "kyber-weave")));
     }
 
     [Fact]
     public void AnEntryNamedThroughALinkedDirectoryIsRefusedWhenTheLinkLeavesTheDestination()
     {
-        _files.CreateDirectory("/kw/outside");
-        _files.CreateDirectory(Work + "/extract");
-        _files.CreateDirectoryLink(Work + "/extract/linked", "/kw/outside");
+        _files.CreateDirectory(Outside);
+        _files.CreateDirectory(Path.Combine(Work, "extract"));
+        _files.CreateDirectoryLink(Path.Combine(Work, "extract", "linked"), Outside);
         string archive = Stage("through-link.tar.gz", ReleaseArchiveBuilder.TarGz(
             new ReleaseArchiveEntry("linked/kyber-weave", "pwned")));
 
-        _ = Assert.Throws<SelfUpdateException>(() => _system.ExtractArchive(archive, Work + "/extract", windows: false));
+        _ = Assert.Throws<SelfUpdateException>(() => _system.ExtractArchive(archive, Path.Combine(Work, "extract"), windows: false));
 
-        Assert.Empty(_files.EnumerateFiles("/kw/outside", "*", recursive: true));
+        Assert.Empty(_files.EnumerateFiles(Outside, "*", recursive: true));
     }
 
     [Fact]
     public void ReplacingABinaryLeavesTheNewImageAndNoStagingFile()
     {
         _files.WriteAllText(Destination, "old");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: false, macOs: false);
+        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
         Assert.Empty(_processes.Calls);
-        Assert.True(_modes.Modes[Install + "/.kyber-weave.new"].HasFlag(UnixFileMode.UserExecute));
+        Assert.True(_modes.Modes[Path.Combine(Install, ".kyber-weave.new")].HasFlag(UnixFileMode.UserExecute));
     }
 
     [Fact]
     public void ReplacingOnWindowsKeepsNoExecutableBitAndLeavesNoOldImage()
     {
         _files.WriteAllText(Destination, "old");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
+        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
@@ -177,13 +180,13 @@ public sealed class SelfUpdateSystemTests
     public void AFailedMoveOfTheNewImageOnWindowsPutsTheOldImageBack()
     {
         _files.WriteAllText(Destination, "old");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
         _files.FailWhen(
             operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
             new IOException("locked"));
 
         _ = Assert.Throws<IOException>(
-            () => _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false));
+            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false));
 
         Assert.Equal("old", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
@@ -193,13 +196,13 @@ public sealed class SelfUpdateSystemTests
     public void AFailedMoveOffTheWindowsPathLeavesNoStagingFileEither()
     {
         _files.WriteAllText(Destination, "old");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
         _files.FailWhen(
             operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
             new IOException("denied"));
 
         _ = Assert.Throws<IOException>(
-            () => _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: false, macOs: false));
+            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false));
 
         Assert.Equal("old", _files.ReadAllText(Destination));
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
@@ -209,9 +212,9 @@ public sealed class SelfUpdateSystemTests
     public void ARecoveryAfterAStopBetweenTheTwoWindowsMovesInstallsTheNewImageAndKeepsTheOldOneForTheNextUpdate()
     {
         _files.WriteAllText(Destination + ".old", "old");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
+        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
@@ -221,13 +224,13 @@ public sealed class SelfUpdateSystemTests
     public void ARecoveryWhoseCommitFailsStillLeavesTheUserAnImage()
     {
         _files.WriteAllText(Destination + ".old", "old");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
         _files.FailWhen(
             operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
             new IOException("denied"));
 
         _ = Assert.Throws<IOException>(
-            () => _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false));
+            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false));
 
         Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
         Assert.Equal([Destination + ".old"], _files.EnumerateFiles(Install, "*", recursive: true));
@@ -238,9 +241,9 @@ public sealed class SelfUpdateSystemTests
     {
         _files.WriteAllText(Destination, "current");
         _files.WriteAllText(Destination + ".old", "stray");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
+        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
     }
@@ -248,27 +251,27 @@ public sealed class SelfUpdateSystemTests
     [Fact]
     public void AFailedCopyOrFinalMoveLeavesNoStagingFile()
     {
-        _files.WriteAllText(Install + "/source", "source");
-        _files.WriteAllText(Work + "/destination", "destination");
+        _files.WriteAllText(Path.Combine(Install, "source"), "source");
+        _files.WriteAllText(Path.Combine(Work, "destination"), "destination");
         _files.FailWhen(
             operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
             new IOException("denied"));
 
-        _ = Assert.Throws<IOException>(() => _system.CopyFile(Install + "/source", Work + "/destination", overwrite: true));
+        _ = Assert.Throws<IOException>(() => _system.CopyFile(Path.Combine(Install, "source"), Path.Combine(Work, "destination"), overwrite: true));
 
-        Assert.Equal("destination", _files.ReadAllText(Work + "/destination"));
-        Assert.DoesNotContain(Work + "/.destination.new", _files.EnumerateFiles(Work, "*", recursive: false));
+        Assert.Equal("destination", _files.ReadAllText(Path.Combine(Work, "destination")));
+        Assert.DoesNotContain(Path.Combine(Work, ".destination.new"), _files.EnumerateFiles(Work, "*", recursive: false));
     }
 
     [Fact]
     public void ACopyThatFailsWhileWritingLeavesNoStagingFile()
     {
-        _files.WriteAllText(Install + "/source", "source");
+        _files.WriteAllText(Path.Combine(Install, "source"), "source");
         _files.FailWhen(
             operation => operation.Name == nameof(_files.OpenWriteNew),
             new IOException("disk full"));
 
-        _ = Assert.Throws<IOException>(() => _system.CopyFile(Install + "/source", Work + "/destination", overwrite: true));
+        _ = Assert.Throws<IOException>(() => _system.CopyFile(Path.Combine(Install, "source"), Path.Combine(Work, "destination"), overwrite: true));
 
         Assert.Empty(_files.EnumerateFiles(Work, "*", recursive: false));
     }
@@ -277,13 +280,13 @@ public sealed class SelfUpdateSystemTests
     public void AnOldImageThatCannotBeRemovedStaysAndTheUpdateStillSucceeds()
     {
         _files.WriteAllText(Destination, "old");
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
         int deletesOfTheOldImage = 0;
         _files.FailWhen(
             operation => operation.Name == nameof(_files.DeleteFile) && operation.Path == Destination + ".old" && ++deletesOfTheOldImage == 2,
             new IOException("locked"));
 
-        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
+        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: true, macOs: false);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
         Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
@@ -293,7 +296,7 @@ public sealed class SelfUpdateSystemTests
     public void AnExtractedBinaryThatIsMissingIsNamed()
     {
         SelfUpdateException failure = Assert.Throws<SelfUpdateException>(
-            () => _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: false, macOs: false));
+            () => _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: false));
 
         Assert.Equal("archive did not contain kyber-weave", failure.Message);
         Assert.False(_files.FileExists(Destination));
@@ -302,13 +305,13 @@ public sealed class SelfUpdateSystemTests
     [Fact]
     public void OnMacOsTheQuarantineIsClearedOnTheStagedFileBeforeItIsMoved()
     {
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: false, macOs: true);
+        _system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: true);
 
         ProcessStartInfo xattr = Assert.Single(_processes.Calls);
         Assert.Equal("xattr", xattr.FileName);
-        Assert.Equal(["-d", "com.apple.quarantine", Install + "/.kyber-weave.new"], xattr.ArgumentList);
+        Assert.Equal(["-d", "com.apple.quarantine", Path.Combine(Install, ".kyber-weave.new")], xattr.ArgumentList);
         Assert.Equal([TimeSpan.FromSeconds(30)], _processes.Timeouts);
         Assert.Equal("new", _files.ReadAllText(Destination));
     }
@@ -319,9 +322,9 @@ public sealed class SelfUpdateSystemTests
         ScriptedProcessExecutor failing = new(_ => throw new TimeoutException("xattr hung"));
         SelfUpdateSystem system = new(
             _files, new FakePathResolver(_files), failing, _console, _modes);
-        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.WriteAllText(Path.Combine(Work, "kyber-weave"), "new");
 
-        system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: false, macOs: true);
+        system.ReplaceBinary(Path.Combine(Work, "kyber-weave"), Destination, windows: false, macOs: true);
 
         Assert.Equal("new", _files.ReadAllText(Destination));
     }
@@ -329,33 +332,33 @@ public sealed class SelfUpdateSystemTests
     [Fact]
     public void CopyingCarriesContentAndPermissionBitsAndLeavesNoStagingFile()
     {
-        _files.WriteAllText(Install + "/source", "binary");
+        _files.WriteAllText(Path.Combine(Install, "source"), "binary");
         UnixFileMode executable = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
-        _modes.Set(Install + "/source", executable);
+        _modes.Set(Path.Combine(Install, "source"), executable);
 
-        _system.CopyFile(Install + "/source", Work + "/backup", overwrite: true);
+        _system.CopyFile(Path.Combine(Install, "source"), Path.Combine(Work, "backup"), overwrite: true);
 
-        Assert.Equal("binary", _files.ReadAllText(Work + "/backup"));
-        Assert.Equal(executable, _modes.Modes[Work + "/.backup.new"]);
-        Assert.Equal([Work + "/backup"], _files.EnumerateFiles(Work, "*", recursive: true));
+        Assert.Equal("binary", _files.ReadAllText(Path.Combine(Work, "backup")));
+        Assert.Equal(executable, _modes.Modes[Path.Combine(Work, ".backup.new")]);
+        Assert.Equal([Path.Combine(Work, "backup")], _files.EnumerateFiles(Work, "*", recursive: true));
     }
 
     [Fact]
     public void CopyingWithoutOverwriteRefusesAnExistingDestinationAndKeepsIt()
     {
-        _files.WriteAllText(Install + "/source", "source");
-        _files.WriteAllText(Work + "/destination", "destination");
+        _files.WriteAllText(Path.Combine(Install, "source"), "source");
+        _files.WriteAllText(Path.Combine(Work, "destination"), "destination");
 
-        _ = Assert.Throws<IOException>(() => _system.CopyFile(Install + "/source", Work + "/destination", overwrite: false));
-        _system.CopyFile(Install + "/source", Work + "/destination", overwrite: true);
+        _ = Assert.Throws<IOException>(() => _system.CopyFile(Path.Combine(Install, "source"), Path.Combine(Work, "destination"), overwrite: false));
+        _system.CopyFile(Path.Combine(Install, "source"), Path.Combine(Work, "destination"), overwrite: true);
 
-        Assert.Equal("source", _files.ReadAllText(Work + "/destination"));
+        Assert.Equal("source", _files.ReadAllText(Path.Combine(Work, "destination")));
     }
 
     [Fact]
     public void CopyingAMissingSourceIsNamed()
     {
-        _ = Assert.Throws<FileNotFoundException>(() => _system.CopyFile(Install + "/absent", Work + "/destination", overwrite: true));
+        _ = Assert.Throws<FileNotFoundException>(() => _system.CopyFile(Path.Combine(Install, "absent"), Path.Combine(Work, "destination"), overwrite: true));
     }
 
     [Fact]
@@ -369,7 +372,7 @@ public sealed class SelfUpdateSystemTests
     [Fact]
     public void AProbeAKilledUpdateLeftDoesNotMakeTheDirectoryLookUnwritable()
     {
-        _files.WriteAllText(Install + "/.kyber-weave-update-probe", string.Empty);
+        _files.WriteAllText(Path.Combine(Install, ".kyber-weave-update-probe"), string.Empty);
 
         Assert.True(_system.CanWriteDirectory(Install));
 
@@ -391,7 +394,7 @@ public sealed class SelfUpdateSystemTests
     [Fact]
     public void ADirectoryThatIsNotThereProbesFalse()
     {
-        Assert.False(_system.CanWriteDirectory(Install + "/missing"));
+        Assert.False(_system.CanWriteDirectory(Path.Combine(Install, "missing")));
     }
 
     [Fact]
@@ -468,7 +471,7 @@ public sealed class SelfUpdateSystemTests
 
     private string Stage(string name, byte[] bytes)
     {
-        string path = Work + "/" + name;
+        string path = Path.Combine(Work, name);
         _files.WriteAllBytes(path, bytes);
         return path;
     }

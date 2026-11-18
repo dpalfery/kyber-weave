@@ -90,11 +90,11 @@ public sealed class InMemorySelfUpdateCrashWorkspace : SelfUpdateCrashWorkspace
         Paths = new FileSystemPathResolver(_files, caseSensitiveFileSystem: true);
         Modes = new KillableFileModes(new FakeUpdateFileModes(), _control);
         Environment = new FakeProcessEnvironment(
-            currentDirectory: "/kw/work",
-            homeDirectory: "/kw/home",
+            currentDirectory: Path.Combine(_memory.Root, "kw", "work"),
+            homeDirectory: Path.Combine(_memory.Root, "kw", "home"),
             readVariable: _ => null);
         _memory.CreateDirectory(Install);
-        _memory.CreateDirectory("/kw/work");
+        _memory.CreateDirectory(Path.Combine(_memory.Root, "kw", "work"));
     }
 
     /// <inheritdoc />
@@ -110,7 +110,7 @@ public sealed class InMemorySelfUpdateCrashWorkspace : SelfUpdateCrashWorkspace
     public override FakeProcessEnvironment Environment { get; }
 
     /// <inheritdoc />
-    public override string Install => "/kw/install";
+    public override string Install => Path.Combine(_memory.Root, "kw", "install");
 
     /// <inheritdoc />
     public override int OperationCount => _control.OperationCount;
