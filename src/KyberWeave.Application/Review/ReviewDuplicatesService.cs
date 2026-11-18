@@ -29,7 +29,7 @@ public sealed class ReviewDuplicatesService(
         string root = Path.GetFullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         ReviewDuplicates options = config.Review.Duplicates;
         CodeGraphPorts graph = graphs.ForRepository(root);
@@ -81,6 +81,6 @@ public sealed class ReviewDuplicatesService(
         // Clusters are Warning by design (the gate proves evidence was produced). A failed
         // --out write is Error and must fail the process, or CI would treat a missing report
         // as a passed gate.
-        return ReviewCommandResult.Reported(report.HasErrors ? 1 : 0, report);
+        return ReviewCommandResultFactory.Reported(report.HasErrors ? 1 : 0, report);
     }
 }

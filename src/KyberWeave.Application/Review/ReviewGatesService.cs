@@ -78,7 +78,7 @@ public sealed class ReviewGatesService(
         string root = Path.GetFullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // Inputs are checked before any gate is considered, so an unsafe path or base is refused the same
         // way whether or not the host declares a gate that uses it.
@@ -105,7 +105,7 @@ public sealed class ReviewGatesService(
                 "review.gates",
                 Hint: "Declare the repository's build, test, and analysis commands under " +
                       "review.gates in kyber-weave.yml."));
-            return ReviewCommandResult.Reported(0, report);
+            return ReviewCommandResultFactory.Reported(0, report);
         }
 
         // --gate narrows the run to the gates named, so a reviewer re-checks one gate without paying for the whole
@@ -209,7 +209,7 @@ public sealed class ReviewGatesService(
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
                 report);
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
         }
 
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
@@ -286,7 +286,7 @@ public sealed class ReviewGatesService(
         // Blocking failures are already Error diagnostics; a failed --out write is too.
         // Non-blocking gate failures stay Warning and do not fail the process. Gates that
         // did not apply are Info and never fail it either.
-        return ReviewCommandResult.Reported(report.HasErrors ? 1 : 0, report, epilogue);
+        return ReviewCommandResultFactory.Reported(report.HasErrors ? 1 : 0, report, epilogue);
     }
 
     /// <summary>The cycle a council run found itself in, and what that decides for each declared gate.</summary>
@@ -527,7 +527,7 @@ public sealed class ReviewGatesService(
         string root = Path.GetFullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // Every input is checked before the agent is looked up, so an unsafe path or slug is refused
         // the same way whether or not the agent declares gates.
@@ -606,7 +606,7 @@ public sealed class ReviewGatesService(
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
                 report);
-            return ReviewCommandResult.Reported(
+            return ReviewCommandResultFactory.Reported(
                 report.HasErrors ? 1 : 0,
                 report,
                 request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath) : []);
@@ -725,7 +725,7 @@ public sealed class ReviewGatesService(
             }
         }
 
-        return ReviewCommandResult.Reported(report.HasErrors ? 1 : 0, report, epilogue);
+        return ReviewCommandResultFactory.Reported(report.HasErrors ? 1 : 0, report, epilogue);
     }
 
     /// <summary>
@@ -771,7 +771,7 @@ public sealed class ReviewGatesService(
         string? hint = null)
     {
         ReviewGateReporting.AddRefusals(report, reasons, hint);
-        return ReviewCommandResult.Reported(1, report);
+        return ReviewCommandResultFactory.Reported(1, report);
     }
 
     /// <summary>

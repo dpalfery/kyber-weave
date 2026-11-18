@@ -65,13 +65,13 @@ public sealed class ReviewSeatsService(
         string root = Path.GetFullPath(request.Path);
         DiagnosticReport report = new();
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         string tree = trees.Containing(root);
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, request.Task);
         if (!choice.Chosen)
-            return ReviewCommandResult.Refused(choice.Error!);
+            return ReviewCommandResultFactory.Refused(choice.Error!);
 
         string task = choice.Task;
 
@@ -88,7 +88,7 @@ public sealed class ReviewSeatsService(
             (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
                 priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review seats");
             if (!ok)
-                return ReviewCommandResult.Reported(1, report);
+                return ReviewCommandResultFactory.Reported(1, report);
 
             recheck = found;
         }
@@ -135,7 +135,7 @@ public sealed class ReviewSeatsService(
                 Severity.Error,
                 $"Could not write the evidence or packets to '{folder}': {ex.Message}",
                 "review seats"));
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
         }
 
         string reviewRun = $"{task}-cycle-{plan.Number}";

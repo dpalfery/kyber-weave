@@ -16,16 +16,6 @@ public sealed record ReviewCommandResult(
     /// <summary>The exit code for an input the command refuses before anything runs.</summary>
     public const int ClientInputExitCode = 2;
 
-    /// <summary>A refused input.</summary>
-    /// <param name="message">What is wrong with it.</param>
-    public static ReviewCommandResult Refused(string message) => new(ClientInputExitCode, ClientError: message);
-
-    /// <summary>A run that ends by rendering <paramref name="report"/>.</summary>
-    /// <param name="exitCode">The exit code.</param>
-    /// <param name="report">The report.</param>
-    /// <param name="epilogue">Lines printed after the report is rendered.</param>
-    public static ReviewCommandResult Reported(int exitCode, DiagnosticReport report, IReadOnlyList<string>? epilogue = null) =>
-        new(exitCode, report, epilogue ?? []);
 }
 
 /// <summary>The options of <c>review gates</c>, as the use case reads them.</summary>

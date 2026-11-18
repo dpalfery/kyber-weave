@@ -41,11 +41,11 @@ public sealed class ReviewCatalogueService(
                 $"Cannot resolve path '{request.Path}': {ex.Message}",
                 "kyber-weave.yml",
                 request.Path));
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
         }
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // A host may declare a technology no template ships: `docs init` scaffolds it as stubs. Its gates are
         // reported as not shipped, not refused, because the technology is the host's own choice.
@@ -59,7 +59,7 @@ public sealed class ReviewCatalogueService(
         foreach (string technology in technologies)
         {
             if (!KyberStandardsTemplates.TryGet(technology, out _) && !declared.Contains(technology))
-                return ReviewCommandResult.Refused(UnknownTechnologyMessage(technology));
+                return ReviewCommandResultFactory.Refused(UnknownTechnologyMessage(technology));
         }
 
         ReviewGatesPlan plan = ReviewCataloguePlanner.Plan(
