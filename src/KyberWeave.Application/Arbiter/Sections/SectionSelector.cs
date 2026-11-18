@@ -4,11 +4,6 @@ using KyberWeave.Core.Arbiter.Rules;
 
 namespace KyberWeave.Core.Arbiter.Sections;
 
-/// <summary>The outcome of selecting the sections of one document for a task.</summary>
-/// <param name="Selected">The sections the worker should read, in document order. The title section is always included.</param>
-/// <param name="FailedSafe">True when the selector was unsure, the provider did not answer, or the provider failed; <paramref name="Selected"/> is then every section.</param>
-public sealed record SectionSelection(IReadOnlyList<DocumentSection> Selected, bool FailedSafe);
-
 /// <summary>
 /// Asks the provider, through <c>KW-ARB-TRIM-001</c>, which sections of a document a task needs. One question is
 /// batched per candidate section, up to <see cref="StateBudget.MaxQuestions"/>; the first section is the title and is always kept, and candidates past the cap are kept unasked. The selector fails safe: any
@@ -21,7 +16,7 @@ public sealed class SectionSelector(IArbiterProvider provider)
     public const string TrimRuleId = "KW-ARB-TRIM-001";
 
     /// <summary>The largest document the selector reads, in bytes. A larger one fails safe rather than being read whole.</summary>
-    public const long MaxDocumentBytes = 1024 * 1024;
+    public const long MaxDocumentBytes = DocumentSection.MaxDocumentBytes;
 
     private const string Relevant = "relevant";
     private const string NotRelevant = "not-relevant";

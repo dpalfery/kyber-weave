@@ -27,7 +27,7 @@ Baseline: `main` at `2089297`. Sources read on that baseline:
 `products/kyber-squad/skills/product-owner/SKILL.md`,
 `products/kyber-squad/skills/code-review/SKILL.md`,
 `review:` in `.kyber-weave/kyber-weave.yml`, and
-`src/KyberWeave.Domain/Review/VerdictEngine.cs` with `review verdict`
+`src/KyberWeave.Application/Review/VerdictEngine.cs` with `review verdict`
 rules 1–4. See [review council architecture](../code-review/architecture.md),
 [Kyber-Squad architecture](../kyber-squad/architecture.md), and the
 [rule reference](../ci-pipelines/rule-reference.md).

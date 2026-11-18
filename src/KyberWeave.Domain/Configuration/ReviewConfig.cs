@@ -49,7 +49,7 @@ public sealed record ReviewGate(
     public bool FailOnOutput { get; init; }
 
     /// <summary>
-    /// Whether this gate runs the full product suite. Only the review council and CI may run it; see <see cref="FullSuiteGate"/>.
+    /// Whether this gate runs the full product suite. Only the review council and CI may run it; see <c>FullSuiteGate</c>.
     /// </summary>
     public bool FullSuite { get; init; }
 

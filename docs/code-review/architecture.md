@@ -170,7 +170,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | `GateRunService` | Runs declared gates, normalizes results | `src/KyberWeave.Application/Review/GateRunService.cs` |
 | `DuplicateDetector` | Clusters symbols by normalized body, from the CodeGraph index | `src/KyberWeave.Application/Review/DuplicateDetectionService.cs` |
 | `ICodeGraphSymbolEnumerator` | Optional CodeGraph port: every indexed symbol of one kind | `src/KyberWeave.Contracts/Repositories/ICodeGraphSymbolEnumerator.cs` |
-| `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Domain/Review/VerdictEngine.cs` |
+| `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Application/Review/VerdictEngine.cs` |
 | `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Kernel/Text/PathGlob.cs` |
 | `ReviewConfig` | The `review:` host configuration | `src/KyberWeave.Domain/Configuration/ReviewConfig.cs` |
 

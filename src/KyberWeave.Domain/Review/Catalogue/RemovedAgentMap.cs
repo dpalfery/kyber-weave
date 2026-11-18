@@ -6,7 +6,7 @@ namespace KyberWeave.Core.Review.Catalogue;
 /// <remarks>
 /// The names stay here after the files are gone, because a host's <c>review.task-gates</c> entries outlive the
 /// agents that wrote them: Requirement 13.2 keeps an agent-keyed entry resolving for two minor releases through
-/// <see cref="TechnologyAgentMap"/>, and Requirement 13.4 reports each one for a removed agent as a warning that
+/// <c>TechnologyAgentMap</c>, and Requirement 13.4 reports each one for a removed agent as a warning that
 /// names <see cref="MigrationCommand"/>. This is the one shipped list all three readers share, so the departure of an
 /// agent and the warning about its config entry cannot disagree.
 /// </remarks>
