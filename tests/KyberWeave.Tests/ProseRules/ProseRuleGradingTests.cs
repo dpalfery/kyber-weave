@@ -6,6 +6,7 @@ using System.Text.Json;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Tests.ProseRules;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -16,6 +17,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ProseRuleGradingTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string OptInVariable = "KW_PROSE_GRADE";
     private const string EndpointVariable = "KW_PROSE_GRADE_ENDPOINT";
     private const string ModelVariable = "KW_PROSE_GRADE_MODEL";
@@ -63,7 +66,7 @@ public sealed class ProseRuleGradingTests
 
         using HttpClientHandler transport = new();
         using ProseGrader grader = new(transport, new Uri(endpoint), model, key, catalog.ConfidenceFloor, TimeoutMs);
-        List<ProseCase> cases = BuildCases(rules, KyberWeaveTestPaths.ToolRoot, grader.FitsBudget, out List<string> buildErrors);
+        List<ProseCase> cases = BuildCases(rules, Corpus, grader.FitsBudget, out List<string> buildErrors);
         Assert.True(buildErrors.Count == 0, "The catalog could not be turned into questions:\n" + string.Join('\n', buildErrors));
 
         List<ProseResult> results = await GradeAllAsync(grader, cases, cancellationToken);
@@ -174,7 +177,7 @@ public sealed class ProseRuleGradingTests
             null);
 
         List<ProseCase> cases = BuildCases(
-            [rule], KyberWeaveTestPaths.ToolRoot, item => item.Kind == ProseCaseKind.Control || item.Text.Length < 4_000, out List<string> errors);
+            [rule], Corpus, item => item.Kind == ProseCaseKind.Control || item.Text.Length < 4_000, out List<string> errors);
 
         Assert.Empty(errors);
         ProseCase stated = Assert.Single(cases, item => item.Kind == ProseCaseKind.Stated);
@@ -187,7 +190,7 @@ public sealed class ProseRuleGradingTests
     /// section, and the note says so; one with no named section, or still over budget, is an error.
     /// </summary>
     internal static List<ProseCase> BuildCases(
-        IReadOnlyList<ProseRule> rules, string root, Func<ProseCase, bool> fitsBudget, out List<string> errors)
+        IReadOnlyList<ProseRule> rules, ICorpusSource corpus, Func<ProseCase, bool> fitsBudget, out List<string> errors)
     {
         List<ProseCase> cases = [];
         List<string> problems = [];
@@ -196,17 +199,17 @@ public sealed class ProseRuleGradingTests
         {
             foreach (ProseDocumentRef document in rule.StatedIn.Where(item => item.Anchor is null))
             {
-                foreach (string path in ProseRuleCatalog.Resolve(root, document))
+                foreach (string path in ProseRuleCatalog.Resolve(corpus, document))
                 {
                     // The whole document is sent: measured against sending only the named section, the section
                     // alone lost context and made the grader less sure. The section is the fallback for budget.
-                    Add(rule.Id, ProseCaseKind.Stated, path, rule.Statement, Read(root, path), null, document.Section);
+                    Add(rule.Id, ProseCaseKind.Stated, path, rule.Statement, Read(corpus, path), null, document.Section);
                 }
             }
 
             foreach (ProseControl control in rule.Controls)
             {
-                string text = Read(root, control.Path);
+                string text = Read(corpus, control.Path);
                 if (control.WithoutSection is { } heading)
                 {
                     string? cut = ProseRuleCatalog.WithoutSection(text, heading);
@@ -229,19 +232,19 @@ public sealed class ProseRuleGradingTests
                 continue;
             }
 
-            string seedPath = retired.SeedInto ?? (ProseRuleCatalog.Resolve(root, retired.AbsentFrom[0]) is { Count: > 0 } first ? first[0] : retired.AbsentFrom[0].Pattern);
-            string seeded = InsertMidway(Read(root, seedPath), retired.Example);
+            string seedPath = retired.SeedInto ?? (ProseRuleCatalog.Resolve(corpus, retired.AbsentFrom[0]) is { Count: > 0 } first ? first[0] : retired.AbsentFrom[0].Pattern);
+            string seeded = InsertMidway(Read(corpus, seedPath), retired.Example);
             string seededPart = ProseRuleCatalog.Parts(seeded, PartChars).First(item => item.Contains(retired.Example, StringComparison.Ordinal));
             Add(rule.Id, ProseCaseKind.RetiredControl, seedPath, retired.Statement, seededPart,
                 "retired example inserted into the part it lands in", null, rule.Statement);
 
             foreach (ProseDocumentRef document in retired.AbsentFrom)
             {
-                foreach (string path in ProseRuleCatalog.Resolve(root, document))
+                foreach (string path in ProseRuleCatalog.Resolve(corpus, document))
                 {
                     // Absence is judged part by part: a retired sentence can sit anywhere, and a short part keeps
                     // the rest of a long file from diluting the answer.
-                    string text = Read(root, path);
+                    string text = Read(corpus, path);
                     IReadOnlyList<string> parts = ProseRuleCatalog.Parts(text, PartChars);
                     for (int index = 0; index < parts.Count; index++)
                     {
@@ -371,7 +374,7 @@ public sealed class ProseRuleGradingTests
         await File.WriteAllTextAsync(output + ".txt", report, cancellationToken);
     }
 
-    private static string Read(string root, string path) => File.ReadAllText(Path.Combine(root, path));
+    private static string Read(ICorpusSource corpus, string path) => corpus.ReadText(path);
 
     /// <summary>Inserts <paramref name="sentence"/> as its own paragraph at the blank line nearest the middle.</summary>
     private static string InsertMidway(string text, string sentence)

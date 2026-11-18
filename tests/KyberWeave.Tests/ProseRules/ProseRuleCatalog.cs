@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Review;
 using YamlDotNet.RepresentationModel;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.ProseRules;
 
@@ -93,28 +94,30 @@ internal sealed partial record ProseRuleCatalog(double ConfidenceFloor, IReadOnl
         return new ProseRuleCatalog(floor, rules);
     }
 
-    /// <summary>Expands a document reference to the existing repository-relative files it names, sorted.</summary>
-    public static IReadOnlyList<string> Resolve(string repositoryRoot, ProseDocumentRef document)
+    /// <summary>Expands a document reference to the existing corpus files it names, sorted.</summary>
+    /// <param name="corpus">The corpus to resolve against.</param>
+    /// <param name="document">The path or glob the rule names.</param>
+    /// <returns>The matching paths, relative to the corpus root.</returns>
+    public static IReadOnlyList<string> Resolve(ICorpusSource corpus, ProseDocumentRef document)
     {
+        ArgumentNullException.ThrowIfNull(corpus);
         if (!document.Pattern.Contains('*', StringComparison.Ordinal))
         {
-            return File.Exists(Path.Combine(repositoryRoot, document.Pattern)) ? [document.Pattern] : [];
+            return corpus.Exists(document.Pattern) ? [document.Pattern] : [];
         }
 
         int wildcard = document.Pattern.IndexOf('*', StringComparison.Ordinal);
         int lastSlash = document.Pattern.LastIndexOf('/', wildcard);
         string prefix = lastSlash < 0 ? string.Empty : document.Pattern[..lastSlash];
-        string start = Path.Combine(repositoryRoot, prefix);
-        if (!Directory.Exists(start))
+        if (prefix.Length == 0)
         {
-            return [];
+            throw new InvalidOperationException(
+                $"'{document.Pattern}' is a glob at the corpus root, which the corpus seam cannot list; name a directory.");
         }
 
-        return Directory.EnumerateFiles(start, "*", SearchOption.AllDirectories)
-            .Select(file => Path.GetRelativePath(repositoryRoot, file).Replace('\\', '/'))
+        return [.. corpus.EnumerateFiles(prefix)
             .Where(relative => PathGlob.IsMatch(document.Pattern, relative))
-            .Order(StringComparer.Ordinal)
-            .ToList();
+            .Order(StringComparer.Ordinal)];
     }
 
     /// <summary>
