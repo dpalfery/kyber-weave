@@ -1,5 +1,4 @@
 using KyberWeave.Contracts.Host;
-using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Host;
 using KyberWeave.Cli.Update;
@@ -31,12 +30,6 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadGlobalRootResolver>(sp => EnvironmentSquadGlobalRoots.Create(
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISquadFileAccess>()));
-        services.TryAddSingleton<ISquadStateStore>(sp => new SquadStateStore(
-            sp.GetRequiredService<ISquadUserPaths>(),
-            sp.GetRequiredService<IWritableFileSystem>(),
-            sp.GetRequiredService<IFileSystemPathSemantics>(),
-            sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadCanonicalProfileStore>(sp => new SquadCanonicalProfileStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadSourceLoader, FileSquadSourceLoader>();
@@ -59,13 +52,6 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadSourceLocator, FileSquadSourceLocator>();
         services.TryAddSingleton<ISquadTargetResolver, FileSquadTargetResolver>();
         services.TryAddSingleton<ILease, MutexLease>();
-        services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
-            sp.GetRequiredService<ISquadStateStore>(),
-            sp.GetRequiredService<ISquadUserPaths>(),
-            sp.GetRequiredService<IWritableFileSystem>(),
-            sp.GetRequiredService<IFileSystemPathSemantics>(),
-            sp.GetRequiredService<ILease>(),
-            sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadCanonicalProfileResolver, CheckoutOrSnapshotCanonicalProfileResolver>();
         services.TryAddSingleton<ISquadLinkFileSystem>(_ => OperatingSystem.IsWindows()
             ? new WindowsSquadLinkFileSystem()

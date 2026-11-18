@@ -46,6 +46,19 @@ public static class SquadServiceCollectionExtensions
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
                 ? new LocalCheckoutSquadReleaseSource(local)
                 : sp.GetRequiredService<ISquadReleaseSource>()));
+        services.TryAddSingleton<ISquadStateStore>(sp => new SquadStateStore(
+            sp.GetRequiredService<ISquadUserPaths>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
+            sp.GetRequiredService<ISquadStateStore>(),
+            sp.GetRequiredService<ISquadUserPaths>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<ILease>(),
+            sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadModelPresetSelectionStore>(sp => new SquadModelPresetSelectionStore(
             sp.GetRequiredService<ISquadUserPaths>(),
             sp.GetRequiredService<IWritableFileSystem>(),
