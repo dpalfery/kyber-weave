@@ -180,21 +180,28 @@ from this file when it is marked Ready.
     the data in `Domain` and moves the method, a pure static helper moves as a static helper and each
     `Data` caller either moves with it or keeps a raw-I/O adapter, and a stateful service moves behind a
     `Contracts` interface.
-  - **Order, with acceptance criteria:**
-    1. **Step 0a — the 36 `Contracts` findings.** Each of the 22 types gets its recorded decision
-       (`split`, `move the interface`, `narrow`). Acceptance: `KyberWeave.Contracts` names no type that
-       will move, and the change lands with the unit or contract test that fails without it, written
-       first.
-    2. **Step 0b — the splits and the caller routes.** The 20 data-with-method types keep their data and
-       move their methods, the 8 services move behind their interfaces, and the 65 `Data` and 13 `Core`
-       rows take their routes. Acceptance: every row is either moved, split or recorded as naming data
-       only; `Data` and `Core` still do not reference `Application`; each split row's adapter implements
-       a `Contracts` interface and holds no decision; each change lands with the test that fails without
+  - **Order, with acceptance criteria** (corrected 2026-11-17 after step 0a failed: a type can move up to
+    `Application` only once nothing below `Application` names it, and `Data` sits between `Contracts` and
+    `Application`, so the callers move first, leaf first):
+    1. **Step 0 — the `Data` and `Core` callers move up, leaf first.** A `Data` file moves to
+       `Application` (with the seam it needs) only after every `Data` file that names it has moved, or
+       together with them; a split leaves behind only a thin adapter, and where that adapter would be a
+       single phase 1 seam call the whole class moves and takes the seam. A vertical pilot (one leaf
+       caller, its record split and its `Contracts` member narrowed, in one branch) runs first and
+       reports the service registrations and `internal` members the move touches. Acceptance: every
+       `Data` and `Core` row of the 2.1 plan is moved, split or recorded as naming data only; `Data` and
+       `Core` still do not reference `Application`; each change lands with the test that fails without
        it, written first.
-    3. **Step 1 — the 24 folder tasks below**, in the order the `depends on` column gives: a group moves
-       before the groups its code names, because `Domain` has no `Application` reference. Acceptance:
-       each folder task meets the acceptance criteria below, and `dotnet build src/KyberWeave.Domain`
-       after its `git mv` proves the order.
+    2. **Step 0b — the record splits and the `Contracts` findings.** The data-with-method types keep their
+       data in `Domain` and move their methods; every `Contracts` member that names `Domain` logic is
+       narrowed to name data only (D12: interfaces stay in `Contracts`). Acceptance: `KyberWeave.Contracts`
+       names no type that will move.
+    3. **Step 1 — the folder tasks below**, in the order the `depends on` column gives. Acceptance: each
+       folder task meets the acceptance criteria below, and `dotnet build src/KyberWeave.Domain` after
+       its `git mv` proves the order.
+    The squad deployment classes in `Data/Squad/Deployment` are not moved by this task: they reach
+    `Application` in tasks 3.2 to 3.4, behind the crash-safety contract tests and the second reviewer
+    requirement 10.2 asks for, and the Domain group they pin (2.5.3) moves after 3.4.
   - **Rules for every folder task:** a move commit is `git mv` only, with the build and the tests green
     before and after it; a seam conversion is a separate commit; each move updates the path-keyed
     artefacts — document code references and `kyber-weave docs drift .`,
@@ -213,7 +220,7 @@ from this file when it is marked Ready.
   - **Objective:** confirm the end state once every 2.5 task is done.
   - **Acceptance criteria:** no class in `KyberWeave.Domain` has a method beyond construction,
     equality, formatting of itself, or validation of its own values; the count is reported.
-  - **Depends on:** 2.5
+  - **Depends on:** 2.5 and 3.4 (the squad deployment group moves after phase 3)
   - _Requirements: 4.2_
 
 ## Phase 3: Squad deployment
