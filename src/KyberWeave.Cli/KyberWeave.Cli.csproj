@@ -29,6 +29,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Cli.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
     <ProjectReference Include="..\KyberWeave.Application\KyberWeave.Application.csproj" />

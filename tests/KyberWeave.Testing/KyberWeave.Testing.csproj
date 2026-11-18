@@ -18,6 +18,11 @@
   <ItemGroup>
     <InternalsVisibleTo Include="KyberWeave.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Kernel.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Mcp.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Arbiter.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Cli.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Data.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.RepoPolicy.Tests" />
     <InternalsVisibleTo Include="KyberWeave.PromptContent.Tests" />

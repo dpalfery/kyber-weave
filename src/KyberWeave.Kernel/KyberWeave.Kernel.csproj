@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Kernel.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
     <InternalsVisibleTo Include="KyberWeave.Domain" />
