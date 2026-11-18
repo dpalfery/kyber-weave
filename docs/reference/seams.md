@@ -38,7 +38,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 | Process | `IProcessRunner`; `IProcessExecutor`, `IProgramRunner` and `IBoundedProcessExecutor` stay as role views | Run with arguments, working directory, environment, timeout and input; captured output; is-alive; find on path | `KernelProcessRunner` (`KyberWeave.Data`, `Hooks/KernelProcessRunner.cs`) over `KyberWeave.Kernel/Processes/ProcessRunner.cs` | `ScriptedProcessRunner` (`Fakes/ScriptedProcessRunner.cs`); `ScriptedProcessExecutor` (`Fakes/ScriptedProcessExecutor.cs`) for the role view | `ProcessRunnerContractTests`: fake in `KyberWeave.Tests/Processes/ScriptedProcessRunnerContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/KernelProcessRunnerContractTests.cs` |
 | Environment and platform | `IProcessEnvironment` (`Contracts/Repositories`) | Environment variables; current, home and temporary directories; user and machine name; operating-system kind; case-insensitive file system; input redirected | `ProcessEnvironment` (`KyberWeave.Data`, `Host/ProcessEnvironment.cs`) | `FakeProcessEnvironment` (`Fakes/FakeProcessEnvironment.cs`) | `ProcessEnvironmentContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
 | Time | `TimeProvider` (framework) | Wall clock; monotonic timestamp and elapsed time; timers; `Task.Delay(TimeSpan, TimeProvider)` | `TimeProvider.System`, registered in `Application/ServiceCollectionExtensions.cs` and `Application/Arbiter/ArbiterApplicationServiceCollectionExtensions.cs` | The framework's `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`), used in `KyberWeave.Tests/Composition/TimeProviderRegistrationTests.cs` and `KyberWeave.Tests/FileSystem/InMemoryFileSystemTests.cs` | None, and none is required: the fake is the framework package's, not a product fake, so requirement 5.4's fake-versus-adapter run has no product fake to run. Decision D5 chose the framework type and its tested fake over a new interface and a hand-written fake |
-| Identifiers | `IIdGenerator` (`Contracts/Repositories`) | New GUID; random token; random file name | `SystemIdGenerator` (`KyberWeave.Data`, `Host/SystemIdGenerator.cs`) | `FakeIdGenerator` (`Fakes/FakeIdGenerator.cs`) | `IdGeneratorContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
+| Identifiers | `IIdGenerator` (`Contracts/Repositories`) | New GUID; random token; random file name; sortable record id for an instant | `SystemIdGenerator` (`KyberWeave.Data`, `Host/SystemIdGenerator.cs`) | `FakeIdGenerator` (`Fakes/FakeIdGenerator.cs`) | `IdGeneratorContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
 | Console | `IConsole` (`Contracts/Host`) | Output and error writers; read line; input redirected | `SystemConsole` (`KyberWeave.Data`, `Host/SystemConsole.cs`); the standard-stream transport `DrainingStreamServerTransport` in `KyberWeave.Mcp` and `KyberWeave.Arbiter` | `FakeConsole` (`Fakes/FakeConsole.cs`) | `ConsoleContractTests`: fake in `KyberWeave.Tests/Console/FakeConsoleContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/SystemConsoleContractTests.cs` |
 | Lease | `ILease` (`Contracts/Host`) | Acquire a named cross-process lease with a timeout; release from any thread | `MutexLease` (`KyberWeave.Data`, `Host/MutexLease.cs`); the lock-file variant is `FileCodeGraphIndexWorkspace` (`Data/Doctor/FileCodeGraphIndexWorkspace.cs`) | `InProcessLease` (`Fakes/InProcessLease.cs`) | `LeaseContractTests`: fake in `KyberWeave.Tests/Lease/InProcessLeaseContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/MutexLeaseContractTests.cs` |
 | Embedded resource | `IEmbeddedResources` (`Contracts/Host`) | Read a named manifest resource as a stream or UTF-8 text | `AssemblyEmbeddedResources` (`KyberWeave.Data`, `Host/AssemblyEmbeddedResources.cs`) | `FakeEmbeddedResources` (`Fakes/FakeEmbeddedResources.cs`) | `EmbeddedResourceContractTests`: fake in `KyberWeave.Tests/EmbeddedResources/FakeEmbeddedResourcesContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/AssemblyEmbeddedResourcesContractTests.cs` |
@@ -81,7 +81,7 @@ task's list.
 | `PhysicalMcpConfigFiles` | File system | `KyberWeave.Data` | `Docs/Mcp/PhysicalMcpConfigFiles.cs` | Reads, attributes and deletes MCP configuration files |
 | `FileGitHookFiles` | File system | `KyberWeave.Data` | `Doctor/FileGitHookFiles.cs` | Hook files and executable bits |
 | `FileStatusLineFiles` | File system | `KyberWeave.Data` | `Utilities/FileStatusLineFiles.cs` | Status-line artifact files |
-| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file. It also reads the clock and sleeps directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
+| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file; its wait and poll run on the injected `TimeProvider` |
 | `ExclusiveFileWriter` | File system | `KyberWeave.Data` | `Docs/Closeout/ExclusiveFileWriter.cs` | Exclusive create |
 | `FileBoundedFileReader` | File system | `KyberWeave.Data` | `Review/FileBoundedFileReader.cs` | Reads up to a byte limit and refuses a file that grew |
 | `FileHookFileWindowReader` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileHookFileWindowReader.cs` | Reads a line window from a file |
@@ -95,7 +95,7 @@ task's list.
 | `SquadFileSystemPathSemantics` | Paths | `KyberWeave.Data` | `Squad/Deployment/SquadFileSystemPathSemantics.cs` | Instance singleton the deployment code shares; it implements `IPathResolver` and `IFileSystemPathSemantics` |
 | `KernelProcessRunner` | Process | `KyberWeave.Data` | `Hooks/KernelProcessRunner.cs` | The product's one `IProcessRunner` |
 | `ProcessRunner` | Process | `KyberWeave.Kernel` | `Processes/ProcessRunner.cs` | The one place that calls `Process.Start`; `KernelProcessRunner` and the role-view adapters build on it |
-| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session. Its timeout reads `DateTime.UtcNow` directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
+| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session; its budget and read wait run on the injected `TimeProvider` |
 | `ProcessProgramRunner` | Process | `KyberWeave.Data` | `Review/ProcessProgramRunner.cs` | The `IProgramRunner` role view |
 | `KernelBoundedProcessExecutor` | Process | `KyberWeave.Data` | `Docs/FileSystem/KernelBoundedProcessExecutor.cs` | The `IBoundedProcessExecutor` role view |
 | `ProcessGitCommandRunner` | Process | `KyberWeave.Data` | `RunStart/ProcessGitCommandRunner.cs` | Git with standard output and error kept apart |
@@ -195,7 +195,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepositoryLocator` (`Arbiter/ArbiterRepositoryLocator.cs`) | file system, paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
-| `ArbiterRecordId` (`Arbiter/Facts/ArbiterJson.cs`) | identifiers | 2.5 |
 | `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
 | `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths, identifiers | 4.3 |
@@ -331,7 +330,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
-| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: 4.9 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
 | `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
@@ -393,11 +391,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 #### KyberWeave.Kernel (3 classes)
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
-| `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | 4.9 |
-| `StdioSession` (`Processes/StdioSession.cs`) | process, clock | clock: 4.9 |
-| `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | 4.9 |
+None left. `FileReferenceExtractor` moved to `KyberWeave.Application` (`Parsing/FileReferenceExtractor.cs`) and `CodeGraphIndexStaleness` to `KyberWeave.Data` (`CodeGraph/CodeGraphIndexStaleness.cs`), both over the file-system seam (and the path and process seams); `StdioSession` is the interactive process adapter and runs on `TimeProvider`.
 
 #### KyberWeave.Mcp (4 classes)
 

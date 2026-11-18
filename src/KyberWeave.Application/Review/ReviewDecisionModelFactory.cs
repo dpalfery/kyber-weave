@@ -14,12 +14,14 @@ namespace KyberWeave.Application.Review;
 /// <param name="keys">Resolves the provider's key, so an unreachable endpoint costs no request.</param>
 /// <param name="arbiter">Builds the provider the configuration names.</param>
 /// <param name="clock">Stamps the decision records.</param>
+/// <param name="ids">Makes the decision record ids.</param>
 public sealed class ReviewDecisionModelFactory(
     IArbiterStateFactory state,
     IReviewDecisionCacheStore cache,
     IArbiterKeyService keys,
     IArbiterDryRunService arbiter,
-    TimeProvider clock) : IReviewDecisionModelFactory
+    TimeProvider clock,
+    IIdGenerator ids) : IReviewDecisionModelFactory
 {
     /// <inheritdoc />
     public IReviewDecisionModel Create(
@@ -34,6 +36,7 @@ public sealed class ReviewDecisionModelFactory(
             rules,
             logDirectory is null ? null : state.OpenDecisionLog(logDirectory),
             clock,
+            ids,
             unavailableReason,
             cache,
             cachePath);

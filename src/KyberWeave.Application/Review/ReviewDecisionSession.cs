@@ -33,6 +33,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
     private readonly IReadOnlyList<ArbiterRule> _rules;
     private readonly IArbiterDecisionLog? _log;
     private readonly TimeProvider _clock;
+    private readonly IIdGenerator _ids;
     private readonly List<ReviewDecision> _decisions = [];
     private bool _faulted;
     private int _skipped;
@@ -46,6 +47,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
     /// <param name="rules">The effective Arbiter rules, with the host's overrides applied.</param>
     /// <param name="log">The decision log each question is appended to; null logs nothing.</param>
     /// <param name="clock">Stamps the decision records.</param>
+    /// <param name="ids">Makes the decision record ids.</param>
     /// <param name="unavailableReason">Why a configured model cannot be used (no key, a bad endpoint); null otherwise.</param>
     /// <param name="cacheStore">Keeps the answers of this review cycle; with <paramref name="cachePath"/> null it keeps none.</param>
     /// <param name="cachePath">A file the answers of this review cycle are kept in and reused from; null keeps none.</param>
@@ -54,16 +56,19 @@ public class ReviewDecisionSession : IReviewDecisionModel
         IReadOnlyList<ArbiterRule> rules,
         IArbiterDecisionLog? log,
         TimeProvider clock,
+        IIdGenerator ids,
         string? unavailableReason = null,
         IReviewDecisionCacheStore? cacheStore = null,
         string? cachePath = null)
     {
         ArgumentNullException.ThrowIfNull(rules);
         ArgumentNullException.ThrowIfNull(clock);
+        ArgumentNullException.ThrowIfNull(ids);
         _provider = provider is NoneProvider ? null : provider;
         _rules = rules;
         _log = log;
         _clock = clock;
+        _ids = ids;
         UnavailableReason = _provider is null ? unavailableReason : null;
         _cache = _provider is not null && cachePath is not null && cacheStore is not null
             ? ReviewDecisionCache.Load(cacheStore, cachePath)
@@ -311,7 +316,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
             latencyMs,
             status);
         ArbiterDecisionRecord record = new(
-            ArbiterRecordId.New(now),
+            _ids.NewSortableId(now),
             now,
             ArbiterSources.Serve,
             "review",

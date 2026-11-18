@@ -4,6 +4,7 @@ using System.Globalization;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Domain.CodeGraph;
 
 namespace KyberWeave.Data.CodeGraph;
@@ -173,7 +174,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         if (root is null) return _staleness = null;
 
         (string? indexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files) = ReadStalenessFacts();
-        return _staleness = CodeGraphIndexStaleness.Describe(root, indexedCommit, files);
+        return _staleness = new CodeGraphIndexStaleness(new PhysicalFileSystem(), new KernelProcessRunner()).Describe(root, indexedCommit, files);
     }
 
     /// <summary>Reads the recorded commit and per-file state the staleness rule needs.</summary>

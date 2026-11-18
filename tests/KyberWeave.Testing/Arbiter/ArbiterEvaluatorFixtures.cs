@@ -117,6 +117,7 @@ internal static class ArbiterEvaluatorFixtures
             RealGateReportFacts.Create(),
             new FileArbiterStateFactory(new ArbiterLogFiles(), new PhysicalFileSystem(), new PhysicalFileSystem()),
             new Clock(FixedNow),
+            new Fakes.FakeIdGenerator(),
             secondaryTriggers);
 
     public static IReadOnlyList<ArbiterDecisionRecord> Records(string root) =>

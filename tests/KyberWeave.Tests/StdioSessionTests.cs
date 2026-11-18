@@ -1,6 +1,7 @@
 using Xunit;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests;
 
@@ -18,6 +19,22 @@ namespace KyberWeave.Tests;
 public sealed class StdioSessionTests
 {
     /// <summary>
+    /// The session budget is measured on the clock the session was given: once that clock has moved past the budget,
+    /// a read fails at once, without waiting on the child.
+    /// </summary>
+    [Fact]
+    public void StdioSession_ClockPastBudget_ReadFailsWithoutWaiting()
+    {
+        FakeTimeProvider time = new(new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero));
+        using StdioSession session = new("/bin/cat", [], TimeSpan.FromSeconds(10), time);
+        time.Advance(TimeSpan.FromSeconds(11));
+
+        TimeoutException failure = Assert.Throws<TimeoutException>(() => session.ReadLine());
+
+        Assert.Contains("exhausted", failure.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A session that exchanged one line, or one that hit its budget waiting, leaves no child process after Dispose.
     /// </summary>
     /// <remarks>
@@ -31,8 +48,8 @@ public sealed class StdioSessionTests
     {
         int processId;
         using (StdioSession session = path == "exchange"
-                   ? new StdioSession("/bin/cat", [], TimeSpan.FromSeconds(10))
-                   : new StdioSession("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500)))
+                   ? new StdioSession("/bin/cat", [], TimeSpan.FromSeconds(10), TimeProvider.System)
+                   : new StdioSession("/bin/sleep", ["600"], TimeSpan.FromMilliseconds(500), TimeProvider.System))
         {
             processId = session.ProcessId;
             if (path == "exchange")
@@ -56,7 +73,7 @@ public sealed class StdioSessionTests
     [Fact]
     public void StdioSession_TwoLinesInOneRead_ReturnsBoth()
     {
-        using StdioSession session = new("/bin/cat", [], TimeSpan.FromSeconds(10));
+        using StdioSession session = new("/bin/cat", [], TimeSpan.FromSeconds(10), TimeProvider.System);
 
         session.SendLine("first");
         session.SendLine("second");
@@ -81,7 +98,7 @@ public sealed class StdioSessionTests
         using (StdioSession session = new(
                    "/bin/sh",
                    ["-c", "head -c 2000000 /dev/zero | tr '\\0' 'a'"],
-                   TimeSpan.FromSeconds(30)))
+                   TimeSpan.FromSeconds(30), TimeProvider.System))
         {
             processId = session.ProcessId;
             Assert.Throws<InvalidDataException>(() => session.ReadLine());
@@ -108,7 +125,7 @@ public sealed class StdioSessionTests
         using StdioSession session = new(
             "/bin/sh",
             ["-c", "head -c 2000000 /dev/zero | tr '\\0' 'a' >&2; printf '\\nboom\\n' >&2"],
-            TimeSpan.FromSeconds(30));
+            TimeSpan.FromSeconds(30), TimeProvider.System);
 
         string? firstErrorLine = null;
         Stopwatch stopwatch = Stopwatch.StartNew();
@@ -134,7 +151,7 @@ public sealed class StdioSessionTests
     [Fact]
     public void StdioSession_FirstErrorLineAfterDispose_IsNull()
     {
-        StdioSession session = new("/bin/sleep", ["30"], TimeSpan.FromSeconds(10));
+        StdioSession session = new("/bin/sleep", ["30"], TimeSpan.FromSeconds(10), TimeProvider.System);
         session.Dispose();
 
         Assert.Null(session.FirstErrorLine);

@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
@@ -147,7 +148,7 @@ public sealed class ModelTargetingTieredTests : IDisposable
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
         RealGateReportFacts.Create(),
         RealArbiterState.Factory(),
-        TimeProvider.System,
+        TimeProvider.System, new FakeIdGenerator(),
         secondaryTriggers: (primary, ev) => string.Equals(primary, "delegate", StringComparison.Ordinal)
             ? [Trigger]
             : []);

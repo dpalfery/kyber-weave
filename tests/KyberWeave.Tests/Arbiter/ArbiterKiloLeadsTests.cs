@@ -92,7 +92,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         string full = await WriteCitedFileAsync("src/Locked.cs");
         using FileStream holder = LockAgainstReads(full);
         FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick");
-        CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
+        CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
 
         CommentTriageResult result = await service.ClassifyAsync(new CommentTriageRequest("src/Locked.cs", 12, "Rename this.", null));
 

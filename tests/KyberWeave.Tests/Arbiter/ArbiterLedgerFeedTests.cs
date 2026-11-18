@@ -20,6 +20,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterLedgerFeedTests : IDisposable
 {
+    private static readonly FakeIdGenerator Ids = new();
+
     private const string Plan = "docs/plans/x.md";
 
     private const string PassReport =
@@ -85,7 +87,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-        TimeProvider.System);
+        TimeProvider.System, new FakeIdGenerator());
 
     private static KyberWeaveConfig Config() => new()
     {
@@ -240,7 +242,7 @@ public sealed class ArbiterLedgerFeedTests : IDisposable
         InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         DateTimeOffset at = DateTimeOffset.UtcNow;
         await ledger.AppendAsync(
-            new ArbiterLedgerEvent(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "factory", "s1", ArbiterLedgerPhases.Post)
+            new ArbiterLedgerEvent(Ids.NewSortableId(at), at, ArbiterSources.Hook, "factory", "s1", ArbiterLedgerPhases.Post)
             {
                 Returns = new ArbiterReturnMarkers(Attested: ["T1=complete"]),
             });

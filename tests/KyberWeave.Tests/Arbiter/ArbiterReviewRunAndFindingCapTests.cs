@@ -94,6 +94,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
+            new FakeIdGenerator(),
             (_, _) => []);
 
     /// <summary>A lens return whose prompt carries the given header line (empty for none) and whose output is the findings.</summary>

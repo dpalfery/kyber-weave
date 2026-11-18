@@ -6,7 +6,7 @@ using KyberWeave.Domain.Doctor;
 namespace KyberWeave.Data.Doctor;
 
 /// <summary>Holds the CodeGraph index lock as an exclusively opened file and probes writability on the real disk.</summary>
-public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
+public sealed class FileCodeGraphIndexWorkspace(TimeProvider time) : ICodeGraphIndexWorkspace
 {
     /// <summary>How long a waiting run sleeps between attempts to take the lock.</summary>
     private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(100);
@@ -15,7 +15,7 @@ public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
     public IDisposable? TryAcquireLock(string path, TimeSpan wait, out string? failure)
     {
         failure = null;
-        DateTime deadline = DateTime.UtcNow + wait;
+        long started = time.GetTimestamp();
         while (true)
         {
             try
@@ -34,9 +34,9 @@ public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
                 failure = $"the index lock path '{path}' is too long";
                 return null;
             }
-            catch (IOException ex) when (IsSharingViolation(ex) && DateTime.UtcNow < deadline)
+            catch (IOException ex) when (IsSharingViolation(ex) && time.GetElapsedTime(started) < wait)
             {
-                Thread.Sleep(LockPollInterval);
+                Task.Delay(LockPollInterval, time).GetAwaiter().GetResult();
             }
             catch (IOException ex) when (IsSharingViolation(ex))
             {

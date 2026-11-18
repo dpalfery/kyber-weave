@@ -50,7 +50,9 @@ public sealed class StdioSession : IDisposable
 
     private readonly Process _process;
     private readonly int _processId;
-    private readonly DateTime _deadline;
+    private readonly TimeProvider _time;
+    private readonly long _started;
+    private readonly TimeSpan _budget;
     private readonly Task<string?> _firstErrorLine;
 
     /// <summary>Characters read from the child but not yet returned, when one read crossed a line end.</summary>
@@ -63,11 +65,13 @@ public sealed class StdioSession : IDisposable
     /// <param name="fileName">The executable. A bare name is resolved through PATH; no shell is involved.</param>
     /// <param name="arguments">The argument vector, passed through <see cref="ProcessStartInfo.ArgumentList"/>.</param>
     /// <param name="budget">The total time the session may take across every read it makes. Must be positive.</param>
+    /// <param name="time">The clock the budget is measured on and the read wait is timed by.</param>
     /// <exception cref="Win32Exception">The executable could not be started.</exception>
-    public StdioSession(string fileName, IReadOnlyList<string> arguments, TimeSpan budget)
+    public StdioSession(string fileName, IReadOnlyList<string> arguments, TimeSpan budget, TimeProvider time)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentNullException.ThrowIfNull(arguments);
+        ArgumentNullException.ThrowIfNull(time);
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(budget, TimeSpan.Zero);
 
         ProcessStartInfo startInfo = new(fileName)
@@ -80,7 +84,9 @@ public sealed class StdioSession : IDisposable
         foreach (string argument in arguments)
             startInfo.ArgumentList.Add(argument);
 
-        _deadline = DateTime.UtcNow + budget;
+        _time = time;
+        _budget = budget;
+        _started = time.GetTimestamp();
         _process = Process.Start(ProcessRunner.CreateSafeStartInfo(startInfo))
                    ?? throw new InvalidOperationException("The child process could not be started.");
         _processId = _process.Id;
@@ -155,7 +161,7 @@ public sealed class StdioSession : IDisposable
         if (_pendingRead is not null)
             throw new InvalidOperationException("A previous read timed out; the session must be disposed, not read again.");
 
-        TimeSpan remaining = _deadline - DateTime.UtcNow;
+        TimeSpan remaining = _budget - _time.GetElapsedTime(_started);
         if (remaining <= TimeSpan.Zero)
             throw new TimeoutException("The session budget was exhausted before the child answered.");
 
@@ -167,7 +173,7 @@ public sealed class StdioSession : IDisposable
             // WaitAsync rejects a timeout past the runtime's maximum timer duration, and the budget is a caller's
             // value with no upper bound of its own.
             TimeSpan wait = remaining > MaxWait ? MaxWait : remaining;
-            read.WaitAsync(wait).GetAwaiter().GetResult();
+            read.WaitAsync(wait, _time).GetAwaiter().GetResult();
         }
         catch (TimeoutException)
         {

@@ -79,7 +79,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         ArbiterConfigDefaults.Product.Rules.Where(rule => rule.Id != CommentRule).ToList();
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<ArbiterRule> rules, IReadOnlyList<string>? botLogins = null) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
 
     private static CommentTriageRequest Request() => new(CitedPath, 12, "Rename this.", null);
 

@@ -128,7 +128,7 @@ internal static class ArbiterTestServices
 
     /// <summary>The serve tools over a serve context and the real file and triage ports.</summary>
     internal static ArbiterTools Tools(ArbiterServeContext context) =>
-        new(new ArbiterServeService(context, Get<IFileTextFacts>(), Get<ICommentTriageFactory>(), Get<IArbiterSectionSelectionService>(), Get<TimeProvider>()));
+        new(new ArbiterServeService(context, Get<IFileTextFacts>(), Get<ICommentTriageFactory>(), Get<IArbiterSectionSelectionService>(), Get<TimeProvider>(), Get<IIdGenerator>()));
 
     /// <summary>The project-scope configuration comes from a test's loader; every other answer is the real one.</summary>
     private sealed class DelegateHostConfig(Func<string, KyberWeaveConfig> loader, IArbiterHostConfig real) : IArbiterHostConfig

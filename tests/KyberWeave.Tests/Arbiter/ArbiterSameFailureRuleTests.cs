@@ -92,6 +92,8 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
 
+    private static readonly FakeIdGenerator Ids = new();
+
     private static ArbiterEvaluator Evaluator(string arbiterDirectory, IArbiterProvider provider) =>
         new(
             provider,
@@ -104,7 +106,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
-            SecondaryTriggers.For);
+            Ids, SecondaryTriggers.For);
 
     /// <summary>A conductor's rework dispatch to a worker, carrying the cluster key and the prior failing output.</summary>
     private static ArbiterEvent Rework(string failureText, string clusterKey = ClusterKey) => new()
