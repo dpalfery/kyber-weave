@@ -127,7 +127,7 @@ static RepositoryRootResolver RealRootResolver()
     PhysicalPathResolver paths = new(files);
     ProcessEnvironment environment = new();
     return new RepositoryRootResolver(
-        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe(files), files, paths, environment),
+        new FileKyberWeaveConfigRepository(new FileRepositoryTreeProbe(files, paths, environment), files, paths, environment),
         paths,
         environment);
 }

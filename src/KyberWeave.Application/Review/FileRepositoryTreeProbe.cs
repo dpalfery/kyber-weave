@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -6,7 +7,12 @@ namespace KyberWeave.Data.Review;
 
 /// <summary>Probes a repository root and the symbolic links under it through the file-system seam.</summary>
 /// <param name="files">Answers every existence, listing and link question.</param>
-public sealed class FileRepositoryTreeProbe(IFileSystem files) : IRepositoryTreeProbe
+/// <param name="paths">Resolves a root the caller spelled relatively.</param>
+/// <param name="environment">Names the working directory a relative root resolves against.</param>
+public sealed class FileRepositoryTreeProbe(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IRepositoryTreeProbe
 {
     /// <inheritdoc />
     public RepositoryRootAccess ProbeRoot(string root)
@@ -40,7 +46,7 @@ public sealed class FileRepositoryTreeProbe(IFileSystem files) : IRepositoryTree
     /// </remarks>
     public bool LeadsOutsideThroughSymlink(string root, string path)
     {
-        string full = Path.GetFullPath(root);
+        string full = paths.GetFullPath(root, environment.CurrentDirectory);
         string current = full;
         string[] segments = path.Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],

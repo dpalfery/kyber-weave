@@ -315,7 +315,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileHookSnapshotStore` (`Hooks/Arbiter/FileHookSnapshotStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileWorkerBudgetStore` (`Hooks/Arbiter/FileWorkerBudgetStore.cs`) | file system | 4.4 |
 | `CheckoutProductRootLocator` (`Host/CheckoutProductRootLocator.cs`) | paths | 4.4 |
-| `FileCitedSourceFiles` (`Review/FileCitedSourceFiles.cs`) | file system, paths | 4.4 |
 | `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
 | `FileProjectFileLocator` (`Review/FileProjectFileLocator.cs`) | file system, paths | 4.4 |
 | `FileReviewDecisionCacheStore` (`Review/FileReviewDecisionCacheStore.cs`) | file system, paths | 4.4 |

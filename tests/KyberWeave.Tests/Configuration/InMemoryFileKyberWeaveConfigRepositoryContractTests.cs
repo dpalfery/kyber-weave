@@ -19,7 +19,7 @@ public sealed class InMemoryFileKyberWeaveConfigRepositoryContractTests : KyberW
     /// <inheritdoc />
     protected override IKyberWeaveConfigRepository CreateRepository() =>
         new FileKyberWeaveConfigRepository(
-            new FileRepositoryTreeProbe(_files),
+            new FileRepositoryTreeProbe(_files, new FakePathResolver(_files), _environment),
             _files,
             new FakePathResolver(_files),
             _environment);

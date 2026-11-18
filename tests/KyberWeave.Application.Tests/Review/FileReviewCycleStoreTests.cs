@@ -1,6 +1,7 @@
 using System.IO;
 using KyberWeave.Core.Review;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -17,7 +18,8 @@ public sealed class FileReviewCycleStoreTests
 
     private readonly InMemoryFileSystem _files = new();
 
-    private FileReviewCycleStore Store() => new(_files);
+    private FileReviewCycleStore Store() =>
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: "/"));
 
     private void SeedFile(string folder, string name, string text)
     {
@@ -68,6 +70,17 @@ public sealed class FileReviewCycleStoreTests
         _files.CreateDirectory(Path.Combine(Scratchpad, "beta"));
 
         Assert.Equal(["alpha"], Store().TaskFolders(Scratchpad));
+    }
+
+    [Fact]
+    public void ReadThroughReadsARelativeFolderAgainstTheWorkingDirectory()
+    {
+        string folder = Path.Combine("/repo", "review", "cycle-2");
+        SeedFile(folder, ReviewCyclePlanning.FindingsFile, "{}");
+
+        ReviewCycleRecord cycle = Assert.Single(Store().ReadThrough("repo/review/cycle-2"));
+
+        Assert.Equal(2, cycle.Number);
     }
 
     [Fact]

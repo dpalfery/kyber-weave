@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -5,7 +6,13 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Reads and writes review cycle folders through the file-system seam.</summary>
-public sealed class FileReviewCycleStore(IWritableFileSystem files) : IReviewCycleStore
+/// <param name="files">Writes and reads every cycle folder entry.</param>
+/// <param name="paths">Resolves a folder the caller spelled relatively.</param>
+/// <param name="environment">Names the working directory a relative folder resolves against.</param>
+public sealed class FileReviewCycleStore(
+    IWritableFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewCycleStore
 {
     /// <inheritdoc />
     public IReadOnlyList<ReviewCycleRecord> ReadFinished(string reviewFolder)
@@ -33,7 +40,7 @@ public sealed class FileReviewCycleStore(IWritableFileSystem files) : IReviewCyc
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(priorFolder);
 
-        string full = Path.GetFullPath(priorFolder);
+        string full = paths.GetFullPath(priorFolder, environment.CurrentDirectory);
         if (ReviewCyclePlanning.TryNumber(Path.GetFileName(full)) is not { } number)
             return files.DirectoryExists(full) ? [Read(0, full)] : [];
 

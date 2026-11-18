@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -7,7 +8,11 @@ namespace KyberWeave.Data.Review;
 /// <summary>Lists the <c>.cs</c> files under a repository root and reads the namespace they declare.</summary>
 /// <param name="files">Answers every existence, listing, link and read question.</param>
 /// <param name="environment">Names the working directory and the program's own directory.</param>
-public sealed class FileTestClassSources(IFileSystem files, IProcessEnvironment environment) : ITestClassSources
+/// <param name="paths">Resolves a root the caller spelled relatively.</param>
+public sealed class FileTestClassSources(
+    IFileSystem files,
+    IProcessEnvironment environment,
+    IPathResolver paths) : ITestClassSources
 {
     private const string SourceExtension = ".cs";
 
@@ -22,7 +27,7 @@ public sealed class FileTestClassSources(IFileSystem files, IProcessEnvironment 
         try
         {
             _ = files.EnumerateEntries(candidateRoot).FirstOrDefault();
-            repository = Path.GetFullPath(candidateRoot);
+            repository = paths.GetFullPath(candidateRoot, environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
@@ -77,7 +82,7 @@ public sealed class FileTestClassSources(IFileSystem files, IProcessEnvironment 
 
     private string? NearestRepositoryRoot(string start)
     {
-        string? current = Path.TrimEndingDirectorySeparator(Path.GetFullPath(start));
+        string? current = Path.TrimEndingDirectorySeparator(paths.GetFullPath(start, environment.CurrentDirectory));
         while (current is not null)
         {
             // A worktree carries .git as a file and a checkout carries it as a directory.

@@ -18,9 +18,11 @@ public sealed class FileTestClassSourcesTests
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
 
     private FileTestClassSources Sources(string? currentDirectory = null, string? baseDirectory = null) =>
-        new(_files, new FakeProcessEnvironment(
-            currentDirectory: currentDirectory ?? Path.GetFullPath("/nowhere"),
-            applicationBaseDirectory: baseDirectory ?? Path.GetFullPath("/nowhere/app")));
+        new(_files,
+            new FakeProcessEnvironment(
+                currentDirectory: currentDirectory ?? Path.GetFullPath("/nowhere"),
+                applicationBaseDirectory: baseDirectory ?? Path.GetFullPath("/nowhere/app")),
+            new FakePathResolver(_files));
 
     private void WriteFile(string relative, string contents = "x")
     {
@@ -132,7 +134,7 @@ public sealed class FileTestClassSourcesTests
 
         InMemoryFileSystem other = new(caseSensitive: true);
         other.CreateDirectory(Path.Combine(Root, ".kyber-weave"));
-        FileTestClassSources sources = new(other, new FakeProcessEnvironment(currentDirectory: Root));
+        FileTestClassSources sources = new(other, new FakeProcessEnvironment(currentDirectory: Root), new FakePathResolver(other));
         Assert.Equal(Root, sources.Open(null)!.Repository);
     }
 

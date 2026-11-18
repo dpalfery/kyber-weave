@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -7,7 +8,13 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Reads the severity overrides from the review guidance file on the file system.</summary>
-public sealed class FileSeverityOverrideSource(IFileSystem files) : ISeverityOverrideSource
+/// <param name="files">Answers every existence and read question.</param>
+/// <param name="paths">Resolves the guidance path the configuration declares.</param>
+/// <param name="environment">Names the working directory a relative root resolves against.</param>
+public sealed class FileSeverityOverrideSource(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISeverityOverrideSource
 {
     /// <inheritdoc />
     public string? GuidancePath(string root, ConfigRegConfig configReg)
@@ -17,7 +24,7 @@ public sealed class FileSeverityOverrideSource(IFileSystem files) : ISeverityOve
         string declared = configReg.Additions
             .FirstOrDefault(entry => string.Equals(entry.Name, "review-guidance", StringComparison.Ordinal))?.Path
             ?? SeverityOverrides.DefaultGuidancePath;
-        string path = Path.GetFullPath(Path.Combine(root, declared));
+        string path = paths.GetFullPath(Path.Combine(root, declared), environment.CurrentDirectory);
         return files.FileExists(path) ? path : null;
     }
 
