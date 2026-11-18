@@ -118,6 +118,12 @@ internal sealed class FakeRepositoryFileStore(IRepositoryFileStore? inner = null
     public bool TryCreateNewFile(string path) => _inner.TryCreateNewFile(path);
 
     /// <inheritdoc />
+    public Stream OpenWriteNew(string path) => _inner.OpenWriteNew(path);
+
+    /// <inheritdoc />
+    public void MoveDirectory(string sourcePath, string destinationPath) => _inner.MoveDirectory(sourcePath, destinationPath);
+
+    /// <inheritdoc />
     public void DeleteFile(string path) => _inner.DeleteFile(path);
 
     /// <inheritdoc />

@@ -66,6 +66,19 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public Stream OpenWriteNew(string path) =>
+        new FileStream(path, new FileStreamOptions
+        {
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+            Options = FileOptions.Asynchronous | FileOptions.SequentialScan
+        });
+
+    /// <inheritdoc />
+    public void MoveDirectory(string sourcePath, string destinationPath) => Directory.Move(sourcePath, destinationPath);
+
+    /// <inheritdoc />
     public void DeleteFile(string path) => File.Delete(path);
 
     /// <inheritdoc />
