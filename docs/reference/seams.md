@@ -189,12 +189,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
 | `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
-| `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | paths | 4.3 |
-| `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
-| `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
 | `ArbiterPlanService` (`Arbiter/ArbiterPlanService.cs`) | paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
-| `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths | 4.3 |
 | `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
