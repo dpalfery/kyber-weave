@@ -584,7 +584,7 @@ Three pieces are usable separately:
 | [`scripts/update-loop.sh`](../scripts/update-loop.sh) | Drives the two together and asserts the outcome. |
 
 The self-updater reaches that server through `KYBER_WEAVE_RELEASE_ORIGIN`, resolved by
-[`ReleaseOrigin`](../src/KyberWeave.Domain/Update/ReleaseOrigin.cs). It accepts **loopback
+[`ReleaseOrigin`](../src/KyberWeave.Application/Update/ReleaseOrigin.cs). It accepts **loopback
 authorities only**, and permits plain HTTP only for a loopback URL under an active override —
 a redirect off the local server still has to be HTTPS. Those restrictions are the point of
 the type; `ReleaseOriginTests` pins them, and widening them needs a reason you can state.
