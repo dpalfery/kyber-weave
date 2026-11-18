@@ -95,10 +95,13 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
 
     private IReadOnlyList<ArbiterDecisionRecord> Records() => new DecisionLog(ArbiterDirectory).ReadAll();
 
+    /// <summary>The provider these tests use: it answers every asked rule and reports no confidence.</summary>
+    private static FakeArbiterProvider Recording() => new() { AnswerAsked = "within-task" };
+
     [Fact]
     public async Task ForEachOverListFact_ExpandsToOneQuestionPerItemInOneBatch()
     {
-        FakeArbiterProvider provider = FakeArbiterProvider.Answering("within-task");
+        FakeArbiterProvider provider = Recording();
         ArbiterEvaluator evaluator = new(
             provider,
             _ => null,
@@ -121,7 +124,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     public async Task ForEachEntries_EachRecordsItsCandidateInListOrder()
     {
         ArbiterEvaluator evaluator = new(
-            FakeArbiterProvider.Answering("within-task"),
+            Recording(),
             _ => null,
             new InFlightLedger(ArbiterDirectory),
             new DecisionLog(ArbiterDirectory),
@@ -138,5 +141,30 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
         Assert.Equal(Files.Length, record.Rules.Count);
         Assert.Equal(Files, record.Rules.Select(entry => entry.Candidate));
         Assert.All(record.Rules, entry => Assert.Equal(RuleEffects.Allow, entry.Effect));
+    }
+
+    /// <summary>
+    /// The provider in these tests reports no confidence, so the decision record must not claim one: a score the
+    /// removed double never sent would put the answer on a path the test does not mean to exercise.
+    /// </summary>
+    [Fact]
+    public async Task AnAnswerFromAProviderThatReportsNoConfidenceRecordsNone()
+    {
+        FakeArbiterProvider provider = Recording();
+        ArbiterEvaluator evaluator = new(
+            provider,
+            _ => null,
+            new InFlightLedger(ArbiterDirectory),
+            new DecisionLog(ArbiterDirectory),
+            new PassThroughGitFacts(),
+            new FileListPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
+            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
+
+        await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
+
+        Assert.All(Records().SelectMany(record => record.Rules), rule => Assert.Null(rule.Confidence));
     }
 }
