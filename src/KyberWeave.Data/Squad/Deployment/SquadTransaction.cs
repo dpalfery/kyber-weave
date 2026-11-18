@@ -313,8 +313,10 @@ public sealed class SquadTransaction : ISquadTransaction
                         lockPath,
                         receiptPath);
                 }
-                catch (InvalidDataException)
+                catch (Exception)
                 {
+                    // Whatever stopped the rollback, the journal and the backups are the only way back: keeping them
+                    // lets the next recovery finish what this one could not.
                     retainTransaction = true;
                     throw;
                 }
