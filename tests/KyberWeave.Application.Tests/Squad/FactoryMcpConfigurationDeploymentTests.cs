@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Fakes;
 using KyberWeave.Testing.Squad;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
@@ -9,31 +10,33 @@ using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Squad;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad;
 
 /// <summary>
 /// Pins the warning a Factory deployment prints when droids are allowed MCP servers that no
-/// Factory config file defines. Each fact runs a real dry-run deployment of the checked-in squad.
+/// Factory config file defines. Each fact runs a dry-run deployment of the checked-in squad, with the real renderer,
+/// over the in-memory file system and state.
 /// </summary>
-public sealed class FactoryMcpConfigurationTests : IDisposable
+public sealed class FactoryMcpConfigurationDeploymentTests
 {
     private const string Version = "1.2.3";
 
-    private readonly TempDirectory _temp = new();
-    private readonly FakeSquadUserPaths _paths;
+    private readonly InMemorySquadState _state = new();
     private readonly string _home;
+    private readonly string _work;
     private readonly string _project;
+    private readonly string _source;
 
-    public FactoryMcpConfigurationTests()
+    public FactoryMcpConfigurationDeploymentTests()
     {
-        _paths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "app-data"));
-        _home = _paths.HomeDirectory;
-        _project = Path.Combine(_temp.Path, "work", "project");
-        Directory.CreateDirectory(_home);
-        Directory.CreateDirectory(_project);
+        _home = _state.UserPaths.HomeDirectory;
+        _work = Path.Combine(_state.Files.Root, "work");
+        _project = Path.Combine(_work, "project");
+        _source = Path.Combine(_state.Files.Root, "release", "kyber-squad");
+        _state.Files.CreateDirectory(_home);
+        _state.Files.CreateDirectory(_project);
+        _ = CanonicalSquadTree.CopyInto(_state.Files, _source);
     }
-
-    public void Dispose() => _temp.Dispose();
 
     [Fact]
     public async Task ProjectInstall_NoConfigAnywhere_WarnsWithEachServerAndItsLaunchCommand()
@@ -75,7 +78,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     [Fact]
     public async Task ProjectInstall_AncestorConfigDefinesEveryServer_DoesNotWarn()
     {
-        WriteConfig(Path.Combine(_temp.Path, "work"), "kw-docs", "codegraph");
+        WriteConfig(_work, "kw-docs", "codegraph");
 
         Assert.Empty(await FactoryWarningsAsync(SquadDeploymentScope.Project));
     }
@@ -101,7 +104,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     [Fact]
     public void InstanceDeployment_NoConfigAnywhere_DoesNotWarn()
     {
-        Assert.Empty(FactoryMcpConfiguration.Warnings(new PhysicalSquadFileAccess(),
+        Assert.Empty(FactoryMcpConfiguration.Warnings(new InMemorySquadFileAccess(_state.Files),
             [SquadTarget.Factory],
             SquadDeploymentScope.Instance,
             TestSquadCorpus.CanonicalSource,
@@ -112,7 +115,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     [Fact]
     public async Task ProjectUpdate_NoConfigAnywhere_Warns()
     {
-        using SyntheticValidSquadReleaseSource release = new();
+        using FakeSquadReleaseSource release = FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
         SquadLifecycleService service = NewService(release, new FactoryRenderer());
         await service.InstallAsync(
             new SquadInstallRequest(_project, SquadDeploymentScope.Project, [SquadTarget.Factory], Version: Version));
@@ -133,9 +136,9 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     public async Task ProjectInstall_MalformedConfig_WarnsRatherThanThrows()
     {
         string directory = Path.Combine(_project, ".factory");
-        Directory.CreateDirectory(directory);
+        _state.Files.CreateDirectory(directory);
         string file = Path.Combine(directory, "mcp.json");
-        await File.WriteAllTextAsync(file, "{ not json");
+        _state.Files.WriteAllText(file, "{ not json");
 
         string warning = Assert.Single(await FactoryWarningsAsync(SquadDeploymentScope.Project));
 
@@ -147,9 +150,9 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     public async Task ProjectInstall_ServersKeyIsNotAnObject_NamesTheFile()
     {
         string directory = Path.Combine(_project, ".factory");
-        Directory.CreateDirectory(directory);
+        _state.Files.CreateDirectory(directory);
         string file = Path.Combine(directory, "mcp.json");
-        await File.WriteAllTextAsync(file, """{ "mcpServers": [] }""");
+        _state.Files.WriteAllText(file, """{ "mcpServers": [] }""");
 
         string warning = Assert.Single(await FactoryWarningsAsync(SquadDeploymentScope.Project));
 
@@ -160,13 +163,13 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     public void ProjectInstall_BrokenHomeConfigAboveTheProject_IsNamedOnce()
     {
         string directory = Path.Combine(_home, ".factory");
-        Directory.CreateDirectory(directory);
+        _state.Files.CreateDirectory(directory);
         string file = Path.Combine(directory, "mcp.json");
-        File.WriteAllText(file, "[]");
+        _state.Files.WriteAllText(file, "[]");
         string project = Path.Combine(_home, "repo");
-        Directory.CreateDirectory(project);
+        _state.Files.CreateDirectory(project);
 
-        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(new PhysicalSquadFileAccess(),
+        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(new InMemorySquadFileAccess(_state.Files),
             [SquadTarget.Factory],
             SquadDeploymentScope.Project,
             TestSquadCorpus.CanonicalSource,
@@ -183,7 +186,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
             """{ "mcpServers": { "bad\nname": { "command": "run\rit", "args": ["a\tb"] } } }""");
         SquadSource source = TestSquadCorpus.CanonicalSource with { McpConfiguration = servers.RootElement };
 
-        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(new PhysicalSquadFileAccess(),
+        string warning = Assert.Single(FactoryMcpConfiguration.Warnings(new InMemorySquadFileAccess(_state.Files),
             [SquadTarget.Factory],
             SquadDeploymentScope.Project,
             source,
@@ -211,9 +214,9 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     private void WriteConfig(string root, params string[] servers)
     {
         string directory = Path.Combine(root, ".factory");
-        Directory.CreateDirectory(directory);
+        _state.Files.CreateDirectory(directory);
         string entries = string.Join(",", servers.Select(server => $"\"{server}\": {{ \"command\": \"x\" }}"));
-        File.WriteAllText(Path.Combine(directory, "mcp.json"), $"{{ \"mcpServers\": {{ {entries} }} }}");
+        _state.Files.WriteAllText(Path.Combine(directory, "mcp.json"), $"{{ \"mcpServers\": {{ {entries} }} }}");
     }
 
     private Task<IReadOnlyList<string>> FactoryWarningsAsync(SquadDeploymentScope scope) =>
@@ -224,7 +227,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
         SquadTarget target,
         ISquadRenderer renderer)
     {
-        using SyntheticValidSquadReleaseSource release = new();
+        using FakeSquadReleaseSource release = FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
 
         SquadLifecycleResult result = await NewService(release, renderer).InstallAsync(
             new SquadInstallRequest(
@@ -239,11 +242,11 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
     }
 
     private SquadLifecycleService NewService(ISquadReleaseSource release, ISquadRenderer renderer) =>
-        SquadHostDefaults.CreateLifecycleService(
+        SquadTestCommands.InMemoryLifecycle(
+            _state,
             release,
-            SquadTestRegistry.Create([renderer]),
-            RealSquadState.Store(_paths),
-            globalRoots: SquadOperatorChannelFixture.GlobalRoots(Path.Combine(_home, ".copilot"), _home));
+            new SquadRendererRegistry([renderer], new InMemorySquadServices(_state.Files).RenderInputReader()),
+            new SquadGlobalRoots(_ => null, _home));
 
     private static IReadOnlyList<string> FactoryWarnings(SquadLifecycleResult result) =>
     [
