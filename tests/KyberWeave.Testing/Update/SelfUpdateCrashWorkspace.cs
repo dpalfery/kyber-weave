@@ -75,22 +75,26 @@ public abstract class SelfUpdateCrashWorkspace : IDisposable
     }
 }
 
-/// <summary>The crash-safety workspace on the in-memory file system, killed with its own latching fault.</summary>
+/// <summary>The crash-safety workspace on the in-memory file system, behind the same latching fault injector as the real disk.</summary>
 public sealed class InMemorySelfUpdateCrashWorkspace : SelfUpdateCrashWorkspace
 {
-    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly InMemoryFileSystem _memory = new(caseSensitive: true);
+    private readonly IWritableFileSystem _files;
+    private readonly LatchingFaultFileSystem _control;
 
     /// <summary>Creates a workspace with an empty install directory.</summary>
     public InMemorySelfUpdateCrashWorkspace()
     {
-        Paths = new FakePathResolver(_files);
-        Modes = new FakeUpdateFileModes();
+        _files = LatchingFaultFileSystem.Wrap(_memory);
+        _control = LatchingFaultFileSystem.Control(_files);
+        Paths = new FileSystemPathResolver(_files, caseSensitiveFileSystem: true);
+        Modes = new KillableFileModes(new FakeUpdateFileModes(), _control);
         Environment = new FakeProcessEnvironment(
             currentDirectory: "/kw/work",
             homeDirectory: "/kw/home",
             readVariable: _ => null);
-        _files.CreateDirectory(Install);
-        _files.CreateDirectory("/kw/work");
+        _memory.CreateDirectory(Install);
+        _memory.CreateDirectory("/kw/work");
     }
 
     /// <inheritdoc />
@@ -109,32 +113,22 @@ public sealed class InMemorySelfUpdateCrashWorkspace : SelfUpdateCrashWorkspace
     public override string Install => "/kw/install";
 
     /// <inheritdoc />
-    public override int OperationCount => _files.OperationCount;
+    public override int OperationCount => _control.OperationCount;
 
     /// <inheritdoc />
-    public override bool Killed => _files.IsKilled;
+    public override bool Killed => _control.IsKilled;
 
     /// <inheritdoc />
-    public override void KillAfter(int count) => _files.KillAt(_files.OperationCount + count);
+    public override void KillAfter(int count) => _control.KillAt(_control.OperationCount + count);
 
     /// <inheritdoc />
-    public override void FailWhen(Func<string, string?, bool> predicate) =>
-        _files.FailWhen(operation => predicate(operation.Name, operation.Path));
+    public override void FailWhen(Func<string, string?, bool> predicate) => _control.FailWhen(predicate);
 
     /// <inheritdoc />
-    public override void Restart() => _files.ClearFaults();
+    public override void Restart() => _control.Restart();
 
     /// <inheritdoc />
-    public override IReadOnlyDictionary<string, byte[]> CaptureInstall()
-    {
-        bool wasKilled = _files.IsKilled;
-        if (wasKilled)
-        {
-            throw new InvalidOperationException("Restart the process before reading the tree.");
-        }
-
-        return Capture(_files, Install);
-    }
+    public override IReadOnlyDictionary<string, byte[]> CaptureInstall() => Capture(_memory, Install);
 
     /// <inheritdoc />
     public override void Dispose()
@@ -168,7 +162,7 @@ public sealed class PhysicalSelfUpdateCrashWorkspace : SelfUpdateCrashWorkspace
         Directory.CreateDirectory(Install);
         Directory.CreateDirectory(home);
         Paths = new PhysicalPathResolver(_files);
-        Modes = new UnixUpdateFileModes();
+        Modes = new KillableFileModes(new UnixUpdateFileModes(), _control);
         Environment = new FakeProcessEnvironment(
             currentDirectory: directory,
             homeDirectory: home,

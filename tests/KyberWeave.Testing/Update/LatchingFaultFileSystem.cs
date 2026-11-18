@@ -86,27 +86,35 @@ public class LatchingFaultFileSystem : DispatchProxy
         IsKilled = false;
     }
 
-    /// <inheritdoc />
-    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    /// <summary>Counts one operation, and dies or fails when the plan says so.</summary>
+    /// <param name="name">The operation's name.</param>
+    /// <param name="path">The path it works on.</param>
+    public void Enter(string name, string? path)
     {
-        ArgumentNullException.ThrowIfNull(targetMethod);
-        string? path = args?.OfType<string>().FirstOrDefault();
         if (IsKilled)
         {
-            throw new SelfUpdateCrashInjectedException($"The process was already killed ({targetMethod.Name} '{path}').");
+            throw new SelfUpdateCrashInjectedException($"The process was already killed ({name} '{path}').");
         }
 
         int number = ++OperationCount;
         if (number == _killAt)
         {
             IsKilled = true;
-            throw new SelfUpdateCrashInjectedException($"The process was killed at operation {number} ({targetMethod.Name} '{path}').");
+            throw new SelfUpdateCrashInjectedException($"The process was killed at operation {number} ({name} '{path}').");
         }
 
-        if (_failWhen?.Invoke(targetMethod.Name, path) == true)
+        if (_failWhen?.Invoke(name, path) == true)
         {
-            throw new IOException($"Operation {number} failed ({targetMethod.Name} '{path}').");
+            throw new IOException($"Operation {number} failed ({name} '{path}').");
         }
+    }
+
+    /// <inheritdoc />
+    protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+    {
+        ArgumentNullException.ThrowIfNull(targetMethod);
+        string? path = args?.OfType<string>().FirstOrDefault();
+        Enter(targetMethod.Name, path);
 
         try
         {
@@ -114,6 +122,12 @@ public class LatchingFaultFileSystem : DispatchProxy
             if (targetMethod.Name == nameof(IWritableFileSystem.CreateTemporaryDirectory) && result is string created)
             {
                 _temporaryDirectories.Add(created);
+            }
+
+            if (result is Stream raw && targetMethod.Name is nameof(IWritableFileSystem.OpenWriteNew)
+                or nameof(IWritableFileSystem.OpenExclusive) or nameof(IWritableFileSystem.OpenAppendShared))
+            {
+                return new KillableWriteStream(raw, this, path);
             }
 
             return result;
