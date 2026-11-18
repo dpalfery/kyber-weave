@@ -132,7 +132,7 @@ public class FileSystemPathResolver : IPathResolver
                 continue;
             }
 
-            string? target = _files.GetFinalLinkTarget(current);
+            string? target = FinalTargetOf(current);
             if (target is not null)
             {
                 current = Canonicalize(target);
@@ -277,7 +277,7 @@ public class FileSystemPathResolver : IPathResolver
         foreach (string segment in Segments(path, filesystemRoot))
         {
             current = Path.Combine(current, segment);
-            string? target = _files.GetFinalLinkTarget(current);
+            string? target = FinalTargetOf(current);
             if (target is not null)
             {
                 current = ResolveLinks(NormalizeLexical(target, nameof(path)));
@@ -285,6 +285,23 @@ public class FileSystemPathResolver : IPathResolver
         }
 
         return NormalizeLexical(current, nameof(path));
+    }
+
+    /// <summary>
+    ///     The final target of a link, or null when the file system will not name one: a target that is gone, or a
+    ///     chain that cycles. A cycle keeps the link's own spelling, so the answer does not depend on which adapter
+    ///     was asked.
+    /// </summary>
+    private string? FinalTargetOf(string path)
+    {
+        try
+        {
+            return _files.GetFinalLinkTarget(path);
+        }
+        catch (IOException)
+        {
+            return null;
+        }
     }
 
     private bool HasPathPrefix(string root, string candidate)

@@ -256,6 +256,20 @@ public abstract class PathResolverContractTests : IDisposable
     }
 
     [Fact]
+    public void CanonicalizeKeepsTheLinkSpellingWhenLinksFormACycle()
+    {
+        Starting(out IWritableFileSystem files, out IPathResolver resolver, out string root);
+        string first = Path.Combine(root, "loop-a");
+        string second = Path.Combine(root, "loop-b");
+        files.CreateDirectoryLink(first, second);
+        files.CreateDirectoryLink(second, first);
+
+        string canonical = resolver.Canonicalize(first);
+
+        Assert.Equal(Path.Combine(resolver.Canonicalize(root), "loop-a"), canonical);
+    }
+
+    [Fact]
     public void ResolvePhysicalRootReturnsTheCanonicalSpellingOfAnExistingDirectory()
     {
         Starting(out IWritableFileSystem files, out IPathResolver resolver, out string root);
