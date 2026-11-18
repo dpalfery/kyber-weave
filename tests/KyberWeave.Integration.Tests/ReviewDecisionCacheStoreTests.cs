@@ -1,4 +1,7 @@
 using KyberWeave.Core.Review;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 using Xunit;
 
@@ -24,7 +27,7 @@ public sealed class ReviewDecisionCacheStoreTests : IDisposable
     [Fact]
     public void AnAnswerSavedInOneRunIsReadBackWithEveryField()
     {
-        FileReviewDecisionCacheStore store = new();
+        FileReviewDecisionCacheStore store = NewStore();
         Dictionary<string, ReviewCachedAnswer> answers = new(StringComparer.Ordinal)
         {
             ["rule|subject|digest"] = new ReviewCachedAnswer("belongs", 0.95, 0.8),
@@ -49,7 +52,7 @@ public sealed class ReviewDecisionCacheStoreTests : IDisposable
             CachePath,
             """{"rule|subject|digest":{"Answer":"belongs","Score":0.95,"Threshold":0.8}}""");
 
-        IReadOnlyDictionary<string, ReviewCachedAnswer> read = new FileReviewDecisionCacheStore().Load(CachePath);
+        IReadOnlyDictionary<string, ReviewCachedAnswer> read = NewStore().Load(CachePath);
 
         Assert.Equal(new ReviewCachedAnswer("belongs", 0.95, 0.8), Assert.Single(read).Value);
     }
@@ -60,7 +63,7 @@ public sealed class ReviewDecisionCacheStoreTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(CachePath)!);
         File.WriteAllText(CachePath, "{ not json");
 
-        Assert.Empty(new FileReviewDecisionCacheStore().Load(CachePath));
+        Assert.Empty(NewStore().Load(CachePath));
     }
 
     [Fact]
@@ -68,6 +71,12 @@ public sealed class ReviewDecisionCacheStoreTests : IDisposable
     {
         Directory.CreateDirectory(CachePath);
 
-        Assert.False(new FileReviewDecisionCacheStore().Save(CachePath, new Dictionary<string, ReviewCachedAnswer>()));
+        Assert.False(NewStore().Save(CachePath, new Dictionary<string, ReviewCachedAnswer>()));
+    }
+
+    private static FileReviewDecisionCacheStore NewStore()
+    {
+        PhysicalFileSystem files = new();
+        return new FileReviewDecisionCacheStore(files, new PhysicalPathResolver(files), new ProcessEnvironment());
     }
 }

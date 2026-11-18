@@ -759,7 +759,7 @@ public sealed class DocsInitMcpCheckTests : IDisposable
         _pathBeforeFakeBinaries ??= Environment.GetEnvironmentVariable("PATH");
         Environment.SetEnvironmentVariable("PATH", Bin + Path.PathSeparator + _pathBeforeFakeBinaries);
 
-        string? resolved = LaunchCommandResolver.FromEnvironment().Resolve(binaryName);
+        string? resolved = PhysicalLaunchCommands.FromEnvironment().Resolve(binaryName);
         Assert.True(
             resolved is not null,
             $"The fixture's '{binaryName}' is not resolvable on PATH, so this case would prove nothing.");
