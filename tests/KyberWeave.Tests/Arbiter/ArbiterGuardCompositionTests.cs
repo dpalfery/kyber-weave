@@ -17,14 +17,17 @@ namespace KyberWeave.Tests.Arbiter;
 public sealed class ArbiterGuardCompositionTests
 {
     [Fact]
-    public void TheGuardsContainerResolvesTheHostConfigLoaderTheGuardsReadThrough()
+    public void TheGuardsContainerResolvesTheConfigurationRepositoryTheGuardsReadThrough()
     {
         using ServiceProvider services = (ServiceProvider)ArbiterContainer.CreateGuards();
 
         IHostConfigLoader loader = services.GetRequiredService<IHostConfigLoader>();
 
         Assert.NotNull(loader);
-        Assert.NotNull(services.GetRequiredService<IKyberWeaveConfigRepository>());
+
+        // Resolving is not enough on its own: the read proves every seam the repository takes was registered.
+        IKyberWeaveConfigRepository configs = services.GetRequiredService<IKyberWeaveConfigRepository>();
+        Assert.Null(configs.FindConfigPath(Path.Combine(AppContext.BaseDirectory, "no-such-repository")));
     }
 
     [Fact]

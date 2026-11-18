@@ -13,7 +13,7 @@ public sealed class FileKyberWeaveConfigRepositoryContractTests : KyberWeaveConf
 
     /// <inheritdoc />
     protected override IKyberWeaveConfigRepository CreateRepository() =>
-        new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create());
+        RealFileKyberWeaveConfigRepository.Create();
 
     /// <inheritdoc />
     protected override string NewRoot() => NewDirectory("kw-config-contract-");

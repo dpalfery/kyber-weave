@@ -18,7 +18,7 @@ namespace KyberWeave.Tests.Configuration;
 /// </remarks>
 public static class ConfigFileReader
 {
-    private static readonly FileKyberWeaveConfigRepository Files = new(RealRepositoryTreeProbe.Create());
+    private static readonly FileKyberWeaveConfigRepository Files = RealFileKyberWeaveConfigRepository.Create();
 
     /// <summary>The real adapter, for a test that hands the seam itself to the code under test.</summary>
     public static IKyberWeaveConfigRepository Repository => Files;

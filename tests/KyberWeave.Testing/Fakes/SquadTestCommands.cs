@@ -44,7 +44,7 @@ internal static class SquadTestCommands
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
-            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()),
+            configs ?? RealFileKyberWeaveConfigRepository.Create(),
             capturePluginStep);
     }
 
@@ -73,7 +73,7 @@ internal static class SquadTestCommands
             roots,
             new PhysicalSquadFileAccess(),
             new SquadConsoleOptions(isInteractive, readAnswer),
-            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()),
+            configs ?? RealFileKyberWeaveConfigRepository.Create(),
             picker,
             capturePluginStep);
     }
@@ -180,7 +180,7 @@ internal static class SquadTestCommands
             new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory),
             SquadFileSystemPathSemantics.Instance,
-            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()));
+            configs ?? RealFileKyberWeaveConfigRepository.Create());
     }
 
     public static SquadPresetUseCommand PresetUse(
