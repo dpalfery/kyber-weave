@@ -155,4 +155,22 @@ internal static class CommandAppFixture
 
     private static void ReviewSuppressionsBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewSuppressionsCommand>("suppressions"); });
+
+    /// <summary><see cref="DocsInit()"/> over a container whose first registrations the test chooses.</summary>
+    /// <param name="configure">Registers the seams the case replaces.</param>
+    /// <param name="console">The console the app and its commands write to.</param>
+    public static CommandApp DocsInit(Action<IServiceCollection> configure, IAnsiConsole console) =>
+        Build(strictParsing: false, configure, console, DocsInitBranch);
+
+    /// <summary><see cref="DocsStandardsMigrate()"/> over a container whose first registrations the test chooses.</summary>
+    /// <param name="configure">Registers the seams the case replaces.</param>
+    /// <param name="console">The console the app and its commands write to.</param>
+    public static CommandApp DocsStandardsMigrate(Action<IServiceCollection> configure, IAnsiConsole console) =>
+        Build(strictParsing: true, configure, console, DocsStandardsMigrateBranch);
+
+    /// <summary><see cref="DocsStandardsDiff()"/> over a container whose first registrations the test chooses.</summary>
+    /// <param name="configure">Registers the seams the case replaces.</param>
+    /// <param name="console">The console the app and its commands write to.</param>
+    public static CommandApp DocsStandardsDiff(Action<IServiceCollection> configure, IAnsiConsole console) =>
+        Build(strictParsing: true, configure, console, DocsStandardsDiffBranch);
 }

@@ -28,6 +28,14 @@ internal sealed class ReportedFindings
             Format = "json"
         };
 
+        if (fixture.Memory is not null)
+        {
+            Spectre.Console.Testing.TestConsole console = new() { EmitAnsiSequences = false };
+            Exit = DocsTestCommands.Validate(DocsMemoryServicesD.Services(fixture), console).Execute(null!, settings);
+            Output = console.Output;
+            return;
+        }
+
         CapturedConsoleExecution<int> execution =
             ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
         Exit = execution.Result;
@@ -120,9 +128,17 @@ internal static class PlanTaskFileProbe
         "dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class \"" + TestClass + "\"";
 
     /// <summary>A corpus holding the plan index and the plan, and no task file.</summary>
-    internal static DocFixture Corpus(string? planMarkdown = null)
+    internal static DocFixture Corpus(string? planMarkdown = null) => Populate(new DocFixture(), planMarkdown);
+
+    /// <summary>The same corpus written into an existing fixture, for a checkout beside another on one in-memory file system.</summary>
+    internal static DocFixture CorpusIn(DocFixture fixture, string? planMarkdown = null) => Populate(fixture, planMarkdown);
+
+    /// <summary>The same corpus on an in-memory file system, for a unit test.</summary>
+    internal static DocFixture CorpusInMemory(string? planMarkdown = null) => Populate(DocFixture.CreateInMemory(), planMarkdown);
+
+    private static DocFixture Populate(DocFixture fixture, string? planMarkdown)
     {
-        return new DocFixture().WithCatalog()
+        return fixture.WithCatalog()
             .Write(
                 ".kyber-weave/kyber-weave.yml",
                 """
@@ -354,6 +370,10 @@ internal static class PlanTaskFileProbe
         return (string)executionDigest!.Invoke(null, [PlanDocumentParser.Parse(markdown)])!;
     }
 
+    /// <summary>Reads a task file's text through the product's format, for a test outside the assembly that owns it.</summary>
+    internal static KyberWeave.Core.Docs.Validation.PlanTaskFile? Deserialize(string path, string text) =>
+        KyberWeave.Core.Docs.Validation.PlanTaskFileFormat.Deserialize(path, text);
+
     /// <summary>The fully qualified class names every prompt's runner command asks for.</summary>
     internal static IEnumerable<string> PromptClassNames()
     {
@@ -451,9 +471,14 @@ internal static class SpecTaskFileProbe
             .Build();
 
     /// <summary>A corpus holding the specification index, the spec folder and its four files.</summary>
-    internal static DocFixture Corpus(string? tasksMarkdown = null)
+    internal static DocFixture Corpus(string? tasksMarkdown = null) => Populate(new DocFixture(), tasksMarkdown);
+
+    /// <summary>The same corpus on an in-memory file system, for a unit test.</summary>
+    internal static DocFixture CorpusInMemory(string? tasksMarkdown = null) => Populate(DocFixture.CreateInMemory(), tasksMarkdown);
+
+    private static DocFixture Populate(DocFixture fixture, string? tasksMarkdown)
     {
-        return new DocFixture().WithCatalog()
+        return fixture.WithCatalog()
             .Write(
                 ".kyber-weave/kyber-weave.yml",
                 """
@@ -610,6 +635,13 @@ internal static class SpecTaskFileProbe
     internal static string ReportedDigest(DocFixture fixture)
     {
         ArgumentNullException.ThrowIfNull(fixture);
+
+        if (fixture.Memory is not null)
+        {
+            // The digest the plan service reports, which the plan command prints, read over the in-memory checkout.
+            return new KyberWeave.Application.Arbiter.ArbiterPlanService(fixture.Memory, fixture.Paths)
+                .TryRead(fixture.Root, TasksPath, TasksPath, new DiagnosticReport())!.Digest!;
+        }
 
         string path = Path.Combine(fixture.Root, TasksPath.Replace('/', Path.DirectorySeparatorChar));
         ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
