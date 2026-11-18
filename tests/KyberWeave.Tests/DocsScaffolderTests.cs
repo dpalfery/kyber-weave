@@ -44,6 +44,8 @@ public sealed class DocsScaffolderTests : IDisposable
               directory-name: .agents/agents
         """;
 
+    private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
@@ -999,7 +1001,7 @@ public sealed class DocsScaffolderTests : IDisposable
                 string relativePath =
                     $"{result.DocsRoot}/standards/{tech}/{KyberStandardsTemplates.FileName(tech, part)}";
                 string content = Read(relativePath);
-                string expected = KyberStandardsTemplates.RenderPart(tech, part, "unassigned", today);
+                string expected = Templates.RenderPart(tech, part, "unassigned", today);
                 Assert.Equal(expected, content);
             }
         }
@@ -1074,6 +1076,6 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.True(csharpFile2.Written);
         string overwrittenText = Read("docs/standards/csharp/csharp.standards.md");
         Assert.NotEqual(customText, overwrittenText);
-        Assert.Equal(KyberStandardsTemplates.Render("csharp", "unassigned", today), overwrittenText);
+        Assert.Equal(Templates.Render("csharp", "unassigned", today), overwrittenText);
     }
 }

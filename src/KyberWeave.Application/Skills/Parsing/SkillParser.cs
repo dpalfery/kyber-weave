@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Core.Skills.Model;
 using Markdig;
 using Markdig.Extensions.Yaml;
@@ -127,11 +128,15 @@ public static class SkillParser
     }
 
     /// <summary>Builds the skill's resource list from the files the caller found under <paramref name="directoryPath"/>.</summary>
+    /// <param name="paths">The path seam that resolves each file to a full path.</param>
+    /// <param name="baseDirectory">The directory a relative file is resolved against.</param>
     /// <param name="directoryPath">The absolute path of the skill's directory.</param>
     /// <param name="skillFilePath">The absolute path of the SKILL.md, which is not itself a resource.</param>
     /// <param name="files">The files the caller enumerated under <paramref name="directoryPath"/>.</param>
     /// <returns>One resource per file, in the order the caller supplied them.</returns>
     public static IReadOnlyList<SkillResource> DiscoverResources(
+        IPathResolver paths,
+        string baseDirectory,
         string directoryPath,
         string skillFilePath,
         IEnumerable<string> files)
@@ -141,10 +146,10 @@ public static class SkillParser
         List<SkillResource> resources = [];
         foreach (string file in files)
         {
-            if (string.Equals(Path.GetFullPath(file), skillFilePath, StringComparison.Ordinal)) continue;
+            if (string.Equals(paths.GetFullPath(file, baseDirectory), skillFilePath, StringComparison.Ordinal)) continue;
             string rel = Path.GetRelativePath(directoryPath, file).Replace('\\', '/');
             SkillResourceKind kind = ClassifyResource(rel);
-            resources.Add(new SkillResource(rel, Path.GetFullPath(file), kind));
+            resources.Add(new SkillResource(rel, paths.GetFullPath(file, baseDirectory), kind));
         }
 
         return resources;

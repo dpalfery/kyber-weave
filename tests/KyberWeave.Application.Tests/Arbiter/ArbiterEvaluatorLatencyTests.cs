@@ -63,7 +63,7 @@ public sealed class ArbiterEvaluatorLatencyTests
                 new InMemoryRepositoryFileStore(_files),
                 new FakePathResolver(_files),
                 new FakeProcessEnvironment(currentDirectory: "/repo")),
-            new FileArbiterStateFactory(_log, _files, _files),
+            new FileArbiterStateFactory(_log, _files, _files, new FakePathResolver(_files)),
             _clock,
             new FakeIdGenerator());
 

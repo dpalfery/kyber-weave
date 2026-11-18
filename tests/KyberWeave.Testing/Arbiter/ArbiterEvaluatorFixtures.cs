@@ -115,7 +115,7 @@ internal static class ArbiterEvaluatorFixtures
             planReader ?? new PlanFacts(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
-            new FileArbiterStateFactory(new ArbiterLogFiles(), new PhysicalFileSystem(), new PhysicalFileSystem()),
+            RealArbiterState.Factory(),
             new Clock(FixedNow),
             new Fakes.FakeIdGenerator(),
             secondaryTriggers);

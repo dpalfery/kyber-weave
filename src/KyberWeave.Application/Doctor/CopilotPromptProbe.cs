@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Kernel.FileSystem;
 namespace KyberWeave.Domain.Doctor;
@@ -25,6 +26,8 @@ public static partial class CopilotPromptProbe
     /// <param name="platform">The operating system whose VS Code layout applies.</param>
     /// <param name="xdgConfigHome">The <c>XDG_CONFIG_HOME</c> value, which moves the VS Code user data on Linux.</param>
     /// <param name="fileSystem">Reads the file system. Production registers the physical adapter; a test injects a fake.</param>
+    /// <param name="paths">Resolves a settings entry to a full path before it is compared with the prompt file.</param>
+    /// <param name="workingDirectory">The directory a relative settings entry is resolved against.</param>
     /// <returns>The checks in report order. Empty when the override is not in use.</returns>
     /// <remarks>
     /// Without an installed prompt file there is nothing to check, so a repository that never opted in sees no
@@ -37,10 +40,14 @@ public static partial class CopilotPromptProbe
         string? appDataDirectory,
         OSPlatform platform,
         IDoctorFileSystem fileSystem,
+        IPathResolver paths,
+        string workingDirectory,
         string? xdgConfigHome = null)
     {
         ArgumentNullException.ThrowIfNull(homeDirectory);
         ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(workingDirectory);
 
         IDoctorFileSystem files = fileSystem;
 
@@ -85,7 +92,7 @@ public static partial class CopilotPromptProbe
                 continue;
             }
 
-            if (state?.StarPromptFile is null || !CopilotPromptFile.SamePath(state.StarPromptFile, promptPath))
+            if (state?.StarPromptFile is null || !CopilotPromptFile.SamePath(paths, workingDirectory, state.StarPromptFile, promptPath))
                 continue;
 
             anyFlavourPoints = true;

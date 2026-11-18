@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Application.Review;
@@ -32,14 +33,24 @@ public sealed partial class ReviewBlockWriter : IReviewGateCatalogue
     private readonly IRepositoryFileStore _files;
     private readonly IRepositoryFileLister _lister;
     private readonly IRepositoryTreeProbe _tree;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
 
     /// <summary>Creates the writer over the file reads and repository listing it needs.</summary>
     /// <param name="files">Reads the repository root's files.</param>
     /// <param name="lister">Lists the repository's files, for project-root detection.</param>
     /// <param name="tree">Answers the path questions the review configuration parser asks.</param>
+    /// <param name="paths">Resolves a gate's working directory to a full path.</param>
+    /// <param name="environment">Supplies the base directory a relative repository root is resolved against.</param>
     public ReviewBlockWriter(
-        IRepositoryFileStore files, IRepositoryFileLister lister, IRepositoryTreeProbe tree)
+        IRepositoryFileStore files,
+        IRepositoryFileLister lister,
+        IRepositoryTreeProbe tree,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _lister = lister ?? throw new ArgumentNullException(nameof(lister));
         _tree = tree ?? throw new ArgumentNullException(nameof(tree));
@@ -153,7 +164,10 @@ public sealed partial class ReviewBlockWriter : IReviewGateCatalogue
                 document.Review,
                 repoRoot,
                 ReviewConfigParser.UnknownKeyWarnings(finalText),
-                new ReviewWorkingDirectoryFacts(_tree.DirectoryExists, _tree.LeadsOutsideThroughSymlink));
+                new ReviewWorkingDirectoryFacts(
+                    _tree.DirectoryExists,
+                    _tree.LeadsOutsideThroughSymlink,
+                    path => _paths.GetFullPath(path, _environment.CurrentDirectory)));
         }
         catch (Exception ex) when (ex is YamlException or InvalidDataException)
         {

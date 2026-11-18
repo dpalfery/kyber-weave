@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Review;
 using KyberWeave.Domain.CodeGraph;
@@ -20,6 +21,8 @@ namespace KyberWeave.Application.Tests.Review;
 public sealed class ReviewPathSeamTests
 {
     private readonly InMemoryFileSystem _files = new();
+
+    private readonly FakeEmbeddedResources _resources = new();
 
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/work");
 
@@ -76,7 +79,7 @@ public sealed class ReviewPathSeamTests
     {
         RecordingConfigs configs = new();
         ReviewCatalogueService service = new(
-            configs, new UnusedLister(), _files, Paths, _environment);
+            configs, new UnusedLister(), _files, Paths, _environment, new KyberStandardsTemplateReader(_resources));
 
         ReviewCommandResult result = service.Run(new ReviewCatalogueRequest("repo", null, []), TextWriter.Null);
 

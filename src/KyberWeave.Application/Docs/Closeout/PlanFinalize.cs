@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -67,8 +68,8 @@ public sealed partial class PlanFinalize
     internal Action<string>? AfterActivePlanCheck { get; init; }
 
     /// <summary>Creates the finalize step over a repository, its effective configuration and the loader validation reads with.</summary>
-    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<IDocumentSource> loaderFactory, IRepositoryFileStore files, IBoundedProcessExecutor process, IDocsSchemaGate gate)
-        : this(repoRoot, config, loaderFactory, files, process, gate, null)
+    public PlanFinalize(string repoRoot, KyberWeaveConfig config, Func<IDocumentSource> loaderFactory, IRepositoryFileStore files, IBoundedProcessExecutor process, IDocsSchemaGate gate, IPathResolver paths, IProcessEnvironment environment)
+        : this(repoRoot, config, loaderFactory, files, process, gate, paths, environment, null)
     {
     }
 
@@ -80,6 +81,8 @@ public sealed partial class PlanFinalize
     /// <param name="files">The file store the plan, its index and its task file are read and written through.</param>
     /// <param name="process">Runs the git commands that stage and commit the plan.</param>
     /// <param name="gate">The schema gate the finalized plan is validated with.</param>
+    /// <param name="paths">Resolves the repository root to a full path.</param>
+    /// <param name="environment">Names the directory a relative repository root is resolved against.</param>
     public PlanFinalize(
         string repoRoot,
         KyberWeaveConfig config,
@@ -87,16 +90,20 @@ public sealed partial class PlanFinalize
         IRepositoryFileStore files,
         IBoundedProcessExecutor process,
         IDocsSchemaGate gate,
+        IPathResolver paths,
+        IProcessEnvironment environment,
         IPlanTaskAgentPicker? picker)
     {
         ArgumentNullException.ThrowIfNull(gate);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _gate = gate;
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(process);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(loaderFactory);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
         _loaderFactory = loaderFactory;
         _store = files;

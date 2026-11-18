@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
@@ -15,7 +16,11 @@ namespace KyberWeave.Data.RunStart;
 /// directory. A run that branched in place works in the canonical checkout itself, so nothing it writes there
 /// is stray. Every unreadable fact answers "no live run", which allows.
 /// </remarks>
-public sealed class RunCheckoutGuard(IWritableFileSystem files, IRunStateStore store, IProcessEnvironment environment) : IRunCheckout
+public sealed class RunCheckoutGuard(
+    IWritableFileSystem files,
+    IRunStateStore store,
+    IProcessEnvironment environment,
+    IPathResolver paths) : IRunCheckout
 {
     private const string GitEntry = ".git";
     private const string HeadRefPrefix = "ref: refs/heads/";
@@ -147,7 +152,7 @@ public sealed class RunCheckoutGuard(IWritableFileSystem files, IRunStateStore s
                 if (line.StartsWith(prefix, StringComparison.Ordinal))
                 {
                     string named = line[prefix.Length..].Trim();
-                    gitDirectory = Path.IsPathRooted(named) ? named : Path.GetFullPath(Path.Combine(worktree, named));
+                    gitDirectory = Path.IsPathRooted(named) ? named : paths.GetFullPath(Path.Combine(worktree, named), environment.CurrentDirectory);
                 }
             }
 
@@ -202,7 +207,7 @@ public sealed class RunCheckoutGuard(IWritableFileSystem files, IRunStateStore s
 
     private string RealPath(string path, int depth)
     {
-        string full = Path.GetFullPath(path);
+        string full = paths.GetFullPath(path, environment.CurrentDirectory);
         string? root = Path.GetPathRoot(full);
         if (string.IsNullOrEmpty(root) || depth > MaxLinkDepth)
         {

@@ -1,4 +1,5 @@
 using KyberWeave.Domain.CopilotPrompt;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -99,5 +100,31 @@ public sealed class CopilotPromptFileTests : IDisposable
         string expected = Path.Combine(_home.Path, ".kyber-weave", "copilot", "system-prompt.yaml");
 
         Assert.Equal(expected, CopilotPromptFile.InstalledPath(_home.Path));
+    }
+
+    [Fact]
+    public void SamePath_RelativeSideIsResolvedAgainstTheGivenBaseDirectory()
+    {
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+
+        Assert.True(CopilotPromptFile.SamePath(paths, "/kw/home", "prompts/system-prompt.yaml", "/kw/home/prompts/system-prompt.yaml"));
+        Assert.False(CopilotPromptFile.SamePath(paths, "/kw/other", "prompts/system-prompt.yaml", "/kw/home/prompts/system-prompt.yaml"));
+    }
+
+    [Fact]
+    public void SamePath_IgnoresATrailingSeparatorAndDotSegmentsButNotADifferentFile()
+    {
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+
+        Assert.True(CopilotPromptFile.SamePath(paths, "/kw/home", "/kw/home/a/../p.yaml", "/kw/home/p.yaml"));
+        Assert.False(CopilotPromptFile.SamePath(paths, "/kw/home", "/kw/home/p.yaml", "/kw/home/q.yaml"));
+    }
+
+    [Fact]
+    public void SamePath_ABlankSideIsNotTheSamePathAsAnything()
+    {
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+
+        Assert.False(CopilotPromptFile.SamePath(paths, "/kw/home", "", "/kw/home/p.yaml"));
     }
 }

@@ -35,7 +35,7 @@ public sealed class ArchiveCloseoutValidatorTests
             fixture.Root,
             config,
             () => RealDocumentLoader.Create(fixture.Root, config.Ontology),
-            DocsPorts.Files).Validate(
+            DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate(
             RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), changes);
     }
 

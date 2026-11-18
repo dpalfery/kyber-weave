@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
@@ -92,7 +93,7 @@ public sealed class ArbiterStateStoreTests
     public async Task ALogThatRefusesTheAppendReportsTheStoreUnavailableInsteadOfThrowing()
     {
         _log.AppendFailure = new IOException("the lock was never taken");
-        ArbiterRunStore store = new("/repo/artifacts/arbiter", _log, _files, _files);
+        ArbiterRunStore store = new("/repo/artifacts/arbiter", _log, _files, _files, new FakePathResolver(_files));
 
         ArbiterStoreStatus status = await store.AppendFindingAsync("REVIEW-1", "a finding");
 
@@ -103,7 +104,7 @@ public sealed class ArbiterStateStoreTests
     [Fact]
     public async Task TheRunStoreKeepsAFindingRetrievableByItsReviewRun()
     {
-        ArbiterRunStore store = new("/repo/artifacts/arbiter", _log, _files, _files);
+        ArbiterRunStore store = new("/repo/artifacts/arbiter", _log, _files, _files, new FakePathResolver(_files));
 
         Assert.Equal(ArbiterStoreStatus.Stored, await store.AppendFindingAsync("REVIEW-1", "line one\nline two"));
 
@@ -118,6 +119,7 @@ public sealed class ArbiterStateStoreTests
             _log,
             _files,
             _files,
+            new FakePathResolver(_files),
             new ArbiterStoreOptions { MaxItemBytes = 4 });
 
         Assert.Equal(ArbiterStoreStatus.TooLarge, await store.AppendFindingAsync("REVIEW-1", "five!"));
@@ -136,6 +138,7 @@ public sealed class ArbiterStateStoreTests
             _log,
             _files,
             _files,
+            new FakePathResolver(_files),
             new ArbiterStoreOptions { RetainDays = 1 },
             new FakeTimeProvider(Now),
             _ => Now.AddDays(-30).UtcDateTime);

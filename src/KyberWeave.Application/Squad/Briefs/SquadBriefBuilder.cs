@@ -157,7 +157,7 @@ public sealed class SquadBriefBuilder(
     private bool TryResolvePlan(string root, KyberWeaveConfig config, string argument, DiagnosticReport report, out string relative)
     {
         string current = paths.GetFullPath(environment.CurrentDirectory, environment.CurrentDirectory);
-        PlanPathResolution resolution = new PlanFileResolver(root, config, plans).Resolve(argument, current);
+        PlanPathResolution resolution = new PlanFileResolver(root, config, plans, paths, environment).Resolve(argument, current);
         if (resolution.Found)
         {
             relative = resolution.Path!;

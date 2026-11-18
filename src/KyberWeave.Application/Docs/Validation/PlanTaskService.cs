@@ -32,7 +32,7 @@ public sealed partial class PlanTaskService(
 
         string root = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         List<string> found = [];
-        foreach (string folder in new PlanFileResolver(root, config, files).PlanningFolders())
+        foreach (string folder in new PlanFileResolver(root, config, files, paths, environment).PlanningFolders())
         {
             string directory = Path.Combine(root, folder.Replace('/', Path.DirectorySeparatorChar));
             if (!files.DirectoryExists(directory))

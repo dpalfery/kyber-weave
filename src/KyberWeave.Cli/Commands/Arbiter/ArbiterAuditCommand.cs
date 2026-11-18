@@ -100,7 +100,7 @@ public sealed class ArbiterAuditCommand(
                 return 1;
             }
 
-            matchesPlan = new PlanFilter(repositoryRoot, config, relative, files, paths).Matches;
+            matchesPlan = new PlanFilter(repositoryRoot, plans.ResolverFor(repositoryRoot, config, files), relative, paths).Matches;
         }
 
         if (audits.Audit(repositoryRoot, config, since, settings.Session, matchesPlan, report) is not { } audited)
@@ -127,9 +127,9 @@ public sealed class ArbiterAuditCommand(
         Execute(context, settings, CancellationToken.None);
 
     /// <summary>The plan <c>--plan</c> named, resolved to its repository-relative path, and the same resolution of a ledger event's plan file.</summary>
-    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative, IRepositoryFileStore files, IPathResolver paths)
+    private sealed class PlanFilter(string root, PlanFileResolver resolver, string relative, IPathResolver paths)
     {
-        private readonly PlanFileResolver _resolver = new(root, config, files);
+        private readonly PlanFileResolver _resolver = resolver;
         private readonly Dictionary<string, string> _seen = new(StringComparer.Ordinal);
 
         public bool Matches(string? eventPlan)

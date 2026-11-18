@@ -1,10 +1,15 @@
 using KyberWeave.Domain.Hooks;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Domain.Tests.Hooks;
 
 public sealed class PathContainmentTests
 {
+    private readonly FakePathResolver _paths = FakePathResolver.OverEmptyFileSystem();
+
+    private static string Abs(string path) => Path.GetFullPath(path);
+
     [Theory]
     [InlineData("/repo", "/repo", true)]
     [InlineData("/repo", "/repo/src/a.cs", true)]
@@ -13,10 +18,10 @@ public sealed class PathContainmentTests
     [InlineData("/repo", "/elsewhere", false)]
     public void ComparesWholePathSegments(string directory, string path, bool expected)
     {
-        string dir = Path.GetFullPath(directory);
-        string target = Path.GetFullPath(path);
+        string dir = Abs(directory);
+        string target = Abs(path);
 
-        Assert.Equal(expected, PathContainment.IsWithin(dir, target));
+        Assert.Equal(expected, PathContainment.IsWithin(_paths, dir, target));
     }
 
     [Fact]
@@ -27,7 +32,7 @@ public sealed class PathContainmentTests
             Assert.Skip("the case-sensitivity expectation is for Linux only");
         }
 
-        Assert.False(PathContainment.IsWithin("/repo", "/REPO/a.cs"));
+        Assert.False(PathContainment.IsWithin(_paths, "/repo", "/REPO/a.cs"));
     }
 
     [Theory]
@@ -35,28 +40,28 @@ public sealed class PathContainmentTests
     [InlineData(StringComparison.OrdinalIgnoreCase, true)]
     public void AppliesTheGivenComparison(StringComparison comparison, bool expected)
     {
-        string root = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "kw-containment"));
+        string root = Abs("/kw-containment");
         string recased = Path.Combine(root.ToUpperInvariant(), "a.cs");
 
-        Assert.Equal(expected, PathContainment.IsWithinUsing(root, recased, comparison));
+        Assert.Equal(expected, PathContainment.IsWithinUsing(_paths, root, recased, comparison));
     }
 
     [Fact]
     public void RejectsDotDotTraversalOutOfTheDirectory()
     {
-        string dir = Path.GetFullPath("/repo");
+        string dir = Abs("/repo");
         string escaping = dir + Path.DirectorySeparatorChar + "sub" + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + "etc" + Path.DirectorySeparatorChar + "passwd";
 
-        Assert.False(PathContainment.IsWithin(dir, escaping));
+        Assert.False(PathContainment.IsWithin(_paths, dir, escaping));
     }
 
     [Fact]
     public void AcceptsDotDotThatStaysInside()
     {
-        string dir = Path.GetFullPath("/repo");
+        string dir = Abs("/repo");
         string inside = dir + Path.DirectorySeparatorChar + "a" + Path.DirectorySeparatorChar + ".." + Path.DirectorySeparatorChar + "b.cs";
 
-        Assert.True(PathContainment.IsWithin(dir, inside));
+        Assert.True(PathContainment.IsWithin(_paths, dir, inside));
     }
 
     [Theory]
@@ -67,9 +72,9 @@ public sealed class PathContainmentTests
     [InlineData("/repo", "repo/a.cs")]
     public void FailsClosedOnEmptyOrRelativeInput(string directory, string path)
     {
-        string dir = directory.StartsWith('/') ? Path.GetFullPath(directory) : directory;
-        string target = path.StartsWith('/') ? Path.GetFullPath(path) : path;
+        string dir = directory.StartsWith('/') ? Abs(directory) : directory;
+        string target = path.StartsWith('/') ? Abs(path) : path;
 
-        Assert.False(PathContainment.IsWithin(dir, target));
+        Assert.False(PathContainment.IsWithin(_paths, dir, target));
     }
 }

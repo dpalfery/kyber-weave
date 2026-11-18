@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
@@ -38,6 +39,7 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
     private readonly IWritableFileSystem _files;
     private readonly IUserHostConfigStore _userConfig;
     private readonly IProcessEnvironment _environment;
+    private readonly IPathResolver _paths;
 
     /// <summary>Creates the uninstaller over the registered Squad state, global roots, user config and file system.</summary>
     /// <param name="stateStore">Reads and writes the deployment receipts.</param>
@@ -45,23 +47,27 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
     /// <param name="files">Probes, reads, writes and deletes the owned files.</param>
     /// <param name="userConfig">Reads the global targets the user config lists.</param>
     /// <param name="environment">Supplies the home directory.</param>
+    /// <param name="paths">Turns the caller's root into a full path.</param>
     public ArbiterUninstaller(
         ISquadStateStore stateStore,
         ISquadGlobalRootResolver globalRoots,
         IWritableFileSystem files,
         IUserHostConfigStore userConfig,
-        IProcessEnvironment environment)
+        IProcessEnvironment environment,
+        IPathResolver paths)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(globalRoots);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(userConfig);
         ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(paths);
         _stateStore = stateStore;
         _globalRoots = globalRoots;
         _files = files;
         _userConfig = userConfig;
         _environment = environment;
+        _paths = paths;
     }
 
     /// <inheritdoc />
@@ -69,7 +75,7 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(target);
-        string fullRoot = Path.GetFullPath(root);
+        string fullRoot = _paths.GetFullPath(root, _environment.CurrentDirectory);
         if (!SquadTargetCatalog.TryResolve(target, out SquadTarget parsed))
             throw new ArgumentException($"Unknown target '{target}'.", nameof(target));
 
@@ -288,7 +294,7 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
         ArgumentException.ThrowIfNullOrWhiteSpace(root);
         ISquadStateStore stateStore = _stateStore;
         ISquadGlobalRootResolver globalRoots = _globalRoots;
-        string full = Path.GetFullPath(root);
+        string full = _paths.GetFullPath(root, _environment.CurrentDirectory);
         string token = SquadTargetCatalog.GetToken(target);
 
         if (scope == SquadDeploymentScope.Global)
@@ -480,6 +486,9 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
 
         try
         {
+            // The root is read once in the spelling the file system uses, so a caller's relative spelling finds the
+            // same receipts and the same registry entry an absolute one does.
+            string full = _paths.GetFullPath(root, _environment.CurrentDirectory);
             IReadOnlyList<string> globalTargets = _userConfig.ReadGlobalTargets(home);
             if (globalTargets.Any(t => !string.Equals(t, token, StringComparison.OrdinalIgnoreCase)))
             {
@@ -494,7 +503,7 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
                 return true;
             }
 
-            SquadReceipt? currentProjectReceipt = stateStore.ReadReceipt(root, SquadDeploymentScope.Project);
+            SquadReceipt? currentProjectReceipt = stateStore.ReadReceipt(full, SquadDeploymentScope.Project);
             if (currentProjectReceipt is not null &&
                 (currentProjectReceipt.Files.Any(file => !string.Equals(file.Target, token, StringComparison.Ordinal))
                  || currentProjectReceipt.Blocks.Any(block => !string.Equals(block.Target, token, StringComparison.Ordinal))))
@@ -511,10 +520,11 @@ public sealed class ArbiterUninstaller : IArbiterUninstaller
                     continue;
                 }
 
-                bool isCurrent = string.Equals(
-                    Path.GetFullPath(project.Path),
-                    Path.GetFullPath(root),
-                    StringComparison.OrdinalIgnoreCase);
+                // The volume's own case rule decides, so two projects that differ only in case stay two projects on a
+                // case-sensitive file system and are one project where names fold.
+                bool isCurrent = _paths.AreSame(
+                    _paths.GetFullPath(project.Path, _environment.CurrentDirectory),
+                    full);
 
                 if (isCurrent)
                 {

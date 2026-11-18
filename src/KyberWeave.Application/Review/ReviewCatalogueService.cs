@@ -15,12 +15,14 @@ namespace KyberWeave.Application.Review;
 /// <param name="files">Reads the files a gate's condition names.</param>
 /// <param name="paths">Resolves the path the caller spelled.</param>
 /// <param name="environment">Names the working directory a relative path resolves against.</param>
+/// <param name="templates">Answers whether the build ships a standard template for a technology.</param>
 public sealed class ReviewCatalogueService(
     IConfigLoadService configs,
     IRepositoryFileLister lister,
     IFileSystem files,
     IPathResolver paths,
-    IProcessEnvironment environment) : IReviewCatalogueService
+    IProcessEnvironment environment,
+    IKyberStandardsTemplates templates) : IReviewCatalogueService
 {
     /// <inheritdoc />
     public ReviewCommandResult Run(
@@ -63,7 +65,7 @@ public sealed class ReviewCatalogueService(
 
         foreach (string technology in technologies)
         {
-            if (!KyberStandardsTemplates.TryGet(technology, out _) && !declared.Contains(technology))
+            if (!templates.TryGet(technology, out _) && !declared.Contains(technology))
                 return ReviewCommandResultFactory.Refused(UnknownTechnologyMessage(technology));
         }
 
@@ -101,14 +103,14 @@ public sealed class ReviewCatalogueService(
     /// <summary>
     /// The unknown-technology message for <paramref name="technology"/>, with the nearest-match
     /// hint. The hint comes from <c>StringDistance.Nearest</c>, but
-    /// <see cref="KyberStandardsTemplates.Render"/> is the public surface that owns the message,
+    /// <see cref="IKyberStandardsTemplates.Render"/> is the public surface that owns the message,
     /// so the hint is harvested from its failure rather than reimplemented where it could drift.
     /// </summary>
-    private static string UnknownTechnologyMessage(string technology)
+    private string UnknownTechnologyMessage(string technology)
     {
         try
         {
-            KyberStandardsTemplates.Render(technology, "kyber-weave", "1970-01-01");
+            templates.Render(technology, "kyber-weave", "1970-01-01");
         }
         catch (ArgumentException ex)
         {

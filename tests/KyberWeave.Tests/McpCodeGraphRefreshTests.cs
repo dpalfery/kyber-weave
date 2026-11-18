@@ -209,6 +209,9 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             Root,
             () => throw new InvalidOperationException("boom resolver"),
             () => throw new IOException("disk error / unreadable docs"),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 
@@ -639,6 +642,9 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
             root,
             resolverFactory,
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

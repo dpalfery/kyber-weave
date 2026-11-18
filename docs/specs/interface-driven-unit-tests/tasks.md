@@ -246,7 +246,7 @@ from this file when it is marked Ready.
 
 ## Phase 3: Squad deployment
 
-- [ ] 3.1 Crash-safety contract tests for squad deployment
+- [x] 3.1 Crash-safety contract tests for squad deployment
   - **Objective:** for install, update, uninstall, rollback and recovery, inject a fault at every
     file operation, recover, and compare the whole tree with the old or the complete new tree; run on
     the in-memory file system and on the real disk.
@@ -257,7 +257,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.3
   - _Requirements: 10.2_
 
-- [ ] 3.2 `SquadStateStore` and `SquadStateMigration` onto seams
+- [x] 3.2 `SquadStateStore` and `SquadStateMigration` onto seams
   - **Files:** `src/KyberWeave.Data/Squad/Deployment/SquadStateStore.cs`, `SquadStateMigration.cs`
   - **Acceptance criteria:** no direct resource call; injected as `ISquadStateStore`; unit tests on
     the in-memory file system; contract tests pass on both.
