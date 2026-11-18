@@ -1,8 +1,9 @@
 using KyberWeave.Core.Docs.Analysis.Claims;
 using KyberWeave.Core.Docs.Model;
+using KyberWeave.Tests;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Analysis.Claims;
 
 /// <summary>
 /// Pins the structural claim boundary used by duplicate, conflict, and terminology
@@ -153,40 +154,5 @@ public sealed class ClaimExtractionTests
         Assert.Contains("Runtime", claim.ContextualText, StringComparison.Ordinal);
     }
 
-    internal static DocumentModel Document(
-        string body,
-        string? rawMarkdown = null,
-        int bodyStartLine = 9)
-    {
-        rawMarkdown ??= """
-            ---
-            id: docs/claims
-            title: Claims
-            doc-type: reference
-            status: current
-            component: DocGraph
-            ---
-
-            """ + body;
-
-        return new DocumentModel
-        {
-            RelativePath = "docs/claims.md",
-            FilePath = "/repo/docs/claims.md",
-            HasFrontmatter = true,
-            Frontmatter = new DocumentFrontmatter
-            {
-                Id = "docs/claims",
-                Title = "Claims",
-                DocType = "reference",
-                Status = "current",
-                Component = "DocGraph"
-            },
-            DocType = DocType.Reference,
-            Status = DocStatus.Current,
-            Body = body,
-            RawMarkdown = rawMarkdown,
-            BodyStartLine = bodyStartLine
-        };
-    }
+    private static DocumentModel Document(string body) => ClaimTestDocuments.Document(body);
 }
