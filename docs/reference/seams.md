@@ -248,7 +248,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
 | `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.8 |
-| `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.8 |
 | `SkillParser` (`Skills/Parsing/SkillParser.cs`) | paths | 2.5 |
 | `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.8 |
 | `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.8 |

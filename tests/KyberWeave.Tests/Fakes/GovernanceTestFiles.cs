@@ -20,7 +20,7 @@ internal static class GovernanceTestFiles
     private static readonly ProcessEnvironment Environment = new();
 
     /// <summary>Reads SKILL.md files and the on-disk facts the pure parser needs.</summary>
-    public static SkillFileReader Skills { get; } = new(Files);
+    public static SkillFileReader Skills { get; } = new(Files, Paths, Environment);
 
     /// <summary>Discovers and reads agent definitions.</summary>
     public static AgentFileReader Agents { get; } = new(Files, Paths, Environment);
