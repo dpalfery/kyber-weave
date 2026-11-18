@@ -16,7 +16,8 @@ public sealed class ArbiterAuditCommand(
     IArbiterConfigResolver configs,
     IArbiterRepositoryLocator locator,
     IArbiterAuditService audits,
-    IRepositoryFileStore files) : Command<ArbiterSettings>
+    IRepositoryFileStore files,
+    IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>A ledger event with no decision: the hook was killed, timed out or crashed after recording the event.</summary>
     public const string MissingDecision = ArbiterAuditService.MissingDecision;
@@ -107,12 +108,12 @@ public sealed class ArbiterAuditCommand(
 
         foreach (string attestation in audited.Attestations)
         {
-            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(attestation)}.[/]");
+            console.MarkupLine($"[grey]{Markup.Escape(attestation)}.[/]");
         }
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[grey]{audited.ModelEvaluations} decision-model evaluation(s) over {audited.ImplementationDispatches} dispatch(es) to implementation agents.[/]");
-        AnsiConsole.MarkupLine($"[grey]{audited.Findings} finding(s) over {audited.EventCount} ledger event(s).[/]");
+        console.MarkupLine($"[grey]{audited.Findings} finding(s) over {audited.EventCount} ledger event(s).[/]");
 
         CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
         return report.HasErrors ? 1 : 0;

@@ -17,7 +17,8 @@ public sealed class ArbiterEvalCommand(
     IArbiterConfigResolver configs,
     IArbiterRepositoryLocator locator,
     IArbiterDryRunService dryRun,
-    IFileSystem files) : Command<ArbiterSettings>
+    IFileSystem files,
+    IAnsiConsole console) : Command<ArbiterSettings>
 {
     private static readonly JsonSerializerOptions EventJson = new()
     {
@@ -124,10 +125,10 @@ public sealed class ArbiterEvalCommand(
             return 1;
         }
 
-        AnsiConsole.MarkupLine($"[bold]Outcome:[/] {Markup.Escape(result.Outcome)}");
+        console.MarkupLine($"[bold]Outcome:[/] {Markup.Escape(result.Outcome)}");
         foreach (ArbiterDispatchEvaluation dispatch in result.Dispatches)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]Trigger {Markup.Escape(dispatch.Trigger ?? "—")}: {Markup.Escape(dispatch.Outcome)}.[/]");
         }
 

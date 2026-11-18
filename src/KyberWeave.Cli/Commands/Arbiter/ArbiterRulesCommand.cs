@@ -9,7 +9,7 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Lists the effective Arbiter rules: id, trigger, step, question, answers, effects and facts.</summary>
-public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs) : Command<ArbiterSettings>
+public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>
     /// Prints one row per rule (one rule per trigger, sharing the rule id).
@@ -75,8 +75,8 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs) : Comman
         }
 
         // Unfolded so a wide table is not split mid-word, which would break a column name such as "For-each".
-        CommandHelpers.WriteUnfolded(() => AnsiConsole.Write(table));
-        AnsiConsole.MarkupLine($"[grey]{rules.Count} rule(s) listed.[/]");
+        CommandHelpers.WriteUnfolded(console, () => console.Write(table));
+        console.MarkupLine($"[grey]{rules.Count} rule(s) listed.[/]");
 
         CommandHelpers.Finish(report, settings, "arbiter rules", "Rule");
         return report.HasErrors ? 1 : 0;

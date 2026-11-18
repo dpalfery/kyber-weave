@@ -26,7 +26,8 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// </remarks>
 internal sealed class ArbiterInstallCommand(
     IArbiterInstallService installer,
-    SquadConsoleOptions console) : Command<ArbiterInstallSettings>
+    SquadConsoleOptions squadConsole,
+    IAnsiConsole console) : Command<ArbiterInstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, ArbiterInstallSettings settings,
@@ -36,7 +37,7 @@ internal sealed class ArbiterInstallCommand(
 
         if (settings.Project && settings.Global)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[red]kyber-weave arbiter: error: " +
                 "--global and --project are mutually exclusive. " +
                 $"[bold]{RuleValidator.InstallScopeConflict}[/] is the permanent rule id for this scope conflict.[/]");
@@ -45,7 +46,7 @@ internal sealed class ArbiterInstallCommand(
 
         if (!string.IsNullOrWhiteSpace(settings.PathOption) && !settings.Project)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[red]kyber-weave arbiter: error: --path is only valid with --project. " +
                 "Use --project to target a project root, or omit --path for the default global scope.[/]");
             return 2;
@@ -89,11 +90,11 @@ internal sealed class ArbiterInstallCommand(
                 plan.Root,
                 plan.Scope,
                 "install",
-                console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                squadConsole.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
                 settings.Yes,
-                console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+                squadConsole.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
         {
-            AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
+            console.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
         }
 
@@ -108,7 +109,7 @@ internal sealed class ArbiterInstallCommand(
         return Execute(context, settings, CancellationToken.None);
     }
 
-    private static void Print(IReadOnlyList<ArbiterInstallEvent> events, SquadTarget? plan)
+    private void Print(IReadOnlyList<ArbiterInstallEvent> events, SquadTarget? plan)
     {
         foreach (ArbiterInstallEvent item in events)
         {
@@ -118,7 +119,7 @@ internal sealed class ArbiterInstallCommand(
                     PrintProvider(provider);
                     break;
                 case ArbiterInstallArgvKeyWarning:
-                    AnsiConsole.MarkupLine(
+                    console.MarkupLine(
                         "[yellow]warn:[/] --arbiter-key is visible in process argv and shell history; " +
                         $"prefer --key-stdin or {Markup.Escape(ArbiterKeyResolver.EnvVarName)}.");
                     break;
@@ -126,20 +127,20 @@ internal sealed class ArbiterInstallCommand(
                     WriteError(error.Message);
                     break;
                 case ArbiterInstallAlreadyInstalled done:
-                    AnsiConsole.MarkupLine(
+                    console.MarkupLine(
                         $"[grey]Arbiter already installed for target '[bold]{Markup.Escape(done.TargetToken)}[/]' " +
                         $"in '[bold]{Markup.Escape(done.Root)}[/]'. Nothing to do.[/]");
                     break;
                 case ArbiterInstallStoredKey stored:
-                    AnsiConsole.MarkupLine($"[green]ok[/] Stored a key for {Markup.Escape(stored.Origin)}.");
+                    console.MarkupLine($"[green]ok[/] Stored a key for {Markup.Escape(stored.Origin)}.");
                     break;
                 case ArbiterInstallDryRun dryRun:
-                    CommandHelpers.WriteUnfolded(() =>
-                        AnsiConsole.MarkupLine(
+                    CommandHelpers.WriteUnfolded(console, () =>
+                        console.MarkupLine(
                             $"[bold]Dry-run:[/] planned {dryRun.PlannedFiles} deployed files for [bold]{Markup.Escape(dryRun.Root)}[/]."));
                     break;
                 case ArbiterInstallDone done:
-                    CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine(done.GlobalScope
+                    CommandHelpers.WriteUnfolded(console, () => console.MarkupLine(done.GlobalScope
                         ? $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(done.TargetToken)}[/]' " +
                           $"in the global user-home scope '[bold]{Markup.Escape(done.Root)}[/]'.[/]"
                         : $"[green]Successfully installed Arbiter for target '[bold]{Markup.Escape(done.TargetToken)}[/]' " +
@@ -155,16 +156,16 @@ internal sealed class ArbiterInstallCommand(
                     PrintScopeTable(table);
                     break;
                 case ArbiterInstallProbeWarning probe:
-                    AnsiConsole.MarkupLine($"[yellow]warn:[/] {Markup.Escape(probe.Message)}");
+                    console.MarkupLine($"[yellow]warn:[/] {Markup.Escape(probe.Message)}");
                     break;
             }
         }
     }
 
-    private static void PrintProvider(ArbiterInstallProviderLine provider)
+    private void PrintProvider(ArbiterInstallProviderLine provider)
     {
         string note = provider.OverrideNote is null ? string.Empty : Markup.Escape(provider.OverrideNote);
-        AnsiConsole.MarkupLine(provider switch
+        console.MarkupLine(provider switch
         {
             { Kept: true } =>
                 $"Arbiter provider: [bold]{provider.KindName}[/] (kept; pass --provider to change it).{note}",
@@ -175,18 +176,18 @@ internal sealed class ArbiterInstallCommand(
         });
     }
 
-    private static void PrintScopeTable(ArbiterInstallScopeTable table)
+    private void PrintScopeTable(ArbiterInstallScopeTable table)
     {
         if (table.Rows.Count == 0)
         {
             return;
         }
 
-        AnsiConsole.MarkupLine("[bold]D13 global hook table[/]");
-        AnsiConsole.MarkupLine("[bold]target[/] | [bold]tier[/] | [bold]path[/] | [bold]reason[/] | [bold]trust[/]");
+        console.MarkupLine("[bold]D13 global hook table[/]");
+        console.MarkupLine("[bold]target[/] | [bold]tier[/] | [bold]path[/] | [bold]reason[/] | [bold]trust[/]");
         foreach (ArbiterInstallScopeRow row in table.Rows)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"  {Markup.Escape(row.Token)} | {Markup.Escape(row.Reason)} | {Markup.Escape(row.Path)} | " +
                 $"{Markup.Escape(row.Reason)} | {Markup.Escape(row.Trust)}");
         }
@@ -207,9 +208,9 @@ internal sealed class ArbiterInstallCommand(
         return string.Join(", ", SquadTargetCatalog.All.Select(SquadTargetCatalog.GetToken));
     }
 
-    private static void WriteError(string message)
+    private void WriteError(string message)
     {
-        CommandHelpers.WriteUnfolded(() =>
-            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
+        CommandHelpers.WriteUnfolded(console, () =>
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
     }
 }

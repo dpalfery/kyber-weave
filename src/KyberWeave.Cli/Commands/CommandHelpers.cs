@@ -103,7 +103,7 @@ public static class CommandHelpers
     }
 
     /// <summary>
-    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
+    /// Runs <paramref name="write"/> with the static console's folding lifted, then restores the width.
     /// </summary>
     /// <param name="write">The output to produce at full width.</param>
     /// <remarks>
@@ -121,19 +121,29 @@ public static class CommandHelpers
     /// one of them, and two commands that then render the same finding differently.
     /// </para>
     /// </remarks>
-    public static void WriteUnfolded(Action write)
+    public static void WriteUnfolded(Action write) => WriteUnfolded(AnsiConsole.Console, write);
+
+    /// <summary>
+    /// Runs <paramref name="write"/> with <paramref name="console"/>'s folding lifted, then restores its width.
+    /// </summary>
+    /// <param name="console">The console whose width is lifted for the write.</param>
+    /// <param name="write">The output to produce at full width.</param>
+    /// <remarks>The width belongs to the console the output goes to, so a command that writes to an injected
+    /// console lifts that one rather than the process-wide console.</remarks>
+    public static void WriteUnfolded(IAnsiConsole console, Action write)
     {
+        ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(write);
 
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
+        int originalWidth = console.Profile.Width;
+        console.Profile.Width = int.MaxValue;
         try
         {
             write();
         }
         finally
         {
-            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
+            console.Profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
         }
     }
 
