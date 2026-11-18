@@ -47,6 +47,13 @@ public sealed class PlanArguments(
         return plan.StartsWith(current + Path.DirectorySeparatorChar, StringComparison.Ordinal) ? current : found;
     }
 
+    /// <summary>A resolver over the repository, on the path seam this command set holds.</summary>
+    /// <param name="root">The repository root.</param>
+    /// <param name="config">The effective configuration, which says where plans live.</param>
+    /// <param name="planFiles">Probes the planning folders.</param>
+    public PlanFileResolver ResolverFor(string root, KyberWeaveConfig config, IRepositoryFileStore planFiles) =>
+        new(root, config, planFiles, paths, environment);
+
     /// <summary>
     /// Resolves <paramref name="argument"/>. An argument that names no file resolves to the path as typed, so the command's
     /// own not-found finding, with its own rule id, still reports it; an ambiguous one is reported here and returns false.
@@ -70,7 +77,7 @@ public sealed class PlanArguments(
         out string relative)
     {
         string current = CurrentDirectory(workingDirectory);
-        PlanPathResolution resolution = new PlanFileResolver(root, config, planFiles).Resolve(argument, current);
+        PlanPathResolution resolution = ResolverFor(root, config, planFiles).Resolve(argument, current);
         if (resolution.Found)
         {
             relative = resolution.Path!;

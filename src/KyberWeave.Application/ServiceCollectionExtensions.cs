@@ -88,13 +88,17 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
             sp.GetRequiredService<IExclusiveFileWriter>(),
-            sp.GetRequiredService<IDocumentSourceFactory>()));
+            sp.GetRequiredService<IDocumentSourceFactory>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanFinalizeService>(sp => new PlanFinalizeService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
             sp.GetRequiredService<IDocsSchemaGate>(),
             sp.GetRequiredService<IDocumentSourceFactory>(),
-            sp.GetRequiredService<IPlanTaskAgentPickerFactory>()));
+            sp.GetRequiredService<IPlanTaskAgentPickerFactory>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanTaskAgentPickerFactory>(sp => new ConfiguredPlanTaskAgentPickerFactory(
             sp.GetRequiredService<ConfiguredArbiterProviderFactory>(),
             sp.GetRequiredService<IProcessEnvironment>()));

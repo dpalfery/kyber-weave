@@ -203,9 +203,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRootResolver` (`Arbiter/Mcp/ArbiterRootResolver.cs`) | paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
 | `ManagedGlossary` (`Docs/Analysis/Glossary/ManagedGlossary.cs`) | paths | 4.2 |
-| `PlanCloseout` (`Docs/Closeout/PlanCloseout.cs`) | paths | 4.2 |
-| `PlanFileResolver` (`Docs/Closeout/PlanFileResolver.cs`) | file system, paths | 4.2 |
-| `PlanFinalize` (`Docs/Closeout/PlanFinalize.cs`) | paths | 4.2 |
 | `PullRequestDescription` (`Docs/Delivery/PullRequestDescription.cs`) | file system | 4.2 |
 | `RunDelivery` (`Docs/Delivery/RunDelivery.cs`) | paths | 4.2 |
 | `DocsScaffolder` (`Docs/Scaffolding/DocsScaffolder.cs`) | file system, paths | 4.2 |
@@ -213,7 +210,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `StandardsTemplateDiff` (`Docs/Scaffolding/StandardsTemplateDiff.cs`) | file system, paths | 4.2 |
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 4.2 |
 | `DocumentIndexHost` (`Docs/Search/DocumentIndexHost.cs`) | file system, paths | 4.2 |
-| `ArchiveCloseoutValidator` (`Docs/Validation/ArchiveCloseoutValidator.cs`) | paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |

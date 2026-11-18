@@ -140,7 +140,9 @@ public sealed class DocsSchemaGate(
             repoRoot,
             config,
             closeoutLoaderFactory,
-            files).Validate(set, changed).Items);
+            files,
+            paths,
+            environment).Validate(set, changed).Items);
         return report;
     }
 }
