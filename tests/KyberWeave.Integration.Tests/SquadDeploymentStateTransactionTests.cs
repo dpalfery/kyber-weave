@@ -82,9 +82,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction transaction = Transaction(fixture.Path, blocker);
         SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
-        Task execution = Task.Run(() => transaction.Execute(plan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task execution = BlockedTransaction.Start(() => transaction.Execute(plan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            execution,
             "The transaction did not reach its durable intent checkpoint.");
 
         bool heldExclusiveLease;
@@ -120,9 +121,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction activeTransaction = Transaction(fixturePath, blocker);
         SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
-        Task execution = Task.Run(() => activeTransaction.Execute(plan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task execution = BlockedTransaction.Start(() => activeTransaction.Execute(plan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            execution,
             "The transaction did not reach its durable intent checkpoint.");
 
         Exception? recoveryException;
@@ -517,10 +519,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             new FixedTimeProvider(InstalledAt));
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction activeTransaction = new(store, blocker);
-        Task activeExecution = StartBlockedTransaction(() =>
+        Task activeExecution = BlockedTransaction.Start(() =>
             activeTransaction.Execute(activePlan));
-        WaitForBlockedStep(
-            blocker,
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
             activeExecution,
             "The active transaction did not acquire its lease before contention was tested.");
         SortedDictionary<string, TreeEntry> beforeContention = CaptureTree(fixture.Path);

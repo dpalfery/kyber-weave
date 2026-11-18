@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
-using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -2017,43 +2016,6 @@ public abstract class SquadDeploymentStateTestBase
                 SawStagingOrBackupInState |= HasDirectoryNamed(stateDirectory, "backups");
             }
         }
-    }
-
-    /// <summary>
-    ///     Starts a transaction a test blocks mid-step on a thread of its own, so reaching that step does not depend
-    ///     on a thread pool the parallel test classes and their own blocking waits may have taken.
-    /// </summary>
-    /// <param name="execute">The transaction call.</param>
-    /// <returns>The task the test awaits once it has released the observer.</returns>
-    internal static Task StartBlockedTransaction(Action execute) =>
-        Task.Factory.StartNew(
-            execute,
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
-
-    /// <summary>
-    /// Waits for the observer's blocked step and, when the transaction finished instead, rethrows its own exception:
-    /// a faulted transaction otherwise reports only the timeout, which says nothing about the cause.
-    /// </summary>
-    /// <param name="blocker">The observer the transaction blocks in.</param>
-    /// <param name="execution">The transaction's task.</param>
-    /// <param name="timeoutMessage">What a transaction that is still running has failed to do.</param>
-    internal static void WaitForBlockedStep(BlockingObserver blocker, Task execution, string timeoutMessage)
-    {
-        // The budget only has to outlast a loaded CI runner starting one thread. The work before the blocked step is
-        // a handful of small directory and file writes, so a transaction that has not arrived by then is stuck.
-        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
-        while (!blocker.Reached.IsSet && !execution.IsCompleted && DateTime.UtcNow < deadline)
-            Thread.Sleep(TimeSpan.FromMilliseconds(10));
-
-        if (blocker.Reached.IsSet)
-            return;
-
-        if (execution.IsFaulted)
-            ExceptionDispatchInfo.Capture(execution.Exception!.GetBaseException()).Throw();
-
-        Assert.Fail(timeoutMessage);
     }
 
     internal sealed class BlockingObserver(SquadTransactionStepKind blockedStep) :
