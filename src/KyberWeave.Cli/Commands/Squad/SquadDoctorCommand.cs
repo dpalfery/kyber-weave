@@ -41,6 +41,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly SquadDoctorOptions _options;
     private readonly IFileSystemPathSemantics _pathSemantics;
     private readonly IKyberWeaveConfigRepository _configs;
+    private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -58,6 +59,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <param name="zcodeMcp">Reads the MCP servers a ZCode installation declares.</param>
     /// <param name="options">The process executor and working directory; the defaults use the real ones.</param>
     /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
+    /// <param name="roots">Resolves the target root, migrates legacy state and anchors a global run.</param>
     public SquadDoctorCommand(
         ISquadStateStore stateStore,
         ISquadStateMigration migration,
@@ -74,7 +76,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         IZCodeMcpInspector zcodeMcp,
         SquadDoctorOptions options,
         IFileSystemPathSemantics pathSemantics,
-        IKyberWeaveConfigRepository configs)
+        IKyberWeaveConfigRepository configs,
+        SquadCommandRoots roots)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -92,6 +95,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(pathSemantics);
         ArgumentNullException.ThrowIfNull(configs);
+        ArgumentNullException.ThrowIfNull(roots);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
@@ -108,6 +112,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _options = options;
         _pathSemantics = pathSemantics;
         _configs = configs;
+        _roots = roots;
     }
 
     /// <inheritdoc />
@@ -134,7 +139,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // The named root is the diagnosed root. The unresolved default — "." positional,
         // no --path — keeps the injected working directory, the process's current
         // directory in production, exactly as before the option existed.
-        string workingDirectory = SquadCommandComposition.ResolveTargetRoot(
+        string workingDirectory = _roots.ResolveTargetRoot(
             effectivePath is null or "." ? _options.WorkingDirectory : effectivePath);
 
         // Doctor reads home-level state, so it resolves the store once. A --global doctor is anchored at the
@@ -142,7 +147,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
         // the migration below runs with dryRun: false and may move legacy state into the home.
         ISquadStateStore homeStateStore = _stateStore;
-        if (settings.Global) _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
+        if (settings.Global) _ = _roots.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
 
         AnsiConsole.MarkupLine("[bold]Kyber-Squad Doctor[/]");
         AnsiConsole.WriteLine();
@@ -237,7 +242,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ReportShadowedSkills(workingDirectory, homeStateStore);
 
         // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
             Environment.CurrentDirectory,
             settings.Global ? null : workingDirectory,

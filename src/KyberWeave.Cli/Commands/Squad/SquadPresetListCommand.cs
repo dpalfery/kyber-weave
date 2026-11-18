@@ -14,26 +14,31 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
     private readonly ISquadStateStore _stateStore;
     private readonly ISquadModelPresetStore _presetStore;
     private readonly ISquadModelPresetSelectionStore _selectionStore;
+    private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="userPaths">Names the home the presets and selections live under.</param>
     /// <param name="stateStore">Reads the deployment state the selections apply to.</param>
     /// <param name="presetStore">Lists the presets.</param>
     /// <param name="selectionStore">Reads the project's selection.</param>
+    /// <param name="roots">Resolves the target root and anchors a global run.</param>
     public SquadPresetListCommand(
         ISquadUserPaths userPaths,
         ISquadStateStore stateStore,
         ISquadModelPresetStore presetStore,
-        ISquadModelPresetSelectionStore selectionStore)
+        ISquadModelPresetSelectionStore selectionStore,
+        SquadCommandRoots roots)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(presetStore);
         ArgumentNullException.ThrowIfNull(selectionStore);
+        ArgumentNullException.ThrowIfNull(roots);
         _userPaths = userPaths;
         _stateStore = stateStore;
         _presetStore = presetStore;
         _selectionStore = selectionStore;
+        _roots = roots;
     }
 
     /// <inheritdoc />
@@ -47,13 +52,13 @@ internal sealed class SquadPresetListCommand : Command<SquadPresetListSettings>
         IReadOnlyList<ISquadModelPresetSelectionStore> selectionStores = [_selectionStore];
 
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
-        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         List<string> presetNames = [.. presetStore.List().Order(StringComparer.Ordinal)];
 
         Dictionary<string, HashSet<string>> usages = new(StringComparer.Ordinal);
 
-        string globalAnchor = SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false);
+        string globalAnchor = _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, dryRun: false);
         SquadLock? globalLock = stateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global);
         if (globalLock?.ModelPresets is not null)
         {

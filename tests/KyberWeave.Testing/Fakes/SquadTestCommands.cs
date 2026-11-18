@@ -17,6 +17,7 @@ using KyberWeave.Data.Review;
 using KyberWeave.Testing.Squad;
 using Spectre.Console;
 using KyberWeave.Tests.Configuration;
+using KyberWeave.Tests.FileSystem;
 
 namespace KyberWeave.Tests.Fakes;
 
@@ -52,7 +53,7 @@ internal static class SquadTestCommands
             console,
             new SquadTargetRootConfirmation(console),
             new ProcessEnvironment(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
+            PhysicalRoots(console),
             configs ?? RealFileKyberWeaveConfigRepository.Create(),
             capturePluginStep);
     }
@@ -87,7 +88,7 @@ internal static class SquadTestCommands
             console,
             new SquadTargetRootConfirmation(console),
             new ProcessEnvironment(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
+            PhysicalRoots(console),
             configs ?? RealFileKyberWeaveConfigRepository.Create(),
             picker,
             capturePluginStep);
@@ -115,7 +116,7 @@ internal static class SquadTestCommands
             console,
             new SquadTargetRootConfirmation(console),
             new ProcessEnvironment(),
-            new PhysicalPathResolver(new PhysicalFileSystem()));
+            PhysicalRoots(console));
     }
 
     public static SquadInstanceRemoveCommand InstanceRemove(
@@ -174,13 +175,18 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         Func<string, string?>? environmentReader = null)
     {
+        SquadConsole console = CapturedSquadConsole();
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadStatusCommand(
             store,
             new SquadStateMigration(store, store.UserPaths),
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader),
             new SquadModelPresetStore(store.UserPaths),
-            SquadFileSystemPathSemantics.Instance);
+            SquadFileSystemPathSemantics.Instance,
+            console,
+            new PhysicalFileSystem(),
+            new ProcessEnvironment(),
+            PhysicalRoots(console));
     }
 
     public static SquadDoctorCommand Doctor(
@@ -210,7 +216,8 @@ internal static class SquadTestCommands
             new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory),
             SquadFileSystemPathSemantics.Instance,
-            configs ?? RealFileKyberWeaveConfigRepository.Create());
+            configs ?? RealFileKyberWeaveConfigRepository.Create(),
+            PhysicalRoots(CapturedSquadConsole()));
     }
 
     public static SquadPresetUseCommand PresetUse(
@@ -228,7 +235,8 @@ internal static class SquadTestCommands
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
-            SquadFileSystemPathSemantics.Instance);
+            SquadFileSystemPathSemantics.Instance,
+            PhysicalRoots(CapturedSquadConsole()));
     }
 
     public static SquadPresetClearCommand PresetClear(
@@ -246,7 +254,8 @@ internal static class SquadTestCommands
             Profiles(store, canonicalProfileResolver),
             new FileSquadDeploymentPlanner(),
             new SquadTransactionFactory(store),
-            SquadFileSystemPathSemantics.Instance);
+            SquadFileSystemPathSemantics.Instance,
+            PhysicalRoots(CapturedSquadConsole()));
     }
 
     public static SquadPresetShowCommand PresetShow(
@@ -270,7 +279,28 @@ internal static class SquadTestCommands
             paths,
             store,
             new SquadModelPresetStore(paths),
-            RealSquadSelectionStore.Create(paths));
+            RealSquadSelectionStore.Create(paths),
+            PhysicalRoots(CapturedSquadConsole()));
+    }
+
+    /// <summary>The roots over an in-memory file system and a fake environment, for a command test that touches no disk.</summary>
+    public static SquadCommandRoots InMemoryRoots(
+        SquadConsole console,
+        string currentDirectory = "/kw/work",
+        InMemoryFileSystem? files = null)
+    {
+        InMemoryFileSystem fileSystem = files ?? new InMemoryFileSystem();
+        return new SquadCommandRoots(
+            fileSystem,
+            new FakePathResolver(fileSystem),
+            new FakeProcessEnvironment(currentDirectory: currentDirectory),
+            console);
+    }
+
+    private static SquadCommandRoots PhysicalRoots(SquadConsole console)
+    {
+        PhysicalFileSystem files = new();
+        return new SquadCommandRoots(files, new PhysicalPathResolver(files), new ProcessEnvironment(), console);
     }
 
     /// <summary>

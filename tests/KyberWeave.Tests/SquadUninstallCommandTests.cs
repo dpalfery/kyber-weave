@@ -135,7 +135,7 @@ public sealed class SquadUninstallCommandTests
             console,
             new SquadTargetRootConfirmation(console),
             new FakeProcessEnvironment(currentDirectory: WorkingDirectory),
-            FakePathResolver.OverEmptyFileSystem());
+            SquadTestCommands.InMemoryRoots(console, WorkingDirectory));
     }
 
     private string Output() => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);

@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
@@ -24,6 +25,11 @@ internal static class SquadCliServices
     {
         services.TryAddSingleton<IAnsiConsole>(_ => AnsiConsole.Console);
         services.TryAddSingleton(sp => new SquadConsole(sp.GetRequiredService<IAnsiConsole>(), sp.GetRequiredService<IConsole>()));
+        services.TryAddSingleton(sp => new SquadCommandRoots(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<SquadConsole>()));
         services.TryAddSingleton(sp => new SquadTargetRootConfirmation(sp.GetRequiredService<SquadConsole>()));
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
