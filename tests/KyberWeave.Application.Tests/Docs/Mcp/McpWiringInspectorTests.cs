@@ -708,6 +708,22 @@ public sealed class McpWiringInspectorTests
         Assert.Equal(before, TreeState());
     }
 
+    /// <summary>
+    /// The tree snapshot behind <see cref="TheCheckWritesNothingToTheTree"/> has to record directories as well as
+    /// files, or a check that creates an empty directory before failing looks untouched: nothing inside it changed,
+    /// because nothing inside it exists.
+    /// </summary>
+    [Fact]
+    public void TheTreeSnapshotRecordsAnEmptyDirectory()
+    {
+        _wiring.CreateDirectory(".factory");
+        string[] before = TreeState();
+
+        _wiring.CreateDirectory(".factory/empty");
+
+        Assert.NotEqual(before, TreeState());
+    }
+
     /// <summary>The <c>.zcode/</c> marker alone puts ZCode in play, as it does for Squad.</summary>
     [Fact]
     public void ZCodeInPlayByItsMarkerAloneReportsTheServerNotWired()
@@ -998,12 +1014,32 @@ public sealed class McpWiringInspectorTests
             _wiring.Paths,
             new FakeProcessEnvironment(currentDirectory: Path.Combine(_wiring.Files.Root, "elsewhere")));
 
-    /// <summary>Every file in the in-memory tree with its text, so a case can prove nothing was written.</summary>
-    private string[] TreeState() =>
-        [.. _wiring.Files
-            .EnumerateFiles(_wiring.Files.Root, "*", recursive: true)
-            .Order(StringComparer.Ordinal)
-            .Select(path => path + "|" + _wiring.Files.ReadAllText(path))];
+    /// <summary>
+    /// Every file in the in-memory tree with its text, and every directory, so a case can prove nothing was
+    /// written — including an empty directory, which a file-only listing cannot see.
+    /// </summary>
+    private string[] TreeState()
+    {
+        List<string> state = [];
+        Walk(_wiring.Files.Root);
+        state.Sort(StringComparer.Ordinal);
+        return [.. state];
+
+        void Walk(string directory)
+        {
+            foreach (string file in _wiring.Files.EnumerateFiles(directory, "*", recursive: false))
+                state.Add($"file {Relative(file)}|{_wiring.Files.ReadAllText(file)}");
+
+            foreach (string child in _wiring.Files.EnumerateDirectories(directory))
+            {
+                state.Add($"dir {Relative(child)}");
+                Walk(child);
+            }
+        }
+
+        string Relative(string path) =>
+            Path.GetRelativePath(_wiring.Files.Root, path).Replace('\\', '/');
+    }
 
     private static RequiredMcpServer FirstPartyServer(
         string repoRootArgument = ".",
