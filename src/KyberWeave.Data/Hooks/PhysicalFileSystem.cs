@@ -53,8 +53,10 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
             using FileStream stream = new(path, FileMode.CreateNew, FileAccess.Write);
             return true;
         }
-        catch (IOException) when (File.Exists(path) || Directory.Exists(path))
+        catch (Exception exception) when (
+            (exception is IOException or UnauthorizedAccessException) && (File.Exists(path) || Directory.Exists(path)))
         {
+            // Windows reports a directory in the way as an access failure, not as an existing file.
             return false;
         }
     }

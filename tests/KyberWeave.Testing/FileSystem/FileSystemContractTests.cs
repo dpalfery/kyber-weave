@@ -414,6 +414,17 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void TryCreateNewFileReportsALostRaceToADirectoryWithoutThrowing()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string directory = At(root, "occupied");
+        files.CreateDirectory(directory);
+
+        Assert.False(files.TryCreateNewFile(directory));
+        Assert.True(files.DirectoryExists(directory));
+    }
+
+    [Fact]
     public void TryCreateNewFileReportsALostRaceWithoutThrowing()
     {
         IWritableFileSystem files = Starting(out string root);
