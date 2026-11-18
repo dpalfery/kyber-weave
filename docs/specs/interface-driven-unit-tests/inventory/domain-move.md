@@ -20,9 +20,11 @@ bags, value objects, enums, options, constants) and all logic moves to `KyberWea
 
 ## Bottom line
 
-- **445 `.cs` files**: **148** stay (data), **285** hold logic and move,
-  **12** hold nothing but interface declarations and move to `Contracts`.
-  322 logic types are declared in those 285 files.
+- **445 `.cs` files**: **155** stay (data), **285** hold logic and move,
+  **5** hold nothing but interface declarations and move to `Contracts`.
+  322 logic types are declared in those 285 files. 7 of the 155 data files also declare
+  an interface: the records stay and only the interface is lifted to `Contracts`, so those files are
+  never moved whole.
 - **Namespaces do not change.** Domain declares its types under `KyberWeave.Core` (350 files),
   `KyberWeave.Domain` (48), `KyberWeave.Arbiter` (29), `KyberWeave.Cli` (17) and `KyberWeave.Mcp` (1),
   and `Application` already carries files in those namespaces (25 in `KyberWeave.Application.Review`,
@@ -46,14 +48,15 @@ The rule the scan implements:
 - **data (stays)** — every type in the file has only properties, fields, constructors (including a
   constructor's validation and assignment of its own values), equality, `ToString`, deconstruction,
   comparison of itself, constants, and factory or `With*` copy helpers that only build another
-  instance of the same type. A type with no body (`record X(...);`) is data.
+  instance of the same type. A type with no body (`record X(...);`) is data. A data file may also
+  declare an interface: only the interface leaves, for `Contracts`.
 - **logic (moves to `Application`)** — any other method: a parser, renderer, validator, resolver,
   service, or a helper computing over other values. A factory that does more than construct, a
   `With*` helper that is not a copy, and every method named `Parse`, `Load`, `Render`, `Resolve`,
   `Validate`, `Find` or `Is*` is logic.
-- **interface (moves to `Contracts`)** — a file whose only declarations are `interface` types. It
-  declares no logic, but D7's list of what Domain keeps does not include interfaces, and `Contracts`
-  already references `Domain` for the records those interfaces name.
+- **interface-only (the whole file moves to `Contracts`)** — every type it declares is an
+  `interface`. It declares no logic, but D7's list of what Domain keeps does not include interfaces,
+  and `Contracts` already references `Domain` for the records those interfaces name.
 - The scan is a C#-shaped parser, not Roslyn: it strips comments and string literals, finds every type
   declaration with its body, then classifies each top-level member by its declaration header. It was
   compared against the compiler's own view by counting declarations: 968 types across 445 files.
@@ -94,17 +97,16 @@ data; a tuple return type or tuple-typed field must not be read as a method; `No
 
 ## Part 1: every file, by folder
 
-Counts are files, then the logic types declared in them. "Interface" files hold declarations only.
+Counts are files, then the logic types declared in them. "Interface-only" files hold declarations only.
 
-
-| folder | files | data | logic | interface | logic types |
+| folder | files | data | logic | interface-only | logic types |
 |---|---|---|---|---|---|
-| Arbiter | 102 | 24 | 73 | 5 | 85 |
-| Squad | 77 | 20 | 54 | 3 | 69 |
-| Docs | 72 | 29 | 41 | 2 | 45 |
+| Arbiter | 102 | 27 | 73 | 2 | 85 |
+| Squad | 77 | 22 | 54 | 1 | 69 |
+| Docs | 72 | 30 | 41 | 1 | 45 |
 | Review | 50 | 14 | 36 | 0 | 42 |
 | Configuration | 37 | 14 | 23 | 0 | 23 |
-| Skills | 18 | 6 | 11 | 1 | 11 |
+| Skills | 18 | 7 | 11 | 0 | 11 |
 | Hooks | 17 | 10 | 7 | 0 | 7 |
 | StatusLine | 16 | 9 | 7 | 0 | 7 |
 | Doctor | 15 | 9 | 6 | 0 | 6 |
@@ -115,33 +117,33 @@ Counts are files, then the logic types declared in them. "Interface" files hold 
 | Security | 3 | 1 | 2 | 0 | 2 |
 | CodeGraph | 2 | 2 | 0 | 0 | 0 |
 | FileSystem | 1 | 0 | 1 | 0 | 1 |
-| total | 445 | 148 | 285 | 12 | 322 |
+| total | 445 | 155 | 285 | 5 | 322 |
 
 ### Arbiter
 
 **Logic: 73 files, 85 types.** `AntigravityHookAdapter`, `ArbiterAnnotationNote`, `ArbiterAnswerText`, `ArbiterCliText`, `ArbiterConfigLoader`, `ArbiterDecisionQueries`, `ArbiterEscalationEnvelope`, `ArbiterFactSet`, `ArbiterFailureNotices`, `ArbiterFindingNotices`, `ArbiterGlobalHookPaths`, `ArbiterHookTimeout`, `ArbiterJson`, `ArbiterKeyResolver`, `ArbiterLedgerQueries`, `ArbiterModelTargets`, `ArbiterPathRule`, `ArbiterProvenance`, `ArbiterRecordId`, `ArbiterRule`, `ArbiterRuleScopes`, `ArbiterRunScope`, `ArbiterSkipNote`, `ArbiterSquadCatalog`, `ArbiterTriggerCatalog`, `ArbiterTriggerFamilies`, `ArbiterUserSettings`, `ArbiterUtcTimestampConverter`, `ArbiterVerifiedNote`, `ArchitectShellGuard`, `CallerResolver`, `ClaudeHookAdapter`, `CodexHookAdapter`, `CommandHookAdapters`, `CommentSummaryTable`, `CommentSyntax`, `ConductorGuardRules`, `CopilotHookAdapter`, `CursorHookAdapter`, `DevinHookAdapter`, `DispatchHeaders`, `DispatchPromptInsertion`, `DocumentSectionIndex`, `FactoryHookAdapter`, `FactoryTranscript`, `FailureFacts`, `GitDiffParser`, `GovernedPathsFacts`, `HarnessAdapterRegistry`, `HeaderBlock`, `HookFastPath`, `HookSnapshotDocument`, `LensInstructions`, `ModelTargetResolver`, `ModelTargetingRules`, `ModelTokenAliases`, `NoRedEvidence`, `NoneProvider`, `PlanDocument`, `PlanDocumentParser`, `PlanReadInstruction`, `PluginEnvelope`, `PluginHookAdapter`, `PluginHookAdapters`, `ProviderFailures`, `ReadGuard`, `RefutationOutcome`, `RefuteFinding`, `ReturnMarkerParser`, `ReturnedFinding`, `RuleEngine`, `RuleOperand`, `RulePredicate`, `RuleValidator`, `RunWriterProfiles`, `SecondaryTriggers`, `SectionSelector`, `StateBudget`, `SubstituteDigests`, `SystemOneContracts`, `TextExcerpts`, `TriggerClassifier`, `UnavailableDecisionEngine`, `Window`, `WorkerGuardRules`
 
-**Data, stays (24 files):** `ArbiterConfig.cs`, `ArbiterEvaluationResult.cs`, `ArbiterEvaluatorOptions.cs`, `ArbiterOutcome.cs`, `ArbiterRunStartRemedy.cs`, `ArbiterTextLimits.cs`, `CommentTriageTypes.cs`, `Credentials/KeychainUnavailableException.cs`, `Credentials/SecretServiceUnavailableException.cs`, `Facts/ArbiterDecisionRecord.cs`, `Facts/ArbiterEvent.cs`, `Facts/ArbiterLogRead.cs`, `Facts/ArbiterModelBlock.cs`, `Facts/ArbiterModelTargetRecords.cs`, `Facts/FileExcerpt.cs`, `Facts/GitRecords.cs`, `HarnessGatingReport.cs`, `Hooks/ArbiterServeContext.cs`, `Hooks/ArbiterServeToken.cs`, `Hooks/DispatchClaimOwners.cs`, `Hooks/HostConfigLoadResult.cs`, `ModelTargets/ArbiterSemanticProfiles.cs`, `Sections/DocumentSection.cs`, `Stores/ArbiterStoreTypes.cs`
+**Data, stays (27 files):** `ArbiterConfig.cs`, `ArbiterEvaluationResult.cs`, `ArbiterEvaluatorOptions.cs`, `ArbiterOutcome.cs`, `ArbiterRunStartRemedy.cs`, `ArbiterTextLimits.cs`, `CommentTriageTypes.cs`, `Credentials/KeychainUnavailableException.cs`, `Credentials/SecretServiceUnavailableException.cs`, `Facts/ArbiterDecisionRecord.cs`, `Facts/ArbiterEvent.cs`, `Facts/ArbiterLogRead.cs`, `Facts/ArbiterModelBlock.cs`, `Facts/ArbiterModelTargetRecords.cs`, `Facts/FileExcerpt.cs`, `Facts/GitRecords.cs`, `HarnessGatingReport.cs`, `Hooks/ArbiterServeContext.cs`, `Hooks/ArbiterServeToken.cs`, `Hooks/BackgroundDispatch.cs` (interface `IBackgroundDispatchEngine` to lift), `Hooks/DispatchClaimOwners.cs`, `Hooks/HostConfigLoadResult.cs`, `Hooks/IHarnessHookAdapter.cs` (interface `IHookDecisionEngine, IHarnessHookAdapter` to lift), `ModelTargets/ArbiterSemanticProfiles.cs`, `Providers/IArbiterProvider.cs` (interface `IArbiterProvider` to lift), `Sections/DocumentSection.cs`, `Stores/ArbiterStoreTypes.cs`
 
-**Interface declarations, move to `Contracts` (5 files):** `Credentials/ICredentialStore.cs`, `Hooks/BackgroundDispatch.cs`, `Hooks/IContextualHookDecisionEngine.cs`, `Hooks/IHarnessHookAdapter.cs`, `Providers/IArbiterProvider.cs`
+**Interface-only, the whole file moves to `Contracts` (2 files):** `Credentials/ICredentialStore.cs`, `Hooks/IContextualHookDecisionEngine.cs`
 
 
 ### Squad
 
 **Logic: 54 files, 69 types.** `AntigravityRenderer`, `ArbiterHookWiring`, `ArbiterModelTargetsFile`, `ArbiterPluginShim`, `BriefAssembler`, `BriefCondition`, `BriefFacts`, `BriefFormatter`, `BriefMap`, `CapabilityDegradations`, `ClaudeRenderer`, `ClaudeToolsFlowSequenceConverter`, `CodexRenderer`, `CommandCodeRenderer`, `CommandCodeYamlFlowSequenceConverter`, `CopilotAgentsFlowSequenceConverter`, `CopilotRenderer`, `CopilotToolCatalog`, `CopilotToolsFlowSequenceConverter`, `CursorRenderer`, `DevinRenderer`, `FactoryRenderer`, `FactoryYamlFlowSequenceConverter`, `KiloRenderer`, `MarkdownSections`, `McpPlan`, `MemoizedSquadGlobalRoots`, `OpenCodeRenderer`, `PiExtensionsFlowSequenceConverter`, `PiRenderer`, `SquadAgentResourceDiscoveryGuard`, `SquadCollectionExtensions`, `SquadDeploymentPlan`, `SquadGlobalRoots`, `SquadHarnessLowering`, `SquadHarnessRenderContext`, `SquadHarnessRenderer`, `SquadHarnessSpec`, `SquadHookJsonBlock`, `SquadInstanceCatalog`, `SquadInstanceRootResolver`, `SquadMarkdownDocument`, `SquadModelDiff`, `SquadModelPreset`, `SquadModelResolution`, `SquadOperatorChannel`, `SquadPathPolicy`, `SquadPhysicalRootIdentity`, `SquadReferenceLocator`, `SquadRenderRequest`, `SquadRenderSource`, `SquadResourceLinkRewriter`, `SquadResourceProjection`, `SquadResponseGuidanceSource`, `SquadResponsePreferencesInjector`, `SquadRetiredSkills`, `SquadSharedIdentityProjection`, `SquadSkillOutputPaths`, `SquadSourceValidationException`, `SquadSourceValidator`, `SquadTargetCatalog`, `SquadToolMap`, `SquadWorkerBaselineInjector`, `SquadYamlEmitter`, `WarpRenderer`, `ZCodeRenderer`
 
-**Data, stays (20 files):** `Briefs/BriefModels.cs`, `Briefs/SquadBriefRequest.cs`, `Deployment/DevinImportOverlapReport.cs`, `Deployment/FactoryHooksShadowingModels.cs`, `Deployment/SquadDeploymentExceptions.cs`, `Deployment/SquadShippedGuidanceUnavailableException.cs`, `Deployment/SquadSkillShadowRecords.cs`, `Deployment/SquadTargetResolutionModels.cs`, `Deployment/ZCodeMcpConfigurationReport.cs`, `Instances/SquadInstanceEnsureResult.cs`, `Instances/SquadInstanceLinkSyncResult.cs`, `Instances/SquadLinkException.cs`, `Instances/SquadLinkRecord.cs`, `Model/SquadSource.cs`, `Packaging/SquadPackModels.cs`, `Presets/SquadCanonicalProfiles.cs`, `Presets/SquadModelPresetSelection.cs`, `Release/SquadReleaseModels.cs`, `Release/ToolProbeResult.cs`, `Rendering/SquadOperatorChannelOverlay.cs`
+**Data, stays (22 files):** `Briefs/BriefModels.cs`, `Briefs/SquadBriefRequest.cs`, `Deployment/DevinImportOverlapReport.cs`, `Deployment/FactoryHooksShadowingModels.cs`, `Deployment/SquadDeploymentExceptions.cs`, `Deployment/SquadDeploymentModels.cs` (interface `ISquadUserPaths` to lift), `Deployment/SquadShippedGuidanceUnavailableException.cs`, `Deployment/SquadSkillShadowRecords.cs`, `Deployment/SquadTargetResolutionModels.cs`, `Deployment/SquadTransactionObservers.cs` (interface `ISquadTransactionObserver, ISquadTransactionCheckpointObserver` to lift), `Deployment/ZCodeMcpConfigurationReport.cs`, `Instances/SquadInstanceEnsureResult.cs`, `Instances/SquadInstanceLinkSyncResult.cs`, `Instances/SquadLinkException.cs`, `Instances/SquadLinkRecord.cs`, `Model/SquadSource.cs`, `Packaging/SquadPackModels.cs`, `Presets/SquadCanonicalProfiles.cs`, `Presets/SquadModelPresetSelection.cs`, `Release/SquadReleaseModels.cs`, `Release/ToolProbeResult.cs`, `Rendering/SquadOperatorChannelOverlay.cs`
 
-**Interface declarations, move to `Contracts` (3 files):** `Deployment/IFileSystemPathSemantics.cs`, `Deployment/SquadDeploymentModels.cs`, `Deployment/SquadTransactionObservers.cs`
+**Interface-only, the whole file moves to `Contracts` (1 file):** `Deployment/IFileSystemPathSemantics.cs`
 
 
 ### Docs
 
 **Logic: 41 files, 45 types.** `AnalysisCandidateId`, `AnalysisGlossary`, `ClaimExtractor`, `ConfigRegMarkdown`, `ContainerScan`, `CorpusProvenance`, `DocGraphProjection`, `DocSpecValidator`, `DocsScaffoldTemplates`, `DocumentCorpus`, `DocumentMarkdown`, `DocumentModel`, `DocumentSectionGraph`, `DocumentSectionTable`, `DocumentSet`, `EmbeddingCandidateBuilder`, `EmbeddingUsage`, `GhJson`, `HarnessMcpCatalog`, `HarnessMcpEntry`, `HostConfigLines`, `HostConfigYaml`, `IgnoreMarkupReader`, `IndexSectionCatalog`, `InventoryReachability`, `JsonServerSplice`, `KyberStandardsTemplates`, `LexicalSimilarity`, `McpConfigurationLink`, `McpDeclarationBlockWriter`, `McpRepositoryPath`, `McpWiringReceipt`, `PacketSelfContainment`, `PlanInventoryValidator`, `PlanPacketContext`, `PlanPacketInliner`, `PlanTaskFileFormat`, `PlanTaskFileRules`, `PlanTaskPacket`, `RunEvidence`, `ScaffoldValues`, `SectionFrontmatterParser`, `TaskFileCommand`, `TodoInventoryValidator`, `TomlTableScanner`
 
-**Data, stays (29 files):** `Analysis/Candidates/CandidateModels.cs`, `Analysis/Claims/Claim.cs`, `Analysis/Claims/ClaimExtractionResult.cs`, `Analysis/DocumentationAnalysisRuleIds.cs`, `Analysis/Glossary/GlossaryModels.cs`, `Analysis/Persistence/PersistenceModels.cs`, `Analysis/Review/ReviewModels.cs`, `Closeout/PlanLifecycleOutcomes.cs`, `Closeout/PlanPathResolution.cs`, `Delivery/DeliveryRecords.cs`, `Delivery/PullRequestContent.cs`, `Export/DocGraphExportResult.cs`, `Graph/DocGraphContribution.cs`, `Graph/DocGraphEdge.cs`, `Graph/DocGraphNode.cs`, `Mcp/McpServerRenameModels.cs`, `Mcp/McpWiringFix.cs`, `Mcp/McpWiringModels.cs`, `Mcp/McpWiringRepairModels.cs`, `Model/DocType.cs`, `Parsing/ArchivedEntryRefusalException.cs`, `Scaffolding/ScaffoldModels.cs`, `Search/CodeJoin.cs`, `Search/DocumentExcerpt.cs`, `Search/DocumentHit.cs`, `Search/ExploreAnswer.cs`, `Validation/PlanTaskFile.cs`, `Validation/PlanTaskFileOutcome.cs`, `Validation/PlanTaskTargetMatch.cs`
+**Data, stays (30 files):** `Analysis/Candidates/CandidateModels.cs`, `Analysis/Claims/Claim.cs`, `Analysis/Claims/ClaimExtractionResult.cs`, `Analysis/DocumentationAnalysisRuleIds.cs`, `Analysis/Glossary/GlossaryModels.cs`, `Analysis/Persistence/PersistenceModels.cs`, `Analysis/Review/ReviewModels.cs`, `Closeout/PlanLifecycleOutcomes.cs`, `Closeout/PlanPathResolution.cs`, `Delivery/DeliveryRecords.cs`, `Delivery/PullRequestContent.cs`, `Export/DocGraphExportResult.cs`, `Graph/DocGraphContribution.cs`, `Graph/DocGraphEdge.cs`, `Graph/DocGraphNode.cs`, `Mcp/McpServerRenameModels.cs`, `Mcp/McpWiringFix.cs`, `Mcp/McpWiringModels.cs`, `Mcp/McpWiringRepairModels.cs`, `Model/DocType.cs`, `Parsing/ArchivedEntryRefusalException.cs`, `Scaffolding/ScaffoldModels.cs`, `Search/CodeJoin.cs`, `Search/DocumentExcerpt.cs`, `Search/DocumentHit.cs`, `Search/ExploreAnswer.cs`, `Validation/PlanTaskAgentPicker.cs` (interface `IPlanTaskAgentPicker` to lift), `Validation/PlanTaskFile.cs`, `Validation/PlanTaskFileOutcome.cs`, `Validation/PlanTaskTargetMatch.cs`
 
-**Interface declarations, move to `Contracts` (2 files):** `IDocsEngineConfig.cs`, `Validation/PlanTaskAgentPicker.cs`
+**Interface-only, the whole file moves to `Contracts` (1 file):** `IDocsEngineConfig.cs`
 
 
 ### Review
@@ -162,9 +164,7 @@ Counts are files, then the logic types declared in them. "Interface" files hold 
 
 **Logic: 11 files, 11 types.** `DescriptionScorer`, `FailOnPolicy`, `LexicalRoutingStrategy`, `RoutingEvaluator`, `RoutingLinter`, `SkillCatalogRow`, `SkillParser`, `SkillReviewExchange`, `SkillScaffold`, `SkillScanner`, `SpecValidator`
 
-**Data, stays (6 files):** `Model/Skill.cs`, `Model/SkillFrontmatter.cs`, `Model/SkillSet.cs`, `Parsing/SkillLoadResult.cs`, `Parsing/SkillParseException.cs`, `Review/SkillReviewModels.cs`
-
-**Interface declarations, move to `Contracts` (1 file):** `Routing/IRoutingStrategy.cs`
+**Data, stays (7 files):** `Model/Skill.cs`, `Model/SkillFrontmatter.cs`, `Model/SkillSet.cs`, `Parsing/SkillLoadResult.cs`, `Parsing/SkillParseException.cs`, `Review/SkillReviewModels.cs`, `Routing/IRoutingStrategy.cs` (interface `IRoutingStrategy` to lift)
 
 
 ### Hooks
@@ -194,7 +194,7 @@ Counts are files, then the logic types declared in them. "Interface" files hold 
 
 **Data, stays (4 files):** `Model/AgentModel.cs`, `Model/HarnessCapabilityProfile.cs`, `Model/HarnessKind.cs`, `Parsing/AgentLoadResult.cs`
 
-**Interface declarations, move to `Contracts` (1 file):** `Parsing/IAgentParser.cs`
+**Interface-only, the whole file moves to `Contracts` (1 file):** `Parsing/IAgentParser.cs`
 
 
 ### RunStart
@@ -231,7 +231,6 @@ Counts are files, then the logic types declared in them. "Interface" files hold 
 ### FileSystem
 
 **Logic: 1 file, 1 type.** `DocsRootPath`
-
 
 ## Part 2: every caller of Domain logic outside Application
 
