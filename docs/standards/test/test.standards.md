@@ -24,11 +24,17 @@ would otherwise have to re-argue in review.
 
 ### Stack
 
-**xUnit**, split into three projects:
+**xUnit**, split into these projects:
 
 - `tests/KyberWeave.Tests` — the unit suite. The full run must finish in 120 seconds or less
   ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)), and
   the speed rules below are how a test keeps it there.
+- One unit test project per product project that holds logic, named `<Project>.Tests`:
+  `KyberWeave.Application.Tests`, `Hooks.Tests`, `Kernel.Tests`, `Mcp.Tests`, `Arbiter.Tests`,
+  `Cli.Tests` and `Data.Tests`. A test sits in the project of the class it tests, runs in
+  memory, and uses the helpers in `tests/KyberWeave.Testing`. `Domain` holds data only and
+  `Contracts` holds interfaces, so neither has one. `tests/KyberWeave.Tests` keeps the classes
+  not yet moved; they move project by project.
 - `tests/KyberWeave.Integration.Tests` — the safety net: a test that performs a real Squad
   deployment, starts a real program, or needs a file system beyond its own scratch folder.
   It runs in CI and the review council, not in the unit time budget.

@@ -100,6 +100,10 @@ What keeps the run there is written down, in [the test standard's speed rules](d
 read them before you write a test. Do not add a guard script or a timing check for them: the rules are guidance an
 author reads, and the classes themselves stay performant.
 
+**Unit tests live in one project per product project**: `tests/KyberWeave.<Project>.Tests` for Application, Hooks, Kernel,
+Mcp, Arbiter, Cli and Data (see [the test standard](docs/standards/test/test.standards.md#stack)); classes not yet moved
+are still in `tests/KyberWeave.Tests`.
+
 **Integration tests live in `tests/KyberWeave.Integration.Tests`.** A test that performs a real Squad
 deployment, starts a real program, or needs a real file system beyond its own small scratch folder
 belongs there. That project is the safety net: CI runs it on every pull request as its own job, and a
