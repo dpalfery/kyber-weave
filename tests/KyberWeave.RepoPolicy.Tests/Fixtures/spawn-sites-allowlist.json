@@ -1239,15 +1239,15 @@
     },
     {
       "file": "src/KyberWeave.Data/Hooks/KernelProcessRunner.cs",
-      "text": "ProcessStartInfo startInfo = new(argv[0])",
+      "text": "ProcessStartInfo startInfo = new(request.Program)",
       "count": 1,
       "bound": "Built only for the ProcessRunner.Run call below, never started on its own; the run is bounded by the hook's remaining time budget (rule timeout capped by it), output is capped at 4 MiB, and cancellation kills the process tree."
     },
     {
       "file": "src/KyberWeave.Data/Hooks/KernelProcessRunner.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout, MaxOutputBytes, cancellationToken);",
+      "text": "ProcessResult result = ProcessRunner.Run(",
       "count": 1,
-      "bound": "ProcessRunner timeout is the rule timeout capped by the hook's remaining budget; stdout and stderr are capped at 4 MiB (MaxOutputBytes); the cancellation token kills the child process tree on expiry or cancel."
+      "bound": "ProcessRunner timeout is the request timeout capped by the hook's remaining budget; when MaxOutputBytes is set each stream is capped and the tree is killed; the cancellation token kills the child process tree on expiry or cancel."
     },
     {
       "file": "src/KyberWeave.Data/RunStart/ProcessGitCommandRunner.cs",
@@ -1272,6 +1272,18 @@
       "text": "ProcessResult result = ProcessRunner.Run(startInfo, Requests, TimeSpan.FromSeconds(60));",
       "count": 1,
       "bound": "ProcessRunner.Run with a 60 s timeout kills the child tree on expiry. The child is the docs MCP assembly in a temporary fixture repository with --no-codegraph-refresh, fed the fixed request list in the test, so it exits once that input ends."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Processes/ProcessRunnerRoleViewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"probe\") { WorkingDirectory = \"work\" };",
+      "count": 1,
+      "bound": "Builds only; the scripted fake starts nothing. It proves the IProcessExecutor view translates the start info onto the seam."
+    },
+    {
+      "file": "tests/KyberWeave.Tests/Processes/ProcessRunnerRoleViewTests.cs",
+      "text": "ProcessStartInfo startInfo = new(\"probe\");",
+      "count": 1,
+      "bound": "Builds only; the scripted fake starts nothing. It proves the IBoundedProcessExecutor view passes its timeout onto the seam."
     }
   ]
 }

@@ -29,6 +29,13 @@
     <PackageReference Include="xunit.v3.extensibility.core" Version="4.0.3" />
   </ItemGroup>
 
+  <!-- A nested project, so its sources must not also compile into this library. -->
+  <ItemGroup>
+    <Compile Remove="ProcessProbe/**" />
+    <None Remove="ProcessProbe/**" />
+    <ProjectReference Include="ProcessProbe\KyberWeave.Testing.ProcessProbe.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\..\src\KyberWeave.Arbiter\KyberWeave.Arbiter.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Cli\KyberWeave.Cli.csproj" />

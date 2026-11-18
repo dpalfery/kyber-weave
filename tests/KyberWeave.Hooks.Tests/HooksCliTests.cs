@@ -160,7 +160,14 @@ public sealed class HooksCliTests : IDisposable
 
     private sealed class StubRunner(ProcessRunResult result) : IProcessRunner
     {
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(result);
+
         public Task<ProcessRunResult> RunAsync(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>
             Task.FromResult(result);
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 }

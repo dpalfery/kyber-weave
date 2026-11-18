@@ -7,9 +7,8 @@ namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 ///     Injectable boundary over the repository's deadlock-safe process runner.
 /// </summary>
 /// <remarks>
-///     Declared in Core rather than the CLI so the repository doctor, which lives in Core, can take the same
-///     seam the CLI fakes use. The namespace is kept so existing references compile unchanged; the production
-///     implementation, <c>ProcessExecutor</c>, stays in the CLI.
+///     One role view over the process seam. The namespace is kept so existing references compile unchanged while
+///     the callers move to <see cref="KyberWeave.Contracts.Repositories.IProcessRunner"/>.
 /// </remarks>
 public interface IProcessExecutor
 {
