@@ -2,6 +2,8 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -12,16 +14,29 @@ namespace KyberWeave.Tests;
 /// points within it, ensuring the stamp fingerprints only the actual documentation tree and
 /// not content accessible through links.
 /// </summary>
-public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
+public sealed class DocumentIndexHostSymlinkContainmentTests
 {
-    private readonly TempDirectory _root = new();
-    private readonly TempDirectory _outside = new();
+    private readonly SettableClock _clock = new();
+    private readonly InMemoryFileSystem _files;
+    private readonly string _root;
+    private readonly string _outside;
 
-    /// <summary>Deletes the repository and outside temp directories.</summary>
-    public void Dispose()
+    public DocumentIndexHostSymlinkContainmentTests()
     {
-        _root.Dispose();
-        _outside.Dispose();
+        _files = new InMemoryFileSystem(_clock);
+        _root = Path.Combine(_files.Root, "repo");
+        _outside = Path.Combine(_files.Root, "outside-root");
+        _files.CreateDirectory(_root);
+        _files.CreateDirectory(_outside);
+    }
+
+    // The in-memory file system stamps a write with its clock, so a file's modification time is set by moving the
+    // clock to it and rewriting the file.
+    private void SetLastWrite(string path, DateTime utc)
+    {
+        string content = _files.ReadAllText(path);
+        _clock.Now = new DateTimeOffset(utc, TimeSpan.Zero);
+        _files.WriteAllText(path, content);
     }
 
     /// <summary>
@@ -33,27 +48,27 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
     public void DirectorySymlinkToOutsideRootDoesNotAffectStamp()
     {
         // Arrange: Set up repo root structure with a real markdown file inside
-        string docsDir = Path.Combine(_root.Path, "docs");
-        Directory.CreateDirectory(docsDir);
+        string docsDir = Path.Combine(_root, "docs");
+        _files.CreateDirectory(docsDir);
         string insideFile = Path.Combine(docsDir, "inside.md");
-        File.WriteAllText(insideFile, "# Inside");
+        _files.WriteAllText(insideFile, "# Inside");
         var fixedTime = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-        File.SetLastWriteTimeUtc(insideFile, fixedTime);
+        SetLastWrite(insideFile, fixedTime);
 
         // Create a directory symlink in the docs root pointing to the outside directory
         string symlinkDir = Path.Combine(docsDir, "linked-outside");
-        Directory.CreateSymbolicLink(symlinkDir, _outside.Path);
+        _files.CreateDirectoryLink(symlinkDir, _outside);
 
         // Create a DocumentIndexHost pointing to this root
-        DocumentIndexHost host = CreateHost(_root.Path, ["docs"]);
+        DocumentIndexHost host = CreateHost(_root, ["docs"]);
 
         // Act: Compute the initial stamp
         long initialStamp = host.ComputeDocsStamp();
 
         // Now add a file to the outside directory (which is linked)
-        string outsideFile = Path.Combine(_outside.Path, "outside.md");
-        File.WriteAllText(outsideFile, "# Outside");
-        File.SetLastWriteTimeUtc(outsideFile, fixedTime.AddHours(1));
+        string outsideFile = Path.Combine(_outside, "outside.md");
+        _files.WriteAllText(outsideFile, "# Outside");
+        SetLastWrite(outsideFile, fixedTime.AddHours(1));
 
         // Compute stamp again — it should be unchanged because the symlink is not descended
         long stampAfterAddingOutsideFile = host.ComputeDocsStamp();
@@ -62,7 +77,7 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
         Assert.Equal(initialStamp, stampAfterAddingOutsideFile);
 
         // Act: Now remove the file from the outside directory
-        File.Delete(outsideFile);
+        _files.DeleteFile(outsideFile);
 
         // Compute stamp again
         long stampAfterRemovingOutsideFile = host.ComputeDocsStamp();
@@ -81,31 +96,31 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
     public void CatalogAsFileSymlinkToOutsideIsExcludedFromStamp()
     {
         // Arrange: Set up docs root with one real markdown file and pin its mtime
-        string docsDir = Path.Combine(_root.Path, "docs");
-        Directory.CreateDirectory(docsDir);
+        string docsDir = Path.Combine(_root, "docs");
+        _files.CreateDirectory(docsDir);
         string insideFile = Path.Combine(docsDir, "inside.md");
         var fixedTime = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-        File.WriteAllText(insideFile, "# Inside");
-        File.SetLastWriteTimeUtc(insideFile, fixedTime);
+        _files.WriteAllText(insideFile, "# Inside");
+        SetLastWrite(insideFile, fixedTime);
 
         // Step 1: Compute stamp WITHOUT any catalog file
-        DocumentIndexHost hostWithoutCatalog = CreateHost(_root.Path, ["docs"], "catalog.md");
+        DocumentIndexHost hostWithoutCatalog = CreateHost(_root, ["docs"], "catalog.md");
         long stampWithoutCatalog = hostWithoutCatalog.ComputeDocsStamp();
 
         // Step 2: Create a real file in the outside directory (will be the symlink target)
-        string outsideFile = Path.Combine(_outside.Path, "catalog.md");
-        File.WriteAllText(outsideFile, "# Catalog");
-        File.SetLastWriteTimeUtc(outsideFile, fixedTime);
+        string outsideFile = Path.Combine(_outside, "catalog.md");
+        _files.WriteAllText(outsideFile, "# Catalog");
+        SetLastWrite(outsideFile, fixedTime);
 
         // Create a symlink in the root pointing to the outside file as the catalog
-        string catalogSymlink = Path.Combine(_root.Path, "catalog.md");
-        File.CreateSymbolicLink(catalogSymlink, outsideFile);
+        string catalogSymlink = Path.Combine(_root, "catalog.md");
+        _files.CreateFileLink(catalogSymlink, outsideFile);
 
         // Compute stamp with the symlinked catalog; on HEAD (before T6), the symlink
         // is counted because File.Exists follows the link, making this differ from
         // stampWithoutCatalog. After T6's fix, the symlink is skipped and this equals
         // stampWithoutCatalog, passing the assertion.
-        DocumentIndexHost hostWithSymlink = CreateHost(_root.Path, ["docs"], "catalog.md");
+        DocumentIndexHost hostWithSymlink = CreateHost(_root, ["docs"], "catalog.md");
         long stampWithLinkedCatalog = hostWithSymlink.ComputeDocsStamp();
 
         // Assert: Symlink should contribute nothing (after T6 fix is applied).
@@ -114,13 +129,13 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
         Assert.Equal(stampWithoutCatalog, stampWithLinkedCatalog);
 
         // Step 3: Edit the outside file (content and mtime)
-        File.WriteAllText(outsideFile, "# Updated Catalog");
+        _files.WriteAllText(outsideFile, "# Updated Catalog");
         var laterTime = fixedTime.AddHours(1);
-        File.SetLastWriteTimeUtc(outsideFile, laterTime);
+        SetLastWrite(outsideFile, laterTime);
 
         // Recompute stamp; after T6, this should still equal stampWithoutCatalog
         // because the symlink is skipped entirely.
-        DocumentIndexHost hostAfterEdit = CreateHost(_root.Path, ["docs"], "catalog.md");
+        DocumentIndexHost hostAfterEdit = CreateHost(_root, ["docs"], "catalog.md");
         long stampAfterEdit = hostAfterEdit.ComputeDocsStamp();
 
         // Assert: Stamp should remain unchanged, equal to the baseline without catalog.
@@ -136,26 +151,26 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
     public void OrdinaryFileAddOrRemoveInsideRootDoesChangeStamp()
     {
         // Arrange: Set up repo root structure with one markdown file
-        string docsDir = Path.Combine(_root.Path, "docs");
-        Directory.CreateDirectory(docsDir);
+        string docsDir = Path.Combine(_root, "docs");
+        _files.CreateDirectory(docsDir);
         string file1 = Path.Combine(docsDir, "doc1.md");
-        File.WriteAllText(file1, "# Doc 1");
+        _files.WriteAllText(file1, "# Doc 1");
 
         // Set LastWriteTimeUtc to a specific time so we can control it
         var fixedTime = new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc);
-        File.SetLastWriteTimeUtc(file1, fixedTime);
+        SetLastWrite(file1, fixedTime);
 
         // Create a DocumentIndexHost pointing to this root
-        DocumentIndexHost host = CreateHost(_root.Path, ["docs"]);
+        DocumentIndexHost host = CreateHost(_root, ["docs"]);
 
         // Act: Compute the initial stamp
         long initialStamp = host.ComputeDocsStamp();
 
         // Now add a new file with a later timestamp
         string file2 = Path.Combine(docsDir, "doc2.md");
-        File.WriteAllText(file2, "# Doc 2");
+        _files.WriteAllText(file2, "# Doc 2");
         var laterTime = fixedTime.AddHours(1);
-        File.SetLastWriteTimeUtc(file2, laterTime);
+        SetLastWrite(file2, laterTime);
 
         // Compute stamp again
         long stampAfterAddingFile = host.ComputeDocsStamp();
@@ -164,7 +179,7 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
         Assert.NotEqual(initialStamp, stampAfterAddingFile);
 
         // Act: Now remove the newer file
-        File.Delete(file2);
+        _files.DeleteFile(file2);
 
         // Compute stamp again
         long stampAfterRemovingFile = host.ComputeDocsStamp();
@@ -183,20 +198,20 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
     [Fact]
     public void CatalogBeneathSymlinkedDirectoryIsExcludedFromStamp()
     {
-        string docsDir = Path.Combine(_root.Path, "docs");
-        Directory.CreateDirectory(docsDir);
+        string docsDir = Path.Combine(_root, "docs");
+        _files.CreateDirectory(docsDir);
         string insideFile = Path.Combine(docsDir, "inside.md");
-        File.WriteAllText(insideFile, "# Inside");
-        File.SetLastWriteTimeUtc(insideFile, new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc));
+        _files.WriteAllText(insideFile, "# Inside");
+        SetLastWrite(insideFile, new DateTime(2026, 1, 1, 12, 0, 0, DateTimeKind.Utc));
 
-        long stampWithoutCatalog = CreateHost(_root.Path, ["docs"], "docs/linked/catalog.md").ComputeDocsStamp();
+        long stampWithoutCatalog = CreateHost(_root, ["docs"], "docs/linked/catalog.md").ComputeDocsStamp();
 
-        string outsideCatalog = Path.Combine(_outside.Path, "catalog.md");
-        File.WriteAllText(outsideCatalog, "# Catalog");
-        File.SetLastWriteTimeUtc(outsideCatalog, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc));
-        Directory.CreateSymbolicLink(Path.Combine(docsDir, "linked"), _outside.Path);
+        string outsideCatalog = Path.Combine(_outside, "catalog.md");
+        _files.WriteAllText(outsideCatalog, "# Catalog");
+        SetLastWrite(outsideCatalog, new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc));
+        _files.CreateDirectoryLink(Path.Combine(docsDir, "linked"), _outside);
 
-        long stampWithLinkedCatalog = CreateHost(_root.Path, ["docs"], "docs/linked/catalog.md").ComputeDocsStamp();
+        long stampWithLinkedCatalog = CreateHost(_root, ["docs"], "docs/linked/catalog.md").ComputeDocsStamp();
 
         Assert.Equal(stampWithoutCatalog, stampWithLinkedCatalog);
     }
@@ -205,7 +220,7 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
     /// A host whose factories are inert: <see cref="DocumentIndexHost.ComputeDocsStamp()"/>
     /// reads the filesystem directly and never calls them.
     /// </summary>
-    private static DocumentIndexHost CreateHost(
+    private DocumentIndexHost CreateHost(
         string repoRoot,
         IReadOnlyList<string>? docsRelativeRoots = null,
         string? catalogRelativePath = null)
@@ -224,10 +239,17 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
             repoRoot,
             resolverFactory,
             documentSetFactory,
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+            new InMemoryRepositoryFileStore(_files),
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: repoRoot, isFileSystemCaseInsensitive: !_files.CaseSensitive),
             docsRelativeRoots,
             catalogRelativePath);
+    }
+
+    private sealed class SettableClock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = new(2026, 1, 1, 12, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => Now;
     }
 }

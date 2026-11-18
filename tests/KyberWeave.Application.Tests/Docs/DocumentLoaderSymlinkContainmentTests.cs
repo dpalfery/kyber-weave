@@ -1,6 +1,8 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -11,24 +13,34 @@ namespace KyberWeave.Tests;
 /// should never read files from the target, and the catalog path itself should be
 /// skipped if it resolves through a symlink.
 /// </summary>
-public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
+public sealed class DocumentLoaderSymlinkContainmentTests
 {
-    private readonly TempDirectory _repoRoot = new();
-    private readonly TempDirectory _outside = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly string _repoRoot;
+    private readonly string _outside;
 
-    /// <summary>Deletes the repository and outside temp directories.</summary>
-    public void Dispose()
+    public DocumentLoaderSymlinkContainmentTests()
     {
-        _repoRoot.Dispose();
-        _outside.Dispose();
+        _repoRoot = Path.Combine(_files.Root, "repo");
+        _outside = Path.Combine(_files.Root, "outside-root");
+        _files.CreateDirectory(_repoRoot);
+        _files.CreateDirectory(_outside);
     }
+
+    private DocumentLoader CreateLoader(OntologyConfig config) =>
+        new(
+            new InMemoryRepositoryFileStore(_files),
+            _repoRoot,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: _repoRoot, isFileSystemCaseInsensitive: !_files.CaseSensitive),
+            config);
 
     /// <summary>Writes <c>.kyber-weave/kyber-weave.yml</c> in the repository root.</summary>
     private void WriteConfig(string yaml)
     {
-        string configDir = Path.Combine(_repoRoot.Path, ".kyber-weave");
-        Directory.CreateDirectory(configDir);
-        File.WriteAllText(Path.Combine(configDir, "kyber-weave.yml"), yaml);
+        string configDir = Path.Combine(_repoRoot, ".kyber-weave");
+        _files.CreateDirectory(configDir);
+        _files.WriteAllText(Path.Combine(configDir, "kyber-weave.yml"), yaml);
     }
 
     /// <summary>
@@ -37,10 +49,10 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
     /// </summary>
     private void WriteDocument(string path, string content, string root = "docs")
     {
-        string fullPath = Path.Combine(root == "docs" ? _repoRoot.Path : _outside.Path, path);
+        string fullPath = Path.Combine(root == "docs" ? _repoRoot : _outside, path);
         string directory = Path.GetDirectoryName(fullPath)!;
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(fullPath, content);
+        _files.CreateDirectory(directory);
+        _files.WriteAllText(fullPath, content);
     }
 
     /// <summary>
@@ -81,12 +93,12 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
             """, root: "outside");
 
         // Create a symlink inside docs root pointing to the outside directory
-        string docsPath = Path.Combine(_repoRoot.Path, "docs");
+        string docsPath = Path.Combine(_repoRoot, "docs");
         string outsideLink = Path.Combine(docsPath, "symlinked-outside");
-        Directory.CreateSymbolicLink(outsideLink, _outside.Path);
+        _files.CreateDirectoryLink(outsideLink, _outside);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
+        DocumentLoader loader = CreateLoader(config);
 
         // Act
         DocumentSet result = loader.Load();
@@ -141,12 +153,12 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
             """, root: "outside");
 
         // Replace the catalog path with a file symlink to the outside catalog
-        string catalogPath = Path.Combine(_repoRoot.Path, "docs", "catalog.md");
-        string outsideCatalogPath = Path.Combine(_outside.Path, "outside", "catalog.md");
-        File.CreateSymbolicLink(catalogPath, outsideCatalogPath);
+        string catalogPath = Path.Combine(_repoRoot, "docs", "catalog.md");
+        string outsideCatalogPath = Path.Combine(_outside, "outside", "catalog.md");
+        _files.CreateFileLink(catalogPath, outsideCatalogPath);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
+        DocumentLoader loader = CreateLoader(config);
 
         // Act
         DocumentSet result = loader.Load();
@@ -221,7 +233,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
             """);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
+        DocumentLoader loader = CreateLoader(config);
 
         // Act
         DocumentSet result = loader.Load();
@@ -258,12 +270,12 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
             """);
 
         WriteDocument("catalog.md", OutsideCatalog, root: "outside");
-        Directory.CreateSymbolicLink(Path.Combine(_repoRoot.Path, "docs", "linked"), _outside.Path);
+        _files.CreateDirectoryLink(Path.Combine(_repoRoot, "docs", "linked"), _outside);
 
         OntologyConfig config = OntologyConfig.ProductDefaults
             .WithDocsRoot("docs")
             .Clone(catalogPath: "docs/linked/catalog.md");
-        DocumentSet result = RealDocumentLoader.Create(_repoRoot.Path, config).Load();
+        DocumentSet result = CreateLoader(config).Load();
 
         Assert.Single(result.Documents, doc => doc.Frontmatter.Id == "normal");
         Assert.DoesNotContain(result.Documents, doc => doc.Frontmatter.Id == "catalog");
@@ -279,10 +291,10 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
     public void CatalogInsideSymlinkedConfiguredRootIsLoaded()
     {
         WriteDocument("catalog.md", OutsideCatalog, root: "outside");
-        Directory.CreateSymbolicLink(Path.Combine(_repoRoot.Path, "docs"), _outside.Path);
+        _files.CreateDirectoryLink(Path.Combine(_repoRoot, "docs"), _outside);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentSet result = RealDocumentLoader.Create(_repoRoot.Path, config).Load();
+        DocumentSet result = CreateLoader(config).Load();
 
         Assert.Single(result.Documents, doc => doc.Frontmatter.Id == "catalog");
         Assert.Contains("OutsideComponent", result.Components);
@@ -308,12 +320,12 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
             # Evil
             """);
         WriteDocument("target.md", OutsideCatalog, root: "outside");
-        string linkPath = Path.Combine(_repoRoot.Path, "docs", "archive", "linked.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
-        File.CreateSymbolicLink(linkPath, Path.Combine(_outside.Path, "target.md"));
+        string linkPath = Path.Combine(_repoRoot, "docs", "archive", "linked.md");
+        _files.CreateDirectory(Path.GetDirectoryName(linkPath)!);
+        _files.CreateFileLink(linkPath, Path.Combine(_outside, "target.md"));
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
+        DocumentLoader loader = CreateLoader(config);
 
         ArchivedEntryRefusalException exception = Assert.Throws<ArchivedEntryRefusalException>(
             () => loader.LoadArchivedDocument("docs/archive/linked.md"));
@@ -328,7 +340,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
     public void LoadArchivedDocumentOutsideRepoRootIsRefused()
     {
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
+        DocumentLoader loader = CreateLoader(config);
 
         ArchivedEntryRefusalException exception = Assert.Throws<ArchivedEntryRefusalException>(
             () => loader.LoadArchivedDocument("../outside.md"));
