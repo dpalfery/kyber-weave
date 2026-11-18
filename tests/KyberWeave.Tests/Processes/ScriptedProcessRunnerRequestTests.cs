@@ -71,6 +71,15 @@ public sealed class ScriptedProcessRunnerRequestTests
         Assert.True(bounded.TimedOut);
     }
 
+    [Fact]
+    public async Task AnUnscriptedProgramFailsInsteadOfReportingSuccess()
+    {
+        ScriptedProcessRunner runner = new();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runner.RunAsync(new ProcessRunRequest { Program = "not-scripted" }, CancellationToken.None));
+    }
+
     private static Task<ProcessRunResult> Run(ScriptedProcessRunner runner, ProcessRunRequest request) =>
         runner.RunAsync(request, CancellationToken.None);
 
