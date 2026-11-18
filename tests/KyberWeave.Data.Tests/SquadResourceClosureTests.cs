@@ -1,13 +1,12 @@
 using KyberWeave.Testing.Squad;
 using System.Collections;
 using System.Reflection;
-using System.Text;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
-using Xunit.Sdk;
 
 namespace KyberWeave.Tests;
 
@@ -36,7 +35,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadAgentResourcesResolvesRecursiveMarkdownAndLeafContentInOrdinalOrder()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.WriteAgentBody(
             "[Start](references/start.md)\n" +
             "[Duplicate](references/start.md)\n" +
@@ -70,7 +69,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadSkillResourcesResolvesMarkdownAndLeafContentRelativeToSkillDirectory()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.WriteSkillBody("[Guide](references/guide.md)\n");
         fixture.Write(
             "skills/test-dev/references/guide.md",
@@ -89,7 +88,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadResourceClosureDeduplicatesRepeatedLinksAndSharedDescendants()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.WriteAgentBody(
             "[Alpha](references/alpha.md)\n" +
             "[Alpha again](references/alpha.md)\n" +
@@ -108,7 +107,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadRecursiveResourceWithMissingTargetReportsDeclaringResourceAndHint()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.WriteAgentBody("[Start](references/start.md)\n");
         fixture.Write("agents/references/start.md", "[Missing](missing.md)\n");
 
@@ -120,7 +119,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadResourceClosureWithActiveCycleReportsCycleAndSourceLocation()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.WriteAgentBody("[A](references/a.md)\n");
         fixture.Write("agents/references/a.md", "[B](b.md)\n");
         fixture.Write("agents/references/b.md", "[A](a.md)\n");
@@ -133,7 +132,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadResourceThatTraversesOutsideAgentDirectoryFailsBeforeReadingIt()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.Write("outside.md", "must not be read\n");
         fixture.WriteAgentBody("[Outside](../outside.md)\n");
 
@@ -146,25 +145,13 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadResourceSymlinkThatEscapesAgentDirectoryReportsResolvedEscape()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            throw SkipException.ForSkip("Symbolic links require elevated privileges on Windows.");
-        }
-
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
-        using TempDirectory outside = new TempDirectory();
-        string outsideResource = Path.Combine(outside.Path, "outside.md");
-        File.WriteAllText(outsideResource, "outside\n", new UTF8Encoding(false));
+        ResourceFixture fixture = ResourceFixture.CreateValid();
+        string outsideResource = Path.Combine(fixture.Files.Root, "outside-resources", "outside.md");
+        fixture.Files.CreateDirectory(Path.GetDirectoryName(outsideResource)!);
+        fixture.Files.WriteAllText(outsideResource, "outside\n");
         string linkedResource = fixture.AbsolutePath("agents/references/escape.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(linkedResource)!);
-        try
-        {
-            File.CreateSymbolicLink(linkedResource, outsideResource);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            throw SkipException.ForSkip("Creating symbolic links requires elevated privileges on this host.");
-        }
+        fixture.Files.CreateDirectory(Path.GetDirectoryName(linkedResource)!);
+        fixture.Files.CreateFileLink(linkedResource, outsideResource);
 
         fixture.WriteAgentBody("[Escape](references/escape.md)\n");
 
@@ -177,7 +164,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadLeafResourceThatIsNotValidUtf8ReportsResourceLocation()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.WriteAgentBody("[Leaf](references/bad.txt)\n");
         fixture.WriteBytes("agents/references/bad.txt", [0xc3, 0x28]);
 
@@ -190,7 +177,7 @@ public sealed class SquadResourceClosureTests
     [Fact]
     public void LoadResourcePathsWithPortableAliasesReportsCollision()
     {
-        using ResourceFixture fixture = ResourceFixture.CreateValid();
+        ResourceFixture fixture = ResourceFixture.CreateValid();
         fixture.WriteAgentBody(
             "[Canonical](references/guide.md)\n" +
             "[Trailing-dot alias](references/guide.md.)\n");
@@ -205,12 +192,12 @@ public sealed class SquadResourceClosureTests
 
     private static SquadAgent LoadAgent(ResourceFixture fixture) =>
         Assert.Single(
-            RealSquadServices.Load(fixture.Path).Agents,
+            fixture.Load().Agents,
             agent => agent.Name == "architect");
 
     private static SquadSkill LoadSkill(ResourceFixture fixture) =>
         Assert.Single(
-            RealSquadServices.Load(fixture.Path).Skills,
+            fixture.Load().Skills,
             skill => skill.Name == "test-dev");
 
     private static IReadOnlyList<ResourceSnapshot> ReadResources(object artifact)
@@ -240,7 +227,7 @@ public sealed class SquadResourceClosureTests
     private static Diagnostic AssertInvalid(ResourceFixture fixture, string expectedFragment)
     {
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => RealSquadServices.Load(fixture.Path));
+            () => fixture.Load());
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => item.Message.Contains(expectedFragment, StringComparison.OrdinalIgnoreCase) ||
@@ -254,15 +241,23 @@ public sealed class SquadResourceClosureTests
 
     private sealed record ResourceSnapshot(string RelativePath, string Content);
 
-    private sealed class ResourceFixture : IDisposable
+    private sealed class ResourceFixture
     {
-        private readonly TempDirectory _temp = new TempDirectory();
-
-        public string Path => _temp.Path;
+        private readonly InMemorySquadServices _services;
 
         private ResourceFixture()
         {
+            Files = new InMemoryFileSystem();
+            _services = new InMemorySquadServices(Files);
+            Path = System.IO.Path.Combine(Files.Root, "squad-source");
+            Files.CreateDirectory(Path);
         }
+
+        public InMemoryFileSystem Files { get; }
+
+        public string Path { get; }
+
+        public SquadSource Load() => _services.Load(Path);
 
         public static ResourceFixture CreateValid()
         {
@@ -423,17 +418,15 @@ public sealed class SquadResourceClosureTests
         public void Write(string relativePath, string content)
         {
             string path = AbsolutePath(relativePath);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, content, new UTF8Encoding(false));
+            Files.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            Files.WriteAllText(path, content);
         }
 
         public void WriteBytes(string relativePath, byte[] content)
         {
             string path = AbsolutePath(relativePath);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-            File.WriteAllBytes(path, content);
+            Files.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            Files.WriteAllBytes(path, content);
         }
-
-        public void Dispose() => _temp.Dispose();
     }
 }

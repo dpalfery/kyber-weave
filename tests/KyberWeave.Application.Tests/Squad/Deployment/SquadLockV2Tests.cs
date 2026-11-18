@@ -1,6 +1,5 @@
 using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -500,7 +499,7 @@ public sealed class SquadLockV2Tests
 
     private static SquadStateStore CreateStore()
     {
-        return RealSquadState.Store(new FakeSquadUserPaths(Path.GetTempPath()));
+        return new InMemorySquadState().Store;
     }
 
     private static SquadLock CreateLock(

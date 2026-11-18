@@ -1,7 +1,6 @@
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Host;
-using KyberWeave.Data.Paths;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -10,7 +9,7 @@ namespace KyberWeave.Tests;
 /// K3 RED contract for deterministic Squad target parsing and selection. The resolver is
 /// intentionally a pure decision service: callers decide how to render a chooser or exit.
 /// </summary>
-public sealed class SquadTargetResolutionTests : IDisposable
+public sealed class SquadTargetResolutionTests
 {
     private static readonly SquadTarget[] ThirteenTargets =
     [
@@ -29,7 +28,14 @@ public sealed class SquadTargetResolutionTests : IDisposable
         SquadTarget.CommandCode
     ];
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly string _root;
+
+    public SquadTargetResolutionTests()
+    {
+        _root = Path.Combine(_files.Root, "project");
+        _files.CreateDirectory(_root);
+    }
 
     public static TheoryData<string, bool, SquadTarget> PositiveMarkers => new()
     {
@@ -158,7 +164,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [Fact]
     public void InstallExplicitTargetsReplaceConfigurationAndMarkers()
     {
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".claude"));
+        _files.CreateDirectory(Path.Combine(_root, ".claude"));
 
         SquadTargetResolutionDecision decision = ResolveInstall(
             explicitTargets: ["codex"],
@@ -170,7 +176,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [Fact]
     public void InstallConfiguredTargetsReplaceMarkerDetectionWhenExplicitTargetsAreAbsent()
     {
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".claude"));
+        _files.CreateDirectory(Path.Combine(_root, ".claude"));
 
         SquadTargetResolutionDecision decision = ResolveInstall(configuredTargets: [SquadTarget.Cursor]);
 
@@ -180,8 +186,8 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [Fact]
     public void InstallStrongMarkersAreUsedWhenExplicitAndConfiguredTargetsAreAbsent()
     {
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".warp"));
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".codex"));
+        _files.CreateDirectory(Path.Combine(_root, ".warp"));
+        _files.CreateDirectory(Path.Combine(_root, ".codex"));
 
         SquadTargetResolutionDecision decision = ResolveInstall();
 
@@ -257,7 +263,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [Fact]
     public void InstallAntigravityHasNoFilesystemMarkerAndRequiresExplicitOrConfiguredSelection()
     {
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".agents"));
+        _files.CreateDirectory(Path.Combine(_root, ".agents"));
 
         SquadTargetResolutionDecision markerDecision = ResolveInstall(isInteractive: false);
         SquadTargetResolutionDecision explicitDecision = ResolveInstall(explicitTargets: ["antigravity"]);
@@ -293,10 +299,10 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [InlineData(SquadTargetOperation.Uninstall)]
     public void LifecycleOperationsUseReceiptAndNeverRedetect(SquadTargetOperation operation)
     {
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".codex"));
+        _files.CreateDirectory(Path.Combine(_root, ".codex"));
         SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
         {
-            RootPath = _temp.Path,
+            RootPath = _root,
             Operation = operation,
             ConfiguredTargets = [SquadTarget.Cursor],
             ReceiptTargets = [SquadTarget.Factory, SquadTarget.Warp],
@@ -321,10 +327,10 @@ public sealed class SquadTargetResolutionTests : IDisposable
     [Fact]
     public void UpdateExplicitTargetsOverrideReceiptTargets()
     {
-        Directory.CreateDirectory(Path.Combine(_temp.Path, ".cursor"));
+        _files.CreateDirectory(Path.Combine(_root, ".cursor"));
         SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
         {
-            RootPath = _temp.Path,
+            RootPath = _root,
             Operation = SquadTargetOperation.Update,
             ExplicitTargets = ["codex,claude"],
             ConfiguredTargets = [SquadTarget.Warp],
@@ -376,7 +382,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     {
         SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
         {
-            RootPath = _temp.Path,
+            RootPath = _root,
             Operation = operation,
             IsInteractive = false
         };
@@ -390,14 +396,12 @@ public sealed class SquadTargetResolutionTests : IDisposable
         Assert.Equal(expectedCommand, decision.RecoveryCommand);
     }
 
-    public void Dispose() => _temp.Dispose();
-
-    private static SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request)
-    {
-        PhysicalFileSystem files = new();
-        return new SquadTargetResolver(files, new PhysicalPathResolver(files), new ProcessEnvironment())
+    private SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request) =>
+        new SquadTargetResolver(
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(isFileSystemCaseInsensitive: !_files.CaseSensitive))
             .Resolve(request);
-    }
 
     private SquadTargetResolutionDecision ResolveInstall(
         IReadOnlyList<string>? explicitTargets = null,
@@ -408,7 +412,7 @@ public sealed class SquadTargetResolutionTests : IDisposable
     {
         SquadTargetResolutionRequest request = new SquadTargetResolutionRequest
         {
-            RootPath = _temp.Path,
+            RootPath = _root,
             Operation = SquadTargetOperation.Install,
             ExplicitTargets = explicitTargets ?? [],
             ConfiguredTargets = configuredTargets ?? [],
@@ -422,17 +426,17 @@ public sealed class SquadTargetResolutionTests : IDisposable
 
     private void CreateFixture(string relativePath, bool isDirectory)
     {
-        string path = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
+        string path = Path.Combine(_root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         if (isDirectory)
         {
-            Directory.CreateDirectory(path);
+            _files.CreateDirectory(path);
             return;
         }
 
         string? parent = Path.GetDirectoryName(path);
         if (parent is not null)
-            Directory.CreateDirectory(parent);
-        File.WriteAllText(path, "fixture");
+            _files.CreateDirectory(parent);
+        _files.WriteAllText(path, "fixture");
     }
 
     private static void AssertResolved(

@@ -1,4 +1,6 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -7,7 +9,14 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// operator's home file and otherwise falling back to the shipped default.
 /// </summary>
 /// <param name="files">Reads the user's guidance file.</param>
-public sealed class SquadResponseGuidanceReader(IFileSystem files) : ISquadResponseGuidanceStore
+/// <param name="writableFiles">The file system a deployer it creates writes through; the real disk when null.</param>
+/// <param name="semantics">The path rules a deployer it creates keeps the file inside the home root with; the real disk's when null.</param>
+/// <param name="ids">The identifier source a deployer it creates names its staging file from; the system's when null.</param>
+public sealed class SquadResponseGuidanceReader(
+    IFileSystem files,
+    IWritableFileSystem? writableFiles = null,
+    IFileSystemPathSemantics? semantics = null,
+    IIdGenerator? ids = null) : ISquadResponseGuidanceStore
 {
     /// <summary>Returns the effective advice text for the current user home.</summary>
     /// <remarks>
@@ -57,7 +66,15 @@ public sealed class SquadResponseGuidanceReader(IFileSystem files) : ISquadRespo
     }
 
     /// <inheritdoc />
-    public ISquadResponseGuidanceDeployer CreateDeployer(string homeStateRoot) => new SquadResponseGuidanceDeployer(homeStateRoot);
+    public ISquadResponseGuidanceDeployer CreateDeployer(string homeStateRoot) =>
+        writableFiles is null && semantics is null && ids is null
+            ? new SquadResponseGuidanceDeployer(homeStateRoot)
+            : new SquadResponseGuidanceDeployer(
+                homeStateRoot,
+                readDefault: null,
+                writableFiles ?? new PhysicalFileSystem(),
+                semantics ?? SquadFileSystemPathSemantics.Instance,
+                ids ?? new SystemIdGenerator());
 
     /// <inheritdoc />
     public bool IsDegradableFailure(Exception exception) => SquadResponseGuidanceDeployer.IsDegradableFailure(exception);

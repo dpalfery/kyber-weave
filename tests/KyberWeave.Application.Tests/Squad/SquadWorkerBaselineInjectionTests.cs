@@ -3,6 +3,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using KyberWeave.Tests.Corpus;
@@ -82,7 +83,7 @@ public sealed class SquadWorkerBaselineInjectionTests
     [MemberData(nameof(ShippedTargets))]
     public async Task EachWorkerRenderCarriesTheBaselineExactlyOnce(SquadTarget target)
     {
-        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+        SquadRenderResult result = await CanonicalSquadTree.RenderSharedProjectAsync(target);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         (string RelativePath, string Content)[] files =
@@ -135,8 +136,8 @@ public sealed class SquadWorkerBaselineInjectionTests
     [Fact]
     public void UnclosedBlockInInstructionBodyIsReplacedWithoutDuplicateBlock()
     {
-        SquadAgent sample = TestSquadCorpus.CanonicalSource.Agents.First(a => a.Invocation == SquadInvocation.Subagent);
-        SquadSource source = TestSquadCorpus.CanonicalSource with
+        SquadAgent sample = CanonicalSquadTree.SharedSource.Agents.First(a => a.Invocation == SquadInvocation.Subagent);
+        SquadSource source = CanonicalSquadTree.SharedSource with
         {
             Agents = [sample with { InstructionBody = "body <worker-baseline> unclosed" }]
         };

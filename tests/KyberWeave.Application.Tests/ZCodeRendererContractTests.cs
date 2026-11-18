@@ -7,7 +7,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
-using KyberWeave.Tests.Corpus;
+using System.Collections.Concurrent;
 
 namespace KyberWeave.Tests;
 
@@ -38,12 +38,16 @@ namespace KyberWeave.Tests;
 /// <c>services/src/subagents/subagentMarkdown.ts</c>.
 /// </para>
 /// </remarks>
-public sealed class ZCodeRendererContractTests : IDisposable
+public sealed class ZCodeRendererContractTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+    /// <summary>The shared read-only copy of the canonical source; a test that edits the source builds its own.</summary>
+    private static readonly CanonicalSquadTree SharedTree = CanonicalSquadTree.Create();
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    private static readonly Lazy<SquadSource> CanonicalSource = new(SharedTree.Load);
+
+    private static readonly ConcurrentDictionary<SquadDeploymentScope, Task<SquadRenderResult>> SharedRenders = new();
+
+    private static string ProductRoot => SharedTree.ProductRoot;
 
     /// <summary>
     /// The capability→tool lowering this suite pins, transcribed independently from plan
@@ -311,39 +315,48 @@ public sealed class ZCodeRendererContractTests : IDisposable
             .Replace("\"", "\\\"", StringComparison.Ordinal);
     }
 
-    private static async Task<SquadRenderResult> RenderZCodeAsync(
-        string sourceDirectory,
+    private static Task<SquadRenderResult> RenderZCodeAsync(
+        CanonicalSquadTree tree,
         SquadDeploymentScope scope = SquadDeploymentScope.Project,
         SquadArbiterWiring? arbiter = null)
     {
-        if (arbiter is null && string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal))
+        if (arbiter is null && ReferenceEquals(tree, SharedTree))
         {
-            return await TestSquadCorpus.GetDefaultRenderAsync(SquadTarget.ZCode, scope);
+            return SharedRenders.GetOrAdd(scope, static s => RenderCoreAsync(SharedTree, s, null));
         }
 
-        SquadRendererRegistry registry = SquadTestRegistry.Create([new ZCodeRenderer()]);
-        return await registry.RenderAsync(new SquadRenderRequest(
-            sourceDirectory,
-            [SquadTarget.ZCode],
-            scope,
-            Arbiter: arbiter).Prepared());
+        return RenderCoreAsync(tree, scope, arbiter);
     }
 
-    public void Dispose()
+    private static async Task<SquadRenderResult> RenderCoreAsync(
+        CanonicalSquadTree tree,
+        SquadDeploymentScope scope,
+        SquadArbiterWiring? arbiter)
     {
-        // No disposable state: the suite reads the checked-in corpus, plus per-test fixture
-        // copies disposed locally via `using`. IDisposable is implemented per the
-        // test-coding standard so a future class-level fixture has a home.
+        SquadRendererRegistry registry = tree.Registry([new ZCodeRenderer()]);
+        return await registry.RenderAsync(tree.Prepare(new SquadRenderRequest(
+            tree.ProductRoot,
+            [SquadTarget.ZCode],
+            scope,
+            GlobalRoots: scope == SquadDeploymentScope.Global ? new FixedGlobalRoots(tree.Files.Root) : null,
+            Arbiter: arbiter)));
+    }
+
+    /// <summary>Resolves each target's global root to a folder under a fixed base, so no home folder is read.</summary>
+    private sealed class FixedGlobalRoots(string baseRoot) : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target) =>
+            Path.Combine(baseRoot, "global", SquadTargetCatalog.GetToken(target));
     }
 
     [Fact]
     public async Task RenderAsync_ZCode_ProjectsEveryCanonicalPrincipalExactlyOnce()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         HashSet<string> shared = SharedIdentities(source);
         HashSet<string> suppressed = SuppressedSkillIdentities(source);
 
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // Every non-shared agent contributes exactly one principal — an agent file or, for the
@@ -380,14 +393,14 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_LowersThePrimaryAgentToASlashCommand()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         // The conductor is the primary agent that is NOT a declared shared identity, so it is the
         // one lowered to a slash command; the two root wrappers reuse their canonical skills.
         SquadAgent primary = Assert.Single(
             source.Agents,
             agent => agent.Name == "conductor");
 
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot, arbiter: new SquadArbiterWiring(true, 30));
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree, arbiter: new SquadArbiterWiring(true, 30));
 
         SquadDeploymentFile command = Assert.Single(
             result.Files, f => f.RelativePath == $".zcode/commands/{primary.Name}.md");
@@ -420,8 +433,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_EmitsOnlyAcceptedAgentFrontmatterKeys()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
         {
@@ -447,8 +460,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_AlwaysEmitsTheToolListBecauseOmittingItGrantsEverything()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot, arbiter: new SquadArbiterWiring(true, 30));
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree, arbiter: new SquadArbiterWiring(true, 30));
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
         {
@@ -468,8 +481,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_AskAndDenyBothWithholdTheirTools()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         foreach (SquadAgent agent in source.Agents.Where(a => a.Invocation == SquadInvocation.Subagent))
         {
@@ -512,8 +525,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_RecordsThatTheDelegationRosterIsNotEnforceable()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         List<SquadAgent> delegating = source.Agents
             .Where(agent => agent.Invocation == SquadInvocation.Subagent)
@@ -546,9 +559,9 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_EmitsOnlySafeSkillFrontmatterKeysWithinTheDescriptionCap()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         HashSet<string> shared = SharedIdentities(source);
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         foreach (SquadSkill skill in source.Skills.Where(s => !shared.Contains(s.Name)))
         {
@@ -581,7 +594,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_EveryAgentAndCommandFrontmatterValueIsASinglePhysicalLine()
     {
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         foreach (SquadDeploymentFile file in result.Files.Where(IsAgentOrCommand))
         {
@@ -609,7 +622,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_KeepsTheRecursivelyScannedRootsFlat()
     {
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         foreach (string prefix in new[] { ".zcode/agents/", ".zcode/commands/" })
         {
@@ -626,8 +639,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_ProjectsAgentResourcesUnderSkillsAndRewritesTheirLinks()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         List<SquadAgent> withResources = source.Agents.Where(a => a.Resources.Count > 0).ToList();
         Assert.NotEmpty(withResources);
@@ -672,8 +685,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_RewritesResourceLinksWithFragmentOrQuery()
     {
-        using ZCodeResourceLinkFragmentFixture fixture = ZCodeResourceLinkFragmentFixture.Create();
-        SquadRenderResult result = await RenderZCodeAsync(fixture.ProductRoot);
+        ZCodeResourceLinkFragmentFixture fixture = ZCodeResourceLinkFragmentFixture.Create();
+        SquadRenderResult result = await RenderZCodeAsync(fixture.Tree);
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
@@ -695,9 +708,9 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_SkillResourcesStayBesideTheirSkill()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         HashSet<string> shared = SharedIdentities(source);
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         foreach (SquadSkill skill in source.Skills.Where(s => !shared.Contains(s.Name) && s.Resources.Count > 0))
         {
@@ -714,8 +727,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCodeGlobalScope_KeepsTheRewrittenSkillLinkForm()
     {
-        SquadRenderResult project = await RenderZCodeAsync(ProductRoot);
-        SquadRenderResult global = await RenderZCodeAsync(ProductRoot, SquadDeploymentScope.Global);
+        SquadRenderResult project = await RenderZCodeAsync(SharedTree);
+        SquadRenderResult global = await RenderZCodeAsync(SharedTree, SquadDeploymentScope.Global);
 
         Assert.True(global.Success, string.Join("; ", global.Errors));
         Assert.Equal(
@@ -732,9 +745,9 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_ResolvesTheHarnessModelOverrideAndOmitsInherit()
     {
-        using ZCodeModelOverrideFixture fixture = ZCodeModelOverrideFixture.Create();
+        ZCodeModelOverrideFixture fixture = ZCodeModelOverrideFixture.Create();
 
-        SquadRenderResult result = await RenderZCodeAsync(fixture.ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(fixture.Tree);
 
         SquadDeploymentFile overridden = Assert.Single(
             result.Files, f => f.RelativePath == $".zcode/agents/{ZCodeModelOverrideFixture.OverriddenAgentName}.md");
@@ -757,13 +770,13 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_ThrowsWhenACanonicalSkillOccupiesARewrittenResourceRoot()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadAgent owner = source.Agents.First(agent => agent.Resources.Count > 0);
 
-        using ZCodeResourceRootCollisionFixture fixture = ZCodeResourceRootCollisionFixture.Create(owner.Name);
+        ZCodeResourceRootCollisionFixture fixture = ZCodeResourceRootCollisionFixture.Create(owner.Name);
 
         SquadRenderValidationException exception =
-            await Assert.ThrowsAsync<SquadRenderValidationException>(() => RenderZCodeAsync(fixture.ProductRoot));
+            await Assert.ThrowsAsync<SquadRenderValidationException>(() => RenderZCodeAsync(fixture.Tree));
 
         Assert.Contains(owner.Name, exception.Message, StringComparison.Ordinal);
         Assert.Contains(".zcode/skills/", exception.Message, StringComparison.Ordinal);
@@ -786,25 +799,20 @@ public sealed class ZCodeRendererContractTests : IDisposable
         // The canonical corpus carries no embedded quote today, so seed a controlled
         // exemplar: copy it and give one skill a description containing one, then render
         // the copy through the same path. The canonical description stays untouched.
-        using TempDirectory temp = new();
-        string fixtureRoot = Path.Combine(temp.Path, "kyber-squad");
-        ZCodeFixtureFiles.CopyCanonicalCorpus(fixtureRoot);
+        CanonicalSquadTree tree = CanonicalSquadTree.Create();
 
-        string skillFile = Path.Combine(fixtureRoot, "skills", "app-docs-standard", "SKILL.md");
-        string skillText = await File.ReadAllTextAsync(skillFile);
+        string skillFile = tree.PathOf("skills/app-docs-standard/SKILL.md");
+        string skillText = tree.Files.ReadAllText(skillFile);
         string[] skillLines = skillText.Split('\n');
         int descriptionIndex = Array.FindIndex(
             skillLines,
             line => line.StartsWith("description:", StringComparison.Ordinal));
         Assert.True(descriptionIndex >= 0, "app-docs-standard SKILL.md has no description line to seed.");
         skillLines[descriptionIndex] = skillLines[descriptionIndex].TrimEnd() + " Say \"hello\".";
-        await File.WriteAllTextAsync(
-            skillFile,
-            string.Join('\n', skillLines),
-            new UTF8Encoding(false));
+        tree.Files.WriteAllText(skillFile, string.Join('\n', skillLines));
 
-        SquadSource source = RealSquadServices.Load(fixtureRoot);
-        SquadRenderResult result = await RenderZCodeAsync(fixtureRoot);
+        SquadSource source = tree.Load();
+        SquadRenderResult result = await RenderZCodeAsync(tree);
 
         List<SquadSkill> quoted = source.Skills
             .Where(skill => skill.Description.Contains('"', StringComparison.Ordinal))
@@ -840,7 +848,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_TheCanonicalCorpusEmitsNoEscapedScalars()
     {
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         Assert.All(
             result.Files.Where(IsPrincipal),
@@ -855,8 +863,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_GrantsTheUngovernedBaseOnEveryPrincipal()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         Assert.Contains(
             result.Files,
@@ -890,7 +898,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_NeverEmitsAnEmptyToolList()
     {
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         foreach (SquadDeploymentFile file in result.Files.Where(IsAgentOrCommand))
         {
@@ -924,8 +932,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_GrantsEveryDeclaredMcpToolByQualifiedName()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot, arbiter: new SquadArbiterWiring(true, 30));
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree, arbiter: new SquadArbiterWiring(true, 30));
 
         IReadOnlyList<string> allTools = ExpectedMcpToolNames(source);
         Assert.NotEmpty(allTools);
@@ -1000,8 +1008,8 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_ZCode_WithholdsOnlyTheOrchestratorExcludedServers()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
-        SquadRenderResult result = await RenderZCodeAsync(ProductRoot);
+        SquadSource source = CanonicalSource.Value;
+        SquadRenderResult result = await RenderZCodeAsync(SharedTree);
 
         IReadOnlyList<string> allTools = ExpectedMcpToolNames(source);
 
@@ -1061,7 +1069,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
     [Fact]
     public void ExpectedMcpToolNames_UseOnlyCharactersZCodePreservesInAToolName()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
 
         Assert.All(ExpectedMcpToolNames(source), name =>
         {
@@ -1095,7 +1103,7 @@ public sealed class ZCodeRendererContractTests : IDisposable
 /// harness-override and <c>inherit</c> branches are exercised against a fixture rather than
 /// against whatever <c>models.yml</c> happens to declare today.
 /// </summary>
-internal sealed class ZCodeModelOverrideFixture : IDisposable
+internal sealed class ZCodeModelOverrideFixture
 {
     internal const string OverriddenProfile = "general";
     internal const string OverriddenAgentName = "dev-medium";
@@ -1103,22 +1111,19 @@ internal sealed class ZCodeModelOverrideFixture : IDisposable
     internal const string InheritProfile = "fast";
     internal const string InheritAgentName = "dev-easy";
 
-    private readonly TempDirectory _temp = new();
-
     private ZCodeModelOverrideFixture()
     {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+        Tree = CanonicalSquadTree.Create();
     }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; }
 
     internal static ZCodeModelOverrideFixture Create()
     {
         ZCodeModelOverrideFixture fixture = new();
-        ZCodeFixtureFiles.CopyCanonicalCorpus(fixture.ProductRoot);
 
-        string modelsPath = Path.Combine(fixture.ProductRoot, "profiles", "models.yml");
-        string original = File.ReadAllText(modelsPath);
+        string modelsPath = fixture.Tree.PathOf("profiles/models.yml");
+        string original = fixture.Tree.Files.ReadAllText(modelsPath);
         string mutated = SetZCodeValue(original, OverriddenProfile, OverrideModel);
         mutated = SetZCodeValue(mutated, InheritProfile, "inherit");
 
@@ -1129,7 +1134,7 @@ internal sealed class ZCodeModelOverrideFixture : IDisposable
                 $"'{InheritProfile}' to mutate.");
         }
 
-        File.WriteAllText(modelsPath, mutated, new UTF8Encoding(false));
+        fixture.Tree.Files.WriteAllText(modelsPath, mutated);
         return fixture;
     }
 
@@ -1160,36 +1165,28 @@ internal sealed class ZCodeModelOverrideFixture : IDisposable
 
         throw new InvalidOperationException($"Profile '{profileName}' declares no zcode value.");
     }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
 }
 
 /// <summary>
 /// Copies the canonical corpus and adds a skill whose name collides with the directory an
 /// agent's rewritten resource closure would claim under <c>.zcode/skills/</c>.
 /// </summary>
-internal sealed class ZCodeResourceRootCollisionFixture : IDisposable
+internal sealed class ZCodeResourceRootCollisionFixture
 {
-    private readonly TempDirectory _temp = new();
-
     private ZCodeResourceRootCollisionFixture()
     {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+        Tree = CanonicalSquadTree.Create();
     }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; }
 
     internal static ZCodeResourceRootCollisionFixture Create(string agentName)
     {
         ZCodeResourceRootCollisionFixture fixture = new();
-        ZCodeFixtureFiles.CopyCanonicalCorpus(fixture.ProductRoot);
 
-        string skillDirectory = Path.Combine(fixture.ProductRoot, "skills", agentName);
-        Directory.CreateDirectory(skillDirectory);
-        File.WriteAllText(
+        string skillDirectory = fixture.Tree.PathOf($"skills/{agentName}");
+        fixture.Tree.Files.CreateDirectory(skillDirectory);
+        fixture.Tree.Files.WriteAllText(
             Path.Combine(skillDirectory, "SKILL.md"),
             $"""
              ---
@@ -1198,34 +1195,9 @@ internal sealed class ZCodeResourceRootCollisionFixture : IDisposable
              license: MIT
              ---
              Fixture body for the '{agentName}' resource-root collision.
-             """,
-            new UTF8Encoding(false));
+             """);
 
         return fixture;
-    }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
-}
-
-internal static class ZCodeFixtureFiles
-{
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    internal static void CopyCanonicalCorpus(string destinationDirectory)
-    {
-        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        Directory.CreateDirectory(destinationDirectory);
-        foreach (string sourcePath in Directory.EnumerateFiles(canonicalRoot, "*", SearchOption.AllDirectories))
-        {
-            string destinationPath = Path.Combine(
-                destinationDirectory,
-                Path.GetRelativePath(canonicalRoot, sourcePath));
-            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
-            File.Copy(sourcePath, destinationPath);
-        }
     }
 }
 
@@ -1234,26 +1206,23 @@ internal static class ZCodeFixtureFiles
 /// that include URL fragments, query parameters, or percent-encoded characters, verifying
 /// that resource-link rewriting matches and preserves fragments/queries on relocated resources.
 /// </summary>
-internal sealed class ZCodeResourceLinkFragmentFixture : IDisposable
+internal sealed class ZCodeResourceLinkFragmentFixture
 {
     internal const string AgentName = "architect";
 
-    private readonly TempDirectory _temp = new();
-
     private ZCodeResourceLinkFragmentFixture()
     {
-        ProductRoot = Path.Combine(_temp.Path, "kyber-squad");
+        Tree = CanonicalSquadTree.Create();
     }
 
-    internal string ProductRoot { get; }
+    internal CanonicalSquadTree Tree { get; }
 
     internal static ZCodeResourceLinkFragmentFixture Create()
     {
         ZCodeResourceLinkFragmentFixture fixture = new();
-        ZCodeFixtureFiles.CopyCanonicalCorpus(fixture.ProductRoot);
 
-        string agentFile = Path.Combine(fixture.ProductRoot, "agents", $"{AgentName}.md");
-        string content = File.ReadAllText(agentFile);
+        string agentFile = fixture.Tree.PathOf($"agents/{AgentName}.md");
+        string content = fixture.Tree.Files.ReadAllText(agentFile);
 
         string augmented = content + "\n\n" +
                            "Fragment test: [intake](architect/references/intake-assessment.md#overview)\n" +
@@ -1261,12 +1230,7 @@ internal sealed class ZCodeResourceLinkFragmentFixture : IDisposable
                            "Fragment and query test: [contract](architect/references/test-first-contract.md#summary?v=1)\n" +
                            "Encoded test: [standard](architect%2Freferences%2Fstandard-verification.md#details)\n";
 
-        File.WriteAllText(agentFile, augmented, new UTF8Encoding(false));
+        fixture.Tree.Files.WriteAllText(agentFile, augmented);
         return fixture;
-    }
-
-    public void Dispose()
-    {
-        _temp.Dispose();
     }
 }

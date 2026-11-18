@@ -28,21 +28,6 @@ public sealed class SquadLinkFileSystemTests : IDisposable
     }
 
     [Fact]
-    public void SquadLinkExceptionPreservesMessageAndPathProperties()
-    {
-        const string message = "Failed to create link";
-        const string linkPath = "/workspace/instance/agent.md";
-        const string targetPath = "/repo/agents/agent.md";
-
-        SquadLinkException exception = new(message, linkPath, targetPath);
-
-        Assert.Equal(message, exception.Message);
-        Assert.Equal(linkPath, exception.LinkPath);
-        Assert.Equal(targetPath, exception.TargetPath);
-        Assert.IsAssignableFrom<Exception>(exception);
-    }
-
-    [Fact]
     public void UnixSquadLinkFileSystemCreatesFileAndFolderLinksOnUnix()
     {
         if (OperatingSystem.IsWindows())

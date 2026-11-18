@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -26,6 +27,15 @@ public sealed class SquadModelPresetStoreTests
                                                default: gpt-4o
                                                cursor: gpt-4o-mini
                                            """;
+
+    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+
+    private FakeSquadUserPaths UserPaths() => new(Path.Combine(_files.Root, "application-data"), Path.Combine(_files.Root, "home"));
+
+    private SquadModelPresetStore Store(FakeSquadUserPaths userPaths) => new(userPaths, _files);
+
+    private static string PresetsDirectory(FakeSquadUserPaths userPaths) =>
+        Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
 
     [Fact]
     public void ValidPresetFileLoadsWithComputedDigestAndProfiles()
@@ -207,17 +217,16 @@ public sealed class SquadModelPresetStoreTests
     [Fact]
     public void TryLoadReturnsPresetWithMatchingMetadataWhenFileExists()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
+        FakeSquadUserPaths userPaths = UserPaths();
+        string presetsDir = PresetsDirectory(userPaths);
+        _files.CreateDirectory(presetsDir);
 
         string presetFilePath = Path.Combine(presetsDir, "dev-models.yml");
         byte[] bytes = Encoding.UTF8.GetBytes(ValidPresetYaml);
-        File.WriteAllBytes(presetFilePath, bytes);
+        _files.WriteAllBytes(presetFilePath, bytes);
         string expectedDigest = Convert.ToHexStringLower(SHA256.HashData(bytes));
 
-        SquadModelPresetStore store = new(userPaths);
+        SquadModelPresetStore store = Store(userPaths);
         SquadModelPreset? preset = store.TryLoad("dev-models");
 
         Assert.NotNull(preset);
@@ -230,10 +239,9 @@ public sealed class SquadModelPresetStoreTests
     [Fact]
     public void TryLoadLoadsPresetWithUtf8BomPreambleWithoutThrowingOrModifyingFileOnDisk()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
+        FakeSquadUserPaths userPaths = UserPaths();
+        string presetsDir = PresetsDirectory(userPaths);
+        _files.CreateDirectory(presetsDir);
 
         string presetFilePath = Path.Combine(presetsDir, "bom-preset.yml");
         byte[] preamble = Encoding.UTF8.GetPreamble();
@@ -242,10 +250,10 @@ public sealed class SquadModelPresetStoreTests
         Buffer.BlockCopy(preamble, 0, fileBytesWithBom, 0, preamble.Length);
         Buffer.BlockCopy(contentBytes, 0, fileBytesWithBom, preamble.Length, contentBytes.Length);
 
-        File.WriteAllBytes(presetFilePath, fileBytesWithBom);
-        DateTime lastWriteTimeUtcBefore = File.GetLastWriteTimeUtc(presetFilePath);
+        _files.WriteAllBytes(presetFilePath, fileBytesWithBom);
+        DateTime lastWriteTimeUtcBefore = _files.GetLastWriteTimeUtc(presetFilePath);
 
-        SquadModelPresetStore store = new(userPaths);
+        SquadModelPresetStore store = Store(userPaths);
         SquadModelPreset? preset = store.TryLoad("bom-preset");
 
         Assert.NotNull(preset);
@@ -253,8 +261,8 @@ public sealed class SquadModelPresetStoreTests
         Assert.Equal(presetFilePath, preset.SourcePath);
         Assert.True(preset.Profiles.ContainsKey("general"));
 
-        byte[] fileBytesAfter = File.ReadAllBytes(presetFilePath);
-        DateTime lastWriteTimeUtcAfter = File.GetLastWriteTimeUtc(presetFilePath);
+        byte[] fileBytesAfter = _files.ReadAllBytes(presetFilePath);
+        DateTime lastWriteTimeUtcAfter = _files.GetLastWriteTimeUtc(presetFilePath);
 
         Assert.Equal(fileBytesWithBom, fileBytesAfter);
         Assert.Equal(lastWriteTimeUtcBefore, lastWriteTimeUtcAfter);
@@ -263,9 +271,8 @@ public sealed class SquadModelPresetStoreTests
     [Fact]
     public void TryLoadReturnsNullWhenFileIsMissing()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadModelPresetStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = UserPaths();
+        SquadModelPresetStore store = Store(userPaths);
 
         SquadModelPreset? preset = store.TryLoad("nonexistent-preset");
 
@@ -284,9 +291,8 @@ public sealed class SquadModelPresetStoreTests
     [InlineData("a123456789b123456789c123456789d123456789e123456789f123456789g12345")]
     public void TryLoadThrowsArgumentExceptionWhenNameIsInvalid(string invalidName)
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadModelPresetStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = UserPaths();
+        SquadModelPresetStore store = Store(userPaths);
 
         Assert.Throws<ArgumentException>(() => store.TryLoad(invalidName));
     }
@@ -294,19 +300,18 @@ public sealed class SquadModelPresetStoreTests
     [Fact]
     public void ListReturnsOnlyYmlStemsSortedOrdinally()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
+        FakeSquadUserPaths userPaths = UserPaths();
+        string presetsDir = PresetsDirectory(userPaths);
+        _files.CreateDirectory(presetsDir);
 
-        File.WriteAllText(Path.Combine(presetsDir, "zeta.yml"), ValidPresetYaml);
-        File.WriteAllText(Path.Combine(presetsDir, "alpha.yml"), ValidPresetYaml);
-        File.WriteAllText(Path.Combine(presetsDir, "mid-tier.yml"), ValidPresetYaml);
-        File.WriteAllText(Path.Combine(presetsDir, "not-a-preset.yaml"), ValidPresetYaml);
-        File.WriteAllText(Path.Combine(presetsDir, "notes.txt"), "notes");
-        File.WriteAllText(Path.Combine(presetsDir, "metadata.json"), "{}");
+        _files.WriteAllText(Path.Combine(presetsDir, "zeta.yml"), ValidPresetYaml);
+        _files.WriteAllText(Path.Combine(presetsDir, "alpha.yml"), ValidPresetYaml);
+        _files.WriteAllText(Path.Combine(presetsDir, "mid-tier.yml"), ValidPresetYaml);
+        _files.WriteAllText(Path.Combine(presetsDir, "not-a-preset.yaml"), ValidPresetYaml);
+        _files.WriteAllText(Path.Combine(presetsDir, "notes.txt"), "notes");
+        _files.WriteAllText(Path.Combine(presetsDir, "metadata.json"), "{}");
 
-        SquadModelPresetStore store = new(userPaths);
+        SquadModelPresetStore store = Store(userPaths);
         IReadOnlyList<string> stems = store.List();
 
         Assert.Equal(["alpha", "mid-tier", "zeta"], stems);
@@ -315,9 +320,8 @@ public sealed class SquadModelPresetStoreTests
     [Fact]
     public void ListReturnsEmptyWhenPresetsDirectoryDoesNotExist()
     {
-        using TempDirectory temp = new();
-        FakeSquadUserPaths userPaths = new(temp.Path);
-        SquadModelPresetStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = UserPaths();
+        SquadModelPresetStore store = Store(userPaths);
 
         IReadOnlyList<string> stems = store.List();
 
@@ -329,8 +333,8 @@ public sealed class SquadModelPresetStoreTests
     [InlineData("   ")]
     public void ConstructorWithEmptyOrWhitespaceHomeDirectoryThrowsArgumentException(string homeDirectory)
     {
-        ISquadUserPaths userPaths = new FakeSquadUserPaths("/dummy/appdata", homeDirectory);
-        Assert.Throws<ArgumentException>(() => new SquadModelPresetStore(userPaths));
+        ISquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_files.Root, "application-data"), homeDirectory);
+        Assert.Throws<ArgumentException>(() => new SquadModelPresetStore(userPaths, _files));
     }
 
     [Fact]

@@ -2,6 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Data.Hooks;
 
 namespace KyberWeave.Core.Squad.Model;
 
@@ -10,15 +11,28 @@ namespace KyberWeave.Core.Squad.Model;
 /// </summary>
 public sealed partial class SquadModelPresetStore : ISquadModelPresetStore
 {
+    private readonly IFileSystem _files;
     private readonly string _presetsDirectory;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SquadModelPresetStore"/> class over the real file system.
+    /// </summary>
+    /// <param name="userPaths">The user paths provider.</param>
+    public SquadModelPresetStore(ISquadUserPaths userPaths)
+        : this(userPaths, new PhysicalFileSystem())
+    {
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SquadModelPresetStore"/> class.
     /// </summary>
     /// <param name="userPaths">The user paths provider.</param>
-    public SquadModelPresetStore(ISquadUserPaths userPaths)
+    /// <param name="files">The file system the presets are read from.</param>
+    public SquadModelPresetStore(ISquadUserPaths userPaths, IFileSystem files)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(files);
+        _files = files;
         ArgumentException.ThrowIfNullOrWhiteSpace(userPaths.HomeDirectory);
         _presetsDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
     }
@@ -29,22 +43,21 @@ public sealed partial class SquadModelPresetStore : ISquadModelPresetStore
     /// <returns>A list of preset names (file stems).</returns>
     public IReadOnlyList<string> List()
     {
-        if (!Directory.Exists(_presetsDirectory))
+        if (!_files.DirectoryExists(_presetsDirectory))
         {
             return [];
         }
 
-        DirectoryInfo directoryInfo = new(_presetsDirectory);
         List<string> stems = new();
 
-        foreach (FileSystemInfo entry in directoryInfo.EnumerateFileSystemInfos("*.yml",
-                     new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(_presetsDirectory))
         {
-            if (entry is FileInfo &&
-                entry.LinkTarget is null &&
-                string.Equals(Path.GetExtension(entry.Name), ".yml", StringComparison.OrdinalIgnoreCase))
+            string name = Path.GetFileName(entry.Path);
+            if (!entry.IsDirectory &&
+                !entry.IsLink &&
+                string.Equals(Path.GetExtension(name), ".yml", StringComparison.OrdinalIgnoreCase))
             {
-                stems.Add(Path.GetFileNameWithoutExtension(entry.Name));
+                stems.Add(Path.GetFileNameWithoutExtension(name));
             }
         }
 
@@ -68,12 +81,12 @@ public sealed partial class SquadModelPresetStore : ISquadModelPresetStore
         }
 
         string filePath = Path.Combine(_presetsDirectory, $"{name}.yml");
-        if (!File.Exists(filePath))
+        if (!_files.FileExists(filePath))
         {
             return null;
         }
 
-        byte[] bytes = File.ReadAllBytes(filePath);
+        byte[] bytes = _files.ReadAllBytes(filePath);
         return SquadSourceLoader.ParseModelPreset(filePath, bytes);
     }
 

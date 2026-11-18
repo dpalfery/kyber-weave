@@ -4,24 +4,25 @@ using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Spectre.Console.Testing;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
 /// <summary>
-///     Integration tests verifying that <see cref="SquadStatusCommand" /> and <see cref="SquadDoctorCommand" />
+///     Verifies, over an in-memory tree, that <see cref="SquadStatusCommand" /> and <see cref="SquadDoctorCommand" />
 ///     correctly inspect, report, and apply model presets recorded in deployment locks.
 ///     Acceptance criteria:
 ///     - 3.4: WHEN a recorded preset no longer exists THEN squad update/status SHALL fail before writing / exit 1 and name
 ///     the missing preset.
 ///     - 5.3: squad status SHALL show the active preset per target, or that none is active.
 /// </summary>
-public sealed class SquadPresetStatusDoctorTests : IDisposable
+public sealed class SquadPresetStatusDoctorTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private const string SamplePresetYaml = """
                                             schema: kyber-squad.model-preset/v1
                                             profiles:
@@ -40,24 +41,92 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
                                                   claude: claude-3-5-haiku
                                               """;
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemorySquadState _state = new();
+    private readonly TestConsole _ansi = new() { EmitAnsiSequences = false };
+    private readonly FakeConsole _streams = new();
 
-    public void Dispose()
+    public SquadPresetStatusDoctorTests() => _ansi.Profile.Width = 200;
+
+    private InMemoryFileSystem Files => _state.Files;
+
+    private string Root(string name)
     {
-        _temp.Dispose();
+        string path = Path.Combine(Files.Root, name);
+        Files.CreateDirectory(path);
+        return path;
+    }
+
+    /// <summary>A repository root in the in-memory tree that carries the markers <c>squad doctor</c> looks for and the shipped Squad source.</summary>
+    private string SquadRepository(string name)
+    {
+        string root = Root(name);
+        Files.WriteAllText(Path.Combine(root, "KyberWeave.sln"), "solution");
+        ShippedSquadSource.CopyInto(Files, Path.Combine(root, "products", "kyber-squad"));
+        return root;
+    }
+
+    private string Output => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private SquadStatusCommand StatusCommand(string workingDirectory)
+    {
+        SquadConsole console = new(_ansi, _streams);
+        FakeProcessEnvironment environment = new(
+            currentDirectory: workingDirectory,
+            homeDirectory: _state.UserPaths.HomeDirectory,
+            isFileSystemCaseInsensitive: !Files.CaseSensitive);
+        return new SquadStatusCommand(
+            _state.Store,
+            _state.Migration,
+            new SquadGlobalRoots(_ => null, _state.UserPaths.HomeDirectory),
+            new SquadModelPresetStore(_state.UserPaths, Files),
+            _state.Semantics,
+            console,
+            Files,
+            environment,
+            new SquadCommandRoots(Files, _state.Paths, environment, console));
+    }
+
+    private SquadDoctorCommand DoctorCommand(
+        FakeProcessExecutor executor,
+        string workingDirectory,
+        SquadGlobalRoots globalRoots,
+        FakeSquadRenderer renderer)
+    {
+        SquadConsole console = new(_ansi, _streams);
+        FakeProcessEnvironment environment = new(
+            currentDirectory: workingDirectory,
+            homeDirectory: _state.UserPaths.HomeDirectory,
+            isFileSystemCaseInsensitive: !Files.CaseSensitive);
+        InMemorySquadServices services = new(Files);
+        return new SquadDoctorCommand(
+            _state.Store,
+            _state.Migration,
+            globalRoots,
+            renderer,
+            new SquadModelPresetStore(_state.UserPaths, Files),
+            _state.Planner,
+            new SquadResponseGuidanceReader(Files),
+            environment,
+            new SquadPackSourceLocator(Files, _state.Paths, environment),
+            services.SourceLoader(),
+            new SquadSkillShadowing(Files, _state.Semantics, environment),
+            new DevinImportOverlap(Files, _state.Semantics, environment),
+            new ZCodeMcpConfiguration(Files, _state.Semantics, environment),
+            new SquadDoctorOptions(executor, workingDirectory),
+            _state.Semantics,
+            new FakeKyberWeaveConfigRepository(),
+            console,
+            Files,
+            new SquadCommandRoots(Files, _state.Paths, environment, console));
     }
 
     [Fact]
     public void StatusShowsActivePresetPerTargetWhenLockHasPresetsAndDigestMatches()
     {
         // AC 5.3: status output displays active preset per target; clean run exits 0 when preset matches.
-        string targetDir = Path.Combine(_temp.Path, "matching-preset-project");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Root("matching-preset-project");
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-
-        WritePreset(userPaths, "zai", SamplePresetYaml);
+        WritePreset("zai", SamplePresetYaml);
         string digest = ComputeDigest(SamplePresetYaml);
 
         Dictionary<SquadTarget, SquadAppliedPreset> presets = new()
@@ -65,67 +134,55 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             [SquadTarget.Claude] = new SquadAppliedPreset("zai", digest)
         };
 
-        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, presets,
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, presets,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        int exit = StatusCommand(targetDir).Execute(
             null!,
             new SquadStatusSettings
             {
                 Path = targetDir,
                 Global = false
-            }));
+            });
 
-        Assert.Equal(0, execution.Result);
-        Assert.Contains("claude", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("zai", execution.Output, StringComparison.Ordinal);
-        Assert.DoesNotContain("(changed since applied)", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("(missing)", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exit);
+        Assert.Contains("claude", Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("zai", Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("(changed since applied)", Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("(missing)", Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void StatusShowsNoneOrBundledWhenLockHasNoPresets()
     {
         // AC 5.3: status shows that no preset is active (none or bundled) when deployment lock has no presets.
-        string targetDir = Path.Combine(_temp.Path, "no-preset-project");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Root("no-preset-project");
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-
-        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, null,
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, null,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        int exit = StatusCommand(targetDir).Execute(
             null!,
             new SquadStatusSettings
             {
                 Path = targetDir,
                 Global = false
-            }));
+            });
 
-        Assert.Equal(0, execution.Result);
-        bool showsNone = execution.Output.Contains("none", StringComparison.OrdinalIgnoreCase) ||
-                         execution.Output.Contains("bundled", StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exit);
+        bool showsNone = Output.Contains("none", StringComparison.OrdinalIgnoreCase) ||
+                         Output.Contains("bundled", StringComparison.OrdinalIgnoreCase);
         Assert.True(showsNone,
-            $"Expected status output to mention 'none' or 'bundled' for presets, but got:\n{execution.Output}");
+            $"Expected status output to mention 'none' or 'bundled' for presets, but got:\n{Output}");
     }
 
     [Fact]
     public void StatusWarnsChangedSinceAppliedAndExitsZeroWhenPresetDigestDiffersFromLock()
     {
         // When preset file was edited after deployment, status prints a warning but exits 0.
-        string targetDir = Path.Combine(_temp.Path, "drifted-preset-project");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Root("drifted-preset-project");
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-
-        WritePreset(userPaths, "zai", SamplePresetYaml);
+        WritePreset("zai", SamplePresetYaml);
         string initialDigest = ComputeDigest(SamplePresetYaml);
 
         Dictionary<SquadTarget, SquadAppliedPreset> presets = new()
@@ -133,37 +190,31 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             [SquadTarget.Claude] = new SquadAppliedPreset("zai", initialDigest)
         };
 
-        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, presets,
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, presets,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
         // Mutate preset on disk so digest no longer matches lock
-        WritePreset(userPaths, "zai", ModifiedPresetYaml);
+        WritePreset("zai", ModifiedPresetYaml);
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        int exit = StatusCommand(targetDir).Execute(
             null!,
             new SquadStatusSettings
             {
                 Path = targetDir,
                 Global = false
-            }));
+            });
 
-        Assert.Equal(0, execution.Result);
-        Assert.Contains("zai", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("(changed since applied)", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("(missing)", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exit);
+        Assert.Contains("zai", Output, StringComparison.Ordinal);
+        Assert.Contains("(changed since applied)", Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("(missing)", Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void StatusNamesMissingPresetAndExitsOneWhenPresetFileDoesNotExist()
     {
         // AC 3.4: WHEN a recorded preset no longer exists THEN status SHALL exit 1 and name the missing preset.
-        string targetDir = Path.Combine(_temp.Path, "missing-preset-project");
-        Directory.CreateDirectory(targetDir);
-
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        string targetDir = Root("missing-preset-project");
 
         Dictionary<SquadTarget, SquadAppliedPreset> presets = new()
         {
@@ -171,35 +222,30 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         };
 
         // Note: do not create zai.yml in userPaths presets directory
-        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, presets,
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, presets,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        int exit = StatusCommand(targetDir).Execute(
             null!,
             new SquadStatusSettings
             {
                 Path = targetDir,
                 Global = false
-            }));
+            });
 
-        Assert.Equal(1, execution.Result);
-        Assert.Contains("zai", execution.Output, StringComparison.Ordinal);
-        Assert.Contains("(missing)", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(1, exit);
+        Assert.Contains("zai", Output, StringComparison.Ordinal);
+        Assert.Contains("(missing)", Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void DoctorPassesRecordedModelPresetsToComparisonRender()
     {
         // Doctor must supply the deployment lock's ModelPresets to the comparison render request.
-        string tempHome = Path.Combine(_temp.Path, "doctor-home");
-        Directory.CreateDirectory(tempHome);
+        string home = _state.UserPaths.HomeDirectory;
+        string repository = SquadRepository("doctor-repository");
 
-        FakeSquadUserPaths userPaths = new(tempHome);
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-
-        WritePreset(userPaths, "zai", SamplePresetYaml);
+        WritePreset("zai", SamplePresetYaml);
         string digest = ComputeDigest(SamplePresetYaml);
 
         Dictionary<SquadTarget, SquadAppliedPreset> presets = new()
@@ -208,29 +254,23 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         };
 
         // Seed global deployment
-        SeedDeployment(tempHome, SquadDeploymentScope.Global, stateStore, presets,
+        SeedDeployment(home, SquadDeploymentScope.Global, presets,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadGlobalRoots globalRoots = new(_ => null, home);
         FakeSquadRenderer renderer = PresetRenderer();
 
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
-            executor,
-            userPaths,
-            Corpus.Root,
-            globalRoots,
-            renderer,
-            stateStore);
+        SquadDoctorCommand command = DoctorCommand(executor, repository, globalRoots, renderer);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        _ = command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = Corpus.Root,
+                Path = repository,
                 Global = true
-            }));
+            });
 
         Assert.NotEmpty(renderer.RenderRequests);
         SquadRenderRequest? claudeRequest =
@@ -246,13 +286,10 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
     {
         // On a clean deployment where files on disk were rendered with an active preset,
         // doctor must pass the active preset into comparison render so it confirms zero findings and exits 0.
-        string tempHome = Path.Combine(_temp.Path, "doctor-home-clean");
-        Directory.CreateDirectory(tempHome);
+        string home = _state.UserPaths.HomeDirectory;
+        string repository = SquadRepository("doctor-repository-clean");
 
-        FakeSquadUserPaths userPaths = new(tempHome);
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-
-        WritePreset(userPaths, "zai", SamplePresetYaml);
+        WritePreset("zai", SamplePresetYaml);
         string digest = ComputeDigest(SamplePresetYaml);
 
         Dictionary<SquadTarget, SquadAppliedPreset> presets = new()
@@ -261,77 +298,65 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         };
 
         // Write unmanaged file on disk under Claude global root with preset-rendered content
-        string claudeAgentPath = Path.Combine(tempHome, ".claude", "agents", "architect.md");
-        Directory.CreateDirectory(Path.GetDirectoryName(claudeAgentPath)!);
-        File.WriteAllText(claudeAgentPath, "You are architect.\nModel: custom-preset-model\n", Encoding.UTF8);
+        string claudeAgentPath = Path.Combine(home, ".claude", "agents", "architect.md");
+        Files.CreateDirectory(Path.GetDirectoryName(claudeAgentPath)!);
+        Files.WriteAllBytes(claudeAgentPath, Encoding.UTF8.GetBytes("You are architect.\nModel: custom-preset-model\n"));
 
         // Seed global deployment with lock having the preset, but receipt not owning the file
         // so that CollectUnmanagedCollisions evaluates whether disk matches render.
-        SeedDeployment(tempHome, SquadDeploymentScope.Global, stateStore, presets);
+        SeedDeployment(home, SquadDeploymentScope.Global, presets);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithMatchingArbiterProbe();
-        SquadGlobalRoots globalRoots = new(_ => null, tempHome);
+        SquadGlobalRoots globalRoots = new(_ => null, home);
         FakeSquadRenderer renderer = PresetRenderer();
 
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
-            executor,
-            userPaths,
-            Corpus.Root,
-            globalRoots,
-            renderer,
-            stateStore);
+        SquadDoctorCommand command = DoctorCommand(executor, repository, globalRoots, renderer);
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        int exit = command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = Corpus.Root,
+                Path = repository,
                 Global = true
-            }));
+            });
 
-        Assert.Equal(0, execution.Result);
-        Assert.Contains("Global unmanaged collisions: none", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Doctor found issues", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(0, exit);
+        Assert.Contains("Global unmanaged collisions: none", Output, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("Doctor found issues", Output, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
     public void StatusWhenSquadLockIsCorruptExitsWithCodeOneAndReportsError()
     {
-        string targetDir = Path.Combine(_temp.Path, "corrupt-lock-project");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Root("corrupt-lock-project");
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-
-        SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore, null,
+        SeedDeployment(targetDir, SquadDeploymentScope.Project, null,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
 
-        string lockPath = stateStore.ResolveLockPath(targetDir, SquadDeploymentScope.Project);
-        File.WriteAllText(lockPath, "{ this is corrupt lock yaml : [ unclosed", Encoding.UTF8);
+        string lockPath = _state.Store.ResolveLockPath(targetDir, SquadDeploymentScope.Project);
+        Files.WriteAllBytes(lockPath, Encoding.UTF8.GetBytes("{ this is corrupt lock yaml : [ unclosed"));
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
-
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
+        int exit = StatusCommand(targetDir).Execute(
             null!,
             new SquadStatusSettings
             {
                 Path = targetDir,
                 Global = false
-            }));
+            });
 
-        Assert.NotEqual(0, execution.Result);
-        Assert.DoesNotContain("Model presets: none", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("error", execution.Output, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEqual(0, exit);
+        Assert.DoesNotContain("Model presets: none", Output, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("error", Output, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string WritePreset(ISquadUserPaths userPaths, string name, string yaml)
+    private string WritePreset(string name, string yaml)
     {
-        string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
+        string presetsDir = Path.Combine(_state.UserPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
+        Files.CreateDirectory(presetsDir);
         string presetPath = Path.Combine(presetsDir, $"{name}.yml");
-        File.WriteAllText(presetPath, yaml, Encoding.UTF8);
+        Files.WriteAllBytes(presetPath, Encoding.UTF8.GetBytes(yaml));
         return presetPath;
     }
 
@@ -341,17 +366,17 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
         return Convert.ToHexStringLower(SHA256.HashData(bytes));
     }
 
-    private static void SeedDeployment(
+    private void SeedDeployment(
         string targetRoot,
         SquadDeploymentScope scope,
-        SquadStateStore stateStore,
         IReadOnlyDictionary<SquadTarget, SquadAppliedPreset>? presets = null,
         params (string RelativePath, string Content)[] files)
     {
+        SquadStateStore stateStore = _state.Store;
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, scope);
         string lockPath = stateStore.ResolveLockPath(targetRoot, scope);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+        Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        Files.CreateDirectory(Path.GetDirectoryName(lockPath)!);
 
         List<SquadOwnedFile> ownedFiles = [];
         foreach ((string relPath, string content) in files)
@@ -359,9 +384,9 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             string fullPath = scope == SquadDeploymentScope.Global
                 ? Path.Combine(targetRoot, ".claude", relPath)
                 : Path.Combine(targetRoot, relPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            Files.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             byte[] bytes = Encoding.UTF8.GetBytes(content);
-            File.WriteAllBytes(fullPath, bytes);
+            Files.WriteAllBytes(fullPath, bytes);
             string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
             ownedFiles.Add(new SquadOwnedFile(relPath, sha256, "claude", false));
         }
@@ -370,7 +395,7 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             scope == SquadDeploymentScope.Global ? SquadStateSchemas.ReceiptSchemaV2 : SquadStateSchemas.ReceiptSchemaV1,
             scope,
             targetRoot,
-            DateTimeOffset.UtcNow,
+            _state.Time.GetUtcNow(),
             [],
             ownedFiles);
 
@@ -390,8 +415,8 @@ public sealed class SquadPresetStatusDoctorTests : IDisposable
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')),
             presets);
 
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
-        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+        Files.WriteAllBytes(receiptPath, Encoding.UTF8.GetBytes(stateStore.SerializeReceipt(receipt)));
+        Files.WriteAllBytes(lockPath, Encoding.UTF8.GetBytes(stateStore.SerializeLock(squadLock)));
     }
 
     /// <summary>

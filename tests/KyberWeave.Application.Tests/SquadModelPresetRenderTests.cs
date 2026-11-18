@@ -3,9 +3,8 @@ using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Testing.Squad;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -18,12 +17,14 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadModelPresetRenderTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private const string ProbeModel = "preset-probe-model";
 
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
+    // The tree is read-only for every test but the one that proves a render leaves it unchanged, so one copy is shared.
+    private static readonly CanonicalSquadTree Tree = CanonicalSquadTree.Create();
+
+    private static readonly Lazy<SquadSource> CanonicalSource = new(Tree.Load);
+
+    private static string ProductRoot => Tree.ProductRoot;
 
     private static readonly ConcurrentDictionary<SquadTarget, Task<SquadRenderResult>> UnpresetRenders = new();
     private static readonly ConcurrentDictionary<SquadTarget, Task<SquadRenderResult>> ProbePresetRenders = new();
@@ -52,7 +53,7 @@ public sealed class SquadModelPresetRenderTests
     /// </summary>
     private static SquadRendererRegistry CreateRegistry()
     {
-        return SquadTestRegistry.Create(
+        return Tree.Registry(
         [
             new AntigravityRenderer(),
             new ClaudeRenderer(),
@@ -80,7 +81,7 @@ public sealed class SquadModelPresetRenderTests
                 [t],
                 SquadDeploymentScope.Project,
                 ModelPresets: null,
-                PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+                PreloadedSource: CanonicalSource.Value).Prepared(Tree);
             return registry.RenderAsync(request);
         });
     }
@@ -89,14 +90,14 @@ public sealed class SquadModelPresetRenderTests
     {
         return ProbePresetRenders.GetOrAdd(target, static t =>
         {
-            SquadModelPreset probePreset = CreateUniversalProbePreset(TestSquadCorpus.CanonicalSource);
+            SquadModelPreset probePreset = CreateUniversalProbePreset(CanonicalSource.Value);
             SquadRendererRegistry registry = CreateRegistry();
             SquadRenderRequest request = new SquadRenderRequest(
                 ProductRoot,
                 [t],
                 SquadDeploymentScope.Project,
                 ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [t] = probePreset },
-                PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+                PreloadedSource: CanonicalSource.Value).Prepared(Tree);
             return registry.RenderAsync(request);
         });
     }
@@ -257,7 +258,7 @@ public sealed class SquadModelPresetRenderTests
     [MemberData(nameof(AllTargets))]
     public async Task RenderedFileContainsProbeModelExactlyWhenModelResolutionReturnsIt(SquadTarget target)
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadModelPreset probePreset = CreateUniversalProbePreset(source);
         SquadRenderResult resultWith = await GetProbePresetRenderAsync(target);
         Assert.True(resultWith.Success, string.Join("; ", resultWith.Errors));
@@ -294,7 +295,7 @@ public sealed class SquadModelPresetRenderTests
     [Fact]
     public async Task RenderWithSelectivePresetOmitsModelWhenResolutionReturnsNull()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadRendererRegistry registry = CreateRegistry();
 
         Dictionary<string, SquadModelProfile> selectiveProfiles = new(StringComparer.Ordinal)
@@ -311,7 +312,7 @@ public sealed class SquadModelPresetRenderTests
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
             ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Copilot] = selectivePreset },
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+            PreloadedSource: CanonicalSource.Value).Prepared(Tree);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
@@ -337,25 +338,26 @@ public sealed class SquadModelPresetRenderTests
     }
 
     [Fact]
-    public async Task RenderExecutionDoesNotMutateCanonicalCorpusOnDisk()
+    public async Task RenderExecutionDoesNotMutateTheCanonicalSourceTree()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSource.Value;
         SquadModelPreset probePreset = CreateUniversalProbePreset(source);
         SquadRendererRegistry registry = CreateRegistry();
 
-        byte[] beforeBytes = Corpus.ReadBytes("products/kyber-squad/profiles/models.yml");
+        string modelsPath = Tree.PathOf("profiles/models.yml");
+        byte[] beforeBytes = Tree.Files.ReadAllBytes(modelsPath);
 
         SquadRenderRequest request = new SquadRenderRequest(
             ProductRoot,
             [SquadTarget.Copilot],
             SquadDeploymentScope.Project,
             ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Copilot] = probePreset },
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+            PreloadedSource: CanonicalSource.Value).Prepared(Tree);
 
         SquadRenderResult result = await registry.RenderAsync(request);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
-        byte[] afterBytes = Corpus.ReadBytes("products/kyber-squad/profiles/models.yml");
+        byte[] afterBytes = Tree.Files.ReadAllBytes(modelsPath);
         Assert.Equal(beforeBytes, afterBytes);
     }
 
@@ -367,7 +369,7 @@ public sealed class SquadModelPresetRenderTests
             [SquadTarget.Claude],
             SquadDeploymentScope.Project,
             ModelPresets: new Dictionary<SquadTarget, SquadModelPreset> { [SquadTarget.Claude] = null! },
-            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared();
+            PreloadedSource: CanonicalSource.Value).Prepared(Tree);
 
         SquadSource source = SquadRenderSource.Load(request, SquadTarget.Claude);
         Assert.NotNull(source);

@@ -105,7 +105,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task EveryTargetGrantsKyberWeaveToExactlyTheAgentsTheSourceEntitles()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSquadTree.SharedSource;
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         IReadOnlySet<string> entitled = SquadMcpGrantProjection.KyberWeaveEntitledAgents(
             source,
@@ -118,7 +118,7 @@ public sealed class SquadUniversalMcpGrantContractTests
 
         foreach (SquadTarget target in GrantingTargets)
         {
-            SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+            SquadRenderResult result = await CanonicalSquadTree.RenderSharedProjectAsync(target);
             Assert.True(result.Success, string.Join("; ", result.Errors));
 
             IReadOnlySet<string> entitledOnTarget =
@@ -219,7 +219,7 @@ public sealed class SquadUniversalMcpGrantContractTests
 
         foreach ((SquadTarget target, string skillPathFormat) in PrimarySkillPathFormats)
         {
-            SquadRenderResult rendered = await TestSquadCorpus.GetProjectRenderAsync(target);
+            SquadRenderResult rendered = await CanonicalSquadTree.RenderSharedProjectAsync(target);
             Assert.True(rendered.Success, string.Join("; ", rendered.Errors));
 
             // The skill exists and is the conductor's only projection, so the absence of a grant
@@ -240,7 +240,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task EveryTargetWithholdsTheOrchestratorExcludedServersFromExactlyThatSubset()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSquadTree.SharedSource;
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
         string[] pureOrchestrators =
         [
@@ -258,7 +258,7 @@ public sealed class SquadUniversalMcpGrantContractTests
 
         foreach (SquadTarget target in OrchestratorExcludedServerTargets)
         {
-            SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+            SquadRenderResult result = await CanonicalSquadTree.RenderSharedProjectAsync(target);
             Assert.True(result.Success, string.Join("; ", result.Errors));
 
             foreach (SquadAgent agent in source.Agents)
@@ -299,7 +299,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task EveryTargetGrantsTheCodeGraphServerThroughTheSharedPredicate()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSquadTree.SharedSource;
 
         SquadTarget[] targets =
         [
@@ -313,7 +313,7 @@ public sealed class SquadUniversalMcpGrantContractTests
 
         foreach (SquadTarget target in targets)
         {
-            SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(target);
+            SquadRenderResult result = await CanonicalSquadTree.RenderSharedProjectAsync(target);
             Assert.True(result.Success, string.Join("; ", result.Errors));
 
             foreach (SquadAgent agent in source.Agents)
@@ -370,7 +370,7 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task TheNewGrantVehiclesSpellTheServerNameTheWayTheirHarnessResolves()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadSource source = CanonicalSquadTree.SharedSource;
         SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
 
         // The two spellings are genuinely different strings, so neither assertion can be
@@ -388,7 +388,7 @@ public sealed class SquadUniversalMcpGrantContractTests
             StringComparison.Ordinal);
 
         // Kilo: the hyphenated wildcard, and never the underscored one.
-        SquadRenderResult kilo = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Kilo);
+        SquadRenderResult kilo = await CanonicalSquadTree.RenderSharedProjectAsync(SquadTarget.Kilo);
         Assert.True(kilo.Success, string.Join("; ", kilo.Errors));
         Assert.Contains(
             conductor.Name,
@@ -406,7 +406,7 @@ public sealed class SquadUniversalMcpGrantContractTests
             StringComparison.Ordinal);
 
         // Pi: the underscored namespace, and never the hyphenated one.
-        SquadRenderResult pi = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Pi);
+        SquadRenderResult pi = await CanonicalSquadTree.RenderSharedProjectAsync(SquadTarget.Pi);
         Assert.True(pi.Success, string.Join("; ", pi.Errors));
 
         IReadOnlyList<string> piOverlay = SquadMcpGrantProjection.PiMcpOverlayToolEntries(source);
@@ -445,7 +445,7 @@ public sealed class SquadUniversalMcpGrantContractTests
                 "The canonical source declares no usable kw-docs launch definition, so the "
                 + "Antigravity entry cannot be checked against it.");
 
-        SquadRenderResult antigravity = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Antigravity);
+        SquadRenderResult antigravity = await CanonicalSquadTree.RenderSharedProjectAsync(SquadTarget.Antigravity);
         Assert.True(antigravity.Success, string.Join("; ", antigravity.Errors));
 
         YamlMappingNode antigravityFrontmatter = Frontmatter(Assert.Single(
@@ -485,9 +485,9 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task AProfileThatDeniesFileReadGrantsNoMcpOnAnyTarget()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedAgent("review-lens");
+        SquadSource source = fixture.Tree.Load();
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         foreach (SquadTarget target in GrantingTargets)
@@ -498,7 +498,7 @@ public sealed class SquadUniversalMcpGrantContractTests
                 + $"'{SquadTargetCatalog.GetToken(target)}', so the fail-closed branch is not "
                 + "exercised.");
 
-            SquadRenderResult result = await RenderAsync(fixture.ProductRoot, target);
+            SquadRenderResult result = await RenderAsync(fixture.Tree, target);
             bool? grant = KyberWeaveGrant(target, result, denied.Name);
             Assert.True(
                 grant.HasValue,
@@ -549,10 +549,10 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task WhenCodegraphDeclared_AntigravityEmitsCodegraphForSpecialistsAndWithholdsFromConductor()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("kw-docs", "codegraph");
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServers("kw-docs", "codegraph");
 
-        SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Antigravity);
+        SquadRenderResult result = await RenderAsync(fixture.Tree, SquadTarget.Antigravity);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // 1. Conductor (orchestrator): must receive kw-docs, but NOT codegraph
@@ -594,10 +594,10 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task WhenContext7Declared_AntigravityGrantsItToSpecialistsAndWithholdsFromConductor()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("kw-docs", "context7");
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServers("kw-docs", "context7");
 
-        SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Antigravity);
+        SquadRenderResult result = await RenderAsync(fixture.Tree, SquadTarget.Antigravity);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         SquadDeploymentFile conductorFile = Assert.Single(
@@ -624,10 +624,10 @@ public sealed class SquadUniversalMcpGrantContractTests
     [Fact]
     public async Task WhenCodegraphDeclared_FactoryEmitsCodegraphForSpecialistsAndWithholdsFromConductor()
     {
-        using McpDeclarationCorpusFixture fixture =
-            McpDeclarationCorpusFixture.WithServers("kw-docs", "codegraph");
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithServers("kw-docs", "codegraph");
 
-        SquadRenderResult result = await RenderAsync(fixture.ProductRoot, SquadTarget.Factory);
+        SquadRenderResult result = await RenderAsync(fixture.Tree, SquadTarget.Factory);
         Assert.True(result.Success, string.Join("; ", result.Errors));
 
         // 1. Conductor (orchestrator): must receive kw-docs, but NOT codegraph
@@ -913,13 +913,13 @@ public sealed class SquadUniversalMcpGrantContractTests
         return Encoding.UTF8.GetString(file.Content.Span);
     }
 
-    private static async Task<SquadRenderResult> RenderAsync(string sourceDirectory, SquadTarget target)
+    private static async Task<SquadRenderResult> RenderAsync(CanonicalSquadTree tree, SquadTarget target)
     {
-        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
-        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
-            sourceDirectory,
+        SquadRendererRegistry registry = tree.Registry(SquadHostDefaults.CreateRenderers());
+        SquadRenderResult result = await registry.RenderAsync(tree.Prepare(new SquadRenderRequest(
+            tree.ProductRoot,
             [target],
-            SquadDeploymentScope.Project).Prepared());
+            SquadDeploymentScope.Project)));
         Assert.True(result.Success, string.Join("; ", result.Errors));
         return result;
     }

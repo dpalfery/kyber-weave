@@ -33,7 +33,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadGlobalRootResolver>(sp => EnvironmentSquadGlobalRoots.Create(
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISquadFileAccess>()));
-        services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>()));
+        services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>(), sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<ISquadCanonicalProfileStore>(sp => new SquadCanonicalProfileStore(sp.GetRequiredService<ISquadUserPaths>()));
         services.TryAddSingleton<ISquadSourceLoader>(sp => new SquadSourceLoader(
             sp.GetRequiredService<IFileSystem>(),
@@ -67,7 +67,11 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystemPathSemantics>(),
             sp.GetRequiredService<ILease>(),
             sp.GetRequiredService<IIdGenerator>()));
-        services.TryAddSingleton<ISquadResponseGuidanceStore>(sp => new SquadResponseGuidanceReader(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ISquadResponseGuidanceStore>(sp => new SquadResponseGuidanceReader(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadFactoryHooksShadowing>(sp => new FactoryHooksShadowing(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ISquadInstanceLinkSync>(sp => new SquadInstanceLinkSync(
             sp.GetRequiredService<IWritableFileSystem>(),
@@ -86,7 +90,10 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadPackager>(sp => new FileSquadPackager(
             sp.GetRequiredService<ISquadArchiveWriter>(),
             sp.GetRequiredService<ISquadSourceLoader>(),
-            sp.GetRequiredService<ISquadCompanionSkills>()));
+            sp.GetRequiredService<ISquadCompanionSkills>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadSkillShadowing>(sp => new SquadSkillShadowing(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),

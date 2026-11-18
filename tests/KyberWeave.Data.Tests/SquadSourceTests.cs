@@ -5,19 +5,13 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
-using Xunit.Sdk;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
 public sealed class SquadSourceTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private static readonly string ProductRoot =
-        Path.Combine(Corpus.Root, "products", "kyber-squad");
-
     private const string NormalizedArchitectBody = "You are architect.\nPlan first.\n";
     private const string NormalizedArchitectBodySha256 =
         "856711e391c077cbee5211b2dfb76861163472c622bf414b5a52d6ce15e0b546";
@@ -25,10 +19,10 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadValidSourceLoadsDeterministically()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
 
-        SquadSource first = RealSquadServices.Load(fixture.Path);
-        SquadSource second = RealSquadServices.Load(fixture.Path);
+        SquadSource first = fixture.Load();
+        SquadSource second = fixture.Load();
 
         Assert.Equal("kyber-squad", first.Manifest.Name);
         Assert.Equal("full", first.Bundle.Name);
@@ -57,7 +51,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadModelProfileWithPiHarnessModelExposesThePiModel()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("profiles/models.yml", """
             schema: kyber-squad.model-profiles/v1
             profiles:
@@ -68,7 +62,7 @@ public sealed class SquadSourceTests
                 default: inherit
             """);
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
 
         SquadModelProfile profile = source.ModelProfiles.Profiles["deep-planning"];
         Assert.Equal("inherit", profile.Default);
@@ -76,254 +70,6 @@ public sealed class SquadSourceTests
             profile.HarnessModels.TryGetValue("pi", out string? piModel),
             "The deep-planning profile does not expose its 'pi' harness model.");
         Assert.Equal("provider/model", piModel);
-    }
-
-    /// <summary>
-    /// Pins the operator-selected model assignments across planning, coding, review, and
-    /// profiles that do not change, including unchanged harness values that must remain stable.
-    /// </summary>
-    [Theory]
-    [InlineData("architect", "claude", "opus")]
-    [InlineData("architect", "codex", "gpt-6.1-sol")]
-    [InlineData("architect", "copilot", "Claude Opus 5.5 (copilot)")]
-    [InlineData("architect", "cursor", "claude-sonnet-5-5[effort=high]")]
-    [InlineData("architect", "kilo", "zai-coding-plan/glm-5.3")]
-    [InlineData("architect", "opencode", "zai-coding-plan/glm-5.3")]
-    [InlineData("architect", "pi", "zai/glm-5.3[thinking=high]")]
-    [InlineData("architect", "devin", "claude-opus-5-5-high")]
-    [InlineData("deep-planning", "claude", "opus")]
-    [InlineData("deep-planning", "codex", "gpt-6.1-sol")]
-    [InlineData("deep-planning", "copilot", "Claude Opus 5.5 (copilot)")]
-    [InlineData("deep-planning", "cursor", "claude-sonnet-5-5[effort=high]")]
-    [InlineData("deep-planning", "kilo", "zai-coding-plan/glm-5.3")]
-    [InlineData("deep-planning", "opencode", "zai-coding-plan/glm-5.3")]
-    [InlineData("deep-planning", "pi", "zai/glm-5.3[thinking=high]")]
-    [InlineData("deep-planning", "devin", "claude-opus-5-5-high")]
-    [InlineData("fast", "claude", "claude-haiku-5-5")]
-    [InlineData("fast", "codex", "gpt-6-luna")]
-    [InlineData("fast", "copilot", "Claude Haiku 5.5 (copilot)")]
-    [InlineData("fast", "cursor", "composer-2.5[]")]
-    [InlineData("fast", "kilo", "opencode-go/muse-spark-1.3-contributor")]
-    [InlineData("fast", "opencode", "opencode-go/muse-spark-1.3-contributor")]
-    [InlineData("fast", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=low]")]
-    [InlineData("fast", "devin", "deepseek-v4-1-flash-high")]
-    [InlineData("general", "claude", "claude-sonnet-5-5")]
-    [InlineData("general", "codex", "gpt-6.1-terra")]
-    [InlineData("general", "copilot", "GPT-6.1 Terra (copilot)")]
-    [InlineData("general", "cursor", "grok-4.7[]")]
-    [InlineData("general", "kilo", "opencode-go/muse-spark-1.3-contributor")]
-    [InlineData("general", "opencode", "opencode-go/muse-spark-1.3-contributor")]
-    [InlineData("general", "pi", "opencode-go/muse-spark-1.3-contributor[thinking=medium]")]
-    [InlineData("general", "devin", "swe-2-high")]
-    [InlineData("reviewer", "claude", "sonnet")]
-    [InlineData("reviewer", "codex", "gpt-6.1-terra")]
-    [InlineData("reviewer", "copilot", "Gemini 3.8 Flash (copilot)")]
-    [InlineData("reviewer", "cursor", "kimi-k2.7-code[]")]
-    [InlineData("reviewer", "kilo", "opencode-go/kimi-k2.7-code")]
-    [InlineData("reviewer", "opencode", "opencode-go/kimi-k2.7-code")]
-    [InlineData("reviewer", "pi", "opencode-go/kimi-k2.7-code[thinking=high]")]
-    [InlineData("reviewer", "devin", "grok-4-7-high")]
-    [InlineData("dev-hard", "claude", "opus")]
-    [InlineData("dev-hard", "codex", "gpt-6.1-sol")]
-    [InlineData("dev-hard", "copilot", "Gemini 4 Hydrogen (copilot)")]
-    [InlineData("dev-hard", "cursor", "claude-sonnet-5-5[effort=high]")]
-    [InlineData("dev-hard", "factory", "glm-5.3[reasoningEffort=high]")]
-    [InlineData("dev-hard", "kilo", "zai-coding-plan/glm-5.3")]
-    [InlineData("dev-hard", "opencode", "zai-coding-plan/glm-5.3")]
-    [InlineData("dev-hard", "pi", "zai/glm-5.3[thinking=high]")]
-    [InlineData("dev-hard", "devin", "claude-opus-5-5-high")]
-    [InlineData("dev-hard", "zcode", "glm-5.3")]
-    public void ModelsYmlDeclaresExactHarnessValuesPerProfilePerPlan(string profileName, string harbessName, string expectedValue)
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-
-        Assert.True(
-            source.ModelProfiles.Profiles.ContainsKey(profileName),
-            $"models.yml does not declare the '{profileName}' profile.");
-        SquadModelProfile profile = source.ModelProfiles.Profiles[profileName];
-
-        // default: inherit is always required
-        Assert.True(
-            profile.Default == "inherit",
-            $"Profile '{profileName}' default is '{profile.Default}' instead of 'inherit'.");
-
-        if (expectedValue == "inherit")
-        {
-            // The harness-model entry should be absent or resolve to inherit
-            bool hasEntry = profile.HarnessModels.TryGetValue(harbessName, out string? actualValue);
-            Assert.True(
-                !hasEntry || actualValue == "inherit",
-                $"Profile '{profileName}' harness '{harbessName}' should be absent or 'inherit', but got '{(hasEntry ? actualValue : "(absent)")}' from models.yml.");
-        }
-        else
-        {
-            // The harness-model entry must exist and match exactly
-            Assert.True(
-                profile.HarnessModels.TryGetValue(harbessName, out string? actualValue),
-                $"Profile '{profileName}' harness '{harbessName}' is missing from models.yml.");
-            Assert.True(
-                actualValue == expectedValue,
-                $"Profile '{profileName}' harness '{harbessName}' is '{actualValue}' but should be '{expectedValue}'.");
-        }
-    }
-
-    [Fact]
-    public void ModelsYmlUsesHaiku55OnlyForTheFastProfile()
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-
-        foreach ((string profileName, SquadModelProfile profile) in source.ModelProfiles.Profiles)
-        {
-            Assert.DoesNotContain("haiku", profile.Default, StringComparison.OrdinalIgnoreCase);
-            foreach ((string harness, string model) in profile.HarnessModels)
-            {
-                if (model.Contains("haiku", StringComparison.OrdinalIgnoreCase))
-                {
-                    Assert.True(
-                        (profileName == "fast" && harness == "claude" && model == "claude-haiku-5-5") ||
-                        (profileName == "fast" && harness == "copilot" && model == "Claude Haiku 5.5 (copilot)"),
-                        $"Profile '{profileName}' on harness '{harness}' unexpectedly resolves to '{model}'.");
-                }
-            }
-        }
-    }
-
-
-    /// <summary>
-    /// Pins Antigravity planning, review and the hard developer tier to Pro while routine work stays on Flash.
-    /// This catches unintended model changes independently of the renderer's YAML echo.
-    /// </summary>
-    [Theory]
-    [InlineData("architect", "pro")]
-    [InlineData("deep-planning", "pro")]
-    [InlineData("fast", "flash")]
-    [InlineData("general", "flash")]
-    [InlineData("dev-hard", "pro")]
-    [InlineData("reviewer", "pro")]
-    public void ModelsYmlAntigravityColumnPinsPlanningReviewAndTheHardTierOnProAndOtherProfilesOnFlash(
-        string profileName,
-        string expectedAntigravityModel)
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-
-        Assert.True(
-            source.ModelProfiles.Profiles.ContainsKey(profileName),
-            $"models.yml does not declare the '{profileName}' profile.");
-        SquadModelProfile profile = source.ModelProfiles.Profiles[profileName];
-        Assert.True(
-            profile.HarnessModels.TryGetValue("antigravity", out string? actualValue),
-            $"Profile '{profileName}' is missing its antigravity column in models.yml.");
-        Assert.True(
-            actualValue == expectedAntigravityModel,
-            $"Profile '{profileName}' antigravity is '{actualValue}' but should be '{expectedAntigravityModel}'.");
-    }
-
-    /// <summary>
-    /// Keeps the architect/product-owner profile distinct from the other planning roles even
-    /// when both profiles currently select the same planning models.
-    /// </summary>
-    [Fact]
-    public void ArchitectAndProductOwnerOwnArchitectModelProfileAndDeepPlanningPeersStayOnDeepPlanning()
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-
-        SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
-        Assert.Equal("architect", architect.ModelProfile);
-
-        SquadAgent productOwner = Assert.Single(source.Agents, agent => agent.Name == "product-owner");
-        Assert.Equal("architect", productOwner.ModelProfile);
-
-        SquadAgent peer = Assert.Single(source.Agents, agent => agent.Name == "bug-crusher-investigator");
-        Assert.Equal("deep-planning", peer.ModelProfile);
-
-        Assert.DoesNotContain(
-            source.Agents.Where(agent => agent.Name != "architect" && agent.Name != "product-owner"),
-            agent => string.Equals(agent.ModelProfile, "architect", StringComparison.Ordinal));
-    }
-
-    /// <summary>
-    /// Guard against vacuous tests: reviewer must have members when it exists (plan section 7, T16 criterion 3).
-    /// </summary>
-    [Fact]
-    public void ReviewerProfileHasNonEmptyMembership()
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-
-        Assert.True(
-            source.ModelProfiles.Profiles.ContainsKey("reviewer"),
-            "models.yml does not declare a 'reviewer' profile.");
-
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
-        int reviewerMemberCount = source.Agents.Count(agent => reviewerAgents.Contains(agent.Name));
-        Assert.True(
-            reviewerMemberCount > 0,
-            "No agents are assigned to the 'reviewer' profile; criterion 3 model assertion would be vacuous.");
-    }
-
-    [Fact]
-    public void MaiCodeFlashKeyIsRemovedFromModelsYml()
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-
-        Assert.False(
-            source.ModelProfiles.Profiles.ContainsKey("mai-code-flash"),
-            "models.yml still contains the 'mai-code-flash' key; it is a model name and must be removed.");
-    }
-
-    [Fact]
-    public void CodeReviewerReviewLensReviewTriageDeclareReviewerProfile()
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-        string[] reviewerAgents = ["code-reviewer", "review-lens", "review-triage"];
-
-        foreach (string agentName in reviewerAgents)
-        {
-            SquadAgent agent = Assert.Single(
-                source.Agents,
-                candidate => candidate.Name == agentName);
-            Assert.True(
-                agent.ModelProfile == "reviewer",
-                $"Agent '{agentName}' declares 'model-profile: {agent.ModelProfile}' instead of 'reviewer'.");
-        }
-    }
-
-    /// <summary>
-    /// The developer agents that the tiered roster dispatches are the ones modelled for cheap work:
-    /// <c>dev-easy</c> is the <c>fast</c> profile. The two removed planning and testing agents used to
-    /// live here; their profiles are still declared for the roles that keep them.
-    /// </summary>
-    [Fact]
-    public void DevEasyDeclaresModelProfileFast()
-    {
-        SquadSource source = RealSquadServices.Load(ProductRoot);
-
-        SquadAgent devEasy = Assert.Single(
-            source.Agents,
-            candidate => candidate.Name == "dev-easy");
-        Assert.Equal("fast", devEasy.ModelProfile);
-    }
-
-    /// <summary>
-    /// The published schema is a second copy of the loader's model-profile field set. Every
-    /// other declared target already has a harness-model property there; without a <c>pi</c>
-    /// property, schema-aware editors reject a profile the loader accepts.
-    /// </summary>
-    [Fact]
-    public void ModelProfilesSchemaDeclaresAPiHarnessModelField()
-    {
-        using JsonDocument schema = JsonDocument.Parse(
-            Corpus.ReadText("products/kyber-squad/schemas/model-profiles.schema.json"));
-        JsonElement harnessModelFields = schema.RootElement
-            .GetProperty("properties")
-            .GetProperty("profiles")
-            .GetProperty("additionalProperties")
-            .GetProperty("properties");
-
-        Assert.True(
-            harnessModelFields.TryGetProperty("pi", out JsonElement piField),
-            "model-profiles.schema.json declares no 'pi' harness-model property.");
-        Assert.Equal("string", piField.GetProperty("type").GetString());
-        Assert.Equal(1, piField.GetProperty("minLength").GetInt32());
     }
 
     [Theory]
@@ -338,7 +84,7 @@ public sealed class SquadSourceTests
         string validSchema,
         string unsupportedSchema)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(relativePath, validSchema, unsupportedSchema);
 
         Diagnostic diagnostic = AssertInvalid(fixture, relativePath, unsupportedSchema);
@@ -349,7 +95,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentOmitsRequiredSchemaFieldReportsFieldAndSourceLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "description: Use when planning multi-domain work.\n",
@@ -363,7 +109,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentUsesUnknownFrontmatterFieldReportsClosedSchemaViolation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "aliases: []",
@@ -377,7 +123,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentUsesUnknownCopilotToolReportsKnownCatalogAndSourceLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -393,7 +139,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentRepeatsCopilotToolReportsDuplicateAndSourceLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -408,7 +154,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentDeclaresNoCopilotToolsReportsRequiredMembership()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -425,7 +171,7 @@ public sealed class SquadSourceTests
     [InlineData("deny")]
     public void LoadGovernedCopilotToolRequiresExplicitCapabilityAllow(string decision)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/dev-medium.md",
             "copilot-tools: [vscode, read]",
@@ -445,7 +191,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadCopilotSpecificProfileAllowsExactToolsWithoutWideningSharedProfile()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "profiles:\n",
@@ -464,7 +210,7 @@ public sealed class SquadSourceTests
             "copilot-capability-profile: architect-copilot\n" +
             "copilot-tools: [vscode, read, edit]");
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
         Assert.Equal("architect", architect.CapabilityProfile);
@@ -477,7 +223,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadCopilotSpecificProfileAsSharedProfileFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "profiles:\n",
@@ -514,7 +260,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithValidPiOverlayLoadsSuccessfully()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -522,7 +268,7 @@ public sealed class SquadSourceTests
             "pi-extensions: [pi-mcp-adapter]\n" +
             "pi-tools: [ext:pi-mcp-adapter/mcp, ext:pi-mcp-adapter/mcp__context7__resolve_library_id]");
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
         Assert.Equal(["vscode", "read"], architect.CopilotTools);
@@ -543,7 +289,7 @@ public sealed class SquadSourceTests
     [InlineData("ext:pi-mcp-adapter/")]
     public void LoadAgentWithMalformedPiToolReferenceRejectsWellFormedRule(string piTool)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -564,7 +310,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithBarePiToolNameRejectsExtForm()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -584,7 +330,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithPiToolExtensionNotDeclaredRejectsCrossCheck()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -603,7 +349,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithEmptyPiExtensionsRejectsRequiredMembership()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -623,7 +369,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithDuplicatePiToolsRejectsDuplicate()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -646,7 +392,7 @@ public sealed class SquadSourceTests
     [InlineData("Pi-Adapter!")]
     public void LoadAgentWithNonPortablePiExtensionRejectsCharset(string extension)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "copilot-tools: [vscode, read]",
@@ -662,7 +408,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentReferencesUnknownCopilotCapabilityProfileFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "capability-profile: architect\n",
@@ -678,7 +424,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadCopilotOverrideReferencesSharedProfileFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "capability-profile: architect\n",
@@ -693,7 +439,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithDevinSpecificCapabilityProfileSucceeds()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "profiles:\n",
@@ -710,7 +456,7 @@ public sealed class SquadSourceTests
             "capability-profile: architect\n" +
             "devin-capability-profile: architect-devin\n");
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
         SquadAgent architect = Assert.Single(source.Agents, agent => agent.Name == "architect");
 
         Assert.Equal("architect", architect.CapabilityProfile);
@@ -723,7 +469,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadDevinSpecificProfileAsSharedProfileFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "profiles:\n",
@@ -753,7 +499,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentReferencesUnknownDevinCapabilityProfileFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "capability-profile: architect\n",
@@ -769,7 +515,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadDevinOverrideReferencesSharedProfileFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "capability-profile: architect\n",
@@ -788,7 +534,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadCapabilityProfileWithUnknownTargetFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "profiles:\n",
@@ -816,7 +562,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadDevinOverrideOnPrimaryAgentFailsClosed()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "profiles:\n",
@@ -847,7 +593,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadVersionSourceIsNotAssemblyReportsRequiredLiteralAtManifestLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "squad.yml",
             "version-source: kyber-weave-assembly",
@@ -867,7 +613,7 @@ public sealed class SquadSourceTests
         string missingProfile,
         string relativePath)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         string original = key switch
         {
             "model-profile" => "deep-planning",
@@ -888,7 +634,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithNoModelProfileFailsUnlessItIsTheConductor()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace("agents/architect.md", "model-profile: deep-planning\n", string.Empty);
 
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "architect");
@@ -901,7 +647,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadConductorWithNoModelProfileIsValid()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("agents/conductor.md", """
             ---
             schema: kyber-squad.agent/v1
@@ -917,7 +663,7 @@ public sealed class SquadSourceTests
             You are conductor.
             """);
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
 
         Assert.True(string.IsNullOrWhiteSpace(
             source.Agents.Single(agent => agent.Name == "conductor").ModelProfile));
@@ -926,7 +672,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadProfileUsesUnknownCapabilityReportsCapabilityProfileLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "      filesystem.read: allow",
@@ -940,7 +686,7 @@ public sealed class SquadSourceTests
     [InlineData("true")]
     public void LoadProfileUsesUnknownPermissionDecisionReportsAllowedDecisions(string decision)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "      filesystem.write: deny",
@@ -956,7 +702,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadProfileOmitsDeclaredCapabilityReportsMissingDecisionAtProfileLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/capabilities.yml",
             "      delegate: ask\n",
@@ -971,7 +717,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadFallbackProfileUsesUnknownFieldReportsClosedSchemaViolation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "profiles/fallbacks.yml",
             "    no-agent-primitive: skill",
@@ -985,8 +731,8 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadMissingFallbackProfilesSchemaReportsRequiredSchemaLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
-        File.Delete(fixture.AbsolutePath("schemas/fallback-profiles.schema.json"));
+        SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Files.DeleteFile(fixture.AbsolutePath("schemas/fallback-profiles.schema.json"));
 
         Diagnostic diagnostic = AssertInvalid(
             fixture,
@@ -999,7 +745,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadMalformedFallbackProfilesSchemaReportsJsonAndSchemaLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("schemas/fallback-profiles.schema.json", "{");
 
         Diagnostic diagnostic = AssertInvalid(
@@ -1013,7 +759,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadFallbackProfilesSchemaUsesUnsupportedIdentityVersionReportsExpectedIdentity()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "schemas/fallback-profiles.schema.json",
             "https://kyber-weave.dev/schemas/kyber-squad/fallback-profiles/v1",
@@ -1030,7 +776,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadMissingReferencedPathReportsDeclaringManifestLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace("squad.yml", "profiles/models.yml", "profiles/missing.yml");
 
         Diagnostic diagnostic = AssertInvalid(fixture, "squad.yml", "profiles/missing.yml");
@@ -1044,7 +790,7 @@ public sealed class SquadSourceTests
     [InlineData("/tmp/outside.yml")]
     public void LoadManifestPathEscapesProductRootRejectsBeforeReadingOutsidePath(string unsafePath)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace("squad.yml", "profiles/models.yml", unsafePath);
 
         Diagnostic diagnostic = AssertInvalid(fixture, "squad.yml", unsafePath);
@@ -1055,27 +801,13 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadReferencedSymlinkEscapesProductRootRejectsResolvedTarget()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            throw SkipException.ForSkip(
-                "Symbolic links require elevated privileges on Windows.");
-        }
-
-        using SquadFixture fixture = SquadFixture.CreateValid();
-        using TempDirectory outside = new TempDirectory();
-        string outsideAgent = Path.Combine(outside.Path, "architect.md");
-        File.WriteAllText(outsideAgent, SquadFixture.ArchitectAgentLf, new UTF8Encoding(false));
+        SquadFixture fixture = SquadFixture.CreateValid();
+        string outsideAgent = System.IO.Path.Combine(fixture.Files.Root, "outside-source", "architect.md");
+        fixture.Files.CreateDirectory(System.IO.Path.GetDirectoryName(outsideAgent)!);
+        fixture.Files.WriteAllText(outsideAgent, SquadFixture.ArchitectAgentLf);
         string linkedAgent = fixture.AbsolutePath("agents/architect.md");
-        File.Delete(linkedAgent);
-        try
-        {
-            File.CreateSymbolicLink(linkedAgent, outsideAgent);
-        }
-        catch (UnauthorizedAccessException)
-        {
-            throw SkipException.ForSkip(
-                "Creating symbolic links requires elevated privileges on this host.");
-        }
+        fixture.Files.DeleteFile(linkedAgent);
+        fixture.Files.CreateFileLink(linkedAgent, outsideAgent);
 
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "symbolic link");
 
@@ -1085,8 +817,8 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentIsNotValidUtf8ReportsEncodingAndSourceLocation()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
-        File.WriteAllBytes(fixture.AbsolutePath("agents/architect.md"), [0xc3, 0x28]);
+        SquadFixture fixture = SquadFixture.CreateValid();
+        fixture.Files.WriteAllBytes(fixture.AbsolutePath("agents/architect.md"), [0xc3, 0x28]);
 
         Diagnostic diagnostic = AssertInvalid(fixture, "agents/architect.md", "UTF-8");
 
@@ -1100,7 +832,7 @@ public sealed class SquadSourceTests
         string identityKind,
         string missingIdentity)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         string anchor = identityKind == "agent" ? "  - dev-medium" : "  - dev-medium";
         fixture.Replace("bundles/full.yml", anchor, $"{anchor}\n  - {missingIdentity}");
 
@@ -1117,7 +849,7 @@ public sealed class SquadSourceTests
         string duplicateRelativePath,
         string duplicateName)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         if (identityKind == "agent")
         {
             fixture.Write(
@@ -1134,7 +866,7 @@ public sealed class SquadSourceTests
         }
 
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => RealSquadServices.Load(fixture.Path));
+            () => fixture.Load());
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => item.Message.Contains("duplicate", StringComparison.OrdinalIgnoreCase) &&
@@ -1153,7 +885,7 @@ public sealed class SquadSourceTests
     [InlineData("shared-alias")]
     public void LoadAliasCollidesWithCanonicalOrExistingAliasReportsDeclaringAgent(string alias)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
             "agents/dev-medium.md",
             SquadFixture.Agent("dev-medium", aliases: $"[{alias}]"));
@@ -1172,7 +904,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAliasReferenceInBundleRejectsNonCanonicalIdentity()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
             "agents/architect.md",
             SquadFixture.Agent("architect", aliases: "[planner]"));
@@ -1192,7 +924,7 @@ public sealed class SquadSourceTests
         string expectedSourcePath,
         string reservedIdentity)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         switch (identityKind)
         {
             case "agent":
@@ -1220,7 +952,7 @@ public sealed class SquadSourceTests
         }
 
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => RealSquadServices.Load(fixture.Path));
+            () => fixture.Load());
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => string.Equals(item.FilePath, expectedSourcePath, StringComparison.Ordinal) &&
@@ -1249,7 +981,7 @@ public sealed class SquadSourceTests
         string declared,
         string expectedMessageFragment)
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Replace(
             "agents/architect.md",
             "aliases: []\n",
@@ -1265,7 +997,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadIdentitiesDifferingOnlyByReservedPrefixCaseRemainValid()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write(
             "agents/architect.md",
             SquadFixture.Agent("architect", name: "Role-architect", aliases: "[Role-planner]"));
@@ -1275,7 +1007,7 @@ public sealed class SquadSourceTests
         fixture.Replace("bundles/full.yml", "  - architect", "  - Role-architect");
         fixture.Replace("bundles/full.yml", "skills:\n  - dev-medium", "skills:\n  - Role-test-dev");
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
 
         SquadAgent agent = Assert.Single(source.Agents, item => item.Name == "Role-architect");
         Assert.Equal(["Role-planner"], agent.Aliases);
@@ -1285,15 +1017,15 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadLfAndUtf8BomVariantsProduceSameNormalizedBodyAndStableSha256()
     {
-        using SquadFixture lfFixture = SquadFixture.CreateValid();
-        using SquadFixture crlfFixture = SquadFixture.CreateValid();
+        SquadFixture lfFixture = SquadFixture.CreateValid();
+        SquadFixture crlfFixture = SquadFixture.CreateValid();
         crlfFixture.Write(
             "agents/architect.md",
             SquadFixture.ArchitectAgentLf.Replace("\n", "\r\n", StringComparison.Ordinal),
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        SquadAgent lfAgent = RealSquadServices.Load(lfFixture.Path).Agents.Single(agent => agent.Name == "architect");
-        SquadAgent crlfAgent = RealSquadServices.Load(crlfFixture.Path).Agents.Single(agent => agent.Name == "architect");
+        SquadAgent lfAgent = lfFixture.Load().Agents.Single(agent => agent.Name == "architect");
+        SquadAgent crlfAgent = crlfFixture.Load().Agents.Single(agent => agent.Name == "architect");
 
         Assert.Equal(NormalizedArchitectBody, lfAgent.InstructionBody);
         Assert.Equal(NormalizedArchitectBody, crlfAgent.InstructionBody);
@@ -1304,7 +1036,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithUnknownFrontmatterFieldReportsMatchingMarkdownLineNumber()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         string invalidAgent =
             "---\n" +
             "schema: kyber-squad.agent/v1\n" +
@@ -1330,7 +1062,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadSkillWithUnknownFrontmatterFieldReportsMatchingMarkdownLineNumber()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         string invalidSkill =
             "---\n" +
             "name: dev-medium\n" +
@@ -1349,7 +1081,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadAgentWithInvalidYamlSyntaxReportsMatchingMarkdownLineNumber()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         string invalidAgent =
             "---\n" +
             "schema: kyber-squad.agent/v1\n" +
@@ -1375,9 +1107,9 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadToolchainWithoutRequiredMcpToolsYieldsAnEmptyRoster()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
 
         Assert.Empty(source.Toolchain.RequiredMcpTools);
     }
@@ -1385,7 +1117,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadToolchainReadsRequiredMcpToolsInStableOrder()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("toolchain.yml", """
             schema: kyber-squad.toolchain/v1
             required-features: []
@@ -1398,7 +1130,7 @@ public sealed class SquadSourceTests
             validated-release: null
             """);
 
-        SquadSource source = RealSquadServices.Load(fixture.Path);
+        SquadSource source = fixture.Load();
 
         Assert.Equal(["codegraph", "kyber-weave"], source.Toolchain.RequiredMcpTools.Keys);
         Assert.Equal(["codegraph_explore"], source.Toolchain.RequiredMcpTools["codegraph"]);
@@ -1410,7 +1142,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadToolchainRejectsAServerDeclaringNoTools()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("toolchain.yml", """
             schema: kyber-squad.toolchain/v1
             required-features: []
@@ -1425,7 +1157,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadToolchainRejectsDuplicateToolNames()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("toolchain.yml", """
             schema: kyber-squad.toolchain/v1
             required-features: []
@@ -1448,7 +1180,7 @@ public sealed class SquadSourceTests
     {
         // toModelVisibleMcpNamePart replaces anything outside [A-Za-z0-9_-], so a name carrying
         // another character would be rewritten and an exact-match allow-list would never match.
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("toolchain.yml", $"""
             schema: kyber-squad.toolchain/v1
             required-features: []
@@ -1464,7 +1196,7 @@ public sealed class SquadSourceTests
     [Fact]
     public void LoadToolchainRejectsAnUnknownField()
     {
-        using SquadFixture fixture = SquadFixture.CreateValid();
+        SquadFixture fixture = SquadFixture.CreateValid();
         fixture.Write("toolchain.yml", """
             schema: kyber-squad.toolchain/v1
             required-features: []
@@ -1481,7 +1213,7 @@ public sealed class SquadSourceTests
         string expectedMessageFragment)
     {
         SquadSourceValidationException exception = Assert.Throws<SquadSourceValidationException>(
-            () => RealSquadServices.Load(fixture.Path));
+            () => fixture.Load());
         Diagnostic diagnostic = Assert.Single(
             exception.Diagnostics.Items,
             item => string.Equals(item.FilePath, expectedRelativePath, StringComparison.Ordinal) &&
@@ -1494,7 +1226,7 @@ public sealed class SquadSourceTests
         return diagnostic;
     }
 
-    private sealed class SquadFixture : IDisposable
+    private sealed class SquadFixture
     {
         internal const string ArchitectAgentLf =
             "---\n" +
@@ -1511,13 +1243,21 @@ public sealed class SquadSourceTests
             "---\n" +
             NormalizedArchitectBody;
 
-        private readonly TempDirectory _temp = new();
-
-        public string Path => _temp.Path;
+        private readonly InMemorySquadServices _services;
 
         private SquadFixture()
         {
+            Files = new InMemoryFileSystem();
+            _services = new InMemorySquadServices(Files);
+            Path = System.IO.Path.Combine(Files.Root, "squad-source");
+            Files.CreateDirectory(Path);
         }
+
+        public InMemoryFileSystem Files { get; }
+
+        public string Path { get; }
+
+        public SquadSource Load() => _services.Load(Path);
 
         public static SquadFixture CreateValid()
         {
@@ -1690,12 +1430,9 @@ public sealed class SquadSourceTests
         public void Replace(string relativePath, string oldValue, string newValue)
         {
             string path = AbsolutePath(relativePath);
-            string content = File.ReadAllText(path);
+            string content = Files.ReadAllText(path);
             Assert.Contains(oldValue, content, StringComparison.Ordinal);
-            File.WriteAllText(
-                path,
-                content.Replace(oldValue, newValue, StringComparison.Ordinal),
-                new UTF8Encoding(false));
+            Files.WriteAllText(path, content.Replace(oldValue, newValue, StringComparison.Ordinal));
         }
 
         public void Write(string relativePath, string content) =>
@@ -1704,10 +1441,8 @@ public sealed class SquadSourceTests
         public void Write(string relativePath, string content, Encoding encoding)
         {
             string path = AbsolutePath(relativePath);
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, content, encoding);
+            Files.CreateDirectory(System.IO.Path.GetDirectoryName(path)!);
+            Files.WriteAllBytes(path, [.. encoding.GetPreamble(), .. encoding.GetBytes(content)]);
         }
-
-        public void Dispose() => _temp.Dispose();
     }
 }
