@@ -13,7 +13,7 @@ code-refs:
   - TodoInventoryValidator
   - ArchiveCloseoutValidator
   - OpenWorkValidator
-  - ChangedFiles
+  - IGitChangeReader
 ---
 
 # Documentation governance gates
