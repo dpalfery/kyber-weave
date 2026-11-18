@@ -49,16 +49,18 @@ internal static class ReviewReportWriter
             return;
         }
 
-        string full = paths.GetFullPath(path, environment.CurrentDirectory);
+        string full = path;
         try
         {
+            full = paths.GetFullPath(path, environment.CurrentDirectory);
             string? directory = Path.GetDirectoryName(full);
             if (!string.IsNullOrEmpty(directory))
                 files.CreateDirectory(directory);
 
             files.WriteAllText(full, content);
         }
-        catch (Exception ex) when (FileFailure.Is(ex))
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is ArgumentException or NotSupportedException
+                                       or PathTooLongException or System.Security.SecurityException)
         {
             report.Add(new Diagnostic(
                 code,

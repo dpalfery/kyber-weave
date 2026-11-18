@@ -1282,28 +1282,7 @@ public sealed partial class ReviewVerdictService(
     /// </summary>
     private void TryWriteReport(string? path, string content, DiagnosticReport report)
     {
-        if (path is null)
-            return;
-
-        string full = FullPath(path);
-        try
-        {
-            string? directory = Path.GetDirectoryName(full);
-            if (!string.IsNullOrEmpty(directory))
-                files.CreateDirectory(directory);
-
-            files.WriteAllText(full, content);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            report.Add(new Diagnostic(
-                ReportWriteFailed,
-                Severity.Error,
-                $"Could not write the report to '{full}': {ex.Message}",
-                Subject,
-                full,
-                Hint: "Check that the directory is writable, or drop --out."));
-        }
+        ReviewReportWriter.TryWrite(files, paths, environment, path, content, ReportWriteFailed, report);
     }
 
     /// <summary>Resolves a path the caller spelled, a relative one against the working directory.</summary>

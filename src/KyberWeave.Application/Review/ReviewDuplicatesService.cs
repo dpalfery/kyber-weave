@@ -31,7 +31,22 @@ public sealed class ReviewDuplicatesService(
         ArgumentNullException.ThrowIfNull(request);
 
         DiagnosticReport report = new();
-        string root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
+        string root;
+        try
+        {
+            root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
+                                       or System.Security.SecurityException)
+        {
+            report.Add(new Diagnostic(
+                IDocsHostConfiguration.ConfigLoadErrorCode,
+                Severity.Error,
+                $"Cannot resolve path '{request.Path}': {ex.Message}",
+                "kyber-weave.yml",
+                request.Path));
+            return ReviewCommandResultFactory.Reported(1, report);
+        }
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return ReviewCommandResultFactory.Reported(1, report);

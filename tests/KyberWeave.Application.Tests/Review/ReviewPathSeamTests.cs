@@ -49,6 +49,29 @@ public sealed class ReviewPathSeamTests
     }
 
     [Fact]
+    public void TheReportWriterReportsAnUnusableOutPathInsteadOfThrowing()
+    {
+        DiagnosticReport report = new();
+
+        ReviewReportWriter.TryWrite(_files, Paths, _environment, "bad\0spelling.json", "{}", "KW-TEST-001", report);
+
+        Assert.True(report.HasErrors);
+        Assert.Contains(report.Items, d => d.Code == "KW-TEST-001");
+    }
+
+    [Fact]
+    public void TheDuplicatesCommandReportsAnUnusablePathInsteadOfThrowing()
+    {
+        ReviewDuplicatesService service = new(
+            new UnusedDetector(), new UnusedGraphs(), new RecordingConfigs(), _files, Paths, _environment);
+
+        ReviewCommandResult result = service.Run(new ReviewDuplicatesRequest("bad\0spelling", null, null));
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(result.Report!.Items, d => d.Message.Contains("Cannot resolve path", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void TheCatalogueCommandLoadsTheConfigurationForTheResolvedRoot()
     {
         RecordingConfigs configs = new();
