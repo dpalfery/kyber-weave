@@ -761,7 +761,7 @@
       "file": "src/KyberWeave.Data/CodeGraph/CodeGraphResolverAdapter.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"sqlite3\")",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at CodeGraphResolverAdapter.cs:203 with SqliteReadTimeout = 60 s."
+      "bound": "Builds only; nothing starts on this line. Started through the bounded process executor in RunSqlite with SqliteReadTimeout = 60 s."
     },
     {
       "file": "src/KyberWeave.Data/Docs/FileSystem/KernelBoundedProcessExecutor.cs",
@@ -773,7 +773,7 @@
       "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
       "text": "ProcessStartInfo startInfo = new ProcessStartInfo(\"git\")",
       "count": 1,
-      "bound": "Builds only; nothing starts on this line. Started by ProcessRunner.Run at AnalysisCacheSafety.cs:119 with GitTimeout = 60 s."
+      "bound": "Builds only; nothing starts on this line. Started through the bounded process executor in HasTrackedCacheEntry with GitTimeout = 60 s."
     },
     {
       "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",
@@ -840,30 +840,6 @@
       "text": "using Process? process = Process.Start(start);",
       "count": 1,
       "bound": "Process.Start for `kyberdash menubar --update`. RunProcess waits TrayUpdateTimeout = 5 min (SelfUpdater.cs:56); on expiry it kills the tree, waits 5 s, and throws TimeoutException (SelfUpdater.cs:617-632)."
-    },
-    {
-      "file": "src/KyberWeave.Data/CodeGraph/CodeGraphResolverAdapter.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with SqliteReadTimeout = 60 s (CodeGraphResolverAdapter.cs:36); the tree is killed on expiry."
-    },
-    {
-      "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/AnalysisCacheSafety.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with GitTimeout = 60 s (AnalysisCacheSafety.cs:16); the tree is killed on expiry."
-    },
-    {
-      "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
-      "text": "result = ProcessRunner.Run(startInfo, boundedInput, SqliteBatchTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner.Run with SqliteBatchTimeout = 120 s (SqliteAnalysisPersistence.cs:35); the tree is killed on expiry. sqlite's own busy timeout is separate and does not bound the process."
-    },
-    {
-      "file": "src/KyberWeave.Data/Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs",
-      "text": "return ProcessRunner.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;",
-      "count": 1,
-      "bound": "ProcessRunner.Run with SqliteVersionProbeTimeout = 30 s (SqliteAnalysisPersistence.cs:38); the tree is killed on expiry."
     },
     {
       "file": "src/KyberWeave.Kernel/Processes/ProcessRunner.cs",

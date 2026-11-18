@@ -11,7 +11,7 @@ component: CI Pipelines
 # Seams, adapters and the exceptions they keep
 
 Every outside resource the product touches — the disk, a child process, the environment, the
-console, the clock, identifiers, a lease, an embedded resource, configuration, the operating
+console, the clock, identifiers, a lease, an embedded resource, configuration, the network, the operating
 system's credential store and the shipped content a test reads — is reached through one
 interface, called a **seam**. This page is the
 register the interface-driven unit tests specification requires: the seams, the adapters that
@@ -44,6 +44,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 | Embedded resource | `IEmbeddedResources` (`Contracts/Host`) | Read a named manifest resource as a stream or UTF-8 text | `AssemblyEmbeddedResources` (`KyberWeave.Data`, `Host/AssemblyEmbeddedResources.cs`) | `FakeEmbeddedResources` (`Fakes/FakeEmbeddedResources.cs`) | `EmbeddedResourceContractTests`: fake in `KyberWeave.Tests/EmbeddedResources/FakeEmbeddedResourcesContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/AssemblyEmbeddedResourcesContractTests.cs` |
 | Configuration | `IKyberWeaveConfigRepository` (`Contracts/Repositories`) | Load and try-load the repository's and the user's host configuration; find the config path | `FileKyberWeaveConfigRepository` (`KyberWeave.Application`, `Configuration/FileKyberWeaveConfigRepository.cs`) over `IRepositoryTreeProbe` (`KyberWeave.Application`, `Review/FileRepositoryTreeProbe.cs`), `IFileSystem`, `IPathResolver` and `IProcessEnvironment` | `FakeKyberWeaveConfigRepository` (`Fakes/FakeKyberWeaveConfigRepository.cs`) | `KyberWeaveConfigRepositoryContractTests`: fake in `KyberWeave.Tests/Configuration/FakeKyberWeaveConfigRepositoryContractTests.cs`, adapter over the in-memory file system in `KyberWeave.Tests/Configuration/InMemoryFileKyberWeaveConfigRepositoryContractTests.cs`, and over the real disk in `KyberWeave.Integration.Tests/Contracts/FileKyberWeaveConfigRepositoryContractTests.cs` |
 | Credentials | `ICredentialStore` (`KyberWeave.Domain`, `Arbiter/Credentials/ICredentialStore.cs`) | Read, write and delete one named secret per endpoint origin; a missing entry reads as null; deleting an absent entry succeeds; a store may refuse a key it cannot carry, and every key it accepts reads back unchanged; an origin or key with a line break is refused on every store | `OperatingSystemCredentialStore` picks `WindowsCredentialStore`, `MacKeychainCredentialStore` or `SecretServiceCredentialStore` (`KyberWeave.Data`, `Arbiter/Credentials/`) | `FakeCredentialStore` (`Fakes/FakeCredentialStore.cs`) | `CredentialStoreContractTests`: fake in `KyberWeave.Tests/Credentials/FakeCredentialStoreContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/OperatingSystemCredentialStoreContractTests.cs`, which skips where the host has no usable store |
+| Network | `HttpMessageHandler` (framework); `IEmbeddingTransport` for the loopback-pinned embedding endpoint (`Contracts/Repositories`) | A client takes a handler by constructor and wraps it in a private `HttpClient`; request shape, headers, status handling and cancellation are tested through the handler. The embedding transport adds the handler and name resolution the loopback check needs | `HttpClientHandler` built by `SocketArbiterHttpHandlers` and `SocketSquadReleaseHttpHandlers`; `LoopbackEmbeddingTransport` (`KyberWeave.Data`, `Docs/Analysis/Embeddings/LoopbackEmbeddingTransport.cs`) | `FakeHttpMessageHandler` (`Fakes/FakeHttpMessageHandler.cs`): scripted responses, a hanging or failing server, requests recorded with their bodies | None, and none is required: the handler is the framework's, and the only product adapter that adds behaviour (the loopback pin) is proven against a real loopback socket in `KyberWeave.Integration.Tests/LoopbackEmbeddingTransportTests.cs` |
 | Shipped content (tests) | `ICorpusSource` (`tests/KyberWeave.Testing/Corpus/ICorpusSource.cs`) | Read the shipped agents, skills, standards, documents and workflows by relative path, contained in the corpus; host name-case rule | `CheckoutCorpusSource` (`tests/KyberWeave.Testing/Corpus/CheckoutCorpusSource.cs`), a test adapter over this checkout | `InMemoryCorpusSource` (`tests/KyberWeave.Testing/Corpus/InMemoryCorpusSource.cs`) | `CorpusSourceContractTests`: both against the adapter and the fake in `KyberWeave.RepoPolicy.Tests/CorpusSourceContractTests.cs` |
 
 Notes.
@@ -115,6 +116,8 @@ task's list.
 | `ConsoleArbiterKeyInput` | Console | `KyberWeave.Cli` | `Commands/Arbiter/ConsoleArbiterKeyInput.cs` | The `IArbiterKeyInput` adapter: the only code that reads a key from standard input or from a masked Spectre prompt, and it reaches both through the `IConsole` and `IAnsiConsole` seams it is given |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
+| `SocketArbiterHttpHandlers` | Network | `KyberWeave.Data` | `Arbiter/SocketArbiterHttpHandlers.cs` | The Arbiter's real HTTP handler; the only place that builds it |
+| `LoopbackEmbeddingTransport` | Network | `KyberWeave.Data` | `Docs/Analysis/Embeddings/LoopbackEmbeddingTransport.cs` | Sockets that connect only to loopback (the check repeats at connect time) and system name resolution for the embedding endpoint |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
 
 The credential seam's interface is the one seam still outside `Contracts`: it lives in
@@ -200,7 +203,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
-| `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
@@ -222,13 +224,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
-| `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
-| `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
-| `CodeGraphResolverAdapter` (`CodeGraph/CodeGraphResolverAdapter.cs`) | file system, paths | 4.4 |
-| `OpenAiCompatibleEmbeddingGenerator` (`Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs`) | environment, network | 4.4 |
-| `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
-| `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
@@ -270,11 +265,16 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   `PhysicalFileSystem` by the file-system contract suite.
 - `SelfUpdateSystem` replaces the running binary and extracts archives, so requirement 10.2 applies: it
   moves with crash-safety contract tests and a second reviewer, with task 4.1's `SelfUpdater`.
-- `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are built with `new` or
-  held as a static delegate by `KyberWeave.Cli` and `KyberWeave.Application` callers, so converting them
-  edits those projects' composition code (tasks 4.5 and 4.2).
-- `SystemOneClient`, `SocketArbiterHttpHandlers`, `SystemOneProviderFactory` and
-  `OpenAiCompatibleEmbeddingGenerator` reach the network; no network seam exists yet.
+- `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are converted: each takes the
+  file-system, path, environment and bounded-process seams by constructor, and SQLite itself stays the system
+  `sqlite3` executable behind the process seam. The callers open them through `IAnalysisPersistenceFactory` and
+  `ICodeGraphPortsFactory`, so no caller builds one with `new`.
+- `SystemOneClient`, `GitHubReleaseClient` and `OpenAiCompatibleEmbeddingGenerator` are converted: each takes an
+  `HttpMessageHandler` (the embedding client takes `IEmbeddingTransport`, which supplies one) and wraps it in a
+  private `HttpClient`, so a test answers through `FakeHttpMessageHandler`. `SystemOneProviderFactory` only passes
+  the handler on.
+- `SocketArbiterHttpHandlers` is an adapter, not a class to convert: it is the one place that builds the Arbiter's
+  real handler.
 - `PresentFile` and `DocsRootWalk` are static helpers of the adapter `PhysicalRepositoryFileStore`
   (the bounded one-step read and the link-refusing walk). Only that adapter calls them: application code
   reaches the walk through `IRepositoryFileStore.EnumerateContainedFiles` and `IsContainedFile`.
