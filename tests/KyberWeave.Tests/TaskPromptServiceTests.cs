@@ -139,8 +139,9 @@ public sealed class TaskPromptServiceTests
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
-            index.StandardsFor);
+            provider.GetRequiredService<IWritableFileSystem>(),
+            index.StandardsFor,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     private static TaskPromptResult Build(DocFixture fixture, string? taskId = "T1", string? technology = null)

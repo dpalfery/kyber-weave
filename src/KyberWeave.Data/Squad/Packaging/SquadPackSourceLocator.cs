@@ -1,9 +1,16 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+
 namespace KyberWeave.Cli.Commands.Squad;
 
 /// <summary>
 /// Locates the canonical Kyber-Squad product source tree within the current repository checkout.
 /// </summary>
-public static class SquadPackSourceLocator
+/// <param name="files">Probes the solution and manifest markers.</param>
+/// <param name="paths">Resolves the working directory to a full path.</param>
+/// <param name="environment">Supplies the directory a relative working directory is resolved against.</param>
+public sealed class SquadPackSourceLocator(IFileSystem files, IPathResolver paths, IProcessEnvironment environment)
+    : ISquadSourceLocator
 {
     private const string SolutionFileName = "KyberWeave.sln";
     private const string SquadRelativePath = "products/kyber-squad/squad.yml";
@@ -19,24 +26,29 @@ public static class SquadPackSourceLocator
     /// The full path to the <c>products/kyber-squad</c> source directory when both markers exist;
     /// otherwise <see langword="null"/>.
     /// </returns>
-    public static string? Resolve(string workingDirectory)
+    public string? Resolve(string workingDirectory)
     {
-        if (string.IsNullOrWhiteSpace(workingDirectory) || !Directory.Exists(workingDirectory))
+        if (string.IsNullOrWhiteSpace(workingDirectory))
         {
             return null;
         }
 
-        string root = Path.GetFullPath(workingDirectory);
+        string root = paths.GetFullPath(workingDirectory, environment.CurrentDirectory);
+        if (!files.DirectoryExists(root))
+        {
+            return null;
+        }
+
         string solutionPath = Path.Combine(root, SolutionFileName);
         string squadPath = Path.Combine(
             root,
             SquadRelativePath.Replace('/', Path.DirectorySeparatorChar));
 
-        if (File.Exists(solutionPath) && File.Exists(squadPath))
+        if (files.FileExists(solutionPath) && files.FileExists(squadPath))
         {
-            return Path.GetFullPath(Path.Combine(
-                root,
-                CanonicalDirectoryRelativePath.Replace('/', Path.DirectorySeparatorChar)));
+            return paths.GetFullPath(
+                Path.Combine(root, CanonicalDirectoryRelativePath.Replace('/', Path.DirectorySeparatorChar)),
+                root);
         }
 
         return null;

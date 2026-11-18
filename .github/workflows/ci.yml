@@ -267,6 +267,11 @@ jobs:
           run tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj prompt-content.trx & pids+=($!)
           run tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj layers-Application.trx & pids+=($!)
           run tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj layers-Hooks.trx & pids+=($!)
+          run tests/KyberWeave.Kernel.Tests/KyberWeave.Kernel.Tests.csproj layers-Kernel.trx & pids+=($!)
+          run tests/KyberWeave.Mcp.Tests/KyberWeave.Mcp.Tests.csproj layers-Mcp.trx & pids+=($!)
+          run tests/KyberWeave.Arbiter.Tests/KyberWeave.Arbiter.Tests.csproj layers-Arbiter.trx & pids+=($!)
+          run tests/KyberWeave.Cli.Tests/KyberWeave.Cli.Tests.csproj layers-Cli.trx & pids+=($!)
+          run tests/KyberWeave.Data.Tests/KyberWeave.Data.Tests.csproj layers-Data.trx & pids+=($!)
           run tests/KyberWeave.Architecture.Tests/KyberWeave.Architecture.Tests.csproj layers-Architecture.trx & pids+=($!)
           for pid in "${pids[@]}"; do
             wait "$pid" || status=1
@@ -475,7 +480,7 @@ jobs:
           dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj
           -c ${{ env.CONFIGURATION }}
           --no-restore
-          --filter "FullyQualifiedName~SquadDeploymentState|FullyQualifiedName~PhysicalFileSystemContractTests"
+          --filter "FullyQualifiedName~SquadDeploymentState|FullyQualifiedName~PhysicalFileSystemContractTests|FullyQualifiedName~SelfUpdate"
 
   publish-smoke:
     name: Self-contained publish smoke (linux-x64)

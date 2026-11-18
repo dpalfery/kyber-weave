@@ -82,7 +82,7 @@ internal sealed class LoopbackFinishingProcess
             new KyberWeave.Data.Hooks.PhysicalFileSystem(),
             new KyberWeave.Data.Paths.PhysicalPathResolver(new KyberWeave.Data.Hooks.PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: _readEnvironment),
-            new KyberWeave.Cli.Update.SelfUpdateSystem(),
+            KyberWeave.Testing.Update.RealSelfUpdateSystem.Create(),
             _log,
             runProcess: _runProcess,
             canWriteDirectory: _canWriteDirectory,

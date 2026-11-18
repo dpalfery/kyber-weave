@@ -14,7 +14,7 @@ public sealed class FileHookSnapshotStoreTests
     private static readonly string Directory = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "arbiter"));
     private static readonly string LockPath = Path.Combine(Directory, ".snapshots.lock");
 
-    private readonly FakeTimeProvider _time = new();
+    private readonly ParkObservingTimeProvider _time = new();
     private readonly InMemoryFileSystem _files;
     private readonly FileHookSnapshotStore _store;
 
@@ -121,7 +121,7 @@ public sealed class FileHookSnapshotStoreTests
         _files.CreateDirectory(Directory);
         Stream held = _files.OpenExclusive(LockPath);
 
-        RunUpdateAdvancingTime(afterPolls: 3, release: held.Dispose, mutate: _ => "[1]");
+        RunUpdateAdvancingTime(afterParks: 3, release: held.Dispose, mutate: _ => "[1]");
 
         Assert.Equal("[1]", _store.ReadText(Directory, DocumentName));
     }
@@ -133,7 +133,7 @@ public sealed class FileHookSnapshotStoreTests
         using Stream held = _files.OpenExclusive(LockPath);
         bool mutated = false;
 
-        RunUpdateAdvancingTime(afterPolls: int.MaxValue, release: () => { }, mutate: _ =>
+        RunUpdateAdvancingTime(afterParks: int.MaxValue, release: () => { }, mutate: _ =>
         {
             mutated = true;
             return "[1]";
@@ -153,22 +153,51 @@ public sealed class FileHookSnapshotStoreTests
         Assert.False(_store.Exists(Directory, DocumentName));
     }
 
-    private void RunUpdateAdvancingTime(int afterPolls, Action release, Func<string, string?> mutate)
+    /// <summary>
+    /// Runs the update on a thread of its own and moves the clock only while the update is parked in its retry delay,
+    /// so the order of lock attempts and clock steps never depends on how fast either thread runs. The lock is
+    /// released at the park numbered <paramref name="afterParks"/>, before the clock moves past it.
+    /// </summary>
+    private void RunUpdateAdvancingTime(int afterParks, Action release, Func<string, string?> mutate)
     {
-        Task update = Task.Run(() => _store.Update(Directory, DocumentName, mutate));
-        int polls = 0;
-        while (!update.IsCompleted)
+        Task update = Task.Factory.StartNew(
+            () => _store.Update(Directory, DocumentName, mutate),
+            CancellationToken.None,
+            TaskCreationOptions.LongRunning,
+            TaskScheduler.Default);
+        int parks = 0;
+        while (true)
         {
-            Thread.Sleep(1);
-            _time.Advance(TimeSpan.FromMilliseconds(50));
-            if (++polls == afterPolls)
+            // The bound is a guard against a hang, not a timing assumption: a correct run never waits on it.
+            Task finished = Task.WhenAny(_time.NextPark(), update).WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+            if (ReferenceEquals(finished, update))
+            {
+                break;
+            }
+
+            if (++parks == afterParks)
             {
                 release();
             }
 
-            Assert.True(polls < 400, "the update did not finish");
+            _time.Advance(TimeSpan.FromMilliseconds(50));
         }
 
         update.GetAwaiter().GetResult();
+    }
+
+    /// <summary>A fake clock that tells the test each time something starts waiting on it.</summary>
+    private sealed class ParkObservingTimeProvider : FakeTimeProvider
+    {
+        private readonly SemaphoreSlim _parks = new(0);
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            ITimer timer = base.CreateTimer(callback, state, dueTime, period);
+            _ = _parks.Release();
+            return timer;
+        }
+
+        public Task NextPark() => _parks.WaitAsync();
     }
 }

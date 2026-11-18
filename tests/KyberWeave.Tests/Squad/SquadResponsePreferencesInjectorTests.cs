@@ -1,6 +1,7 @@
 using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -12,6 +13,8 @@ namespace KyberWeave.Tests.Squad;
 /// </summary>
 public sealed class SquadResponsePreferencesInjectorTests
 {
+    private static SquadResponseGuidanceReader Reader => new(new PhysicalFileSystem());
+
     [Fact]
     public void ReadEffective_UsesHomeFileWhenPresentAndNonWhitespace()
     {
@@ -21,7 +24,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         File.WriteAllText(path, expected, Encoding.UTF8);
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
+        string actual = Reader.ReadEffective(home, warnings);
 
         Assert.Equal(expected, actual);
         Assert.Empty(warnings);
@@ -40,7 +43,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         File.WriteAllText(path, homeText, Encoding.UTF8);
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
+        string actual = Reader.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
@@ -53,7 +56,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         string home = NewHomeDirectory();
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
+        string actual = Reader.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         Assert.Empty(warnings);
@@ -68,7 +71,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         Directory.CreateDirectory(Path.Combine(home, SquadResponseGuidanceDeployer.FileName));
 
         List<string> warnings = [];
-        string actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
+        string actual = Reader.ReadEffective(home, warnings);
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
         string warning = Assert.Single(warnings);
@@ -88,7 +91,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         using (SquadHomeHarness.DenyReadOrSkip(path))
         {
             // The file exists but the process is refused its bytes: a genuine degradable read failure.
-            actual = SquadResponseGuidanceReader.ReadEffective(home, warnings);
+            actual = Reader.ReadEffective(home, warnings);
         }
 
         Assert.Equal(SquadResponseGuidanceSource.DefaultText, actual);
@@ -110,7 +113,7 @@ public sealed class SquadResponsePreferencesInjectorTests
         string actual;
         using (SquadHomeHarness.DenyReadOrSkip(path))
         {
-            actual = SquadResponseGuidanceReader.ReadEffective(home, warnings, () => seamDefault);
+            actual = Reader.ReadEffective(home, warnings, () => seamDefault);
         }
 
         Assert.Equal(seamDefault, actual);
@@ -127,7 +130,7 @@ public sealed class SquadResponsePreferencesInjectorTests
 
         List<string> warnings = [];
         Assert.Throws<SquadShippedGuidanceUnavailableException>(() =>
-            SquadResponseGuidanceReader.ReadEffective(
+            Reader.ReadEffective(
                 home,
                 warnings,
                 () => throw new SquadShippedGuidanceUnavailableException("The embedded default is missing.")));

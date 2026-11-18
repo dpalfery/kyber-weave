@@ -20,7 +20,7 @@ namespace KyberWeave.Core.Docs.Validation;
 public sealed class TaskPromptServiceFactory(
     IPlanTaskService tasks,
     IPacketHostFacts hostFacts,
-    IFileSystem files,
+    IWritableFileSystem files,
     ICodeGraphPortsFactory codeGraph,
     IDocumentSourceFactory documents,
     IPathResolver paths,
@@ -36,6 +36,6 @@ public sealed class TaskPromptServiceFactory(
         DocumentIndex index = DocumentIndex.Build(
             documents.Create(root, config.Ontology).Load(),
             codeGraph.ForRepository(root).Resolver);
-        return new TaskPromptService(tasks, hostFacts, files, index.StandardsFor);
+        return new TaskPromptService(tasks, hostFacts, files, index.StandardsFor, environment);
     }
 }

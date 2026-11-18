@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Tests.Corpus;
@@ -24,7 +25,7 @@ public sealed class SquadCorpusTemplate
     /// <summary>Loads the checked-in corpus once for the class that declares this fixture.</summary>
     public SquadCorpusTemplate()
     {
-        Source = SquadSourceLoader.Load(Path.Combine(Corpus.Root, "products", "kyber-squad"));
+        Source = RealSquadServices.Load(Path.Combine(Corpus.Root, "products", "kyber-squad"));
     }
 
     /// <summary>The corpus, parsed once and never mutated.</summary>

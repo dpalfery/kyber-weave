@@ -107,8 +107,9 @@ public sealed class DocsTaskPromptToolTests
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
-            Host(fixture, config).Current().StandardsFor);
+            provider.GetRequiredService<IWritableFileSystem>(),
+            Host(fixture, config).Current().StandardsFor,
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     private static string Packet(DocFixture fixture, string task)

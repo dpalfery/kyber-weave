@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
@@ -266,7 +267,7 @@ public sealed class CommandCodeRendererContractTests
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
         Assert.True(
             SquadMcpGrantProjection.WithheldServers(source, denied, SquadTarget.CommandCode).Count > 0,

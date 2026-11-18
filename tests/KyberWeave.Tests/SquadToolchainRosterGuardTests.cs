@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Reflection;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
@@ -32,7 +33,7 @@ public sealed class SquadToolchainRosterGuardTests
     [Fact]
     public void ShippedToolchainRosterGrantsEveryToolTheKyberWeaveMcpServerExposes()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.True(
             source.Toolchain.RequiredMcpTools.TryGetValue("kw-docs", out IReadOnlyList<string>? declared),
@@ -75,7 +76,7 @@ public sealed class SquadToolchainRosterGuardTests
     [Fact]
     public void ShippedToolchainRosterCoversEveryMcpServerTheSquadDeclares()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         IReadOnlyList<string> declaredServers = SquadMcpDeclaration.ServerNames(source);
 
         Assert.True(

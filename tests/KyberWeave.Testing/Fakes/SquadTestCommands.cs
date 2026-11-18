@@ -47,7 +47,7 @@ internal static class SquadTestCommands
             SquadHostDefaults.CreateLifecycleService(userPaths, store, releaseSource, renderer, globalRoots: roots, environmentReader: environmentReader),
             store,
             RealSquadState.Migration(store, store.UserPaths),
-            new FileSquadTargetResolver(),
+            new SquadTargetResolver(new PhysicalFileSystem(), SquadFileSystemPathSemantics.Instance, new ProcessEnvironment()),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
             console,
@@ -81,7 +81,7 @@ internal static class SquadTestCommands
             instanceService ?? new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(userPaths ?? store.UserPaths)),
             store,
             RealSquadState.Migration(store, store.UserPaths),
-            new FileSquadTargetResolver(),
+            new SquadTargetResolver(new PhysicalFileSystem(), SquadFileSystemPathSemantics.Instance, new ProcessEnvironment()),
             roots,
             new PhysicalSquadFileAccess(),
             new SquadConsoleOptions(isInteractive, readAnswer),
@@ -141,8 +141,8 @@ internal static class SquadTestCommands
         new(new SquadPackService(
             new FakeProcessEnvironment(currentDirectory: workingDirectory ?? "/kw/work"),
             new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FileSquadSourceLocator(),
-            new FileSquadPackager(RealSquadPacker.Create())),
+            RealSquadServices.SourceLocator(),
+            RealSquadServices.Packager(RealSquadPacker.Create())),
             CapturedConsole());
 
     public static SquadRunCommand Run(
@@ -162,7 +162,7 @@ internal static class SquadTestCommands
                 : new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(paths)),
             selectionStore ?? RealSquadSelectionStore.Create(paths),
             ensureOverride is not null ? new AnyPresetStore() : new SquadModelPresetStore(paths),
-            new ProcessSquadHarnessLauncher(),
+            RealSquadServices.ProcessHarnessLauncher(),
             new ProcessEnvironment(),
             new SquadRunOptions(runner, getEnv, findOnPath, workingDirectory),
             output ?? CapturedSquadConsole(),
@@ -209,11 +209,11 @@ internal static class SquadTestCommands
             renderer ?? SquadHostDefaults.ResolveRenderer(),
             new SquadModelPresetStore(store.UserPaths),
             RealSquadDeployment.Planner,
-            new FileSquadResponseGuidanceStore(),
+            new SquadResponseGuidanceReader(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: environmentReader),
-            new FileSquadSourceLocator(),
-            new FileSquadSourceLoader(),
-            new FileSquadSkillShadowing(),
+            RealSquadServices.SourceLocator(),
+            RealSquadServices.SourceLoader(),
+            new SquadSkillShadowing(new PhysicalFileSystem(), SquadFileSystemPathSemantics.Instance, new ProcessEnvironment()),
             new FileDevinImportOverlapInspector(),
             new FileZCodeMcpInspector(),
             new SquadDoctorOptions(executor, workingDirectory),
@@ -243,7 +243,8 @@ internal static class SquadTestCommands
             PhysicalRoots(CapturedSquadConsole()),
             new PhysicalFileSystem(),
             CapturedSquadConsole(),
-            TimeProvider.System);
+            TimeProvider.System,
+            RealSquadServices.PresetValidator());
     }
 
     public static SquadPresetClearCommand PresetClear(
@@ -277,7 +278,8 @@ internal static class SquadTestCommands
             userPaths ?? store.UserPaths,
             new SquadModelPresetStore(store.UserPaths),
             Profiles(store, canonicalProfileResolver),
-            CapturedSquadConsole());
+            CapturedSquadConsole(),
+            RealSquadServices.PresetValidator());
     }
 
     public static SquadPresetListCommand PresetList(
@@ -313,7 +315,7 @@ internal static class SquadTestCommands
         ISquadModelPresetStore presets,
         Func<string?, SquadCanonicalProfiles?> canonicalProfileResolver,
         SquadConsole console) =>
-        new(userPaths, presets, new FuncProfileResolver(canonicalProfileResolver), console);
+        new(userPaths, presets, new FuncProfileResolver(canonicalProfileResolver), console, RealSquadServices.PresetValidator());
 
     /// <summary>The use verb over the stores, roots, file system and console a test supplies; it never starts a transaction.</summary>
     public static SquadPresetUseCommand PresetUseOver(
@@ -336,7 +338,8 @@ internal static class SquadTestCommands
             roots,
             files,
             console,
-            TimeProvider.System);
+            TimeProvider.System,
+            RealSquadServices.PresetValidator());
 
     /// <summary>The clear verb over the stores, roots, file system and console a test supplies; it never starts a transaction.</summary>
     public static SquadPresetClearCommand PresetClearOver(
@@ -412,7 +415,7 @@ internal static class SquadTestCommands
             ? new FuncProfileResolver(version => resolver(version, store.UserPaths))
             : new CheckoutOrSnapshotCanonicalProfileResolver(
                 new PhysicalSquadFileAccess(),
-                new FileSquadSourceLoader(),
+                RealSquadServices.SourceLoader(),
                 new SquadCanonicalProfileStore(store.UserPaths));
 
     private sealed class FuncProfileResolver(Func<string?, SquadCanonicalProfiles?> resolve) : ISquadCanonicalProfileResolver

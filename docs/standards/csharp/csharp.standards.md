@@ -21,7 +21,7 @@ repository has made and would otherwise have to re-argue in review.
 
 ### Dependencies
 
-`KyberWeave.Core` takes Markdig and YamlDotNet, and adding a third needs a justification you
+`KyberWeave.Application` takes few packages, and adding one needs a justification you
 can state. The reasoning is in [`AGENTS.md`](../../../AGENTS.md): every dependency this
 library takes is one every host repository takes with it.
 

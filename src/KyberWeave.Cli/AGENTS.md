@@ -25,7 +25,7 @@ another, that is a gap worth naming rather than an asymmetry to preserve.
 
 The CLI decides which implementations Core uses. `DocsCommandComposition` builds the
 `DocumentLoader` and the `ICodeGraphResolver`; commands take what it returns. Do not
-construct adapters inside Core — see [`../KyberWeave.Core/AGENTS.md`](../KyberWeave.Core/AGENTS.md).
+construct adapters inside Application — see [`../KyberWeave.Application/AGENTS.md`](../KyberWeave.Application/AGENTS.md).
 
 ## Reporting and exit codes
 

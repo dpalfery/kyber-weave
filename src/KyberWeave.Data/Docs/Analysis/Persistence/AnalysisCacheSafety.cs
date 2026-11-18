@@ -1,12 +1,22 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.IO.Enumeration;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Core.Docs.Analysis.Persistence;
 
 /// <summary>Checks whether local analysis state is protected from accidental commits.</summary>
-public static class AnalysisCacheSafety
+/// <param name="files">Reads the repository's state ignore file.</param>
+/// <param name="paths">Resolves the repository root to a full path.</param>
+/// <param name="environment">Supplies the directory a relative root resolves against.</param>
+/// <param name="processes">Runs <c>git ls-files</c> under a time limit.</param>
+public sealed class AnalysisCacheSafety(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment,
+    IBoundedProcessExecutor processes)
 {
     private const string CacheIgnoreEntry = "cache/";
 
@@ -19,17 +29,17 @@ public static class AnalysisCacheSafety
     /// Returns true only when the repository-owned state ignore file contains the narrow
     /// cache-directory entry used by Kyber-Weave.
     /// </summary>
-    public static bool IsSafe(string repositoryRoot)
+    public bool IsSafe(string repositoryRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
         string ignorePath = Path.Combine(
-            Path.GetFullPath(repositoryRoot),
+            paths.GetFullPath(repositoryRoot, environment.CurrentDirectory),
             ".kyber-weave",
             ".gitignore");
         try
         {
-            return File.Exists(ignorePath)
+            return files.FileExists(ignorePath)
                 && HasEffectiveCacheIgnore(ignorePath)
                 && !HasTrackedCacheEntry(repositoryRoot);
         }
@@ -43,10 +53,10 @@ public static class AnalysisCacheSafety
         }
     }
 
-    private static bool HasEffectiveCacheIgnore(string ignorePath)
+    private bool HasEffectiveCacheIgnore(string ignorePath)
     {
         bool protectedByExactEntry = false;
-        foreach (string line in File.ReadLines(ignorePath))
+        foreach (string line in files.ReadLines(ignorePath))
         {
             if (StringComparer.Ordinal.Equals(line, CacheIgnoreEntry))
             {
@@ -99,7 +109,7 @@ public static class AnalysisCacheSafety
 #pragma warning restore CA1847
     }
 
-    private static bool HasTrackedCacheEntry(string repositoryRoot)
+    private bool HasTrackedCacheEntry(string repositoryRoot)
     {
         ProcessStartInfo startInfo = new ProcessStartInfo("git")
         {
@@ -116,7 +126,7 @@ public static class AnalysisCacheSafety
 
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);
+            ProcessResult result = processes.Run(startInfo, string.Empty, GitTimeout);
             return result.ExitCode == 0 && !string.IsNullOrWhiteSpace(result.StandardOutput);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException or IOException or TimeoutException)

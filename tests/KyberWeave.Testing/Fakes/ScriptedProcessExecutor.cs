@@ -20,6 +20,7 @@ public sealed class ScriptedProcessExecutor : IProcessExecutor, IBoundedProcessE
     private readonly Func<ProcessStartInfo, ProcessResult> _respond;
     private readonly List<ProcessStartInfo> _calls = [];
     private readonly List<TimeSpan> _timeouts = [];
+    private readonly List<string> _inputs = [];
 
     public ScriptedProcessExecutor(Func<ProcessStartInfo, ProcessResult> respond)
     {
@@ -33,6 +34,9 @@ public sealed class ScriptedProcessExecutor : IProcessExecutor, IBoundedProcessE
     /// <summary>The time limit each bounded call passed, in order; an unbounded call adds none.</summary>
     public IReadOnlyList<TimeSpan> Timeouts => _timeouts;
 
+    /// <summary>The standard input each call was given, in order.</summary>
+    public IReadOnlyList<string> Inputs => _inputs;
+
     /// <summary>The calls whose executable is <paramref name="fileName"/>.</summary>
     public IEnumerable<ProcessStartInfo> CallsTo(string fileName) =>
         _calls.Where(call => call.FileName == fileName);
@@ -41,6 +45,7 @@ public sealed class ScriptedProcessExecutor : IProcessExecutor, IBoundedProcessE
     {
         ArgumentNullException.ThrowIfNull(startInfo);
         _calls.Add(startInfo);
+        _inputs.Add(standardInput);
         return _respond(startInfo);
     }
 

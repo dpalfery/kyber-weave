@@ -25,6 +25,9 @@ public sealed class FakeSquadCompanionSkills : ISquadCompanionSkills
     public IReadOnlyList<(string SquadSourceRoot, string? CompanionSkillsRoot)> Calls => _calls;
 
     /// <inheritdoc />
+    public string? ResolveRoot(string squadSourceRoot) => null;
+
+    /// <inheritdoc />
     public IReadOnlyList<(string RelativePath, string SourcePath)> Collect(
         string squadSourceRoot,
         string? companionSkillsRoot)

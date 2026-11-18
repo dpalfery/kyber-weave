@@ -254,7 +254,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
         string extracted = ExtractApmArchive();
 
-        SquadSource source = SquadSourceLoader.Load(extracted);
+        SquadSource source = RealSquadServices.Load(extracted);
 
         string[] loaded = source.Skills.Select(skill => skill.Name).ToArray();
         string[] expected = AllKyberWeaveSkillNames();
@@ -278,7 +278,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     {
         AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
         string extracted = ExtractApmArchive();
-        SquadSource source = SquadSourceLoader.Load(extracted);
+        SquadSource source = RealSquadServices.Load(extracted);
         using SquadHomeHarness harness = new(Path.Combine(_temp.Path, "home"));
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         string[] kyberWeaveSkills = AllKyberWeaveSkillNames();
@@ -469,7 +469,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), ParitySkillName);
         string destination = Path.Combine(_temp.Path, "checkout-release");
         using LocalCheckoutSquadReleaseSource source =
-            new(Path.Combine(repository, "products", "kyber-squad"));
+            new(Path.Combine(repository, "products", "kyber-squad"), RealSquadServices.CompanionSkills());
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(
             new SquadReleaseRequest("local/kyber-squad", PackedVersion, destination));
@@ -490,7 +490,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
         string destination = Path.Combine(_temp.Path, "checkout-clash");
         using LocalCheckoutSquadReleaseSource source =
-            new(Path.Combine(repository, "products", "kyber-squad"));
+            new(Path.Combine(repository, "products", "kyber-squad"), RealSquadServices.CompanionSkills());
         SquadReleaseRequest request = new("local/kyber-squad", PackedVersion, destination);
 
         Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => source.DownloadAndExtractAsync(request));
@@ -665,7 +665,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string link = LinkCompanionSkill(repository, ParitySkillName, linkWholeDirectory);
         string destination = Path.Combine(_temp.Path, "checkout-link");
         using LocalCheckoutSquadReleaseSource source =
-            new(Path.Combine(repository, "products", "kyber-squad"));
+            new(Path.Combine(repository, "products", "kyber-squad"), RealSquadServices.CompanionSkills());
         SquadReleaseRequest request = new("local/kyber-squad", PackedVersion, destination);
 
         Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => source.DownloadAndExtractAsync(request));

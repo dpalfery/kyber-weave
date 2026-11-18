@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Validation;
 
 namespace KyberWeave.Core.Squad.Packaging;
@@ -11,7 +13,11 @@ namespace KyberWeave.Core.Squad.Packaging;
 /// <c>products/kyber-squad</c> would break the package, and copying them would leave two sources to drift. Pack and
 /// the checkout release source both call this type, so they cannot disagree about what a Squad tree holds.
 /// </remarks>
-public static class SquadCompanionSkills
+/// <param name="files">Probes links and lists the companion skill folders.</param>
+/// <param name="paths">Resolves a Squad source root to a full path.</param>
+/// <param name="environment">Supplies the directory a relative Squad source root is resolved against.</param>
+public sealed class SquadCompanionSkills(IFileSystem files, IPathResolver paths, IProcessEnvironment environment)
+    : ISquadCompanionSkills
 {
     /// <summary>
     /// Resolves the <c>.apm/skills</c> directory of the repository that holds a Squad source root shaped
@@ -22,29 +28,29 @@ public static class SquadCompanionSkills
     /// would read whatever the link points at, and the per-skill checks never see the root.
     /// </remarks>
     /// <exception cref="SquadSourceValidationException">Thrown when <c>.apm</c> or <c>.apm/skills</c> is a symbolic link.</exception>
-    public static string? ResolveRoot(string squadSourceRoot)
+    public string? ResolveRoot(string squadSourceRoot)
     {
-        DirectoryInfo root = new(Path.GetFullPath(squadSourceRoot));
-        DirectoryInfo? products = root.Parent;
-        DirectoryInfo? repository = products?.Parent;
-        if (root.Name != "kyber-squad" || products?.Name != "products" || repository is null)
+        string root = Path.TrimEndingDirectorySeparator(paths.GetFullPath(squadSourceRoot, environment.CurrentDirectory));
+        string? products = Path.GetDirectoryName(root);
+        string? repository = products is null ? null : Path.GetDirectoryName(products);
+        if (Path.GetFileName(root) != "kyber-squad" || Path.GetFileName(products) != "products" || repository is null)
         {
             return null;
         }
 
-        string apmRoot = Path.Combine(repository.FullName, ".apm");
-        if (new DirectoryInfo(apmRoot).LinkTarget is not null)
+        string apmRoot = Path.Combine(repository, ".apm");
+        if (IsLink(apmRoot))
         {
             throw SymbolicLink(".apm");
         }
 
         string skillsRoot = Path.Combine(apmRoot, "skills");
-        if (new DirectoryInfo(skillsRoot).LinkTarget is not null)
+        if (IsLink(skillsRoot))
         {
             throw SymbolicLink(".apm/skills");
         }
 
-        return Directory.Exists(skillsRoot) ? skillsRoot : null;
+        return files.DirectoryExists(skillsRoot) ? skillsRoot : null;
     }
 
     /// <summary>
@@ -57,14 +63,14 @@ public static class SquadCompanionSkills
     /// harness with no signal. A symbolic link at a companion skill's directory, its <c>SKILL.md</c>, or any file or folder
     /// nested in it throws for the same reason. The exception carries no partial list, so no caller can report a partial tree.
     /// </remarks>
-    public static IReadOnlyList<(string RelativePath, string SourcePath)> Collect(
+    public IReadOnlyList<(string RelativePath, string SourcePath)> Collect(
         string squadSourceRoot,
         string? companionSkillsRoot)
     {
-        List<(string RelativePath, string SourcePath)> files = [];
+        List<(string RelativePath, string SourcePath)> collected = [];
         if (companionSkillsRoot is null)
         {
-            return files;
+            return collected;
         }
 
         foreach (string skillDirectory in SkillDirectories(companionSkillsRoot))
@@ -75,19 +81,19 @@ public static class SquadCompanionSkills
             foreach (string filePath in EnumerateSkillFiles(skillDirectory, $".apm/skills/{name}"))
             {
                 string relativePath = Path.GetRelativePath(skillDirectory, filePath).Replace('\\', '/');
-                files.Add(($"skills/{name}/{relativePath}", filePath));
+                collected.Add(($"skills/{name}/{relativePath}", filePath));
             }
         }
 
-        return files;
+        return collected;
     }
 
     /// <summary>
     /// Every direct child of the companion root that is a real directory holding a real <c>SKILL.md</c>, ordinally sorted.
     /// </summary>
-    private static IEnumerable<string> SkillDirectories(string companionSkillsRoot)
+    private IEnumerable<string> SkillDirectories(string companionSkillsRoot)
     {
-        return Directory.EnumerateDirectories(companionSkillsRoot)
+        return files.EnumerateDirectories(companionSkillsRoot)
             .Where(IsSkillDirectory)
             .Order(StringComparer.Ordinal);
     }
@@ -100,32 +106,30 @@ public static class SquadCompanionSkills
     /// <remarks>
     /// Lists one folder at a time, so a link is seen as a link and never descended into. Hidden entries are included.
     /// </remarks>
-    private static IEnumerable<string> EnumerateSkillFiles(string directory, string skillPath)
+    private IEnumerable<string> EnumerateSkillFiles(string directory, string skillPath)
     {
-        EnumerationOptions options = new() { RecurseSubdirectories = false, IgnoreInaccessible = false, AttributesToSkip = 0 };
-        List<FileSystemInfo> entries = new DirectoryInfo(directory)
-            .EnumerateFileSystemInfos("*", options)
-            .OrderBy(entry => entry.Name, StringComparer.Ordinal)
+        List<FileSystemEntry> entries = files.EnumerateEntries(directory)
+            .OrderBy(entry => Path.GetFileName(entry.Path), StringComparer.Ordinal)
             .ToList();
 
-        foreach (FileSystemInfo entry in entries)
+        foreach (FileSystemEntry entry in entries)
         {
-            string entryPath = $"{skillPath}/{entry.Name}";
-            if (entry.LinkTarget is not null)
+            string entryPath = $"{skillPath}/{Path.GetFileName(entry.Path)}";
+            if (entry.IsLink)
             {
                 throw SymbolicLink(entryPath);
             }
 
-            if (entry is DirectoryInfo subdirectory)
+            if (entry.IsDirectory)
             {
-                foreach (string file in EnumerateSkillFiles(subdirectory.FullName, entryPath))
+                foreach (string file in EnumerateSkillFiles(entry.Path, entryPath))
                 {
                     yield return file;
                 }
             }
             else
             {
-                yield return entry.FullName;
+                yield return entry.Path;
             }
         }
     }
@@ -135,24 +139,37 @@ public static class SquadCompanionSkills
     /// would release a tree without a skill the operator authored, and nothing would say so. A linked skill could also
     /// pull content in from outside the tree.
     /// </remarks>
-    private static bool IsSkillDirectory(string directory)
+    private bool IsSkillDirectory(string directory)
     {
         string name = Path.GetFileName(directory);
-        if (new DirectoryInfo(directory).LinkTarget is not null)
+        if (IsLink(directory))
         {
             throw SymbolicLink($".apm/skills/{name}");
         }
 
         string skillFile = Path.Combine(directory, "SKILL.md");
-        if (new FileInfo(skillFile).LinkTarget is not null)
+        if (IsLink(skillFile))
         {
             throw SymbolicLink($".apm/skills/{name}/SKILL.md");
         }
 
-        return File.Exists(skillFile);
+        return files.FileExists(skillFile);
     }
 
-    private static void RejectClash(string squadSourceRoot, string name)
+    /// <summary>
+    /// Whether the path is a symbolic link, found by listing its parent: a link whose target is gone is still a link, and a
+    /// probe that follows the link would report it as absent and let the skill be skipped.
+    /// </summary>
+    private bool IsLink(string path)
+    {
+        string name = Path.GetFileName(path);
+        string? parent = Path.GetDirectoryName(path);
+        return parent is not null &&
+               files.EnumerateEntries(parent).Any(entry =>
+                   entry.IsLink && string.Equals(Path.GetFileName(entry.Path), name, StringComparison.Ordinal));
+    }
+
+    private void RejectClash(string squadSourceRoot, string name)
     {
         string? squadSkill = EntryNamedIgnoringCase(Path.Combine(squadSourceRoot, "skills"), name, isDirectory: true);
         if (squadSkill is not null)
@@ -172,17 +189,17 @@ public static class SquadCompanionSkills
     /// folder is listed rather than probed by path, because a probe follows the host's own case rules: on Linux
     /// <c>Task-Gate</c> would find no <c>task-gate</c>, and the install on macOS or Windows would then collide.
     /// </summary>
-    private static string? EntryNamedIgnoringCase(string directory, string entryName, bool isDirectory)
+    private string? EntryNamedIgnoringCase(string directory, string entryName, bool isDirectory)
     {
-        if (!Directory.Exists(directory))
+        if (!files.DirectoryExists(directory))
         {
             return null;
         }
 
-        IEnumerable<string> paths = isDirectory
-            ? Directory.EnumerateDirectories(directory)
-            : Directory.EnumerateFiles(directory);
-        return paths
+        IEnumerable<string> entries = isDirectory
+            ? files.EnumerateDirectories(directory)
+            : files.EnumerateFiles(directory, "*", recursive: false);
+        return entries
             .Select(path => Path.GetFileName(path))
             .FirstOrDefault(fileName => string.Equals(fileName, entryName, StringComparison.OrdinalIgnoreCase));
     }

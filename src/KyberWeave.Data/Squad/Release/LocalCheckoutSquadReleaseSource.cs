@@ -1,20 +1,23 @@
-using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Release;
 
 namespace KyberWeave.Cli.Commands.Squad.Infrastructure;
 
 /// <summary>Stages a local kyber-squad checkout as the release source in place of a download.</summary>
 /// <remarks>
-/// The checkout carries the same companion skills as a release archive, from the same <see cref="SquadCompanionSkills"/>
-/// type, so a CLI run from a checkout deploys what an installed release deploys.
+/// The checkout carries the same companion skills as a release archive, from the same <see cref="ISquadCompanionSkills"/>
+/// seam, so a CLI run from a checkout deploys what an installed release deploys.
 /// </remarks>
 internal sealed class LocalCheckoutSquadReleaseSource : ISquadReleaseSource
 {
     private readonly string _sourceRoot;
+    private readonly ISquadCompanionSkills _companions;
 
-    public LocalCheckoutSquadReleaseSource(string sourceRoot)
+    public LocalCheckoutSquadReleaseSource(string sourceRoot, ISquadCompanionSkills companions)
     {
+        ArgumentNullException.ThrowIfNull(companions);
         _sourceRoot = sourceRoot;
+        _companions = companions;
     }
 
     /// <remarks>
@@ -27,7 +30,7 @@ internal sealed class LocalCheckoutSquadReleaseSource : ISquadReleaseSource
         CancellationToken cancellationToken = default)
     {
         IReadOnlyList<(string RelativePath, string SourcePath)> companionFiles =
-            SquadCompanionSkills.Collect(_sourceRoot, SquadCompanionSkills.ResolveRoot(_sourceRoot));
+            _companions.Collect(_sourceRoot, _companions.ResolveRoot(_sourceRoot));
 
         Directory.CreateDirectory(request.DestinationPath);
         List<string> extractedFiles = [];

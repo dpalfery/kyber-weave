@@ -27,11 +27,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\KyberWeave.Application\KyberWeave.Application.csproj" />
-    <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Mcp.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
   </ItemGroup>

@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Reflection;
 using KyberWeave.Tests.Fakes;
 using System.Text;
@@ -54,7 +55,7 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void DecisionQueryJoinsTheCapabilityVocabulary()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.Contains(DecisionQuery, source.CapabilityProfiles.Capabilities);
     }
@@ -62,7 +63,7 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void EveryProfileDeclaresDecisionQueryAllowForConductorAndReviewerAndDenyForTheRest()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         Assert.Equal(
             (AllowedProfiles.Concat(DeniedProfiles)).Order(StringComparer.Ordinal),
@@ -86,7 +87,7 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void McpConfigurationDeclaresTheArbiterServerAsServeAtTheRepositoryRoot()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         JsonElement server = source.McpConfiguration
             .GetProperty("mcpServers")
@@ -101,7 +102,7 @@ public sealed class ArbiterCanonicalSquadTests
     [Fact]
     public void ToolchainArbiterToolsEqualTheToolsArbiterToolsDeclares()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
 
         string[] declared = DeclaredArbiterToolNames();
         string[] pinned = [.. source.Toolchain.RequiredMcpTools[ArbiterServer].Order(StringComparer.Ordinal)];

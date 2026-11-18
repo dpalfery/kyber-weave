@@ -1,3 +1,4 @@
+using System.Text;
 using KyberWeave.Contracts.Repositories;
 using System.Runtime.InteropServices;
 using KyberWeave.Core.FileSystem;
@@ -262,10 +263,22 @@ public sealed partial class PhysicalFileSystem : IWritableFileSystem
     public bool DirectoryExists(string path) => Directory.Exists(path);
 
     /// <inheritdoc />
-    public string ReadAllText(string path) => File.ReadAllText(path);
+    public string ReadAllText(string path)
+    {
+        // Shares like OpenRead, so a file another holder appends to (OpenAppendShared) stays readable on Windows.
+        using Stream stream = OpenRead(path);
+        using StreamReader reader = new(stream, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return reader.ReadToEnd();
+    }
 
     /// <inheritdoc />
-    public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
+    public byte[] ReadAllBytes(string path)
+    {
+        using Stream stream = OpenRead(path);
+        using MemoryStream buffer = new();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
 
     /// <inheritdoc />
     public IEnumerable<string> ReadLines(string path)

@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Model;
@@ -415,7 +416,7 @@ internal static class SquadResourceRenderingContract
         string skillsDirectory)
     {
         using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent agent = Assert.Single(
             source.Agents,
             a => string.Equals(a.Name, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));

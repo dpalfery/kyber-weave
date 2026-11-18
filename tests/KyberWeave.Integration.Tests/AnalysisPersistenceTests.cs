@@ -31,7 +31,7 @@ public sealed class AnalysisPersistenceTests
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        bool actual = AnalysisCacheSafety.IsSafe(repository.Path);
+        bool actual = DocsPorts.CacheSafety.IsSafe(repository.Path);
 
         Assert.Equal(expected, actual);
     }
@@ -47,7 +47,7 @@ public sealed class AnalysisPersistenceTests
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, ".gitignore"), ignoreContents);
 
-        Assert.False(AnalysisCacheSafety.IsSafe(repository.Path));
+        Assert.False(DocsPorts.CacheSafety.IsSafe(repository.Path));
     }
 
     [Fact]
@@ -60,7 +60,7 @@ public sealed class AnalysisPersistenceTests
         RunGit(repository.Path, "init");
         RunGit(repository.Path, "add", "-f", ".kyber-weave/cache/docs-analysis.sqlite3");
 
-        Assert.False(AnalysisCacheSafety.IsSafe(repository.Path));
+        Assert.False(DocsPorts.CacheSafety.IsSafe(repository.Path));
     }
 
     [Theory]
@@ -100,7 +100,7 @@ public sealed class AnalysisPersistenceTests
                 break;
         }
 
-        Assert.Throws<InvalidOperationException>(() => new SqliteAnalysisPersistence(repository.Path));
+        Assert.Throws<InvalidOperationException>(() => DocsPorts.Sqlite(repository.Path));
         Assert.Equal("external state must remain unchanged", File.ReadAllText(sentinelPath));
         Assert.False(File.Exists(Path.Combine(external.Path, "docs-analysis.sqlite3")));
     }
@@ -112,7 +112,7 @@ public sealed class AnalysisPersistenceTests
         string stateDirectory = Path.Combine(repository.Path, ".kyber-weave");
         string cacheDirectory = Path.Combine(stateDirectory, "cache");
 
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
 
         Assert.False(persistence.IsAvailable);
         Assert.Empty(persistence.LoadClaims(["claim-1"]));
@@ -134,11 +134,11 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence first = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence first = DocsPorts.Sqlite(repository.Path);
         PersistedClaim claim = Claim("claim-idempotent");
         first.SaveClaims([claim]);
 
-        SqliteAnalysisPersistence second = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence second = DocsPorts.Sqlite(repository.Path);
 
         Assert.True(first.IsAvailable);
         Assert.True(second.IsAvailable);
@@ -153,7 +153,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         PersistedClaim first = Claim("claim-left", filePath: "docs/left.md", startLine: 11);
         PersistedClaim second = Claim("claim-right", filePath: "docs/right.md", startLine: 29);
 
@@ -170,7 +170,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         EmbeddingCacheKey storedKey = Key("context", provider: "local-a", model: "embed-a", dimensions: 2);
         persistence.SaveEmbeddings([Embedding(storedKey)]);
         EmbeddingCacheKey[] requested =
@@ -195,7 +195,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         PersistedCandidateFingerprint candidate = Candidate("candidate-review");
         AnalysisVerdict verdict = new AnalysisVerdict(
             candidate.CandidateId,
@@ -232,7 +232,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         const string hostile = "'close\n); DROP TABLE analysis_claims; --\nnext";
         PersistedClaim claim = Claim(hostile, text: "Operator's first line\nsecond line; SELECT * FROM verdicts;");
         PersistedCandidateFingerprint candidate = Candidate(hostile);
@@ -254,7 +254,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         StoredEmbedding valid = Embedding(Key("valid"));
         StoredEmbedding invalid = new StoredEmbedding(Key("invalid"), [float.NaN, 1f]);
 
@@ -268,7 +268,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         PersistedCandidateFingerprint first = Candidate("candidate-valid");
         PersistedCandidateFingerprint second = Candidate("candidate-invalid");
         persistence.SaveCandidateFingerprints([first, second]);
@@ -293,7 +293,7 @@ public sealed class AnalysisPersistenceTests
             "CREATE TABLE analysis_claims (broken TEXT);\nPRAGMA user_version = 0;");
         string originalSchema = QuerySqlite(databasePath, ".schema analysis_claims");
 
-        Assert.Throws<InvalidDataException>(() => new SqliteAnalysisPersistence(repository.Path));
+        Assert.Throws<InvalidDataException>(() => DocsPorts.Sqlite(repository.Path));
 
         Assert.Equal("0", QuerySqlite(databasePath, "PRAGMA user_version;").Trim());
         Assert.Equal(originalSchema, QuerySqlite(databasePath, ".schema analysis_claims"));
@@ -308,7 +308,7 @@ public sealed class AnalysisPersistenceTests
         string original = "not a sqlite database\nwith operator-owned evidence";
         File.WriteAllText(databasePath, original);
 
-        Assert.Throws<InvalidDataException>(() => new SqliteAnalysisPersistence(repository.Path));
+        Assert.Throws<InvalidDataException>(() => DocsPorts.Sqlite(repository.Path));
 
         Assert.Equal(original, File.ReadAllText(databasePath));
     }
@@ -324,7 +324,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         byte[] payload = table switch
         {
             "analysis_claims" => System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(Claim(payloadId)),
@@ -359,7 +359,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         (string table, string keyColumn, string rowId, byte[] payload) = scenario switch
         {
             "claim-empty-id" => (
@@ -415,7 +415,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         using Process lockProcess = StartSqliteLock(persistence.DatabasePath);
         try
         {
@@ -443,7 +443,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         using Process primaryLock = StartSqliteLock(persistence.DatabasePath);
         try
         {
@@ -482,7 +482,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(
             () => StartSqliteLock(persistence.DatabasePath, acquireAckQuery: "SELECT 'UNEXPECTED';"));
@@ -495,7 +495,7 @@ public sealed class AnalysisPersistenceTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
 
         AggregateException exception = Assert.Throws<AggregateException>(
             () => StartSqliteLock(

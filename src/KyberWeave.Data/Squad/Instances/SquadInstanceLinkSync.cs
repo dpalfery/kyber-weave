@@ -1,6 +1,10 @@
+using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -19,9 +23,23 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///         If they match, the link is re-established; if they differ, both copies are preserved and a warning is raised.
 ///     </para>
 /// </remarks>
-public static class SquadInstanceLinkSync
+/// <param name="files">Reads, writes and lists the instance, main-home and state files.</param>
+/// <param name="paths">Canonicalizes and resolves the instance root.</param>
+/// <param name="lease">Serializes concurrent syncs of one instance root.</param>
+/// <param name="environment">Supplies the base for a relative root and the operating system's case rule.</param>
+public sealed class SquadInstanceLinkSync(
+    IWritableFileSystem files,
+    IPathResolver paths,
+    ILease lease,
+    IProcessEnvironment environment) : ISquadInstanceLinkSync
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
+    private const string PlannedLinksFileName = "links.pending.json";
+
+    private static readonly TimeSpan LeaseTimeout = TimeSpan.FromMinutes(5);
+
+    // The lease refuses a second request from the process that holds the name, so every concurrent caller in this
+    // process, through any sync object, queues here first and one at a time reaches the cross-process lease.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -35,12 +53,11 @@ public static class SquadInstanceLinkSync
     /// </summary>
     /// <param name="instanceRoot">The filesystem root of the instance.</param>
     /// <returns>A mutex name starting with <c>kyber-weave-squad-</c> followed by the canonical root key.</returns>
-    public static string GetMutexName(string instanceRoot)
+    public string GetMutexName(string instanceRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceRoot);
-        string canonical = Semantics.Canonicalize(instanceRoot);
-        string rootKey = SquadPhysicalRootIdentity.KeyOf(canonical);
-        return $"kyber-weave-squad-{rootKey}";
+        string canonical = paths.Canonicalize(instanceRoot);
+        return SquadLeaseNames.ForRoot(SquadPhysicalRootIdentity.KeyOf(canonical));
     }
 
     /// <summary>
@@ -53,7 +70,7 @@ public static class SquadInstanceLinkSync
     /// <param name="fileSystem">Filesystem abstraction for creating and inspecting links.</param>
     /// <param name="instanceStateDirectory">Directory where instance state, including <c>links.json</c>, is recorded.</param>
     /// <returns>Result containing active links and any generated warnings.</returns>
-    public static SquadInstanceLinkSyncResult Sync(
+    public SquadInstanceLinkSyncResult Sync(
         string instanceRoot,
         string mainHome,
         SquadInstanceRow row,
@@ -70,21 +87,12 @@ public static class SquadInstanceLinkSync
 
         if (row.Kind != SquadInstanceKind.HomeReplace) return new SquadInstanceLinkSyncResult([], []);
 
-        string mutexName = GetMutexName(instanceRoot);
-        using Mutex mutex = new(false, mutexName);
-        bool acquired = false;
-
+        string leaseName = GetMutexName(instanceRoot);
+        SemaphoreSlim gate = Gates.GetOrAdd(leaseName, static _ => new SemaphoreSlim(1, 1));
+        gate.Wait();
         try
         {
-            try
-            {
-                acquired = mutex.WaitOne();
-            }
-            catch (AbandonedMutexException)
-            {
-                acquired = true;
-            }
-
+            using IDisposable held = lease.Acquire(leaseName, LeaseTimeout);
             return SynchronizeCore(
                 instanceRoot,
                 mainHome,
@@ -95,11 +103,11 @@ public static class SquadInstanceLinkSync
         }
         finally
         {
-            if (acquired) mutex.ReleaseMutex();
+            _ = gate.Release();
         }
     }
 
-    private static SquadInstanceLinkSyncResult SynchronizeCore(
+    private SquadInstanceLinkSyncResult SynchronizeCore(
         string instanceRoot,
         string mainHome,
         SquadInstanceRow row,
@@ -109,6 +117,7 @@ public static class SquadInstanceLinkSync
     {
         List<SquadLinkRecord> recordedLinks = ReadRecordedLinks(instanceStateDirectory);
         ValidateRecordedLinks(instanceRoot, recordedLinks);
+        AdoptPlannedLinks(instanceRoot, instanceStateDirectory, fileSystem, recordedLinks);
 
         List<SquadLinkRecord> mainListing = EnumerateMainHome(mainHome, renderedPaths, row.ExtraLinks);
         List<string> instanceListing = EnumerateInstanceRoot(instanceRoot);
@@ -129,15 +138,17 @@ public static class SquadInstanceLinkSync
             string linkPath = Path.Combine(instanceRoot, remove.Record.RelativePath);
             try
             {
-                if (remove.Record.Kind == SquadLinkKind.Directory)
+                if (fileSystem.IsLink(linkPath))
                 {
-                    if (Directory.Exists(linkPath) || fileSystem.IsLink(linkPath))
+                    if (remove.Record.Kind == SquadLinkKind.Directory)
                         fileSystem.DeleteTreeNoFollow(linkPath);
+                    else
+                        files.DeleteFile(linkPath);
                 }
-                else
+                else if (files.FileExists(linkPath) || files.DirectoryExists(linkPath))
                 {
-                    if (File.Exists(linkPath) || fileSystem.IsLink(linkPath))
-                        File.Delete(linkPath);
+                    // The harness or the person replaced the link with a real copy; it may be the only one.
+                    warnings.Add($"Recorded link '{remove.Record.RelativePath}' is now the instance's own copy and was kept.");
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -167,13 +178,13 @@ public static class SquadInstanceLinkSync
             string targetPath = recorded.TargetPath;
 
             if (!fileSystem.IsLinkTo(linkPath, targetPath))
-                if (File.Exists(linkPath) && File.Exists(targetPath))
+                if (files.FileExists(linkPath) && files.FileExists(targetPath))
                 {
                     if (FilesAreEqual(linkPath, targetPath))
                     {
                         try
                         {
-                            File.Delete(linkPath);
+                            files.DeleteFile(linkPath);
                             fileSystem.CreateFileLink(linkPath, targetPath);
                         }
                         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -192,6 +203,16 @@ public static class SquadInstanceLinkSync
 
         // 4. Apply Add actions
         List<SquadLinkRecord> activeLinks = [];
+        WritePlannedLinks(
+            instanceStateDirectory,
+            [.. actions.OfType<SquadLinkAction.Add>()
+                .Select(add => add.Record)
+                .Where(record =>
+                    !differingSplitPaths.Contains(NormalizeRelativePath(record.RelativePath)) &&
+                    !keptPaths.Contains(NormalizeRelativePath(record.RelativePath)) &&
+                    !fileSystem.IsLinkTo(Path.Combine(instanceRoot, record.RelativePath), record.TargetPath) &&
+                    (fileSystem.IsLink(Path.Combine(instanceRoot, record.RelativePath)) ||
+                     !PathHoldsRealCopy(Path.Combine(instanceRoot, record.RelativePath), fileSystem)))]);
 
         foreach (SquadLinkAction.Add add in actions.OfType<SquadLinkAction.Add>())
         {
@@ -214,8 +235,9 @@ public static class SquadInstanceLinkSync
             if (record.Kind == SquadLinkKind.Directory)
                 try
                 {
-                    if (Directory.Exists(linkPath) || fileSystem.IsLink(linkPath))
-                        fileSystem.DeleteTreeNoFollow(linkPath);
+                    if (KeepRealCopy(linkPath, fileSystem, record, warnings)) continue;
+
+                    if (fileSystem.IsLink(linkPath)) fileSystem.DeleteTreeNoFollow(linkPath);
 
                     EnsureDirectoryExists(Path.GetDirectoryName(linkPath));
                     fileSystem.CreateFolderLink(linkPath, targetPath);
@@ -228,7 +250,9 @@ public static class SquadInstanceLinkSync
             else
                 try
                 {
-                    if (File.Exists(linkPath) || fileSystem.IsLink(linkPath)) File.Delete(linkPath);
+                    if (KeepRealCopy(linkPath, fileSystem, record, warnings)) continue;
+
+                    if (fileSystem.IsLink(linkPath)) files.DeleteFile(linkPath);
 
                     EnsureDirectoryExists(Path.GetDirectoryName(linkPath));
                     fileSystem.CreateFileLink(linkPath, targetPath);
@@ -247,14 +271,111 @@ public static class SquadInstanceLinkSync
             .ToList();
 
         WriteLinksJson(instanceStateDirectory, sortedLinks);
+        DeletePlannedLinks(instanceStateDirectory);
 
         return new SquadInstanceLinkSyncResult(sortedLinks, warnings);
     }
 
-    private static void ValidateRecordedLinks(string instanceRoot, IReadOnlyList<SquadLinkRecord> recordedLinks)
+    private bool PathHoldsRealCopy(string path, ISquadLinkFileSystem fileSystem) =>
+        !fileSystem.IsLink(path) && (files.FileExists(path) || files.DirectoryExists(path));
+
+    /// <summary>
+    /// A path that is still a link may be replaced; anything else there is a real copy the sync did not make, so it is kept,
+    /// reported, and left out of the recorded links.
+    /// </summary>
+    private bool KeepRealCopy(string linkPath, ISquadLinkFileSystem fileSystem, SquadLinkRecord record, List<string> warnings)
     {
-        string canonicalRoot = Path.GetFullPath(instanceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        if (!PathHoldsRealCopy(linkPath, fileSystem)) return false;
+
+        warnings.Add($"Instance copy kept for '{record.RelativePath}': a real copy replaced the recorded link.");
+        return true;
+    }
+
+    private string PlannedLinksPath(string instanceStateDirectory) =>
+        Path.Combine(instanceStateDirectory, PlannedLinksFileName);
+
+    /// <summary>
+    /// Writes the links about to be created, before the first one is. A stop after some links exist and before
+    /// <c>links.json</c> names them leaves this file as the proof they are the sync's own.
+    /// </summary>
+    private void WritePlannedLinks(string instanceStateDirectory, IReadOnlyList<SquadLinkRecord> planned)
+    {
+        if (planned.Count == 0) return;
+
+        EnsureDirectoryExists(instanceStateDirectory);
+        string text = JsonSerializer.Serialize(planned, JsonOptions) + "\n";
+        files.WriteAllBytesAtomic(
+            PlannedLinksPath(instanceStateDirectory),
+            new UTF8Encoding(false).GetBytes(text),
+            SquadTransaction.SyncToDisk);
+    }
+
+    private void DeletePlannedLinks(string instanceStateDirectory)
+    {
+        string path = PlannedLinksPath(instanceStateDirectory);
+        try
+        {
+            if (files.FileExists(path)) files.DeleteFile(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A leftover record only lists links the next sync checks again before adopting any.
+        }
+    }
+
+    /// <summary>
+    /// Treats a planned link that exists on disk as recorded, so a stop before <c>links.json</c> was written does not turn
+    /// the sync's own links into copies it keeps forever. Only a link that points at the planned target is adopted: a
+    /// regular file or a link elsewhere at the same path is still the person's own and is kept with a warning.
+    /// </summary>
+    private void AdoptPlannedLinks(
+        string instanceRoot,
+        string instanceStateDirectory,
+        ISquadLinkFileSystem fileSystem,
+        List<SquadLinkRecord> recordedLinks)
+    {
+        string path = PlannedLinksPath(instanceStateDirectory);
+        if (!files.FileExists(path)) return;
+
+        List<SquadLinkRecord>? planned;
+        try
+        {
+            planned = JsonSerializer.Deserialize<List<SquadLinkRecord>>(files.ReadAllText(path), JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (planned is null || planned.Any(r => r is null || r.RelativePath is null || r.TargetPath is null)) return;
+
+        HashSet<string> known = new(recordedLinks.Select(r => NormalizeRelativePath(r.RelativePath)), StringComparer.Ordinal);
+        List<SquadLinkRecord> candidates = [.. planned.Where(r => !string.IsNullOrWhiteSpace(r.RelativePath))];
+        try
+        {
+            ValidateRecordedLinks(instanceRoot, candidates);
+        }
+        catch (InvalidDataException)
+        {
+            return;
+        }
+
+        foreach (SquadLinkRecord record in candidates)
+        {
+            if (known.Contains(NormalizeRelativePath(record.RelativePath))) continue;
+
+            if (fileSystem.IsLinkTo(Path.Combine(instanceRoot, record.RelativePath), record.TargetPath))
+            {
+                recordedLinks.Add(record);
+                known.Add(NormalizeRelativePath(record.RelativePath));
+            }
+        }
+    }
+
+    private void ValidateRecordedLinks(string instanceRoot, IReadOnlyList<SquadLinkRecord> recordedLinks)
+    {
+        string canonicalRoot = FullPath(instanceRoot).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        StringComparison comparison = environment.OperatingSystem == OperatingSystemKind.Windows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
         foreach (SquadLinkRecord record in recordedLinks)
         {
@@ -269,20 +390,20 @@ public static class SquadInstanceLinkSync
             if (segments.Any(s => s == ".."))
                 throw new InvalidDataException($"Recorded link relative path '{record.RelativePath}' contains directory traversal segments.");
 
-            string fullPath = Path.GetFullPath(Path.Combine(instanceRoot, record.RelativePath));
+            string fullPath = FullPath(Path.Combine(instanceRoot, record.RelativePath));
             if (!fullPath.StartsWith(canonicalRoot, comparison))
                 throw new InvalidDataException($"Recorded link relative path '{record.RelativePath}' escapes instance root '{instanceRoot}'.");
         }
     }
 
-    private static List<SquadLinkRecord> ReadRecordedLinks(string instanceStateDirectory)
+    private List<SquadLinkRecord> ReadRecordedLinks(string instanceStateDirectory)
     {
         string linksJsonPath = Path.Combine(instanceStateDirectory, "links.json");
-        if (!File.Exists(linksJsonPath)) return [];
+        if (!files.FileExists(linksJsonPath)) return [];
 
         try
         {
-            string json = File.ReadAllText(linksJsonPath, Encoding.UTF8);
+            string json = files.ReadAllText(linksJsonPath);
             List<SquadLinkRecord>? deserialized = JsonSerializer.Deserialize<List<SquadLinkRecord>>(json, JsonOptions);
             return deserialized ?? throw new InvalidDataException($"Corrupt instance link state file '{linksJsonPath}'.");
         }
@@ -292,50 +413,21 @@ public static class SquadInstanceLinkSync
         }
     }
 
-    private static void WriteLinksJson(string instanceStateDirectory, IReadOnlyList<SquadLinkRecord> links)
+    private void WriteLinksJson(string instanceStateDirectory, IReadOnlyList<SquadLinkRecord> links)
     {
         EnsureDirectoryExists(instanceStateDirectory);
         string text = JsonSerializer.Serialize(links, JsonOptions) + "\n";
         string targetPath = Path.Combine(instanceStateDirectory, "links.json");
-        string tempPath = Path.Combine(instanceStateDirectory, $"links.json.{Guid.NewGuid():N}.tmp");
-
-        try
-        {
-            using (FileStream stream = new(
-                       tempPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       4096,
-                       SquadTransaction.SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
-            {
-                byte[] bytes = new UTF8Encoding(false).GetBytes(text);
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: SquadTransaction.SyncToDisk);
-            }
-
-            File.Move(tempPath, targetPath, true);
-        }
-        finally
-        {
-            if (File.Exists(tempPath))
-                try
-                {
-                    File.Delete(tempPath);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                }
-        }
+        files.WriteAllBytesAtomic(targetPath, new UTF8Encoding(false).GetBytes(text), SquadTransaction.SyncToDisk);
     }
 
-    private static List<SquadLinkRecord> EnumerateMainHome(
+    private List<SquadLinkRecord> EnumerateMainHome(
         string mainHome,
         IReadOnlySet<string> renderedPaths,
         IReadOnlyList<string> extraLinks)
     {
         List<SquadLinkRecord> records = [];
-        if (!Directory.Exists(mainHome)) return records;
+        if (!files.DirectoryExists(mainHome)) return records;
 
         HashSet<string> interestingPrefixes = new(StringComparer.Ordinal);
         foreach (string path in renderedPaths)
@@ -360,47 +452,40 @@ public static class SquadInstanceLinkSync
             }
         }
 
-        Queue<(DirectoryInfo Dir, int Depth)> queue = new();
-        queue.Enqueue((new DirectoryInfo(mainHome), 0));
-
-        EnumerationOptions options = new()
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0
-        };
+        Queue<(string Dir, int Depth)> queue = new();
+        queue.Enqueue((mainHome, 0));
 
         while (queue.Count > 0)
         {
-            (DirectoryInfo current, int depth) = queue.Dequeue();
-            IEnumerable<FileSystemInfo> entries;
+            (string current, int depth) = queue.Dequeue();
+            IReadOnlyList<FileSystemEntry> entries;
             try
             {
-                entries = current.EnumerateFileSystemInfos("*", options);
+                entries = [.. files.EnumerateEntries(current)];
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
 
-            foreach (FileSystemInfo entry in entries)
+            foreach (FileSystemEntry entry in entries)
             {
-                string relativePath = Path.GetRelativePath(mainHome, entry.FullName).Replace('\\', '/');
+                string relativePath = Path.GetRelativePath(mainHome, entry.Path).Replace('\\', '/');
                 string normRel = relativePath.Trim('/');
 
-                if (entry is DirectoryInfo dirEntry)
+                if (entry.IsDirectory)
                 {
-                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.Directory, dirEntry.FullName));
+                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.Directory, entry.Path));
                     if (depth < 10 &&
-                        entry.LinkTarget is null &&
-                        !entry.Attributes.HasFlag(FileAttributes.ReparsePoint) &&
+                        !entry.IsLink &&
                         interestingPrefixes.Contains(normRel))
                     {
-                        queue.Enqueue((dirEntry, depth + 1));
+                        queue.Enqueue((entry.Path, depth + 1));
                     }
                 }
                 else
                 {
-                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.File, entry.FullName));
+                    records.Add(new SquadLinkRecord(relativePath, SquadLinkKind.File, entry.Path));
                 }
             }
         }
@@ -408,43 +493,34 @@ public static class SquadInstanceLinkSync
         return records;
     }
 
-    private static List<string> EnumerateInstanceRoot(string instanceRoot)
+    private List<string> EnumerateInstanceRoot(string instanceRoot)
     {
         List<string> results = [];
-        if (!Directory.Exists(instanceRoot)) return results;
+        if (!files.DirectoryExists(instanceRoot)) return results;
 
-        Queue<(DirectoryInfo Dir, int Depth)> queue = new();
-        queue.Enqueue((new DirectoryInfo(instanceRoot), 0));
-
-        EnumerationOptions options = new()
-        {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0
-        };
+        Queue<(string Dir, int Depth)> queue = new();
+        queue.Enqueue((instanceRoot, 0));
 
         while (queue.Count > 0)
         {
-            (DirectoryInfo current, int depth) = queue.Dequeue();
-            IEnumerable<FileSystemInfo> entries;
+            (string current, int depth) = queue.Dequeue();
+            IReadOnlyList<FileSystemEntry> entries;
             try
             {
-                entries = current.EnumerateFileSystemInfos("*", options);
+                entries = [.. files.EnumerateEntries(current)];
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
 
-            foreach (FileSystemInfo entry in entries)
+            foreach (FileSystemEntry entry in entries)
             {
-                string relativePath = Path.GetRelativePath(instanceRoot, entry.FullName).Replace('\\', '/');
+                string relativePath = Path.GetRelativePath(instanceRoot, entry.Path).Replace('\\', '/');
                 results.Add(relativePath);
-                if (entry is DirectoryInfo dirEntry &&
-                    depth < 10 &&
-                    entry.LinkTarget is null &&
-                    !entry.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                if (entry.IsDirectory && depth < 10 && !entry.IsLink)
                 {
-                    queue.Enqueue((dirEntry, depth + 1));
+                    queue.Enqueue((entry.Path, depth + 1));
                 }
             }
         }
@@ -452,19 +528,17 @@ public static class SquadInstanceLinkSync
         return results;
     }
 
-    private static bool FilesAreEqual(string path1, string path2)
+    private bool FilesAreEqual(string path1, string path2)
     {
         try
         {
-            FileInfo info1 = new(path1);
-            FileInfo info2 = new(path2);
+            long length = files.GetLength(path1);
+            if (length != files.GetLength(path2)) return false;
 
-            if (info1.Length != info2.Length) return false;
+            if (length == 0) return true;
 
-            if (info1.Length == 0) return true;
-
-            using FileStream stream1 = File.OpenRead(path1);
-            using FileStream stream2 = File.OpenRead(path2);
+            using Stream stream1 = files.OpenRead(path1);
+            using Stream stream2 = files.OpenRead(path2);
 
             Span<byte> buffer1 = stackalloc byte[8192];
             Span<byte> buffer2 = stackalloc byte[8192];
@@ -487,18 +561,20 @@ public static class SquadInstanceLinkSync
         }
     }
 
-    private static void EnsureDirectoryExists(string? directoryPath)
+    private void EnsureDirectoryExists(string? directoryPath)
     {
-        if (!string.IsNullOrEmpty(directoryPath) && !Directory.Exists(directoryPath))
+        if (!string.IsNullOrEmpty(directoryPath) && !files.DirectoryExists(directoryPath))
             try
             {
-                Directory.CreateDirectory(directoryPath);
+                files.CreateDirectory(directoryPath);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
                                            or NotSupportedException)
             {
             }
     }
+
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 
     private static string NormalizeRelativePath(string path)
     {

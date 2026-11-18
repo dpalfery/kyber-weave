@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
@@ -25,6 +26,8 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private const string BlockPath = ".factory/hooks.json";
     private const string ExpectedCommand = "kyber-weave-arbiter hook --harness factory";
     private const int HookTimeoutSeconds = 5;
+
+    private static readonly FactoryHooksShadowing HooksShadowing = new(new PhysicalFileSystem());
 
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
 
@@ -436,7 +439,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
              "hooks": {"post_tool_use": [{"command": "user-own-linter"}]}}
             """);
 
-        Assert.True(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.True(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
@@ -446,7 +449,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         WriteFile(Path.Combine(targetRoot.Path, ".factory/settings.json"), "{\"hooks\": {}}");
         WriteFile(Path.Combine(targetRoot.Path, ".factory/hooks.json"), "{}");
 
-        Assert.False(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.False(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
@@ -455,7 +458,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         using TempDirectory targetRoot = new();
         WriteFile(Path.Combine(targetRoot.Path, ".factory/settings.json"), "{\"model\": \"droid\"}");
 
-        Assert.False(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.False(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
@@ -463,13 +466,13 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using TempDirectory targetRoot = new();
 
-        Assert.False(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.False(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
     public void Degradation_RecordsSettingsHooksShadowedWithTheNamedFix()
     {
-        SquadDegradationRecord record = FactoryHooksShadowing.Degradation();
+        SquadDegradationRecord record = HooksShadowing.Degradation();
 
         Assert.Equal("factory", record.Target);
         Assert.Equal("arbiter", record.CanonicalIdentity);
@@ -539,7 +542,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         WriteFile(Path.Combine(targetRoot.Path, ".factory/settings.json"), "{ // jsonc comment\n \"hooks\": {} }");
         SquadRenderedBlock block = new("factory", BlockPath, SquadHookBlockFormat.Factory, []);
 
-        FactoryHooksShadowingOutcome outcome = FactoryHooksShadowing.Resolve(
+        FactoryHooksShadowingOutcome outcome = HooksShadowing.Resolve(
             targetRoot.Path,
             [SquadTarget.Factory],
             new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),

@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Squad.Parsing;
 using Xunit;
@@ -99,7 +100,7 @@ public sealed class ArbiterSquadCatalogTests
     public void Catalog_EqualsTheCanonicalTree()
     {
         string squadRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
-        var source = SquadSourceLoader.Load(squadRoot);
+        var source = RealSquadServices.Load(squadRoot);
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
 
         Assert.Equal(source.Agents.Count, catalog.Agents.Count);

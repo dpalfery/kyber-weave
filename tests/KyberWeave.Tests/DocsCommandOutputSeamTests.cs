@@ -47,7 +47,7 @@ public sealed class DocsCommandOutputSeamTests
         int exit = new DocsPacketCommand(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IWritableFileSystem>(),
             provider.GetRequiredService<IProcessEnvironment>(),
             provider.GetRequiredService<IPlanTaskTargetService>(),
             provider.GetRequiredService<ITaskGateSelectionService>(),

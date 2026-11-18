@@ -11,7 +11,7 @@ component: CI Pipelines
 # Seams, adapters and the exceptions they keep
 
 Every outside resource the product touches — the disk, a child process, the environment, the
-console, the clock, identifiers, a lease, an embedded resource, configuration, the operating
+console, the clock, identifiers, a lease, an embedded resource, configuration, the network, the operating
 system's credential store and the shipped content a test reads — is reached through one
 interface, called a **seam**. This page is the
 register the interface-driven unit tests specification requires: the seams, the adapters that
@@ -44,6 +44,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 | Embedded resource | `IEmbeddedResources` (`Contracts/Host`) | Read a named manifest resource as a stream or UTF-8 text | `AssemblyEmbeddedResources` (`KyberWeave.Data`, `Host/AssemblyEmbeddedResources.cs`) | `FakeEmbeddedResources` (`Fakes/FakeEmbeddedResources.cs`) | `EmbeddedResourceContractTests`: fake in `KyberWeave.Tests/EmbeddedResources/FakeEmbeddedResourcesContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/AssemblyEmbeddedResourcesContractTests.cs` |
 | Configuration | `IKyberWeaveConfigRepository` (`Contracts/Repositories`) | Load and try-load the repository's and the user's host configuration; find the config path | `FileKyberWeaveConfigRepository` (`KyberWeave.Application`, `Configuration/FileKyberWeaveConfigRepository.cs`) over `IRepositoryTreeProbe` (`KyberWeave.Application`, `Review/FileRepositoryTreeProbe.cs`), `IFileSystem`, `IPathResolver` and `IProcessEnvironment` | `FakeKyberWeaveConfigRepository` (`Fakes/FakeKyberWeaveConfigRepository.cs`) | `KyberWeaveConfigRepositoryContractTests`: fake in `KyberWeave.Tests/Configuration/FakeKyberWeaveConfigRepositoryContractTests.cs`, adapter over the in-memory file system in `KyberWeave.Tests/Configuration/InMemoryFileKyberWeaveConfigRepositoryContractTests.cs`, and over the real disk in `KyberWeave.Integration.Tests/Contracts/FileKyberWeaveConfigRepositoryContractTests.cs` |
 | Credentials | `ICredentialStore` (`KyberWeave.Domain`, `Arbiter/Credentials/ICredentialStore.cs`) | Read, write and delete one named secret per endpoint origin; a missing entry reads as null; deleting an absent entry succeeds; a store may refuse a key it cannot carry, and every key it accepts reads back unchanged; an origin or key with a line break is refused on every store | `OperatingSystemCredentialStore` picks `WindowsCredentialStore`, `MacKeychainCredentialStore` or `SecretServiceCredentialStore` (`KyberWeave.Data`, `Arbiter/Credentials/`) | `FakeCredentialStore` (`Fakes/FakeCredentialStore.cs`) | `CredentialStoreContractTests`: fake in `KyberWeave.Tests/Credentials/FakeCredentialStoreContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/OperatingSystemCredentialStoreContractTests.cs`, which skips where the host has no usable store |
+| Network | `HttpMessageHandler` (framework); `IEmbeddingTransport` for the loopback-pinned embedding endpoint (`Contracts/Repositories`) | A client takes a handler by constructor and wraps it in a private `HttpClient`; request shape, headers, status handling and cancellation are tested through the handler. The embedding transport adds the handler and name resolution the loopback check needs | `HttpClientHandler` built by `SocketArbiterHttpHandlers` and `SocketSquadReleaseHttpHandlers`; `LoopbackEmbeddingTransport` (`KyberWeave.Data`, `Docs/Analysis/Embeddings/LoopbackEmbeddingTransport.cs`) | `FakeHttpMessageHandler` (`Fakes/FakeHttpMessageHandler.cs`): scripted responses, a hanging or failing server, requests recorded with their bodies | None, and none is required: the handler is the framework's, and the only product adapter that adds behaviour (the loopback pin) is proven against a real loopback socket in `KyberWeave.Integration.Tests/LoopbackEmbeddingTransportTests.cs` |
 | Shipped content (tests) | `ICorpusSource` (`tests/KyberWeave.Testing/Corpus/ICorpusSource.cs`) | Read the shipped agents, skills, standards, documents and workflows by relative path, contained in the corpus; host name-case rule | `CheckoutCorpusSource` (`tests/KyberWeave.Testing/Corpus/CheckoutCorpusSource.cs`), a test adapter over this checkout | `InMemoryCorpusSource` (`tests/KyberWeave.Testing/Corpus/InMemoryCorpusSource.cs`) | `CorpusSourceContractTests`: both against the adapter and the fake in `KyberWeave.RepoPolicy.Tests/CorpusSourceContractTests.cs` |
 
 Notes.
@@ -100,7 +101,7 @@ task's list.
 | `KernelBoundedProcessExecutor` | Process | `KyberWeave.Data` | `Docs/FileSystem/KernelBoundedProcessExecutor.cs` | The `IBoundedProcessExecutor` role view |
 | `ProcessGitCommandRunner` | Process | `KyberWeave.Data` | `RunStart/ProcessGitCommandRunner.cs` | Git with standard output and error kept apart |
 | `ProcessRunnerCredentialProcessRunner` | Process | `KyberWeave.Data` | `Arbiter/Credentials/ProcessRunnerCredentialProcessRunner.cs` | The credential process runner over `IProcessRunner` |
-| `ProcessSquadHarnessLauncher` | Process | `KyberWeave.Data` | `Squad/Instances/ProcessSquadHarnessLauncher.cs` | Starts the interactive harness; builds its start information through the static `SquadHarnessLauncher` |
+| `ProcessSquadHarnessLauncher` | Process | `KyberWeave.Data` | `Squad/Instances/ProcessSquadHarnessLauncher.cs` | Starts the interactive harness; builds its start information through the `SquadHarnessLauncher` instance it is given |
 | `ProcessExecutor` | Process | `KyberWeave.Cli` | `Commands/Squad/Infrastructure/IProcessExecutor.cs` | The CLI's `IProcessExecutor` role view |
 | `MacKeychainCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security` through `ICredentialProcessRunner`, so it reaches the process seam too. `Write` refuses a non-ASCII key: `security` prints such a password as hex, so it would not read back |
 | `SecretServiceCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool` through `ICredentialProcessRunner`, so it reaches the process seam too |
@@ -109,12 +110,16 @@ task's list.
 | `ProcessEnvironment` | Environment and platform | `KyberWeave.Data` | `Host/ProcessEnvironment.cs` | The environment and platform adapter |
 | `SystemIdGenerator` | Identifiers | `KyberWeave.Data` | `Host/SystemIdGenerator.cs` | GUIDs, random tokens and temp names |
 | `SystemConsole` | Console | `KyberWeave.Data` | `Host/SystemConsole.cs` | Console output, error and input |
+| `ProcessConsoleLauncher` | Process | `KyberWeave.Data` | `Update/ProcessConsoleLauncher.cs` | Starts an update child that shares this console, bounded; the only update code that calls `Process.Start` |
+| `UnixUpdateFileModes` | File permissions | `KyberWeave.Data` | `Update/UnixUpdateFileModes.cs` | Reads and sets the Unix permission bits of an installed binary |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Mcp` | `DrainingStreamServerTransport.cs` | Opens the standard streams for the MCP server |
 | `DrainingStreamServerTransport` | Console (standard streams) | `KyberWeave.Arbiter` | `Mcp/DrainingStreamServerTransport.cs` | Opens the standard streams for the Arbiter host |
 | `MutexLease` | Lease | `KyberWeave.Data` | `Host/MutexLease.cs` | The named-mutex lease |
 | `ConsoleArbiterKeyInput` | Console | `KyberWeave.Cli` | `Commands/Arbiter/ConsoleArbiterKeyInput.cs` | The `IArbiterKeyInput` adapter: the only code that reads a key from standard input or from a masked Spectre prompt, and it reaches both through the `IConsole` and `IAnsiConsole` seams it is given |
 | `AssemblyEmbeddedResources` | Embedded resource | `KyberWeave.Data` | `Host/AssemblyEmbeddedResources.cs` | Manifest resource reads |
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
+| `SocketArbiterHttpHandlers` | Network | `KyberWeave.Data` | `Arbiter/SocketArbiterHttpHandlers.cs` | The Arbiter's real HTTP handler; the only place that builds it |
+| `LoopbackEmbeddingTransport` | Network | `KyberWeave.Data` | `Docs/Analysis/Embeddings/LoopbackEmbeddingTransport.cs` | Sockets that connect only to loopback (the check repeats at connect time) and system name resolution for the embedding endpoint |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
 
 The credential seam's interface is the one seam still outside `Contracts`: it lives in
@@ -130,8 +135,8 @@ startup.
 The process seam has one sanctioned escape that is not an adapter: a class may build a
 `ProcessStartInfo` and hand it to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a
 delegate. `ProcessStartInfo` is data there, and the exceptions register below covers it. Production
-process starts are in `Kernel/Processes/ProcessRunner.cs` and `StdioSession`; `SelfUpdateSystem`
-still calls `Process.Start` itself and is on task 4.4's list.
+process starts are in `Kernel/Processes/ProcessRunner.cs`, `StdioSession` and the update's
+`ProcessConsoleLauncher`, the one child that shares the user's console.
 
 ### Composition roots (allowed to read process state at startup)
 
@@ -186,20 +191,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `ArbiterPlanService` (`Arbiter/ArbiterPlanService.cs`) | paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
-| `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths | 4.3 |
-| `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
-| `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
-| `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
-| `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
-| `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
-| `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
@@ -214,42 +211,22 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
-| `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
-| `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
-| `CodeGraphResolverAdapter` (`CodeGraph/CodeGraphResolverAdapter.cs`) | file system, paths | 4.4 |
-| `OpenAiCompatibleEmbeddingGenerator` (`Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs`) | environment, network | 4.4 |
-| `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
-| `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
-| `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
 | `SquadDeploymentAdapters` (`Squad/Deployment/SquadDeploymentAdapters.cs`) | file system, paths, identifiers | 3.5 |
 | `SquadHookJsonFile` (`Squad/Deployment/SquadHookJsonFile.cs`) | file system, paths | 3.5 |
 | `SquadMigrationLedger` (`Squad/Deployment/SquadMigrationLedger.cs`) | file system | 3.5 |
 | `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadResponseGuidanceReader` (`Squad/Deployment/SquadResponseGuidanceReader.cs`) | file system | 3.5 |
-| `SquadSkillShadowing` (`Squad/Deployment/SquadSkillShadowing.cs`) | file system, paths | 3.5 |
-| `SquadTargetResolver` (`Squad/Deployment/SquadTargetResolver.cs`) | file system, paths | 3.5 |
 | `SquadWorkerBaselineFile` (`Squad/Deployment/SquadWorkerBaselineFile.cs`) | file system, paths | 3.5 |
 | `SquadWorktreeMcp` (`Squad/Deployment/SquadWorktreeMcp.cs`) | file system, paths | 3.5 |
 | `ZCodeMcpConfiguration` (`Squad/Deployment/ZCodeMcpConfiguration.cs`) | paths | 3.5 |
-| `SquadHarnessLauncher` (`Squad/Instances/SquadHarnessLauncher.cs`) | file system, environment | 3.5 |
-| `SquadInstanceLinkSync` (`Squad/Instances/SquadInstanceLinkSync.cs`) | file system, paths, identifiers, lease | 3.5 |
 | `FileSquadPackager` (`Squad/Packaging/FileSquadPackager.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadCompanionSkills` (`Squad/Packaging/SquadCompanionSkills.cs`) | file system, paths | 3.5 |
-| `SquadPackSourceLocator` (`Squad/Packaging/SquadPackSourceLocator.cs`) | file system, paths | 3.5 |
-| `SquadSourceLoader` (`Squad/Parsing/SquadSourceLoader.cs`) | file system, paths | 3.5 |
 | `SquadCanonicalProfileStore` (`Squad/Presets/SquadCanonicalProfileStore.cs`) | file system, identifiers | 3.5 |
 | `SquadModelPresetStore` (`Squad/Presets/SquadModelPresetStore.cs`) | file system | 3.5 |
-| `SquadModelPresetValidator` (`Squad/Presets/SquadModelPresetValidator.cs`) | file system | 3.5 |
 | `LocalCheckoutSquadReleaseSource` (`Squad/Release/LocalCheckoutSquadReleaseSource.cs`) | file system, paths | 3.5 |
-| `CopilotMcpServerProbe` (`Squad/Rendering/CopilotMcpServerProbe.cs`) | file system | 3.5 |
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
-| `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
-| `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
 
 Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
 
@@ -262,13 +239,27 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   that keeps others from changing or deleting a file), both proven by the same contract suite, and later
   `FlushDirectory` (flushes a directory's entries, so a rename survives a power loss; a no-op on Windows and in
   memory).
-- `SelfUpdateSystem` replaces the running binary and extracts archives, so requirement 10.2 applies: it
-  moves with crash-safety contract tests and a second reviewer, with task 4.1's `SelfUpdater`.
-- `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are built with `new` or
-  held as a static delegate by `KyberWeave.Cli` and `KyberWeave.Application` callers, so converting them
-  edits those projects' composition code (tasks 4.5 and 4.2).
-- `SystemOneClient`, `SocketArbiterHttpHandlers`, `SystemOneProviderFactory` and
-  `OpenAiCompatibleEmbeddingGenerator` reach the network; no network seam exists yet.
+- `SelfUpdateSystem` is converted. It takes the file-system, path and bounded-process seams by constructor, and
+  splits the work: `ArchiveEntryPlanner` decides where an archive entry may go and refuses an absolute, climbing or
+  link-escaping one, `ReleaseArchiveExtractor` reads the archive as a stream and writes each entry through the file
+  system (a link entry is refused), and `BinaryReplacer` stages, moves and (on Windows) rolls back one binary. Two
+  adapters hold what those seams cannot express: `ProcessConsoleLauncher` starts a child that shares the console
+  (a role view captures output), and also runs the hand-off rehearsal so it is the hand-off's own start path;
+  `UnixUpdateFileModes` reads and sets permission bits (the file-system seam has no member for them). It replaces
+  the running binary, so requirement 10.2 applies: `SelfUpdateCrashSafetyContractTests` kills the update and its
+  rollback at every file operation and runs on the in-memory file system and on the real disk. One gap stays and is
+  listed in that suite: on Windows a stop between moving the old image aside and moving the new one in leaves no
+  image at the installed path.
+- `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are converted: each takes the
+  file-system, path, environment and bounded-process seams by constructor, and SQLite itself stays the system
+  `sqlite3` executable behind the process seam. The callers open them through `IAnalysisPersistenceFactory` and
+  `ICodeGraphPortsFactory`, so no caller builds one with `new`.
+- `SystemOneClient`, `GitHubReleaseClient` and `OpenAiCompatibleEmbeddingGenerator` are converted: each takes an
+  `HttpMessageHandler` (the embedding client takes `IEmbeddingTransport`, which supplies one) and wraps it in a
+  private `HttpClient`, so a test answers through `FakeHttpMessageHandler`. `SystemOneProviderFactory` only passes
+  the handler on.
+- `SocketArbiterHttpHandlers` is an adapter, not a class to convert: it is the one place that builds the Arbiter's
+  real handler.
 - `PresentFile` and `DocsRootWalk` are static helpers of the adapter `PhysicalRepositoryFileStore`
   (the bounded one-step read and the link-refusing walk). Only that adapter calls them: application code
   reaches the walk through `IRepositoryFileStore.EnumerateContainedFiles` and `IsContainedFile`.
@@ -324,10 +315,9 @@ the behaviour: where a test observes the value, the seam still wraps it.
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
 `Application/Update/SelfUpdater.cs`,
-`Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,
-`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
+`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.
 
 Two more framework members are used directly but are not in the exception list because a seam

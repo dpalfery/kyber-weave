@@ -766,7 +766,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         if (scope == HookScope.Global)
         {
             string effectiveHome = _hostConfig.ResolveHomeDirectory(homeDirectory);
-            string rootKey = ProjectRootKey(repoRoot);
+            string rootKey = ProjectRootKey(repoRoot, _process.CurrentDirectory);
             return Path.Combine(effectiveHome, ".kyber-weave", "arbiter", "projects", rootKey);
         }
 
@@ -803,9 +803,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
     }
 
-    internal static string ProjectRootKey(string projectRoot)
+    /// <summary>The per-project key a global ledger directory is named by: the hash of the root's full path.</summary>
+    /// <param name="projectRoot">The project root, relative or fully qualified.</param>
+    /// <param name="baseDirectory">The fully qualified directory a relative root is resolved against.</param>
+    internal static string ProjectRootKey(string projectRoot, string baseDirectory)
     {
-        string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
+        string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot, baseDirectory));
         byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexStringLower(hash);
     }

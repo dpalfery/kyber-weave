@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
@@ -17,7 +18,8 @@ namespace KyberWeave.Core.Squad.Rendering;
 /// target before opening it, and reads at most <see cref="MaxConfigBytes"/> bytes. A symlink is followed; its
 /// target must itself be a regular file.
 /// </remarks>
-public static class CopilotMcpServerProbe
+/// <param name="files">Resolves links, checks the length and reads the config.</param>
+public sealed class CopilotMcpServerProbe(IFileSystem files) : ICopilotMcpServerProbe
 {
     public const string McpConfigFileName = SquadOperatorChannel.CopilotMcpConfigFileName;
 
@@ -31,30 +33,28 @@ public static class CopilotMcpServerProbe
     /// regular file holding valid JSON whose <c>mcpServers</c> object contains <paramref name="serverName"/>
     /// as an exact key.
     /// </summary>
-    public static bool HasServer(string copilotRoot, string serverName)
+    public bool HasServer(string copilotRoot, string serverName)
     {
         string path = Path.Combine(copilotRoot, McpConfigFileName);
         try
         {
-            FileInfo link = new(path);
-            FileSystemInfo? resolved = link.LinkTarget is null
-                ? link
-                : link.ResolveLinkTarget(returnFinalTarget: true);
-            if (resolved is not FileInfo file || !file.Exists)
+            string? target = files.GetLinkTarget(path) is null ? path : files.GetFinalLinkTarget(path);
+            if (target is null || !files.FileExists(target))
             {
                 return false;
             }
 
             // Refused before any open: a zero-length target is a special file or an empty config, and a
             // special file must never be opened.
-            if (file.Length is 0 || file.Length > MaxConfigBytes)
+            long length = files.GetLength(target);
+            if (length is 0 || length > MaxConfigBytes)
             {
                 return false;
             }
 
             byte[] buffer = new byte[MaxConfigBytes + 1];
             int total = 0;
-            using (FileStream stream = file.OpenRead())
+            using (Stream stream = files.OpenRead(target))
             {
                 // Bounded by the buffer, so a file that grows after the length check still cannot be read whole.
                 int read;

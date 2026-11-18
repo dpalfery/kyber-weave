@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -341,7 +342,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_WhitelistsDeclaredMcpServersForEntitledDroids()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         Assert.NotEmpty(declaredMcpServers);
 
@@ -405,7 +406,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_RecordsMcpWithholdingOnlyWhenTheWhitelistIsEmpty()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
@@ -499,7 +500,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Factory_EntryPointCaveatNamesTheDroidsRenderedMcpServers()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         IReadOnlyList<string> declaredMcpServers = DeclaredFactoryMcpServers(source);
         SquadRenderResult result = await new FactoryRenderer().RenderAsync(new SquadRenderRequest(
             ProductRoot,
@@ -546,7 +547,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServers("a, b");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["a, b"], declared);
 
@@ -589,7 +590,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     public async Task RenderAsync_Factory_EmptyMcpDeclarationFailsClosedForEveryDroid()
     {
         using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers();
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         Assert.Empty(DeclaredFactoryMcpServers(source));
         Assert.NotEmpty(source.Agents);
 
@@ -670,7 +671,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServers("a,b", "bracket[server]", "plain");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["a,b", "bracket[server]", "plain"], declared);
 
@@ -694,7 +695,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServers("zeta-reader", "alpha-reader");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.Equal(["alpha-reader", "zeta-reader"], declared);
 
@@ -742,7 +743,7 @@ public sealed class FactoryRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         IReadOnlyList<string> declared = DeclaredFactoryMcpServers(source);
         Assert.NotEmpty(declared);
 

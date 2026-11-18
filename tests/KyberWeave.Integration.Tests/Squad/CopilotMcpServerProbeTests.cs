@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Rendering;
@@ -34,7 +35,7 @@ public sealed class CopilotMcpServerProbeTests : IDisposable
     /// <summary>Runs the probe on a worker and fails if it has not returned within the deadline.</summary>
     private static async Task<bool> HasServerWithinDeadlineAsync(string root)
     {
-        Task<bool> probe = Task.Run(() => CopilotMcpServerProbe.HasServer(root, ServerName));
+        Task<bool> probe = Task.Run(() => RealSquadServices.CopilotProbe().HasServer(root, ServerName));
         Task finished = await Task.WhenAny(probe, Task.Delay(ProbeDeadline));
         Assert.True(
             ReferenceEquals(finished, probe),

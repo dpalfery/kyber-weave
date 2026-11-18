@@ -5,6 +5,8 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Processes;
 
@@ -48,12 +50,34 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
     private static partial Regex SqliteBusyOrLockedRegex();
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.General);
     private readonly string _repositoryRoot;
+    private readonly IWritableFileSystem _files;
+    private readonly IBoundedProcessExecutor _processes;
 
-    public SqliteAnalysisPersistence(string repositoryRoot)
+    /// <summary>Opens the cache under <paramref name="repositoryRoot"/>, creating it when the repository's state is safe to cache in.</summary>
+    /// <param name="repositoryRoot">The repository root.</param>
+    /// <param name="files">Creates the cache folder and inspects the path components for links.</param>
+    /// <param name="paths">Resolves the repository root to a full path.</param>
+    /// <param name="environment">Supplies the directory a relative root resolves against.</param>
+    /// <param name="processes">Runs the <c>sqlite3</c> executable under a time limit.</param>
+    /// <param name="safety">Decides whether the cache is protected from accidental commits.</param>
+    public SqliteAnalysisPersistence(
+        string repositoryRoot,
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IBoundedProcessExecutor processes,
+        AnalysisCacheSafety safety)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(processes);
+        ArgumentNullException.ThrowIfNull(safety);
+        _files = files;
+        _processes = processes;
 
-        string fullRoot = Path.GetFullPath(repositoryRoot);
+        string fullRoot = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         _repositoryRoot = fullRoot;
         DatabasePath = Path.Combine(
             fullRoot,
@@ -62,9 +86,9 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             "docs-analysis.sqlite3");
 
         EnsureSafePersistencePath(fullRoot, DatabasePath);
-        if (!AnalysisCacheSafety.IsSafe(fullRoot) || !CanStartSqlite()) return;
+        if (!safety.IsSafe(fullRoot) || !CanStartSqlite()) return;
 
-        Directory.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
+        _files.CreateDirectory(Path.GetDirectoryName(DatabasePath)!);
         EnsureSafePersistencePath(fullRoot, DatabasePath);
         InitializeSchema();
         IsAvailable = true;
@@ -349,7 +373,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
             ProcessResult result;
             try
             {
-                result = ProcessRunner.Run(startInfo, boundedInput, SqliteBatchTimeout);
+                result = _processes.Run(startInfo, boundedInput, SqliteBatchTimeout);
             }
             catch (Win32Exception exception)
             {
@@ -384,13 +408,13 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         throw new InvalidOperationException("The documentation analysis cache operation did not complete.");
     }
 
-    private static bool CanStartSqlite()
+    private bool CanStartSqlite()
     {
         ProcessStartInfo startInfo = CreateStartInfo();
         startInfo.ArgumentList.Add("--version");
         try
         {
-            return ProcessRunner.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;
+            return _processes.Run(startInfo, string.Empty, SqliteVersionProbeTimeout).ExitCode == 0;
         }
         catch (Win32Exception)
         {
@@ -599,7 +623,7 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         }
     }
 
-    private static void EnsureSafePersistencePath(string repositoryRoot, string databasePath)
+    private void EnsureSafePersistencePath(string repositoryRoot, string databasePath)
     {
         EnsureContained(repositoryRoot, databasePath);
         string stateDirectory = Path.Combine(repositoryRoot, ".kyber-weave");
@@ -622,15 +646,12 @@ public sealed partial class SqliteAnalysisPersistence : IAnalysisPersistence
         }
     }
 
-    private static void RejectLinkOrReparsePoint(string path)
+    private void RejectLinkOrReparsePoint(string path)
     {
-        FileSystemInfo info = Directory.Exists(path)
-            ? new DirectoryInfo(path)
-            : new FileInfo(path);
         try
         {
-            if (info.LinkTarget is not null
-                || info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            if (_files.GetLinkTarget(path) is not null
+                || _files.PathExists(path) && _files.GetAttributes(path).HasFlag(FileAttributes.ReparsePoint))
             {
                 throw new InvalidOperationException(
                     $"The documentation analysis cache path cannot contain a symbolic link or reparse point: '{path}'.");

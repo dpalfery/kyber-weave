@@ -362,7 +362,7 @@ public sealed class DocumentationReviewExchangeTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        IAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        IAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         AnalysisCandidate candidate = Candidate("sqlite-round-trip", AnalysisRuleKind.Conflict);
         DocumentationReviewExchange exchange = new DocumentationReviewExchange(persistence);
         ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;
@@ -387,7 +387,7 @@ public sealed class DocumentationReviewExchangeTests
     {
         RequireSqlite();
         using TempDirectory repository = SafeRepository();
-        SqliteAnalysisPersistence persistence = new SqliteAnalysisPersistence(repository.Path);
+        SqliteAnalysisPersistence persistence = DocsPorts.Sqlite(repository.Path);
         AnalysisCandidate candidate = Candidate("sqlite-rollback", AnalysisRuleKind.Conflict);
         DocumentationReviewExchange exchange = new DocumentationReviewExchange(persistence);
         ReviewCandidateBundle exported = exchange.Export([candidate]).Bundle;

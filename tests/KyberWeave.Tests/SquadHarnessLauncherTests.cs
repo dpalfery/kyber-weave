@@ -1,3 +1,6 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using System.Diagnostics;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
@@ -11,6 +14,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadHarnessLauncherTests
 {
+    private static readonly SquadHarnessLauncher Launcher = new(new InMemoryFileSystem(), new FakeProcessEnvironment());
     private static readonly SquadInstanceRow ClaudeRow = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
     private static readonly SquadInstanceRow CodexRow = SquadInstanceCatalog.GetRow(SquadTarget.Codex);
 
@@ -21,7 +25,7 @@ public sealed class SquadHarnessLauncherTests
         string instanceRoot = "/tmp/instances/claude/fast";
         string[] args = ["--version"];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             ClaudeRow,
             instanceRoot,
             args,
@@ -39,7 +43,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = ["--version"];
 
         FileNotFoundException ex = Assert.Throws<FileNotFoundException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -56,7 +60,7 @@ public sealed class SquadHarnessLauncherTests
         string instanceRoot = "/tmp/instances/claude/fast";
         string[] args = [];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             ClaudeRow,
             instanceRoot,
             args,
@@ -75,7 +79,7 @@ public sealed class SquadHarnessLauncherTests
         string instanceRoot = "/tmp/instances/codex/fast";
         string[] args = ["--model", "gpt-4o", "--sandbox", "project"];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             CodexRow,
             instanceRoot,
             args,
@@ -99,7 +103,7 @@ public sealed class SquadHarnessLauncherTests
         string exePath = @"C:\Program Files\Claude\claude.exe";
         string[] args = ["--verbose", "run"];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             ClaudeRow,
             instanceRoot,
             args,
@@ -124,7 +128,7 @@ public sealed class SquadHarnessLauncherTests
         string comSpec = @"C:\Windows\System32\cmd.exe";
         string[] args = ["run", "my project"];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             ClaudeRow,
             instanceRoot,
             args,
@@ -146,7 +150,7 @@ public sealed class SquadHarnessLauncherTests
         string comSpec = @"C:\Windows\System32\cmd.exe";
         string[] args = ["start"];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             ClaudeRow,
             instanceRoot,
             args,
@@ -166,7 +170,7 @@ public sealed class SquadHarnessLauncherTests
         string shimPath = @"C:\Users\tester\AppData\Roaming\npm\claude.cmd";
         string[] args = ["run"];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             ClaudeRow,
             instanceRoot,
             args,
@@ -187,7 +191,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = ["--safe", offending];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -206,7 +210,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = [offending];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -225,7 +229,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = [offending];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -244,7 +248,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = [offending];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -263,7 +267,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = [offending];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -282,7 +286,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = [offending];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -310,7 +314,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = ["--safe", offending];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 ClaudeRow,
                 instanceRoot,
                 args,
@@ -331,7 +335,7 @@ public sealed class SquadHarnessLauncherTests
         string[] args = ["--version"];
 
         ArgumentException ex = Assert.Throws<ArgumentException>(() =>
-            SquadHarnessLauncher.BuildStartInfo(
+            Launcher.PrepareLaunch(
                 row,
                 instanceRoot,
                 args,
@@ -348,7 +352,7 @@ public sealed class SquadHarnessLauncherTests
         string instanceRoot = "/tmp/instances/claude/fast";
         string[] cleanArgs = ["--opt=val", "plain text", "path/to/file", "-v"];
 
-        ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(
+        ProcessStartInfo startInfo = Launcher.PrepareLaunch(
             ClaudeRow,
             instanceRoot,
             cleanArgs,
@@ -358,5 +362,67 @@ public sealed class SquadHarnessLauncherTests
 
         Assert.Equal(cleanArgs.Length, startInfo.ArgumentList.Count);
         for (int i = 0; i < cleanArgs.Length; i++) Assert.Equal(cleanArgs[i], startInfo.ArgumentList[i]);
+    }
+
+    [Fact]
+    public void ExecutableOnPathIsFoundThroughTheFileSeam()
+    {
+        InMemoryFileSystem files = new(caseSensitive: true);
+        files.CreateDirectory("/opt/tools");
+        files.WriteAllText("/opt/tools/claude", "binary");
+        SquadHarnessLauncher launcher = new(files, new FakeProcessEnvironment(
+            readVariable: name => name == "PATH" ? $"/usr/bin{Path.PathSeparator}/opt/tools" : null));
+
+        Assert.Equal("/opt/tools/claude", launcher.FindOnPath("claude"));
+    }
+
+    [Fact]
+    public void ExecutableMissingFromEveryPathDirectoryIsNotFound()
+    {
+        InMemoryFileSystem files = new(caseSensitive: true);
+        files.CreateDirectory("/opt/tools");
+        SquadHarnessLauncher launcher = new(files, new FakeProcessEnvironment(
+            readVariable: name => name == "PATH" ? "/opt/tools" : null));
+
+        Assert.Null(launcher.FindOnPath("claude"));
+    }
+
+    [Fact]
+    public void LaunchOnTheEnvironmentsOwnPathAndOperatingSystemWrapsAShimInTheCommandInterpreter()
+    {
+        InMemoryFileSystem files = new(caseSensitive: false);
+        files.CreateDirectory("/winbin");
+        files.WriteAllText("/winbin/claude.cmd", "shim");
+        FakeProcessEnvironment environment = new(
+            operatingSystem: OperatingSystemKind.Windows,
+            readVariable: name => name switch
+            {
+                "PATH" => "/winbin",
+                "PATHEXT" => ".CMD",
+                "ComSpec" => "/winbin/cmd.exe",
+                _ => null
+            });
+        SquadHarnessLauncher launcher = new(files, environment);
+
+        ProcessStartInfo startInfo = launcher.PrepareLaunch(ClaudeRow, "/tmp/instances/claude/fast", ["--version"]);
+
+        Assert.Equal("/winbin/cmd.exe", startInfo.FileName);
+        Assert.StartsWith("/d /s /c", startInfo.Arguments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LaunchOnANonWindowsEnvironmentPassesTheArgumentsAsAList()
+    {
+        InMemoryFileSystem files = new(caseSensitive: true);
+        files.CreateDirectory("/opt/tools");
+        files.WriteAllText("/opt/tools/claude", "binary");
+        SquadHarnessLauncher launcher = new(files, new FakeProcessEnvironment(
+            operatingSystem: OperatingSystemKind.Linux,
+            readVariable: name => name == "PATH" ? "/opt/tools" : null));
+
+        ProcessStartInfo startInfo = launcher.PrepareLaunch(ClaudeRow, "/tmp/instances/claude/fast", ["--version"]);
+
+        Assert.Equal("/opt/tools/claude", startInfo.FileName);
+        Assert.Equal(["--version"], startInfo.ArgumentList);
     }
 }

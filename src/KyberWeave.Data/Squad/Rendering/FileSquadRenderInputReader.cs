@@ -1,12 +1,21 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
-using KyberWeave.Core.Squad.Parsing;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
 /// <summary>Reads a render's disk inputs from the Squad source tree and the user's Copilot config.</summary>
-public sealed class FileSquadRenderInputReader : ISquadRenderInputReader
+/// <param name="loader">Loads the Squad source when the request carries none.</param>
+/// <param name="copilotProbe">Tells whether the Copilot config declares the operator channel server.</param>
+/// <param name="overlay">Reads the operator channel overlay.</param>
+/// <param name="files">Checks whether the request's source directory exists.</param>
+/// <param name="processEnvironment">Reads the environment when the request carries no reader.</param>
+public sealed class FileSquadRenderInputReader(
+    ISquadSourceLoader loader,
+    ICopilotMcpServerProbe copilotProbe,
+    ISquadOperatorChannelOverlayFile overlay,
+    IFileSystem files,
+    IProcessEnvironment processEnvironment) : ISquadRenderInputReader
 {
     /// <inheritdoc />
     public SquadRenderRequest Prepare(SquadRenderRequest request)
@@ -23,7 +32,7 @@ public sealed class FileSquadRenderInputReader : ISquadRenderInputReader
         {
             try
             {
-                source = SquadSourceLoader.Load(request.SourceDirectory);
+                source = loader.Load(request.SourceDirectory);
             }
             catch (Exception exception)
             {
@@ -45,7 +54,7 @@ public sealed class FileSquadRenderInputReader : ISquadRenderInputReader
         ISquadGlobalRootResolver? roots = request.GlobalRoots is null
             ? null
             : new MemoizedSquadGlobalRoots(request.GlobalRoots);
-        Func<string, string?> environment = request.EnvironmentReader ?? Environment.GetEnvironmentVariable;
+        Func<string, string?> environment = request.EnvironmentReader ?? processEnvironment.GetVariable;
         (bool declared, string? overlayText, Exception? overlayFailure) =
             ReadOperatorChannel(request, environment, roots, source);
 
@@ -64,7 +73,7 @@ public sealed class FileSquadRenderInputReader : ISquadRenderInputReader
         };
     }
 
-    private static (bool Declared, string? OverlayText, Exception? OverlayFailure) ReadOperatorChannel(
+    private (bool Declared, string? OverlayText, Exception? OverlayFailure) ReadOperatorChannel(
         SquadRenderRequest request,
         Func<string, string?> environment,
         ISquadGlobalRootResolver? roots,
@@ -95,17 +104,17 @@ public sealed class FileSquadRenderInputReader : ISquadRenderInputReader
             return (false, null, null);
         }
 
-        if (!CopilotMcpServerProbe.HasServer(copilotRoot, serverName))
+        if (!copilotProbe.HasServer(copilotRoot, serverName))
         {
             return (false, null, null);
         }
 
-        string overlaySourceDirectory = Directory.Exists(request.SourceDirectory)
+        string overlaySourceDirectory = files.DirectoryExists(request.SourceDirectory)
             ? request.SourceDirectory
             : source?.RootPath ?? request.SourceDirectory;
         try
         {
-            return (true, SquadOperatorChannelOverlayFile.ReadText(overlaySourceDirectory), null);
+            return (true, overlay.ReadText(overlaySourceDirectory), null);
         }
         catch (SquadRenderValidationException exception)
         {

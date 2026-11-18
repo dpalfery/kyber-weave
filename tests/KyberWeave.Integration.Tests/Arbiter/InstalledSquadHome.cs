@@ -86,7 +86,7 @@ public sealed class InstalledSquadHome : IDisposable
 
             SquadStateStore store = RealSquadState.Store(new SquadHostDefaults.CliSquadUserPaths(directory.Path, directory.Path));
             ISquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(
-                SquadReleaseSources.LocalCheckout(CheckoutSourceRoot()),
+                SquadReleaseSources.LocalCheckout(CheckoutSourceRoot(), RealSquadServices.CompanionSkills()),
                 SquadHostDefaults.ResolveRenderer(),
                 store,
                 globalRoots: new SquadGlobalRoots(_ => null, directory.Path));

@@ -23,6 +23,7 @@
   <ItemGroup>
     <!-- Test-only visibility for the launch-link store and other hook internals. -->
     <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Arbiter.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
   </ItemGroup>
@@ -34,7 +35,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\KyberWeave.Application\KyberWeave.Application.csproj" />
-    <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
   </ItemGroup>
 
 </Project>

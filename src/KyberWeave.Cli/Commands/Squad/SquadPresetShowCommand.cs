@@ -16,26 +16,31 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
     private readonly ISquadModelPresetStore _presetStore;
     private readonly ISquadCanonicalProfileResolver _canonicalProfiles;
     private readonly SquadConsole _output;
+    private readonly ISquadModelPresetValidator _validator;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="userPaths">Names the home the presets live under.</param>
     /// <param name="presetStore">Loads the named presets.</param>
     /// <param name="canonicalProfiles">Finds the canonical model profiles to show.</param>
     /// <param name="output">Where the rows and the refusals are written.</param>
+    /// <param name="validator">Checks the preset against the canonical model profiles.</param>
     public SquadPresetShowCommand(
         ISquadUserPaths userPaths,
         ISquadModelPresetStore presetStore,
         ISquadCanonicalProfileResolver canonicalProfiles,
-        SquadConsole output)
+        SquadConsole output,
+        ISquadModelPresetValidator validator)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
         ArgumentNullException.ThrowIfNull(presetStore);
         ArgumentNullException.ThrowIfNull(canonicalProfiles);
         ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(validator);
         _userPaths = userPaths;
         _presetStore = presetStore;
         _canonicalProfiles = canonicalProfiles;
         _output = output;
+        _validator = validator;
     }
 
     /// <inheritdoc />
@@ -115,7 +120,7 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
 
         try
         {
-            SquadModelPresetValidator.Validate(preset, canonical.Profiles);
+            _validator.Validate(preset, canonical.Profiles);
         }
         catch (SquadSourceValidationException ex)
         {
