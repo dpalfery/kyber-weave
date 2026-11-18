@@ -62,7 +62,7 @@ public sealed class ArbiterDoctorCommand(
         ArbiterDoctorReport inspected = doctor.Inspect(settings.Path, settings.Config, report);
         CommandHelpers.WriteUnfolded(console, () => Print(inspected));
 
-        CommandHelpers.Finish(report, settings, "arbiter doctor", "Rule");
+        CommandHelpers.Finish(console, report, settings, "arbiter doctor", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 

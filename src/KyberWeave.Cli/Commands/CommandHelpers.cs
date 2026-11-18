@@ -75,8 +75,28 @@ public static class CommandHelpers
         return true;
     }
 
-    public static void Finish(DiagnosticReport report, AnalysisSettings settings, string command, string subjectLabel)
+    public static void Finish(DiagnosticReport report, AnalysisSettings settings, string command, string subjectLabel) =>
+        Finish(AnsiConsole.Console, report, settings, command, subjectLabel);
+
+    /// <summary>
+    /// Applies <c>--no-info</c>, renders <paramref name="report"/> in the requested format through
+    /// <paramref name="console"/>, and prints the summary, so a command that writes to an injected console renders its
+    /// findings there too.
+    /// </summary>
+    /// <param name="console">The console the findings are written to.</param>
+    /// <param name="report">The findings to render.</param>
+    /// <param name="settings">The command's settings, which choose the format.</param>
+    /// <param name="command">The command name a document format records.</param>
+    /// <param name="subjectLabel">Names what the findings are about.</param>
+    public static void Finish(
+        IAnsiConsole console,
+        DiagnosticReport report,
+        AnalysisSettings settings,
+        string command,
+        string subjectLabel)
     {
+        ArgumentNullException.ThrowIfNull(console);
+
         if (settings.NoInfo)
         {
             DiagnosticReport filtered = new DiagnosticReport();
@@ -89,16 +109,16 @@ public static class CommandHelpers
             report = filtered;
         }
 
-        ReportRenderer.Render(report, settings.ParsedFormat, command, subjectLabel);
+        ReportRenderer.Render(console, report, settings.ParsedFormat, command, subjectLabel);
         OutputFormat format = settings.ParsedFormat;
         if (format == OutputFormat.Table)
         {
-            AnsiConsole.WriteLine();
-            ReportRenderer.RenderSummary(report);
+            console.WriteLine();
+            ReportRenderer.RenderSummary(console, report);
         }
         else if (format == OutputFormat.Lines)
         {
-            ReportRenderer.RenderSummary(report);
+            ReportRenderer.RenderSummary(console, report);
         }
     }
 

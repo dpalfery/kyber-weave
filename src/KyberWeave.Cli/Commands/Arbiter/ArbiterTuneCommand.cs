@@ -42,13 +42,13 @@ public sealed class ArbiterTuneCommand(IArbiterTuneService tune, IAnsiConsole co
                 problem!,
                 "--thresholds",
                 Hint: "Pass values between 0 and 1, for example 0.5,0.6,0.7."));
-            CommandHelpers.Finish(report, settings, CommandName, "Event");
+            CommandHelpers.Finish(console, report, settings, CommandName, "Event");
             return 1;
         }
 
         if (tune.Score(settings.Path, thresholds, settings.Rule, report) is not { } scored)
         {
-            CommandHelpers.Finish(report, settings, CommandName, "Event");
+            CommandHelpers.Finish(console, report, settings, CommandName, "Event");
             return 1;
         }
 

@@ -32,13 +32,13 @@ public sealed class ArbiterPlanCommand(
         string root = PlanArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
         if (!PlanArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config, configs), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
         {
-            CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+            CommandHelpers.Finish(console, report, settings, "arbiter plan", "Task");
             return 1;
         }
 
         if (plans.TryRead(root, relative, settings.Path, report) is not { } read)
         {
-            CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+            CommandHelpers.Finish(console, report, settings, "arbiter plan", "Task");
             return 1;
         }
 
@@ -56,7 +56,7 @@ public sealed class ArbiterPlanCommand(
             Print(read);
         }
 
-        CommandHelpers.Finish(report, settings, "arbiter plan", "Task");
+        CommandHelpers.Finish(console, report, settings, "arbiter plan", "Task");
         return report.HasErrors ? 1 : 0;
     }
 

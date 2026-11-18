@@ -41,7 +41,7 @@ public sealed class ArbiterStatusCommand(
         DiagnosticReport report = new();
         CommandHelpers.WriteUnfolded(console, () => Inspect(settings, report));
 
-        CommandHelpers.Finish(report, settings, "arbiter status", "Rule");
+        CommandHelpers.Finish(console, report, settings, "arbiter status", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 

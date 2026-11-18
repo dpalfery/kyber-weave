@@ -22,7 +22,7 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiCon
         DiagnosticReport report = new();
         if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
-            CommandHelpers.Finish(report, settings, "arbiter rules", "Rule");
+            CommandHelpers.Finish(console, report, settings, "arbiter rules", "Rule");
             return 1;
         }
 
@@ -41,7 +41,7 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiCon
                     exception.Message,
                     "--trigger",
                     Hint: "List every trigger's rules by omitting --trigger."));
-                CommandHelpers.Finish(report, settings, "arbiter rules", "Rule");
+                CommandHelpers.Finish(console, report, settings, "arbiter rules", "Rule");
                 return 1;
             }
 
@@ -78,7 +78,7 @@ public sealed class ArbiterRulesCommand(IArbiterConfigResolver configs, IAnsiCon
         CommandHelpers.WriteUnfolded(console, () => console.Write(table));
         console.MarkupLine($"[grey]{rules.Count} rule(s) listed.[/]");
 
-        CommandHelpers.Finish(report, settings, "arbiter rules", "Rule");
+        CommandHelpers.Finish(console, report, settings, "arbiter rules", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 

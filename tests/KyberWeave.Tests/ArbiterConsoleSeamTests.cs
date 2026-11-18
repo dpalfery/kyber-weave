@@ -31,6 +31,23 @@ public sealed class ArbiterConsoleSeamTests
         Assert.Contains("rule(s) listed", console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A report rendered through <see cref="KyberWeave.Cli.Commands.CommandHelpers.Finish"/> also goes to the injected
+    /// console: a command's findings are its main output, and a test that cannot read them can only prove the happy path.
+    /// </summary>
+    [Fact]
+    public void Rules_AConfigurationThatFailsToLoad_WritesItsFindingToTheConsoleItWasGiven()
+    {
+        TestConsole console = new();
+        console.Profile.Width = 200;
+        ArbiterRulesCommand command = new(new FailingArbiterConfigs(), console);
+
+        int exitCode = command.Execute(null!, new ArbiterSettings { Path = "/nowhere", Format = "json" });
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains(FailingArbiterConfigs.Code, console.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>The empty notice is the exact text <c>arbiter status</c> and <c>arbiter doctor</c> printed before.</summary>
     [Fact]
     public void GatingConsole_WritesTheEmptyNoticeUnchanged()
@@ -110,6 +127,32 @@ public sealed class ArbiterConsoleSeamTests
 
         public KyberWeaveConfigLoadResult Load(string root, string? configFile, bool projectScope) =>
             new(true, KyberWeaveConfigDefaults.Product);
+
+        public KyberWeaveConfig LoadFromYaml(string yaml) => KyberWeaveConfigDefaults.Product;
+    }
+
+    /// <summary>A configuration resolver that reports the load failure the way the real one does.</summary>
+    private sealed class FailingArbiterConfigs : IArbiterConfigResolver
+    {
+        internal const string Code = "KW-CONFIG-001";
+
+        public bool TryResolve(
+            string path,
+            string? configFile,
+            DiagnosticReport report,
+            out KyberWeaveConfig config,
+            out string? configPath)
+        {
+            report.Add(new Diagnostic(Code, Severity.Error, "kyber-weave.yml could not be read.", "kyber-weave.yml"));
+            config = KyberWeaveConfigDefaults.Product;
+            configPath = null;
+            return false;
+        }
+
+        public KyberWeaveConfig? TryLoadRepository(string root) => null;
+
+        public KyberWeaveConfigLoadResult Load(string root, string? configFile, bool projectScope) =>
+            new(false, error: "kyber-weave.yml could not be read.");
 
         public KyberWeaveConfig LoadFromYaml(string yaml) => KyberWeaveConfigDefaults.Product;
     }
