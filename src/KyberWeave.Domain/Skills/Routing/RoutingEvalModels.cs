@@ -31,9 +31,14 @@ public sealed record RoutingCaseResult(RoutingEvalCase Case, RoutingResult Resul
 }
 
 /// <summary>The accuracy of a routing eval set: how many cases passed, out of how many.</summary>
+/// <remarks>
+/// An eval set with no cases scores zero, not one: a file whose <c>cases:</c> key is missing
+/// or misspelled, or one that holds no case, would otherwise report a perfect score and pass
+/// the <c>route</c> gate without testing anything.
+/// </remarks>
 public sealed record RoutingEvalSummary(IReadOnlyList<RoutingCaseResult> Results)
 {
     public int Total => Results.Count;
     public int Passed => Results.Count(r => r.Passed);
-    public double Accuracy => Total == 0 ? 1.0 : (double)Passed / Total;
+    public double Accuracy => Total == 0 ? 0.0 : (double)Passed / Total;
 }

@@ -161,4 +161,15 @@ public class RoutingTests
         Assert.Equal(3, summary.Total);
         Assert.True(summary.Accuracy >= 0.66, $"accuracy was {summary.Accuracy:P0}");
     }
+
+    [Fact]
+    public void AnEvalThatDeclaresNoCasesIsNotAPerfectScore()
+    {
+        RoutingEvalFile evalFile = RoutingEvalFileParser.Parse(string.Empty);
+
+        RoutingEvalSummary summary = new RoutingEvaluator(new LexicalRoutingStrategy()).Evaluate(evalFile, SampleSet());
+
+        Assert.Equal(0, summary.Total);
+        Assert.Equal(0.0, summary.Accuracy);
+    }
 }
