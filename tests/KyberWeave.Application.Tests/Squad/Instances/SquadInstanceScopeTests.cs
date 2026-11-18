@@ -2,14 +2,13 @@ using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using KyberWeave.Tests.Fakes;
 using System.Text;
-using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Instances;
 
 /// <summary>
 /// Pins the instance deployment scope contract and root resolution rules.
@@ -22,16 +21,12 @@ namespace KyberWeave.Integration.Tests;
 /// <c>registry.json</c>, migration ignores it, and rendering lowers paths under the instance root
 /// via <see cref="SquadInstanceRootResolver" />.
 /// </remarks>
-public sealed class SquadInstanceScopeTests : IDisposable
+public sealed class SquadInstanceScopeTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private static readonly DateTimeOffset InstalledAt =
         new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
+    private readonly InMemorySquadState _state = new();
 
     /// <summary>
     /// Verifies that SquadDeploymentScope declares the Instance enum member as distinct from Project and Global.
@@ -52,9 +47,8 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [Fact]
     public void ValidInstanceRootResolvesStateLockAndReceiptUnderInstanceState()
     {
-        string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeSquadUserPaths userPaths = new(applicationData);
-        Directory.CreateDirectory(userPaths.HomeDirectory);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceRoot = Path.Combine(
@@ -64,7 +58,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "instances",
             "claude",
             "default");
-        Directory.CreateDirectory(instanceRoot);
+        _state.Files.CreateDirectory(instanceRoot);
 
         string expectedStateDir = Path.Combine(
             userPaths.HomeDirectory,
@@ -96,14 +90,13 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [InlineData("relative-path")]
     public void InvalidInstanceRootThrowsArgumentException(string scenario)
     {
-        string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeSquadUserPaths userPaths = new(applicationData);
-        Directory.CreateDirectory(userPaths.HomeDirectory);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = RealSquadState.Store(userPaths);
 
         string invalidRoot = scenario switch
         {
-            "outside-home" => Path.Combine(_temp.Path, "custom-location"),
+            "outside-home" => Path.Combine(_state.Files.Root, "custom-location"),
             "missing-preset" => Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", "claude"),
             "instances-base-only" => Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances"),
             "relative-path" => Path.Combine(".kyber-weave", "squad", "instances", "claude", "default"),
@@ -123,9 +116,8 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [Fact]
     public void ExecuteInstanceTransactionDeploysToInstanceRootAndStoresStateUnderInstanceState()
     {
-        string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeSquadUserPaths userPaths = new(applicationData);
-        Directory.CreateDirectory(userPaths.HomeDirectory);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceRoot = Path.Combine(
@@ -135,7 +127,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "instances",
             "claude",
             "default");
-        Directory.CreateDirectory(instanceRoot);
+        _state.Files.CreateDirectory(instanceRoot);
 
         SquadLock squadLock = CreateLock();
         SquadDeploymentFile renderedAgent = new(
@@ -143,7 +135,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
             Encoding.UTF8.GetBytes("# Conductor Agent Content"),
             "claude");
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
             instanceRoot,
             SquadDeploymentScope.Instance,
             squadLock,
@@ -152,12 +144,12 @@ public sealed class SquadInstanceScopeTests : IDisposable
             adopt: false,
             new FixedTimeProvider(InstalledAt));
 
-        SquadTransaction transaction = RealSquadDeployment.Transaction(store);
+        SquadTransaction transaction = _state.Transaction();
         transaction.Execute(plan);
 
         string deployedFile = Path.Combine(instanceRoot, "agents", "conductor.md");
-        Assert.True(File.Exists(deployedFile));
-        Assert.Equal("# Conductor Agent Content", File.ReadAllText(deployedFile));
+        Assert.True(_state.Files.FileExists(deployedFile));
+        Assert.Equal("# Conductor Agent Content", _state.Files.ReadAllText(deployedFile));
 
         string expectedStateDir = Path.Combine(
             userPaths.HomeDirectory,
@@ -166,11 +158,11 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "instance-state",
             "claude",
             "default");
-        Assert.True(File.Exists(Path.Combine(expectedStateDir, "squad.lock.yml")));
-        Assert.True(File.Exists(Path.Combine(expectedStateDir, "squad.receipt.json")));
+        Assert.True(_state.Files.FileExists(Path.Combine(expectedStateDir, "squad.lock.yml")));
+        Assert.True(_state.Files.FileExists(Path.Combine(expectedStateDir, "squad.receipt.json")));
 
-        Assert.False(Directory.Exists(Path.Combine(instanceRoot, ".squad-transaction")));
-        Assert.False(Directory.Exists(Path.Combine(instanceRoot, ".kyber-weave")));
+        Assert.False(_state.Files.DirectoryExists(Path.Combine(instanceRoot, ".squad-transaction")));
+        Assert.False(_state.Files.DirectoryExists(Path.Combine(instanceRoot, ".kyber-weave")));
     }
 
     /// <summary>
@@ -180,9 +172,8 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [Fact]
     public void ExecuteInstanceTransactionNeverRegistersInProjectRegistry()
     {
-        string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeSquadUserPaths userPaths = new(applicationData);
-        Directory.CreateDirectory(userPaths.HomeDirectory);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceRoot = Path.Combine(
@@ -192,9 +183,9 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "instances",
             "claude",
             "default");
-        Directory.CreateDirectory(instanceRoot);
+        _state.Files.CreateDirectory(instanceRoot);
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
             instanceRoot,
             SquadDeploymentScope.Instance,
             CreateLock(),
@@ -203,16 +194,16 @@ public sealed class SquadInstanceScopeTests : IDisposable
             adopt: false,
             new FixedTimeProvider(InstalledAt));
 
-        SquadTransaction transaction = RealSquadDeployment.Transaction(store);
+        SquadTransaction transaction = _state.Transaction();
         transaction.Execute(plan);
 
         IReadOnlyList<SquadProjectRegistryEntry> projects = store.ListProjects();
         Assert.DoesNotContain(projects, project => string.Equals(project.Path, instanceRoot, StringComparison.Ordinal));
 
         string registryPath = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "registry.json");
-        if (File.Exists(registryPath))
+        if (_state.Files.FileExists(registryPath))
         {
-            string registryContent = File.ReadAllText(registryPath);
+            string registryContent = _state.Files.ReadAllText(registryPath);
             Assert.DoesNotContain("instances", registryContent, StringComparison.Ordinal);
             Assert.DoesNotContain("claude/default", registryContent, StringComparison.Ordinal);
         }
@@ -225,9 +216,8 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [Fact]
     public void SquadStateMigrationIgnoresInstanceStateDirectory()
     {
-        string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeSquadUserPaths userPaths = new(applicationData);
-        Directory.CreateDirectory(userPaths.HomeDirectory);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = RealSquadState.Store(userPaths);
 
         string instanceStateDir = Path.Combine(
@@ -237,11 +227,11 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "instance-state",
             "claude",
             "default");
-        Directory.CreateDirectory(instanceStateDir);
+        _state.Files.CreateDirectory(instanceStateDir);
         string lockFile = Path.Combine(instanceStateDir, "squad.lock.yml");
         string receiptFile = Path.Combine(instanceStateDir, "squad.receipt.json");
-        File.WriteAllText(lockFile, store.SerializeLock(CreateLock()));
-        File.WriteAllText(receiptFile, store.SerializeReceipt(new SquadReceipt(
+        _state.Files.WriteAllText(lockFile, store.SerializeLock(CreateLock()));
+        _state.Files.WriteAllText(receiptFile, store.SerializeReceipt(new SquadReceipt(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Instance,
             Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", "claude", "default"),
@@ -249,11 +239,11 @@ public sealed class SquadInstanceScopeTests : IDisposable
             [],
             [])));
 
-        SquadStateMigration migration = RealSquadState.Migration(store, userPaths);
+        SquadStateMigration migration = _state.Migration;
         SquadMigrationReport report = migration.MigrateGlobal(userPaths.HomeDirectory);
 
-        Assert.True(File.Exists(lockFile));
-        Assert.True(File.Exists(receiptFile));
+        Assert.True(_state.Files.FileExists(lockFile));
+        Assert.True(_state.Files.FileExists(receiptFile));
         Assert.Empty(report.MigratedItems);
         Assert.Empty(report.UnmigratedLegacyRoots);
         Assert.Empty(report.ImportedProjects);
@@ -266,7 +256,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [Fact]
     public void SquadInstanceRootResolverResolvesTargetAndThrowsForOtherTargets()
     {
-        string instanceRoot = Path.Combine(_temp.Path, "instance-root");
+        string instanceRoot = Path.Combine(_state.Files.Root, "instance-root");
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Claude);
 
         Assert.Equal(instanceRoot, resolver.ResolveGlobalRoot(SquadTarget.Claude));
@@ -284,8 +274,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [Fact]
     public async Task ClaudeInstanceRendersAgentsUnderInstanceRoot()
     {
-        string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeSquadUserPaths userPaths = new(applicationData);
+        ISquadUserPaths userPaths = _state.UserPaths;
         string instanceRoot = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
@@ -293,17 +282,18 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "instances",
             "claude",
             "default");
-        Directory.CreateDirectory(instanceRoot);
+        _state.Files.CreateDirectory(instanceRoot);
 
-        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
+        ISquadRenderer renderer = tree.Registry(SquadHostDefaults.CreateRenderers());
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Claude);
 
         SquadRenderRequest request = new SquadRenderRequest(
-            SourceDirectory: Path.Combine(Corpus.Root, "products", "kyber-squad"),
+            SourceDirectory: tree.ProductRoot,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
             UserScopeDirectory: userPaths.ApplicationDataDirectory,
-            GlobalRoots: resolver).Prepared();
+            GlobalRoots: resolver).Prepared(tree);
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
@@ -321,8 +311,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     [Fact]
     public async Task CopilotInstanceAbsoluteLinksPointInsideInstanceRoot()
     {
-        string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeSquadUserPaths userPaths = new(applicationData);
+        ISquadUserPaths userPaths = _state.UserPaths;
         string instanceRoot = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
@@ -330,17 +319,18 @@ public sealed class SquadInstanceScopeTests : IDisposable
             "instances",
             "copilot",
             "default");
-        Directory.CreateDirectory(instanceRoot);
+        _state.Files.CreateDirectory(instanceRoot);
 
-        ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
+        ISquadRenderer renderer = tree.Registry(SquadHostDefaults.CreateRenderers());
         SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Copilot);
 
         SquadRenderRequest request = new SquadRenderRequest(
-            SourceDirectory: Path.Combine(Corpus.Root, "products", "kyber-squad"),
+            SourceDirectory: tree.ProductRoot,
             Targets: [SquadTarget.Copilot],
             Scope: SquadDeploymentScope.Global,
             UserScopeDirectory: userPaths.ApplicationDataDirectory,
-            GlobalRoots: resolver).Prepared();
+            GlobalRoots: resolver).Prepared(tree);
 
         SquadRenderResult result = await renderer.RenderAsync(request);
 
