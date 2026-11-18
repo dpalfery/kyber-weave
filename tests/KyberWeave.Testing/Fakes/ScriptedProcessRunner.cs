@@ -1,0 +1,137 @@
+using KyberWeave.Contracts.Repositories;
+
+namespace KyberWeave.Tests.Fakes;
+
+/// <summary>
+/// Scripted process seam: every run is answered from a table keyed by program and arguments, and every call is
+/// recorded. Nothing is started, so a unit test controls the result, the timeout and the failure exactly.
+/// </summary>
+public sealed class ScriptedProcessRunner : IProcessRunner
+{
+    private readonly List<Answer> _scripts = [];
+    private readonly List<ProcessRunRequest> _calls = [];
+    private readonly List<ProcessRunRequest> _timedOutCalls = [];
+    private readonly HashSet<string> _missingDirectories = new(StringComparer.Ordinal);
+    private readonly Dictionary<int, bool> _alive = [];
+    private readonly Dictionary<string, string?> _onPath = new(StringComparer.Ordinal);
+
+    /// <summary>Every call the code under test made, in order.</summary>
+    public IReadOnlyList<ProcessRunRequest> Calls => _calls;
+
+    /// <summary>The calls whose scripted result reported a timeout.</summary>
+    public IReadOnlyList<ProcessRunRequest> TimedOutCalls => _timedOutCalls;
+
+    /// <summary>Answers one program and exact argument list with a result.</summary>
+    /// <param name="program">The program name the script matches.</param>
+    /// <param name="result">The result to return.</param>
+    /// <param name="arguments">The exact arguments the script matches; omit to match any arguments.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner Script(string program, ProcessRunResult result, params string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(result);
+        _scripts.Add(new Answer(program, arguments.Length == 0 ? null : arguments, result, Exception: null));
+        return this;
+    }
+
+    /// <summary>Answers one program and argument list as a killed, timed-out run.</summary>
+    /// <param name="program">The program name the script matches.</param>
+    /// <param name="arguments">The exact arguments the script matches; omit to match any arguments.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner ScriptTimeout(string program, params string[] arguments) =>
+        Script(
+            program,
+            new ProcessRunResult(-1, string.Empty, TimedOut: true) { StandardOutput = string.Empty, StandardError = string.Empty },
+            arguments);
+
+    /// <summary>Makes one program and argument list fail with an exception.</summary>
+    /// <param name="program">The program name the script matches.</param>
+    /// <param name="exception">The exception the run throws.</param>
+    /// <param name="arguments">The exact arguments the script matches; omit to match any arguments.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner Throws(string program, Exception exception, params string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(exception);
+        _scripts.Add(new Answer(program, arguments.Length == 0 ? null : arguments, Result: null, exception));
+        return this;
+    }
+
+    /// <summary>Makes one program fail as a program that is not installed.</summary>
+    /// <param name="program">The program name the script matches.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner WithMissingProgram(string program) =>
+        Throws(program, new FileNotFoundException($"command not found: {program}", program));
+
+    /// <summary>Makes a run in this directory fail as a missing working directory.</summary>
+    /// <param name="directory">The working directory the script matches.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner WithMissingDirectory(string directory)
+    {
+        ArgumentNullException.ThrowIfNull(directory);
+        _ = _missingDirectories.Add(directory);
+        return this;
+    }
+
+    /// <summary>Reports a process id as running or ended.</summary>
+    /// <param name="processId">The process id to answer for.</param>
+    /// <param name="alive">Whether it is running.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner WithAlive(int processId, bool alive = true)
+    {
+        _alive[processId] = alive;
+        return this;
+    }
+
+    /// <summary>Reports a program as found on the path.</summary>
+    /// <param name="program">The program name to answer for.</param>
+    /// <param name="path">The full path it resolves to.</param>
+    /// <returns>This runner, for chaining.</returns>
+    public ScriptedProcessRunner WithProgramOnPath(string program, string path)
+    {
+        ArgumentNullException.ThrowIfNull(program);
+        ArgumentNullException.ThrowIfNull(path);
+        _onPath[program] = path;
+        return this;
+    }
+
+    /// <inheritdoc />
+    public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        _calls.Add(request);
+
+        if (request.WorkingDirectory is { } directory && _missingDirectories.Contains(directory))
+        {
+            throw new DirectoryNotFoundException($"working directory not found: {directory}");
+        }
+
+        Answer script = _scripts.Find(candidate => candidate.Matches(request))
+                        ?? new Answer(request.Program, Arguments: null, new ProcessRunResult(0, string.Empty, TimedOut: false), Exception: null);
+
+        if (script.Exception is { } exception)
+        {
+            throw exception;
+        }
+
+        if (script.Result is { TimedOut: true })
+        {
+            _timedOutCalls.Add(request);
+        }
+
+        return Task.FromResult(script.Result!);
+    }
+
+    /// <inheritdoc />
+    public bool IsAlive(int processId) => _alive.TryGetValue(processId, out bool alive) && alive;
+
+    /// <inheritdoc />
+    public string? FindOnPath(string program) => _onPath.TryGetValue(program, out string? path) ? path : null;
+
+    private sealed record Answer(string Program, string[]? Arguments, ProcessRunResult? Result, Exception? Exception)
+    {
+        public bool Matches(ProcessRunRequest request) =>
+            string.Equals(Program, request.Program, StringComparison.Ordinal) &&
+            (Arguments is null || Arguments.SequenceEqual(request.Arguments, StringComparer.Ordinal));
+    }
+}

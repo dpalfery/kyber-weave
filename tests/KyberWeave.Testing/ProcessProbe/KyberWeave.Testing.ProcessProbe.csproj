@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A tiny console program the process-seam contract suite starts for real. It must run on
+    macOS, Linux and Windows CI, so it does only what the base class library does: read
+    standard input, write the two output streams, read a file relative to its working
+    directory, read an environment variable, sleep and set an exit code.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>KyberWeave.Testing.ProcessProbe</AssemblyName>
+    <RootNamespace>KyberWeave.Testing.ProcessProbe</RootNamespace>
+  </PropertyGroup>
+
+</Project>
