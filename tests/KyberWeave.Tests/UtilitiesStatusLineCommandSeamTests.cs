@@ -72,6 +72,43 @@ public sealed class UtilitiesStatusLineCommandSeamTests
         Assert.Contains("kyber-weave utilities statusline deploy", _console.Output, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A home directory that is not fully qualified is client input. Status and doctor refuse it with exit 2 on the
+    /// injected console, the same line deploy and remove already print, instead of throwing out of the command.
+    /// </summary>
+    [Theory]
+    [InlineData("status")]
+    [InlineData("doctor")]
+    public void AnUnusableHomeIsClientInputWithExitTwo(string verb)
+    {
+        FakeProcessEnvironment environment = new(currentDirectory: Work, homeDirectory: "relative-home");
+
+        int result = verb == "status"
+            ? new UtilitiesStatusLineStatusCommand(environment, _plans, _host, _semantics, _console)
+                .Execute(null!, new UtilitiesStatusLineSettings())
+            : new UtilitiesStatusLineDoctorCommand(environment, _plans, _host, UnreachableProbe, _semantics, _console)
+                .Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(2, result);
+        Assert.Contains("kyber-weave utilities statusline: error:", _console.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>A relative harness-root override is refused the same way, because the command checks every root first.</summary>
+    [Fact]
+    public void StatusRefusesARelativeHarnessRootOverrideWithExitTwo()
+    {
+        FakeProcessEnvironment environment = new(
+            currentDirectory: Work,
+            homeDirectory: Home,
+            readVariable: name => name == "CLAUDE_CONFIG_DIR" ? "relative-override" : null);
+
+        int result = new UtilitiesStatusLineStatusCommand(environment, _plans, _host, _semantics, _console)
+            .Execute(null!, new UtilitiesStatusLineSettings());
+
+        Assert.Equal(2, result);
+        Assert.Contains("kyber-weave utilities statusline: error:", _console.Output, StringComparison.Ordinal);
+    }
+
     /// <summary>A malformed receipt is reported as invalid rather than thrown out of the command.</summary>
     [Fact]
     public void StatusReportsAMalformedReceiptAsInvalid()

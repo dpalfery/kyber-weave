@@ -56,7 +56,20 @@ public sealed class UtilitiesStatusLineStatusCommand : Command<UtilitiesStatusLi
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        StatusLineTargetRoots roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
+        StatusLineTargetRoots roots;
+        try
+        {
+            roots = UtilitiesStatusLineCommandComposition.ResolveRoots(_environment);
+            foreach (StatusLineTarget target in UtilitiesStatusLineTargetCatalog.All)
+            {
+                _ = roots.ResolveStagingRoot(target);
+            }
+        }
+        catch (ArgumentException ex)
+        {
+            UtilitiesStatusLineCommandComposition.WriteClientInputError(_console, ex.Message);
+            return 2;
+        }
 
         _console.MarkupLine("[bold]Kyber Utilities status line — status[/]");
 
