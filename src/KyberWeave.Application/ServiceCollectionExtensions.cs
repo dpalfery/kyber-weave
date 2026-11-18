@@ -214,7 +214,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
+        services.TryAddSingleton<IReviewEvidenceService>(sp => new ReviewEvidenceService(
+            sp.GetRequiredService<IGitChangeReader>(),
+            sp.GetRequiredService<IReviewEvidenceStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();
         services.TryAddSingleton<IGateRunService, GateRunService>();
