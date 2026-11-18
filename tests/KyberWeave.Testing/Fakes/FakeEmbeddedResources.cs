@@ -29,7 +29,7 @@ public sealed class FakeEmbeddedResources : IEmbeddedResources
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentNullException.ThrowIfNull(content);
-        if (!_resources.TryAdd(name, content))
+        if (!_resources.TryAdd(name, content.ToArray()))
         {
             throw new InvalidOperationException($"The resource '{name}' is already added.");
         }
