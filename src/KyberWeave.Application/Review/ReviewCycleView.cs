@@ -89,7 +89,21 @@ public static class ReviewCycleView
 
         reviewFolder = string.Empty;
         cycle = 0;
-        string? cycleFolder = Path.GetDirectoryName(paths.GetFullPath(outPath, environment.CurrentDirectory));
+        if (string.IsNullOrWhiteSpace(outPath))
+            return false;
+
+        string full;
+        try
+        {
+            full = paths.GetFullPath(outPath, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
+                                       or System.Security.SecurityException)
+        {
+            return false;
+        }
+
+        string? cycleFolder = Path.GetDirectoryName(full);
         string? name = cycleFolder is null ? null : Path.GetFileName(cycleFolder);
         string? parent = cycleFolder is null ? null : Path.GetDirectoryName(cycleFolder);
         if (name is null || parent is null

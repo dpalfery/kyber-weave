@@ -30,6 +30,18 @@ public sealed class ReviewCycleViewTests
         Assert.Equal(2, cycle);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("bad\0spelling/review/cycle-1/gates.json")]
+    public void AnUnusableReportPathNamesNoCycleAndDoesNotThrow(string outPath)
+    {
+        Assert.False(ReviewCycleView.TryFromOutPath(
+            _paths, _environment, outPath, out string reviewFolder, out int cycle));
+        Assert.Equal(string.Empty, reviewFolder);
+        Assert.Equal(0, cycle);
+    }
+
     [Fact]
     public void AFullCycleReportIsPlacedByItsOwnPath()
     {
