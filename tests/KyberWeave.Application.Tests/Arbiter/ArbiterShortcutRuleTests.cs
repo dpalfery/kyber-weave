@@ -9,8 +9,9 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 3.7 (shortcuts): three step-1 rules that answer a dispatch without spawning its
@@ -35,7 +36,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// ids whose decision was refused or answered, so the audit does not count a withheld worker as a spawn.
 /// </para>
 /// </remarks>
-public sealed class ArbiterShortcutRuleTests : IDisposable
+public sealed class ArbiterShortcutRuleTests
 {
     private const string TriageRule = "KW-ARB-TRIAGE-001";
     private const string IntakeRule = "KW-ARB-INTAKE-001";
@@ -53,18 +54,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     private const string GovernedPathsFact = "docs.governed-paths-changed";
     private const string Answered = RuleEffects.Answer;
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-shortcut-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
@@ -108,20 +98,17 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
 
-    private static ArbiterEvaluator Evaluator(
-        string arbiterDirectory,
-        IArbiterProvider provider,
-        IArbiterGitFacts? gitFacts = null) =>
+    private ArbiterEvaluator Evaluator(IArbiterProvider provider, IArbiterGitFacts? gitFacts = null) =>
         new(
             provider,
             _ => null,
-            RealArbiterState.Ledger(arbiterDirectory),
-            RealArbiterState.Decisions(arbiterDirectory),
+            _arbiter.Ledger,
+            _arbiter.Decisions,
             gitFacts ?? new PassThroughGitFacts(),
             new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+            new FileArbiterModelTargetsReader(_arbiter.Files),
+            _arbiter.GateReports,
+            _arbiter.State,
             new FixedClock(Now),
             new FakeIdGenerator(), SecondaryTriggers.For);
 
@@ -316,7 +303,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task AnEnforcedTrivialTriageAnswerDeniesTheInvestigatorDispatch()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
@@ -335,11 +322,11 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task TheTriageDenyReasonCarriesTheSubstituteDigestForItsDecision()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         await evaluator.EvaluateAsync(BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        IReadOnlyList<ArbiterDecisionRecord> records = RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+        IReadOnlyList<ArbiterDecisionRecord> records = _arbiter.Records;
         ArbiterDecisionRecord triage = Assert.Single(records, record => record.Trigger == TriageTrigger);
         string expected = string.Join(
             "\n",
@@ -356,13 +343,13 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task TheShadowTriageAnswerOnlyLogsWhatItWouldHaveDone()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Shipped(TriageRule)]));
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        ArbiterDecisionRecord triage = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == TriageTrigger);
+        ArbiterDecisionRecord triage = Assert.Single(_arbiter.Records, record => record.Trigger == TriageTrigger);
         ArbiterDecisionRule rule = Assert.Single(triage.Rules, r => r.Id == TriageRule);
         Assert.Equal(Answered, rule.WouldEffect);
     }
@@ -372,7 +359,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task ATriageAnswerBelowTheFloorLeavesTheDispatchUnchanged()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.8);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
@@ -386,7 +373,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task AProviderFailureLeavesTheTriageDispatchUnchanged()
     {
         FakeArbiterProvider provider = new() { RequestSent = false, Model = null };
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
@@ -400,7 +387,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task ANeedsArchitectTriageAnswerKeepsTheDispatch()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NeedsArchitect, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
@@ -415,7 +402,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task AnEnforcedIntakePlanAnswerIsAnsweredNotSpawned()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Plan, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             IntakePlanner(), ConfigWith([Enforced(IntakeRule)]));
@@ -428,11 +415,11 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task TheIntakeAnswerCarriesTheIntakeRecommendationDigest()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Spec, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         await evaluator.EvaluateAsync(IntakePlanner(), ConfigWith([Enforced(IntakeRule)]));
 
-        ArbiterDecisionRecord intake = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == IntakeTrigger);
+        ArbiterDecisionRecord intake = Assert.Single(_arbiter.Records, record => record.Trigger == IntakeTrigger);
         string expected = string.Join(
             "\n",
             "STATUS: INTAKE_RECOMMENDATION",
@@ -450,7 +437,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task TheShadowIntakeAnswerLeavesThePlannerDispatchUnchanged()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Plan, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             IntakePlanner(), ConfigWith([Shipped(IntakeRule)]));
@@ -463,7 +450,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task AnIntakeAnswerBelowTheFloorLeavesThePlannerDispatchUnchanged()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Plan, 0.7);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             IntakePlanner(), ConfigWith([Enforced(IntakeRule)]));
@@ -478,8 +465,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task AnUntouchedDocsImpactAnsweredWithConfidenceIsAnswered()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs"));
+        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -492,8 +478,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task ATouchedDocsImpactKeepsTheDispatchWithoutAskingTheProvider()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new ChangedPathsGitFacts("docs/uploader.md"));
+        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("docs/uploader.md"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -511,8 +496,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task ADocsPathInTheRunsDiffSetsTheGovernedPathsFactAndKeepsTheDispatch()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs", "docs/uploader.md"));
+        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs", "docs/uploader.md"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -531,8 +515,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task ANonDocsDiffSetsTheGovernedPathsFactFalseAndTheProviderCanAnswer()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs", "tests/WidgetTests.cs"));
+        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs", "tests/WidgetTests.cs"));
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
@@ -548,12 +531,11 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task TheDocsImpactAnswerCarriesTheNoDocChangeDigest()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(NoDocChange, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(
-            ArbiterDirectory, provider, new ChangedPathsGitFacts("src/Widget.cs"));
+        ArbiterEvaluator evaluator = Evaluator( provider, new ChangedPathsGitFacts("src/Widget.cs"));
 
         await evaluator.EvaluateAsync(DocsImpactDispatch(), ConfigWith([Enforced(DocsImpactRule)]));
 
-        ArbiterDecisionRecord docs = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Trigger == DocsImpactTrigger);
+        ArbiterDecisionRecord docs = Assert.Single(_arbiter.Records, record => record.Trigger == DocsImpactTrigger);
         // The digest only means "shortcut" when the rule itself answered: not when the question was kept and escalated.
         ArbiterDecisionRule answered = Assert.Single(docs.Rules, rule => rule.Id == DocsImpactRule);
         Assert.Equal(NoDocChange, answered.Answer);
@@ -576,12 +558,12 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task AnAnsweredShortcutIsRecordedAsANotDispatchedDispatch()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Enforced(TriageRule)]));
 
-        Assert.Contains(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(RealArbiterState.Decisions(ArbiterDirectory)));
+        Assert.Contains(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(_arbiter.Decisions));
     }
 
     /// <summary>A shadow shortcut dispatched the worker, so its ledger id is not in the not-dispatched set.</summary>
@@ -589,12 +571,12 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
     public async Task AShadowShortcutDoesNotMarkTheDispatchAsNotDispatched()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Trivial, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             BugCrusherInvestigate(), ConfigWith([Shipped(TriageRule)]));
 
-        Assert.DoesNotContain(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(RealArbiterState.Decisions(ArbiterDirectory)));
+        Assert.DoesNotContain(result.LedgerId, LedgerFacts.NotDispatchedLedgerIds(_arbiter.Decisions));
     }
 
     // ---- Shipped pins (acceptance: the three ids are in the catalogue and shipped in shadow) ----

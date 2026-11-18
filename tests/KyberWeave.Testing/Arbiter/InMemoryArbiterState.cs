@@ -33,7 +33,10 @@ internal sealed class InMemoryArbiterState
     public IPathResolver Paths => new FakePathResolver(Files);
 
     /// <summary>Gets the in-flight ledger the evaluator pairs pre and post events through.</summary>
-    public IArbiterLedger Ledger => new InFlightLedger(Directory, Log);
+    public IArbiterLedger Ledger => LedgerStore;
+
+    /// <summary>Gets the in-flight ledger as its concrete type, for a test that seeds events through it.</summary>
+    public InFlightLedger LedgerStore => new(Directory, Log);
 
     /// <summary>Gets the decision log the evaluator records each decision in.</summary>
     public IArbiterDecisionLog Decisions => new DecisionLog(Directory, Log);
@@ -41,30 +44,40 @@ internal sealed class InMemoryArbiterState
     /// <summary>Gets every decision recorded so far, in append order.</summary>
     public IReadOnlyList<ArbiterDecisionRecord> Records => Decisions.ReadAll();
 
+    /// <summary>Gets the gate-report facts the evaluator reads over <see cref="Files"/>.</summary>
+    public IGateReportFacts GateReports => new GateReportFacts(
+        new InMemoryRepositoryFileStore(Files),
+        new FakePathResolver(Files),
+        new FakeProcessEnvironment(currentDirectory: "/repo"));
+
+    /// <summary>Gets the state factory the evaluator opens its stores through.</summary>
+    public IArbiterStateFactory State => new FileArbiterStateFactory(Log, Files, Files, new FakePathResolver(Files));
+
     /// <summary>Builds the real evaluator over these seams.</summary>
     /// <param name="provider">The provider a test scripts.</param>
     /// <param name="secondaryTriggers">Chooses the secondary triggers an event raises; the product's own when null.</param>
     /// <param name="planReader">Supplies plan facts; a pass-through when null.</param>
     /// <param name="gitFacts">Supplies git facts; a pass-through when null.</param>
+    /// <param name="clock">The clock latency and retention are measured on; a fixed clock when null.</param>
+    /// <param name="modelTargets">Reads the model-targets table; the file-backed reader over <see cref="Files"/> when null.</param>
     public ArbiterEvaluator Evaluator(
         IArbiterProvider provider,
         Func<string, ArbiterEvent, IReadOnlyList<string>>? secondaryTriggers = null,
         IArbiterPlanReader? planReader = null,
-        IArbiterGitFacts? gitFacts = null) =>
+        IArbiterGitFacts? gitFacts = null,
+        TimeProvider? clock = null,
+        IArbiterModelTargetsReader? modelTargets = null) =>
         new(
             provider,
             _ => null,
-            Ledger,
+            LedgerStore,
             Decisions,
             gitFacts ?? new ArbiterEvaluatorFixtures.PassThroughGitFacts(),
             planReader ?? new ArbiterEvaluatorFixtures.PlanFacts(),
-            new FileArbiterModelTargetsReader(Files),
-            new GateReportFacts(
-                new InMemoryRepositoryFileStore(Files),
-                new FakePathResolver(Files),
-                new FakeProcessEnvironment(currentDirectory: "/repo")),
-            new FileArbiterStateFactory(Log, Files, Files, new FakePathResolver(Files)),
-            new ArbiterEvaluatorFixtures.Clock(ArbiterEvaluatorFixtures.FixedNow),
+            modelTargets ?? new FileArbiterModelTargetsReader(Files),
+            GateReports,
+            State,
+            clock ?? new ArbiterEvaluatorFixtures.Clock(ArbiterEvaluatorFixtures.FixedNow),
             new FakeIdGenerator(),
             secondaryTriggers);
 

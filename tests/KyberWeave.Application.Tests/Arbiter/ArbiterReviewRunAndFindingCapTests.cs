@@ -11,8 +11,9 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Microsoft.Extensions.Time.Testing;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review-run and finding-cap contracts for task 3.19-F2 and task 3.21 (RED, src work pending).
@@ -28,7 +29,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// <c>lens.returned</c> record that contains the reason word. The tests pin the reason word and the stored outcome,
 /// not the digest path of a store. Store keys are read back through <see cref="ArbiterRunStore.ReadFindings"/>.
 /// </remarks>
-public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
+public sealed class ArbiterReviewRunAndFindingCapTests
 {
     private const string NitpickRule = "KW-ARB-NITPICK-001";
     private const string Nitpick = "nitpick";
@@ -40,30 +41,11 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     private const string FindingsOverCap = "findings-over-cap";
     private const string LensTrigger = "lens.returned";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-review-run-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
-    private sealed class PassThroughGitFacts : IArbiterGitFacts
-    {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
-    }
 
-    private sealed class PassThroughPlanReader : IArbiterPlanReader
-    {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) => facts;
-    }
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
@@ -83,20 +65,8 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
-    private static ArbiterEvaluator Evaluator(string arbiterDirectory, IArbiterProvider provider) =>
-        new(
-            provider,
-            _ => null,
-            RealArbiterState.Ledger(arbiterDirectory),
-            RealArbiterState.Decisions(arbiterDirectory),
-            new PassThroughGitFacts(),
-            new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-            new FixedClock(Now),
-            new FakeIdGenerator(),
-            (_, _) => []);
+    private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
+        _arbiter.Evaluator(provider, (_, _) => [], clock: new FixedClock(Now));
 
     /// <summary>A lens return whose prompt carries the given header line (empty for none) and whose output is the findings.</summary>
     private static ArbiterEvent LensReturn(string headerLine, string findings) =>
@@ -119,7 +89,7 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         $"id: nit-{number}\nseverity: Minor\nfile: src/Widget.cs\nline: {number}\nclaim: naming";
 
     private IReadOnlyList<ArbiterDecisionRecord> LensRecords() =>
-        RealArbiterState.Decisions(ArbiterDirectory).ReadAll().Where(record => record.Trigger == LensTrigger).ToList();
+        _arbiter.Records.Where(record => record.Trigger == LensTrigger).ToList();
 
     /// <summary>Every evidence line of every rule on a record, joined so a test can search the notes it carries.</summary>
     private static string NotesOf(ArbiterDecisionRecord record) =>
@@ -137,14 +107,14 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85);
 
-        await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturn(string.Empty, MinorFinding), Config());
+        await Evaluator(provider).EvaluateAsync(LensReturn(string.Empty, MinorFinding), Config());
 
         ArbiterDecisionRecord record = Assert.Single(LensRecords());
         Assert.Contains(ReviewRunMissing, NotesOf(record), StringComparison.Ordinal);
         Assert.Contains(record.Rules, rule => rule.Id == NitpickRule && rule.Answer == Nitpick);
         Assert.True(provider.CallCount > 0, "the finding must still be judged when the review run is missing");
         Assert.False(
-            Directory.Exists(Path.Combine(ArbiterDirectory, "stores")),
+            _arbiter.Files.DirectoryExists(Path.Combine(InMemoryArbiterState.Directory, "stores")),
             "with no review run there is no review to persist into, so no store is written");
     }
 
@@ -179,12 +149,12 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     public async Task TheSameReviewRunSharesOneStoreAndADifferentOneDoesNot()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Substantive, 0.9, threshold: 0.85);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         await evaluator.EvaluateAsync(LensReturnWithRun(ReviewRun, MinorFinding), Config());
         await evaluator.EvaluateAsync(LensReturnWithRun(ReviewRun, MinorFinding), Config());
 
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
+        ArbiterRunStore store = _arbiter.RunStore(clock: new FakeTimeProvider(Now));
         Assert.Equal(2, store.ReadFindings(ReviewRun).Count);
         Assert.Empty(store.ReadFindings(OtherRun));
     }
@@ -193,9 +163,9 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Substantive, 0.9, threshold: 0.85);
 
-        await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(reviewRun, MinorFinding), Config());
+        await Evaluator(provider).EvaluateAsync(LensReturnWithRun(reviewRun, MinorFinding), Config());
 
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
+        ArbiterRunStore store = _arbiter.RunStore(clock: new FakeTimeProvider(Now));
         IReadOnlyList<string> stored = store.ReadFindings(reviewRun);
         string item = Assert.Single(stored);
         Assert.Contains("nit-1", item, StringComparison.Ordinal);
@@ -216,10 +186,10 @@ public sealed class ArbiterReviewRunAndFindingCapTests : IDisposable
         string findings = string.Join("\n", Enumerable.Range(1, total).Select(Finding));
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Nitpick, 0.9, threshold: 0.85);
 
-        await Evaluator(ArbiterDirectory, provider).EvaluateAsync(LensReturnWithRun(ReviewRun, findings), Config());
+        await Evaluator(provider).EvaluateAsync(LensReturnWithRun(ReviewRun, findings), Config());
 
         Assert.Equal(StateBudget.MaxQuestions, provider.CallCount);
-        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFindings(ReviewRun);
+        IReadOnlyList<string> stored = _arbiter.RunStore(clock: new FakeTimeProvider(Now)).ReadFindings(ReviewRun);
         Assert.Equal(total, stored.Count);
         Assert.EndsWith("status: dropped", stored[0], StringComparison.Ordinal);
         for (int index = StateBudget.MaxQuestions; index < total; index++)

@@ -9,8 +9,9 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 1.5: secondary triggers evaluate behind the primary dispatch.
@@ -19,7 +20,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// <c>ArbiterDecisionRule.WouldEffect</c>, <c>ArbiterDecisionRecord.PrimaryLedgerId</c>
 /// and the new catalog triggers do not exist yet.
 /// </summary>
-public sealed class ArbiterSecondaryTriggerTests : IDisposable
+public sealed class ArbiterSecondaryTriggerTests
 {
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
     private const string PrimaryTrigger = "delegate";
@@ -27,18 +28,7 @@ public sealed class ArbiterSecondaryTriggerTests : IDisposable
     private const string PrimaryRuleId = "KW-ARB-ASK-001";
     private const string SecondaryRuleId = "KW-ARB-MODEL-001";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-secondary-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     /// <summary>Answers per rule id, records every call's rule ids, and can fail or report over-budget.</summary>
     private sealed class ScriptedProvider : IArbiterProvider
@@ -82,20 +72,8 @@ public sealed class ArbiterSecondaryTriggerTests : IDisposable
         }
     }
 
-    private sealed class PassThroughGitFacts : IArbiterGitFacts
-    {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
-    }
 
-    private sealed class PassThroughPlanReader : IArbiterPlanReader
-    {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) => facts;
-    }
 
-    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
-    {
-        public override DateTimeOffset GetUtcNow() => now;
-    }
 
     /// <summary>The test-only secondary-trigger derivation: <c>delegate</c> carries one secondary trigger.</summary>
     private static IReadOnlyList<string> SecondaryFor(string primaryTrigger, ArbiterEvent ev) =>
@@ -154,25 +132,10 @@ public sealed class ArbiterSecondaryTriggerTests : IDisposable
         with
         { Shadow = shadow };
 
-    private ArbiterEvaluator CreateEvaluator(IArbiterProvider provider)
-    {
-        DateTimeOffset fixedNow = new(2025, 10, 1, 12, 0, 0, TimeSpan.Zero);
-        return new ArbiterEvaluator(
-            provider,
-            _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
-            new PassThroughGitFacts(),
-            new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-            new FixedClock(fixedNow),
-            new FakeIdGenerator(),
-            secondaryTriggers: SecondaryFor);
-    }
+    private ArbiterEvaluator CreateEvaluator(IArbiterProvider provider) =>
+        _arbiter.Evaluator(provider, secondaryTriggers: SecondaryFor);
 
-    private IReadOnlyList<ArbiterDecisionRecord> Records() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Records() => _arbiter.Records;
 
     // Behaviour 1: a primary step-0 short-circuit stops before any provider call or secondary work.
     [Fact]

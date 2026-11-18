@@ -9,31 +9,21 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 1.5: <c>RuleAsk.ForEach</c> over a list fact expands to one question per item.
 /// RED: <c>ArbiterDecisionRule.Candidate</c> does not exist yet, so the record assertions cannot compile.
 /// </summary>
-public sealed class ArbiterForEachExpansionTests : IDisposable
+public sealed class ArbiterForEachExpansionTests
 {
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
     private const string RuleId = "KW-ARB-ASK-010";
     private static readonly string[] Files = ["src/a.cs", "src/b.cs", "src/c.cs"];
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-foreach-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     /// <summary>Supplies the list fact the rule expands over.</summary>
     private sealed class FileListPlanReader : IArbiterPlanReader
@@ -42,10 +32,6 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             facts.With("plan.task.files", Files, ArbiterFactLabel.Derived);
     }
 
-    private sealed class PassThroughGitFacts : IArbiterGitFacts
-    {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
-    }
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
@@ -93,7 +79,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
                 },
                 ForEach: "plan.task.files"));
 
-    private IReadOnlyList<ArbiterDecisionRecord> Records() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Records() => _arbiter.Records;
 
     /// <summary>The provider these tests use: it answers every asked rule and reports no confidence.</summary>
     private static FakeArbiterProvider Recording() => new() { AnswerAsked = "within-task" };
@@ -102,17 +88,10 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     public async Task ForEachOverListFact_ExpandsToOneQuestionPerItemInOneBatch()
     {
         FakeArbiterProvider provider = Recording();
-        ArbiterEvaluator evaluator = new(
+        ArbiterEvaluator evaluator = _arbiter.Evaluator(
             provider,
-            _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
-            new PassThroughGitFacts(),
-            new FileListPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
+            planReader: new FileListPlanReader(),
+            clock: new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
 
@@ -123,17 +102,10 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     [Fact]
     public async Task ForEachEntries_EachRecordsItsCandidateInListOrder()
     {
-        ArbiterEvaluator evaluator = new(
+        ArbiterEvaluator evaluator = _arbiter.Evaluator(
             Recording(),
-            _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
-            new PassThroughGitFacts(),
-            new FileListPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
+            planReader: new FileListPlanReader(),
+            clock: new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
 
@@ -151,17 +123,10 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     public async Task AnAnswerFromAProviderThatReportsNoConfidenceRecordsNone()
     {
         FakeArbiterProvider provider = Recording();
-        ArbiterEvaluator evaluator = new(
+        ArbiterEvaluator evaluator = _arbiter.Evaluator(
             provider,
-            _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
-            new PassThroughGitFacts(),
-            new FileListPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
+            planReader: new FileListPlanReader(),
+            clock: new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
 

@@ -11,8 +11,9 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Microsoft.Extensions.Time.Testing;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 3.9 (same-failure): a rework dispatch to the same worker that carries the prior failing
@@ -37,7 +38,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// dispatch unchanged. The first failure of a cluster is only recorded, never asked about.
 /// </para>
 /// </remarks>
-public sealed class ArbiterSameFailureRuleTests : IDisposable
+public sealed class ArbiterSameFailureRuleTests
 {
     private const string FailureRule = "KW-ARB-FAILURE-001";
     private const string FailureTrigger = "delegate.failure";
@@ -48,18 +49,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     private const string FirstFailure = "expected 3 got 2 at Widget.cs:12";
     private const string SecondFailure = "expected 3 got 2 at Widget.cs:12 (rerun)";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-failure-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
@@ -95,17 +85,17 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
 
     private static readonly FakeIdGenerator Ids = new();
 
-    private static ArbiterEvaluator Evaluator(string arbiterDirectory, IArbiterProvider provider) =>
+    private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
         new(
             provider,
             _ => null,
-            RealArbiterState.Ledger(arbiterDirectory),
-            RealArbiterState.Decisions(arbiterDirectory),
+            _arbiter.Ledger,
+            _arbiter.Decisions,
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+            new FileArbiterModelTargetsReader(_arbiter.Files),
+            _arbiter.GateReports,
+            _arbiter.State,
             new FixedClock(Now),
             Ids, SecondaryTriggers.For);
 
@@ -208,14 +198,14 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     public async Task TheFirstFailureIsRecordedAndNotAdvised()
     {
         FakeArbiterProvider provider = FakeArbiterProvider.Answering(Same, 0.95);
-        ArbiterEvaluator evaluator = Evaluator(ArbiterDirectory, provider);
+        ArbiterEvaluator evaluator = Evaluator(provider);
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(
             Rework(FirstFailure), ConfigWith([Enforced(FailureRule)]));
 
         Assert.Equal(0, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        string stored = Assert.Single(RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFailures(null, null, Session));
+        string stored = Assert.Single(_arbiter.RunStore(clock: new FakeTimeProvider(Now)).ReadFailures(null, null, Session));
         Assert.Contains(FirstFailure, stored, StringComparison.Ordinal);
     }
 
@@ -225,10 +215,10 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     [Fact]
     public async Task ASameClusterSecondFailureAtTheFloorIsAdvised()
     {
-        ArbiterEvaluator first = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Different, 0.95));
+        ArbiterEvaluator first = Evaluator( FakeArbiterProvider.Answering(Different, 0.95));
         await first.EvaluateAsync(Rework(FirstFailure), ConfigWith([Enforced(FailureRule)]));
 
-        ArbiterEvaluator second = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Same, 0.9));
+        ArbiterEvaluator second = Evaluator( FakeArbiterProvider.Answering(Same, 0.9));
         ArbiterEvaluationResult result = await second.EvaluateAsync(
             Rework(SecondFailure), ConfigWith([Enforced(FailureRule)]));
 
@@ -242,10 +232,10 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     [Fact]
     public async Task TheSameFailureAdvisoryNeverDeniesTheDispatch()
     {
-        ArbiterEvaluator first = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Different, 0.95));
+        ArbiterEvaluator first = Evaluator( FakeArbiterProvider.Answering(Different, 0.95));
         await first.EvaluateAsync(Rework(FirstFailure), ConfigWith([Enforced(FailureRule)]));
 
-        ArbiterEvaluator second = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Same, 0.95));
+        ArbiterEvaluator second = Evaluator( FakeArbiterProvider.Answering(Same, 0.95));
         ArbiterEvaluationResult result = await second.EvaluateAsync(
             Rework(SecondFailure), ConfigWith([Enforced(FailureRule)]));
 
@@ -258,10 +248,10 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     [Fact]
     public async Task ASameAnswerBelowTheFloorLeavesTheDispatchUnchanged()
     {
-        ArbiterEvaluator first = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Different, 0.95));
+        ArbiterEvaluator first = Evaluator( FakeArbiterProvider.Answering(Different, 0.95));
         await first.EvaluateAsync(Rework(FirstFailure), ConfigWith([Enforced(FailureRule)]));
 
-        ArbiterEvaluator second = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Same, 0.8));
+        ArbiterEvaluator second = Evaluator( FakeArbiterProvider.Answering(Same, 0.8));
         ArbiterEvaluationResult result = await second.EvaluateAsync(
             Rework(SecondFailure), ConfigWith([Enforced(FailureRule)]));
 
@@ -272,10 +262,10 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     [Fact]
     public async Task ADifferentFailureIsNotAdvised()
     {
-        ArbiterEvaluator first = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Different, 0.95));
+        ArbiterEvaluator first = Evaluator( FakeArbiterProvider.Answering(Different, 0.95));
         await first.EvaluateAsync(Rework(FirstFailure), ConfigWith([Enforced(FailureRule)]));
 
-        ArbiterEvaluator second = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Different, 0.95));
+        ArbiterEvaluator second = Evaluator( FakeArbiterProvider.Answering(Different, 0.95));
         ArbiterEvaluationResult result = await second.EvaluateAsync(
             Rework(SecondFailure), ConfigWith([Enforced(FailureRule)]));
 
@@ -286,10 +276,10 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     [Fact]
     public async Task AProviderFailureLeavesTheReworkDispatchUnchanged()
     {
-        ArbiterEvaluator first = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Different, 0.95));
+        ArbiterEvaluator first = Evaluator( FakeArbiterProvider.Answering(Different, 0.95));
         await first.EvaluateAsync(Rework(FirstFailure), ConfigWith([Enforced(FailureRule)]));
 
-        ArbiterEvaluator second = Evaluator(ArbiterDirectory, new FakeArbiterProvider { RequestSent = false, Model = null });
+        ArbiterEvaluator second = Evaluator( new FakeArbiterProvider { RequestSent = false, Model = null });
         ArbiterEvaluationResult result = await second.EvaluateAsync(
             Rework(SecondFailure), ConfigWith([Enforced(FailureRule)]));
 
@@ -301,16 +291,16 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
     [Fact]
     public async Task TheShadowSameFailureOnlyLogsWhatItWouldHaveAdvised()
     {
-        ArbiterEvaluator first = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Different, 0.95));
+        ArbiterEvaluator first = Evaluator( FakeArbiterProvider.Answering(Different, 0.95));
         await first.EvaluateAsync(Rework(FirstFailure), ConfigWith([Shipped(FailureRule)]));
 
-        ArbiterEvaluator second = Evaluator(ArbiterDirectory, FakeArbiterProvider.Answering(Same, 0.95));
+        ArbiterEvaluator second = Evaluator( FakeArbiterProvider.Answering(Same, 0.95));
         ArbiterEvaluationResult result = await second.EvaluateAsync(
             Rework(SecondFailure), ConfigWith([Shipped(FailureRule)]));
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
         ArbiterDecisionRecord record = Assert.Single(
-            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(),
+            _arbiter.Records,
             decision => decision.Trigger == FailureTrigger && decision.LedgerId == result.LedgerId);
         ArbiterDecisionRule rule = Assert.Single(record.Rules, r => r.Id == FailureRule);
         Assert.Equal(RuleEffects.SameFailure, rule.WouldEffect);

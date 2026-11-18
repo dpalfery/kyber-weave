@@ -11,15 +11,16 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Review-round contract for the evaluator's model write: a confirm callback that throws means the model
 /// was not written, so the decision records <c>model-write-failed</c> and the dispatch stays allowed. A
 /// cancellation still propagates. Observed through <see cref="ArbiterEvaluator"/> with the shipped secondaries.
 /// </summary>
-public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
+public sealed class ArbiterEvaluatorModelWriteFailureTests
 {
     private const string DifficultyRule = "KW-ARB-DIFFICULTY-001";
     private const string ScopeRule = "KW-ARB-SCOPE-002";
@@ -27,11 +28,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
     private const string Harness = "claude";
     private const string Model = "claude-sonnet-5-5";
 
-    private readonly TempDirectory _repo = new();
-
-    public void Dispose() => _repo.Dispose();
-
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     /// <summary>
     /// The plan facts the evaluator reads. Under the one remaining roster the difficulty rule takes the recorded
@@ -82,13 +79,13 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
             Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
         },
         _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
+        _arbiter.Ledger,
+        _arbiter.Decisions,
         new NoGitFacts(),
         new PlanFacts(),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+        new FileArbiterModelTargetsReader(_arbiter.Files),
+            _arbiter.GateReports,
+            _arbiter.State,
         TimeProvider.System, new FakeIdGenerator());
 
     private ArbiterEvent Dispatch() => new()
@@ -99,7 +96,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
-        Cwd = _repo.Path,
+        Cwd = InMemoryArbiterState.Directory,
         ModelOverrideField = "model",
         RenderedModelToken = Model,
         IsDispatch = true,
@@ -107,7 +104,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
 
     private void WriteTable()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
+        _arbiter.Files.CreateDirectory(InMemoryArbiterState.Directory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             Harness,
@@ -123,8 +120,8 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
             {
                 ["dev-medium"] = new("general", "sonnet"),
             });
-        File.WriteAllText(
-            Path.Combine(ArbiterDirectory, $"model-targets.{Harness}.json"),
+        _arbiter.Files.WriteAllText(
+            Path.Combine(InMemoryArbiterState.Directory, $"model-targets.{Harness}.json"),
             JsonSerializer.Serialize(table));
     }
 
@@ -143,7 +140,7 @@ public sealed class ArbiterEvaluatorModelWriteFailureTests : IDisposable
         Assert.False(result.IsError);
         Assert.NotEqual(RuleEffects.Escalate, result.Outcome);
         ArbiterDecisionRecord record = Assert.Single(
-            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), decision => decision.Trigger == "delegate.model");
+            _arbiter.Records, decision => decision.Trigger == "delegate.model");
         ArbiterModelBlock block = BlockOf(record);
         Assert.False(block.Delivered);
         Assert.Equal("model-write-failed", block.Reason);

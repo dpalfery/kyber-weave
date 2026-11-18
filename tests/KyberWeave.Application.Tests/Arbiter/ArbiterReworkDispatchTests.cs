@@ -10,8 +10,9 @@ using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Regression contract for a rework dispatch (a delegate whose first body line is <c>FAILURE-CLUSTER: &lt;key&gt;</c>).
@@ -22,7 +23,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// RED: until the classifier and secondary derivation are corrected, the primary is <c>delegate.failure</c> and the
 /// retarget decision and the primary rule record are absent.
 /// </summary>
-public sealed class ArbiterReworkDispatchTests : IDisposable
+public sealed class ArbiterReworkDispatchTests
 {
     private const string PlanReadRule = "KW-ARB-PLANREAD-001";
     private const string ModelRule = "KW-ARB-DIFFICULTY-001";
@@ -39,34 +40,19 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     private const string FirstFailure = "expected 3 got 2 at Widget.cs:12";
     private const string SecondFailure = "expected 3 got 2 at Widget.cs:12 (rerun)";
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-rework-" + Guid.NewGuid().ToString("N"));
-
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _arbiter = new();
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
-    private sealed class PassThroughGitFacts : IArbiterGitFacts
-    {
-        public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev) => facts;
-    }
 
     /// <summary>
     /// The plan facts the evaluator reads. The rating the task file records is what the difficulty rule answers
     /// from under the one remaining roster, so this reader states it and no model call is made.
     /// </summary>
-    private sealed class PassThroughPlanReader : IArbiterPlanReader
+    private sealed class HardPlanReader : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            facts.With("plan.task.difficulty", "hard", ArbiterFactLabel.Derived);
+            facts.With("plan.task.difficulty", Hard, ArbiterFactLabel.Derived);
     }
 
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
@@ -117,18 +103,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     }
 
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
-        new(
-            provider,
-            _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
-            new PassThroughGitFacts(),
-            new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-            new FixedClock(Now),
-            new FakeIdGenerator(), SecondaryTriggers.For);
+        _arbiter.Evaluator(provider, SecondaryTriggers.For, planReader: new HardPlanReader(), clock: new FixedClock(Now));
 
     /// <summary>A conductor's rework dispatch to an implementation worker, carrying the cluster key and the failing output.</summary>
     private static ArbiterEvent Rework(string failureText) => new()
@@ -155,7 +130,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
         await evaluator.EvaluateAsync(Rework(FirstFailure), ReworkConfig());
         await evaluator.EvaluateAsync(Rework(SecondFailure), ReworkConfig());
 
-        ArbiterDecisionRule failure = RealArbiterState.Decisions(ArbiterDirectory).ReadAll()
+        ArbiterDecisionRule failure = _arbiter.Records
             .SelectMany(record => record.Rules)
             .Single(rule => rule.Id == FailureRule && rule.Step == 1);
         Assert.Equal(0.95, failure.Confidence);
@@ -193,7 +168,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
         ArbiterEvaluationResult result = await Evaluator(Confident((ModelRule, Hard))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
 
         ArbiterDecisionRecord primary = Assert.Single(
-            RealArbiterState.Decisions(ArbiterDirectory).ReadAll(),
+            _arbiter.Records,
             record => record.Trigger == DelegateTrigger && record.LedgerId == result.LedgerId);
         ArbiterDecisionRule planRead = Assert.Single(primary.Rules, rule => rule.Id == PlanReadRule);
         Assert.Equal(NoPlan, planRead.Answer);
