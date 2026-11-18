@@ -21,14 +21,21 @@ public sealed class SkillScanner
     /// <returns>One diagnostic per finding, in prose, script and provenance order.</returns>
     public IEnumerable<Diagnostic> Scan(Skill skill, Func<SkillResource, string?> readScriptText)
     {
+        ArgumentNullException.ThrowIfNull(skill);
         ArgumentNullException.ThrowIfNull(readScriptText);
 
+        return ScanCore(skill, readScriptText);
+    }
+
+    private static IEnumerable<Diagnostic> ScanCore(Skill skill, Func<SkillResource, string?> readScriptText)
+    {
         string id = skill.Frontmatter.Name ?? skill.DirectoryName;
         string file = skill.SkillFilePath;
         InstructionSurfaceRuleCodes codes = InstructionSurfaceRuleCodes.ForSkills;
 
+        // A skill with no parsed body has no prose to scan; spec validation reports the missing body.
         foreach (Diagnostic d in InstructionSurfaceScanner.ScanProse(
-                     skill.InstructionsBody, id, file, codes, "skill"))
+                     skill.InstructionsBody ?? string.Empty, id, file, codes, "skill"))
             yield return d;
 
         foreach (SkillResource script in skill.Scripts)
