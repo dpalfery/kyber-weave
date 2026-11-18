@@ -156,7 +156,7 @@ public sealed record SquadRenderDiskInputs(
 /// Carried as render parameters rather than read from host configuration at render time so
 /// a render stays a pure function of its request, and so a request that omits the field
 /// renders byte for byte as it did before the field existed. Hook production keys off
-/// <see cref="ArbiterHookWiring"/>: hooks are produced only when <see cref="Enabled"/> is
+/// <c>ArbiterHookWiring</c>: hooks are produced only when <see cref="Enabled"/> is
 /// true and the scope is <see cref="SquadDeploymentScope.Project"/> (Req 22.4), and
 /// <see cref="HookTimeoutSeconds"/> becomes every produced hook's command timeout.
 /// </remarks>
