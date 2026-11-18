@@ -44,13 +44,13 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
         "| nit | `src/Gadget.cs` | 8-10 | Prefer a constant for the magic number. |\n" +
         "| warning | `src/Widget.cs:20` | 20 | The null check is missing before the dereference. |\n";
 
-    private readonly TempDirectory _sandbox = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _sandbox.Dispose();
+    public void Dispose() => _host.Dispose();
 
-    private string Root => Path.Combine(_sandbox.Path, "repo");
+    private string Root => _host.RepoRoot;
 
-    private string ArbiterDirectory => Path.Combine(_sandbox.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => _host.ArbiterDirectory;
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
@@ -61,9 +61,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
 
     private void WriteFile(string relative, int lines = 30)
     {
-        string full = Path.Combine(Root, relative);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, lines).Select(i => $"var v{i} = {i};")));
+        _ = _host.Write(Path.Combine(Root, relative), string.Join("\n", Enumerable.Range(1, lines).Select(i => $"var v{i} = {i};")));
     }
 
     private void WriteKiloFiles()
@@ -73,7 +71,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     }
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<string>? botLogins) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), _host.Get<IFileTextFacts>(), _host.Get<IArbiterStateFactory>(), botLogins: botLogins);
 
     private static CommentSummaryRequest Summary(string? author, string body = KiloSummary) => new(body, author);
 
@@ -280,6 +278,6 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
             .ClassifySummaryAsync(Summary(BotLogin));
 
         string decisionId = result.Items[0].DecisionId;
-        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Id == decisionId);
+        Assert.Single(_host.Decisions, record => record.Id == decisionId);
     }
 }

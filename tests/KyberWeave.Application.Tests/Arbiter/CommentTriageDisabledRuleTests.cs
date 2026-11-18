@@ -42,18 +42,13 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         "| warning | `src/Widget.cs` | L12 | Rename this. |\n" +
         "| nit | `src/Widget.cs` | 8-10 | Prefer a constant. |\n";
 
-    private readonly TempDirectory _sandbox = new();
-    private readonly TempDirectory _home = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose()
-    {
-        _sandbox.Dispose();
-        _home.Dispose();
-    }
+    public void Dispose() => _host.Dispose();
 
-    private string Root => Path.Combine(_sandbox.Path, "repo");
+    private string Root => _host.RepoRoot;
 
-    private string ArbiterDirectory => Path.Combine(_sandbox.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => _host.ArbiterDirectory;
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
@@ -64,9 +59,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     private void WriteCitedFile()
     {
-        string full = Path.Combine(Root, CitedPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+        _ = _host.Write(Path.Combine(Root, CitedPath), string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
     }
 
     /// <summary>The effective rules with the comment rule disabled by a host override, as the loader builds them.</summary>
@@ -79,7 +72,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         ArbiterConfigDefaults.Product.Rules.Where(rule => rule.Id != CommentRule).ToList();
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<ArbiterRule> rules, IReadOnlyList<string>? botLogins = null) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), _host.Get<IFileTextFacts>(), _host.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
 
     private static CommentTriageRequest Request() => new(CitedPath, 12, "Rename this.", null);
 
@@ -123,7 +116,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
         CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), RulesWithCommentDisabled()).ClassifyAsync(Request());
 
-        ArbiterDecisionRecord record = Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), entry => entry.Id == result.DecisionId);
+        ArbiterDecisionRecord record = Assert.Single(_host.Decisions, entry => entry.Id == result.DecisionId);
         Assert.Empty(record.Rules);
         Assert.Equal(ArbiterProviderStatuses.NotEvaluated, record.Provider.Status);
     }
@@ -159,9 +152,9 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         Assert.Equal(ArbiterProviderStatuses.Answered, result.Status);
     }
 
-    private static ArbiterTools Tools(IArbiterProvider provider, string root, TempDirectory home, IReadOnlyList<ArbiterRule> rules)
+    private ArbiterTools Tools(IArbiterProvider provider, string root, IReadOnlyList<ArbiterRule> rules)
     {
-        ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => provider, homeDirectory: () => home.Path);
+        ArbiterHookDecisionEngine engine = _host.Engine(providerFactory: _ => provider);
         KyberWeaveConfig config = new()
         {
             Arbiter = ArbiterConfigDefaults.Product with
@@ -171,7 +164,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
                 CommentTriage = new ArbiterCommentTriageConfig([BotLogin]),
             },
         };
-        return ArbiterTestServices.Tools(new ArbiterServeContext(root, engine, TextWriter.Null, _ => config, _ => true));
+        return _host.Tools(engine, root, _ => config);
     }
 
     /// <summary>The tool's inline JSON for a disabled rule carries status not-evaluated, and an answered call carries answered.</summary>
@@ -180,9 +173,9 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument disabled = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, _home, RulesWithCommentDisabled())
+        using JsonDocument disabled = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, RulesWithCommentDisabled())
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
-        using JsonDocument answered = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Real), Root, _home,
+        using JsonDocument answered = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Real), Root,
                 KyberWeaveConfigAssembler.FromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
 
@@ -198,7 +191,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, _home, RulesWithCommentDisabled())
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, RulesWithCommentDisabled())
             .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];
@@ -212,7 +205,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n");
-        ArbiterCommentCommand disabledCommand = ArbiterTestServices.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick));
+        ArbiterCommentCommand disabledCommand = _host.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick));
         CommandExecution disabled = Capture(() => disabledCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));
@@ -221,8 +214,8 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         Assert.Contains("class real", disabled.Output, StringComparison.Ordinal);
         Assert.Contains("status not-evaluated", disabled.Output, StringComparison.Ordinal);
 
-        File.Delete(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"));
-        ArbiterCommentCommand answeredCommand = ArbiterTestServices.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Real));
+        _host.Files.DeleteFile(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"));
+        ArbiterCommentCommand answeredCommand = _host.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Real));
         CommandExecution answered = Capture(() => answeredCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));
@@ -234,15 +227,13 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     private void WriteHostConfig(string yaml)
     {
-        string directory = Path.Combine(Root, ".kyber-weave");
-        Directory.CreateDirectory(directory);
-        File.WriteAllText(Path.Combine(directory, "kyber-weave.yml"), yaml);
+        _ = _host.WriteRepoConfig(yaml, Root);
     }
 
-    private static CommandExecution Capture(Func<int> execute)
+    private CommandExecution Capture(Func<int> execute)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
+        ArbiterCommandRun run = _host.Run(execute);
+        return new CommandExecution(run.ExitCode, run.Output);
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);

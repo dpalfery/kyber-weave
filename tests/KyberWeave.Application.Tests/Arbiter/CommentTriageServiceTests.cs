@@ -34,25 +34,23 @@ public sealed class CommentTriageServiceTests : IDisposable
     private const string AlreadyFixed = "already-fixed";
     private const string CitedPath = "src/Widget.cs";
 
-    private readonly TempDirectory _sandbox = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _sandbox.Dispose();
+    public void Dispose() => _host.Dispose();
 
-    private string Root => Path.Combine(_sandbox.Path, "repo");
+    private string Root => _host.RepoRoot;
 
-    private string ArbiterDirectory => Path.Combine(_sandbox.Path, "artifacts", "arbiter");
+    private string ArbiterDirectory => _host.ArbiterDirectory;
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
     private void WriteCitedFile()
     {
-        string full = Path.Combine(Root, CitedPath);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+        _ = _host.Write(Path.Combine(Root, CitedPath), string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
     }
 
     private CommentTriageService Service(IArbiterProvider provider) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), _host.Get<IFileTextFacts>(), _host.Get<IArbiterStateFactory>());
 
     private static CommentTriageRequest Request() =>
         new(CitedPath, 12, "Rename this variable to something clearer.", null);
@@ -78,7 +76,7 @@ public sealed class CommentTriageServiceTests : IDisposable
         Assert.True(result.Shadow);
         Assert.Equal(Nitpick, result.WouldClass);
         Assert.Equal(0.95, result.Confidence);
-        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll(), record => record.Id == result.DecisionId);
+        Assert.Single(_host.Decisions, record => record.Id == result.DecisionId);
     }
 
     /// <summary>
@@ -154,7 +152,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     [Fact]
     public async Task AMissingCitedFileFailsSafeToReal()
     {
-        Directory.CreateDirectory(Root);
+        _host.Files.CreateDirectory(Root);
 
         CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, AlreadyFixed))
             .ClassifyAsync(Request());

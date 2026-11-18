@@ -23,9 +23,11 @@ namespace KyberWeave.Tests.Arbiter;
 /// from [F10] of the task packet.
 /// RED: <c>AntigravityHookAdapter</c> does not exist yet.
 /// </summary>
-public sealed class AntigravityHookAdapterTests
+public sealed class AntigravityHookAdapterTests : IDisposable
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
+
+    public void Dispose() => _host.Dispose();
 
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
@@ -116,16 +118,16 @@ public sealed class AntigravityHookAdapterTests
         new() { Arbiter = new ArbiterConfig { Enabled = false } };
 
     private static string Fixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/antigravity/{name}");
+        EmbeddedFixtureText.Read(typeof(AntigravityHookAdapterTests).Assembly, $"arbiter-hooks/antigravity/{name}");
 
-    private static (int Exit, string Stdout, string Log) Run(
+    private (int Exit, string Stdout, string Log) Run(
         string stdin,
         string? caller,
         IHookDecisionEngine engine,
         Func<string, KyberWeaveConfig>? loader = null)
     {
-        HookCommand command = ArbiterTestServices.Command(
-            ArbiterTestServices.Registry(engine),
+        HookCommand command = _host.HookCommand(
+            _host.Registry(engine),
             loader ?? (_ => EnabledConfig()),
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -172,7 +174,7 @@ public sealed class AntigravityHookAdapterTests
     public void PreInvoke_EmptyPromptAndTypeName_AllowsAndLogs()
     {
         ContextualEngine engine = new();
-        JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", "/repo"))!.AsObject();
+        JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", _host.RepoRoot))!.AsObject();
         JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
         subagent["Prompt"] = string.Empty;
         subagent["TypeName"] = string.Empty;
@@ -190,7 +192,7 @@ public sealed class AntigravityHookAdapterTests
     public void PreInvoke_MissingTypeName_AllowsWithoutEvaluatingATargetlessDispatch()
     {
         ContextualEngine engine = new();
-        JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", "/repo"))!.AsObject();
+        JsonObject root = JsonNode.Parse(Payload("PreToolUse", "invoke_subagent", _host.RepoRoot))!.AsObject();
         JsonObject subagent = root["toolCall"]!["args"]!["Subagents"]![0]!.AsObject();
         subagent.Remove("TypeName");
 
@@ -310,12 +312,12 @@ public sealed class AntigravityHookAdapterTests
         return payload.ToJsonString();
     }
 
-    private static (int Exit, string Stdout, string Log) RunWithLoader(
+    private (int Exit, string Stdout, string Log) RunWithLoader(
         string stdin,
         Func<string, KyberWeaveConfig> loader)
     {
-        HookCommand command = ArbiterTestServices.Command(
-            ArbiterTestServices.Registry(new ScriptedEngine()),
+        HookCommand command = _host.HookCommand(
+            _host.Registry(new ScriptedEngine()),
             loader,
             () => "decision-test-1");
         using StringWriter stdout = new();
@@ -330,25 +332,22 @@ public sealed class AntigravityHookAdapterTests
     [Fact]
     public void Hook_WorkspaceSuppliesRepoRoot_LoadsTheWorkspaceConfig()
     {
-        using TempDirectory workspace = new();
-        Directory.CreateDirectory(System.IO.Path.Combine(workspace.Path, ".kyber-weave"));
-        File.WriteAllText(
-            System.IO.Path.Combine(workspace.Path, ".kyber-weave", "kyber-weave.yml"),
-            "arbiter:\n  enabled: false\n");
+        string workspace = ArbiterTestRoots.Under("workspace");
+        _ = _host.WriteRepoConfig("arbiter:\n  enabled: false\n", workspace);
 
         List<string> roots = [];
         (int exit, string stdout, string log) = RunWithLoader(
-            Payload("PreToolUse", "invoke_subagent", workspace.Path),
+            Payload("PreToolUse", "invoke_subagent", workspace),
             root =>
             {
                 roots.Add(root);
-                return string.Equals(root, workspace.Path, StringComparison.Ordinal)
+                return string.Equals(root, workspace, StringComparison.Ordinal)
                     ? DisabledConfig()
                     : throw new InvalidOperationException($"no host configuration at '{root}'");
             });
 
         Assert.Equal(0, exit);
-        Assert.Equal([workspace.Path], roots);
+        Assert.Equal([workspace], roots);
         // Even disabled, Antigravity receives its documented allow document ({}).
         Assert.Equal("{}", stdout);
         Assert.Contains("Arbiter is disabled", log, StringComparison.Ordinal);
@@ -357,26 +356,23 @@ public sealed class AntigravityHookAdapterTests
     [Fact]
     public void Hook_WorkspaceTakesPrecedenceOverThePayloadCwd()
     {
-        using TempDirectory workspace = new();
-        using TempDirectory cwdDirectory = new();
-        Directory.CreateDirectory(System.IO.Path.Combine(workspace.Path, ".kyber-weave"));
-        File.WriteAllText(
-            System.IO.Path.Combine(workspace.Path, ".kyber-weave", "kyber-weave.yml"),
-            "arbiter:\n  enabled: false\n");
+        string workspace = ArbiterTestRoots.Under("workspace");
+        string cwdDirectory = ArbiterTestRoots.Under("cwd");
+        _ = _host.WriteRepoConfig("arbiter:\n  enabled: false\n", workspace);
 
         List<string> roots = [];
         (int exit, _, string log) = RunWithLoader(
-            Payload("PreToolUse", "invoke_subagent", workspace.Path, cwd: cwdDirectory.Path),
+            Payload("PreToolUse", "invoke_subagent", workspace, cwd: cwdDirectory),
             root =>
             {
                 roots.Add(root);
-                return string.Equals(root, workspace.Path, StringComparison.Ordinal)
+                return string.Equals(root, workspace, StringComparison.Ordinal)
                     ? DisabledConfig()
                     : throw new InvalidOperationException($"no host configuration at '{root}'");
             });
 
         Assert.Equal(0, exit);
-        Assert.Equal([workspace.Path], roots);
+        Assert.Equal([workspace], roots);
         Assert.Contains("Arbiter is disabled", log, StringComparison.Ordinal);
     }
 
@@ -392,11 +388,11 @@ public sealed class AntigravityHookAdapterTests
     [InlineData("   ")]
     public void Hook_BlankWorkspace_FallsBackToThePayloadCwd(string workspace)
     {
-        using TempDirectory cwdDirectory = new();
+        string cwdDirectory = ArbiterTestRoots.Under("cwd");
 
         List<string> roots = [];
         (int exit, _, _) = RunWithLoader(
-            Payload("PreToolUse", "invoke_subagent", workspace, cwd: cwdDirectory.Path),
+            Payload("PreToolUse", "invoke_subagent", workspace, cwd: cwdDirectory),
             root =>
             {
                 roots.Add(root);
@@ -404,7 +400,7 @@ public sealed class AntigravityHookAdapterTests
             });
 
         Assert.Equal(0, exit);
-        Assert.Equal([cwdDirectory.Path], roots);
+        Assert.Equal([cwdDirectory], roots);
     }
 
     [Fact]
@@ -420,7 +416,7 @@ public sealed class AntigravityHookAdapterTests
             });
 
         Assert.Equal(0, exit);
-        Assert.Equal([Directory.GetCurrentDirectory()], roots);
+        Assert.Equal([_host.WorkingDirectory], roots);
     }
 
     [Fact]
@@ -429,7 +425,7 @@ public sealed class AntigravityHookAdapterTests
         int loads = 0;
 
         (int exit, string stdout, _) = RunWithLoader(
-            Payload("PreToolUse", "view_file", "/repo"),
+            Payload("PreToolUse", "view_file", _host.RepoRoot),
             root => { loads++; return EnabledConfig(); });
 
         Assert.Equal(0, exit);
@@ -441,7 +437,7 @@ public sealed class AntigravityHookAdapterTests
     public void Adapters_AreRegisteredForAntigravityToken()
     {
         ScriptedEngine engine = new();
-        HarnessAdapterRegistry registry = ArbiterTestServices.Registry(engine);
+        HarnessAdapterRegistry registry = _host.Registry(engine);
 
         Assert.True(registry.TryGet(AntigravityHookAdapter.Token, out IHarnessHookAdapter? adapter));
         Assert.IsType<AntigravityHookAdapter>(adapter);
