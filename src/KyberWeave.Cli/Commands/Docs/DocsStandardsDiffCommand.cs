@@ -20,7 +20,7 @@ public sealed class DocsStandardsDiffSettings : DocsSettings
 /// Prints how each installed standards folder differs from the current template, and writes
 /// nothing.
 /// </summary>
-public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs) : Command<DocsStandardsDiffSettings>
+public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs, IAnsiConsole console) : Command<DocsStandardsDiffSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -31,7 +31,7 @@ public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out _, out OntologyConfig ontology))
         {
-            CommandHelpers.Finish(report, settings, "docs standards diff", "Folder");
+            CommandHelpers.Finish(console, report, settings, "docs standards diff", "Folder");
             return 1;
         }
 
@@ -42,12 +42,12 @@ public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs
         }
         catch (ArgumentException ex)
         {
-            AnsiConsole.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
+            console.MarkupLine($"[red]{Markup.Escape(ex.Message)}[/]");
             return 1;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]The standards folders could not be read, so nothing was compared.[/] " +
                 Markup.Escape(exception.Message));
             return 1;
@@ -55,7 +55,7 @@ public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs
 
         if (result.Folders.Count == 0)
         {
-            AnsiConsole.MarkupLine("[green]Nothing to compare.[/] No declared standards folder is installed.");
+            console.MarkupLine("[green]Nothing to compare.[/] No declared standards folder is installed.");
             return 0;
         }
 
@@ -71,23 +71,23 @@ public sealed class DocsStandardsDiffCommand(IKyberWeaveConfigRepository configs
                 ? $"{folder.Name} in {folder.Root}"
                 : folder.Name;
 
-            AnsiConsole.MarkupLine(clean
+            console.MarkupLine(clean
                 ? $"[green]up to date[/] {Markup.Escape(label)}"
                 : $"[bold]{Markup.Escape(label)}[/]");
 
             foreach (string file in folder.Missing)
             {
-                AnsiConsole.MarkupLine($"  [yellow]missing[/]     {Markup.Escape(file)}");
+                console.MarkupLine($"  [yellow]missing[/]     {Markup.Escape(file)}");
             }
 
             foreach (string file in folder.Changed)
             {
-                AnsiConsole.MarkupLine($"  [yellow]changed[/]     {Markup.Escape(file)}");
+                console.MarkupLine($"  [yellow]changed[/]     {Markup.Escape(file)}");
             }
 
             foreach (string file in folder.HostOnly)
             {
-                AnsiConsole.MarkupLine($"  [grey]host only[/]   {Markup.Escape(file)}");
+                console.MarkupLine($"  [grey]host only[/]   {Markup.Escape(file)}");
             }
         }
 

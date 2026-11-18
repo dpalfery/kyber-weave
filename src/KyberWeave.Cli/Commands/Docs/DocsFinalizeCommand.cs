@@ -4,6 +4,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -15,7 +16,9 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsFinalizeCommand(
     IPlanFinalizeService finalize,
     IRepositoryFileStore files,
-    IKyberWeaveConfigRepository configs) : Command<DocsFinalizeSettings>
+    IKyberWeaveConfigRepository configs,
+    TimeProvider time,
+    IAnsiConsole console) : Command<DocsFinalizeSettings>
 {
     /// <summary>A <c>--date</c> or <c>--approval-mode</c> value is not usable.</summary>
     public const string InvalidOption = "KW-DOC-FINALIZE-007";
@@ -32,7 +35,7 @@ public sealed class DocsFinalizeCommand(
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        DateOnly date = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly date = DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime);
         if (settings.Date is not null
             && !DateOnly.TryParseExact(settings.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
         {
@@ -50,14 +53,14 @@ public sealed class DocsFinalizeCommand(
         settings.Path = root;
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
-            CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+            CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
             return 1;
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
         if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs finalize", report, out string relative))
         {
-            CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+            CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
             return 1;
         }
 
@@ -67,14 +70,14 @@ public sealed class DocsFinalizeCommand(
         report.AddMetric("finalized", outcome.Finalized);
         report.AddMetric("task-file", outcome.TaskFilePath);
 
-        CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+        CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
         return report.HasErrors ? 1 : 0;
     }
 
-    private static int Fail(DiagnosticReport report, DocsFinalizeSettings settings, string message, string hint)
+    private int Fail(DiagnosticReport report, DocsFinalizeSettings settings, string message, string hint)
     {
         report.Add(new Diagnostic(InvalidOption, Severity.Error, message, "docs finalize", Hint: hint));
-        CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
+        CommandHelpers.Finish(console, report, settings, "docs finalize", "Plan");
         return 1;
     }
 }

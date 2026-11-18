@@ -1,4 +1,6 @@
 using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
@@ -10,6 +12,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
+using Spectre.Console;
 using Spectre.Console.Cli;
 using KyberWeave.Core.FileSystem;
 
@@ -30,7 +33,10 @@ public sealed class DocsPacketCommand(
     IRepositoryFileStore repositoryFiles,
     IGitRepositoryFacts git,
     IKyberWeaveConfigRepository configs,
-    IDocumentSourceFactory documents) : Command<DocsPacketSettings>
+    IDocumentSourceFactory documents,
+    IPathResolver paths,
+    IAnsiConsole console,
+    IConsole standardError) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -55,7 +61,7 @@ public sealed class DocsPacketCommand(
     public override int Execute(CommandContext context, DocsPacketSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        string current = Path.GetFullPath(settings.WorkingDirectory ?? environment.CurrentDirectory);
+        string current = CurrentDirectory(settings);
         string root = settings.Plan is null ? ArbiterRepoRoot.Find(current) : PlanArguments.RepositoryRootFor(settings.Plan, current);
         if (!CommandHelpers.TryLoadConfig(configs, root, settings.Config, report, out KyberWeaveConfig config))
         {
@@ -119,7 +125,7 @@ public sealed class DocsPacketCommand(
 
             try
             {
-                _ = files.ReadAllText(Path.GetFullPath(settings.PriorResults, root));
+                _ = files.ReadAllText(paths.GetFullPath(settings.PriorResults, root));
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
@@ -154,11 +160,11 @@ public sealed class DocsPacketCommand(
             return Fail(report);
         }
 
-        Console.Out.WriteLine(prompt.Prompt);
+        CommandHelpers.WriteUnfolded(console, () => console.Profile.Out.Writer.WriteLine(prompt.Prompt));
         if (prompt.Substitution is not null)
         {
             // A warning to the conductor, not part of the prompt: the hook inserts stdout unchanged.
-            Console.Error.WriteLine(prompt.Substitution);
+            standardError.Error.WriteLine(prompt.Substitution);
         }
 
         // The test command is a packet extra, not part of the prompt the hook inserts, so it is printed here.
@@ -168,16 +174,24 @@ public sealed class DocsPacketCommand(
                 prompt.Agent,
                 entry,
                 targets.ContractRow(root, plan, entry.Id),
-                OperatingSystem.IsWindows(),
+                environment.OperatingSystem == OperatingSystemKind.Windows,
                 targets,
                 taskGates) is { } tests)
         {
-            Console.Out.WriteLine();
-            Console.Out.WriteLine(tests);
+            CommandHelpers.WriteUnfolded(console, () =>
+            {
+                console.Profile.Out.Writer.WriteLine();
+                console.Profile.Out.Writer.WriteLine(tests);
+            });
         }
 
         return 0;
     }
+
+    private string CurrentDirectory(DocsPacketSettings settings) =>
+        settings.WorkingDirectory is null
+            ? environment.CurrentDirectory
+            : paths.GetFullPath(settings.WorkingDirectory, environment.CurrentDirectory);
 
     private string? ChoosePlan(string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
     {
@@ -211,11 +225,11 @@ public sealed class DocsPacketCommand(
 
     private string? FindInOtherWorktrees(ref string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
     {
-        string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        string here = paths.GetFullPath(root, current);
         List<(string Worktree, string Plan)> matches = [];
         foreach (string worktree in (settings.ListWorktrees ?? (dir => git.ListWorktrees(dir)))(root))
         {
-            string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
+            string other = paths.GetFullPath(worktree, current);
             if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))
             {
                 continue;
@@ -259,9 +273,9 @@ public sealed class DocsPacketCommand(
         return null;
     }
 
-    private static int Fail(DiagnosticReport report)
+    private int Fail(DiagnosticReport report)
     {
-        ReportRenderer.Render(report, OutputFormat.Lines, "docs packet", "Task packet");
+        ReportRenderer.Render(console, report, OutputFormat.Lines, "docs packet", "Task packet");
         return 1;
     }
 }
