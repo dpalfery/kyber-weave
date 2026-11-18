@@ -662,13 +662,13 @@
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry. Runs `node --test <generated harness>.mjs`, which imports one status-line extension with no child process; see the ProcessStartInfo entry for the full description."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/VersionRetrievalTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/VersionFlagProcessTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"dotnet\")",
       "count": 1,
       "bound": "Started by the Run at line 180: ProcessRunner timeout 30 s kills the child tree on expiry; the product assembly run as `dotnet <dll> --version`, which prints and exits."
     },
     {
-      "file": "tests/KyberWeave.Integration.Tests/VersionRetrievalTests.cs",
+      "file": "tests/KyberWeave.Integration.Tests/VersionFlagProcessTests.cs",
       "text": "return ProcessRunner.Run(startInfo, string.Empty, TimeSpan.FromSeconds(30));",
       "count": 1,
       "bound": "ProcessRunner timeout 30 s kills the child tree on expiry; the product assembly run as `dotnet <dll> --version`, which prints and exits."
