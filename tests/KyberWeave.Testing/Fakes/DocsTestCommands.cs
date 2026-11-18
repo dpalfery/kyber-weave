@@ -57,7 +57,9 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
             provider.GetRequiredService<IFileSystem>(),
-            provider.GetRequiredService<IProcessEnvironment>());
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IPlanTaskTargetService>(),
+            provider.GetRequiredService<ITaskGateSelectionService>());
     }
 
     public static DocsTasksCommand Tasks(IServiceProvider? services = null)
