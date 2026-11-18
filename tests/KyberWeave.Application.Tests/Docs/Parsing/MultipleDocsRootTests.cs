@@ -1,31 +1,22 @@
-using KyberWeave.Tests.Configuration;
-
-using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Tests;
 using Xunit;
-using KyberWeave.Tests.Fakes;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Parsing;
 
 /// <summary>
 /// A repository that documents components next to their code brings those files under
 /// governance by naming each module as a documentation root. Before this, the only way in
 /// was to relocate the file under the single <c>docs-root</c>.
 /// </summary>
-public class MultipleDocsRootTests : IDisposable
+public sealed class MultipleDocsRootTests
 {
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-        GC.SuppressFinalize(this);
-    }
+    private readonly DocFixture _fixture = DocFixture.CreateInMemory();
 
     // --- configuration --------------------------------------------------------------
 
@@ -215,7 +206,7 @@ public class MultipleDocsRootTests : IDisposable
         Write("automation/README.md", Document("automation/readme"));
         Write("lab/README.md", Document("lab/readme"));
 
-        List<string> paths = RealDocumentLoader.Create(_temp.Path, MultiRootConfig).Load()
+        List<string> paths = _fixture.Loader(MultiRootConfig).Load()
             .Documents.Select(d => d.RelativePath).ToList();
 
         Assert.Equal(["docs/catalog.md", "automation/README.md", "lab/README.md"], paths);
@@ -232,11 +223,10 @@ public class MultipleDocsRootTests : IDisposable
         Write("docs/nested/guide.md", Document("nested/guide"));
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoots(["docs", "docs/nested"]);
-        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = _fixture.Loader(config).Load().Documents;
 
         Assert.Single(documents, d => d.RelativePath == "docs/nested/guide.md");
-        Assert.False(RealDocSpecValidator.Create(_temp.Path, config).Validate(
-            RealDocumentLoader.Create(_temp.Path, config).Load()).HasErrors);
+        Assert.False(_fixture.Validate(config).HasErrors);
     }
 
     /// <summary>Exclusion entries are recorded relative to a root, not to the repository.</summary>
@@ -248,7 +238,7 @@ public class MultipleDocsRootTests : IDisposable
         Write("automation/vendored/upstream.md", "# no frontmatter either\n");
 
         OntologyConfig config = MultiRootConfig.Clone(excludedFiles: ["vendored/upstream.md"]);
-        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = _fixture.Loader(config).Load().Documents;
 
         Assert.DoesNotContain(documents, d => d.RelativePath.EndsWith("upstream.md", StringComparison.Ordinal));
     }
@@ -262,7 +252,7 @@ public class MultipleDocsRootTests : IDisposable
         OntologyConfig config = OntologyConfig.ProductDefaults
             .WithDocsRoots(["docs", "docs/nested"])
             .Clone(excludedFiles: ["skip.md"]);
-        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = _fixture.Loader(config).Load().Documents;
 
         Assert.DoesNotContain(documents, d => d.RelativePath == "docs/nested/skip.md");
     }
@@ -322,7 +312,7 @@ public class MultipleDocsRootTests : IDisposable
         WriteCatalog(".kyber-weave/catalog.md", owner: "not-in-the-catalog");
 
         OntologyConfig config = MultiRootConfig.Clone(catalogPath: ".kyber-weave/catalog.md");
-        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = _fixture.Loader(config).Load().Documents;
 
         Assert.Contains(documents, d => d.RelativePath == ".kyber-weave/catalog.md");
         Assert.Contains(Validate(config).Items, i =>
@@ -335,44 +325,9 @@ public class MultipleDocsRootTests : IDisposable
         WriteCatalog("docs/catalog.md");
 
         OntologyConfig config = MultiRootConfig.Clone(catalogPath: "docs/catalog.md");
-        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = _fixture.Loader(config).Load().Documents;
 
         Assert.Single(documents, d => d.RelativePath == "docs/catalog.md");
-    }
-
-    // --- the --docs-root option -----------------------------------------------------
-
-    [Fact]
-    public void AnUnsuppliedDocsRootOptionLeavesTheConfiguredRootsAlone()
-    {
-        WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
-
-        Assert.True(TryResolveOntology([], out OntologyConfig ontology, out _));
-        Assert.Equal(["docs", "automation"], ontology.DocsRoots);
-    }
-
-    /// <summary>
-    /// The option carries no default of its own, so a value that happens to equal the
-    /// product default is still an override rather than being silently discarded.
-    /// </summary>
-    [Fact]
-    public void ARepeatedDocsRootOptionReplacesTheConfiguredRoots()
-    {
-        WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
-
-        Assert.True(TryResolveOntology(["lab", OntologyConfig.DefaultDocsRoot], out OntologyConfig ontology, out _));
-        Assert.Equal(["lab", OntologyConfig.DefaultDocsRoot], ontology.DocsRoots);
-    }
-
-    [Fact]
-    public void ADocsRootOptionThatEscapesTheRepositoryReportsKWCONFIG001()
-    {
-        WriteHostConfig("ontology:\n  docs-root: docs\n");
-
-        Assert.False(TryResolveOntology(["../elsewhere"], out _, out DiagnosticReport report));
-        Assert.Contains(report.Items, i =>
-            i.Code == KyberWeaveConfigDiagnosticCodes.LoadError &&
-            i.Message.Contains("escapes the repository root", StringComparison.Ordinal));
     }
 
     // --- docs init ------------------------------------------------------------------
@@ -393,23 +348,23 @@ public class MultipleDocsRootTests : IDisposable
                 - automation
               excluded-files: []
             """);
-        string before = File.ReadAllText(configPath);
+        string before = _fixture.Memory!.ReadAllText(configPath);
 
-        ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
+        ScaffoldResult result = _fixture.Scaffolder().Scaffold(_fixture.Root);
 
         Assert.Equal("docs", result.DocsRoot);
-        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), _fixture.Memory!.ReadAllText(configPath));
     }
 
     [Fact]
     public void ScaffoldingIntoAListedRootLeavesTheConfigOtherwiseAlone()
     {
         string configPath = WriteHostConfig("ontology:\n  docs-root: [docs, automation]\n");
-        string before = File.ReadAllText(configPath);
+        string before = _fixture.Memory!.ReadAllText(configPath);
 
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "automation");
+        _fixture.Scaffolder().Scaffold(_fixture.Root, "automation");
 
-        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), _fixture.Memory!.ReadAllText(configPath));
     }
 
     /// <summary>
@@ -424,14 +379,14 @@ public class MultipleDocsRootTests : IDisposable
                 - docs
                 - automation
             """);
-        string before = File.ReadAllText(configPath);
+        string before = _fixture.Memory!.ReadAllText(configPath);
 
         InvalidDataException ex = Assert.Throws<InvalidDataException>(
-            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "handbook"));
+            () => _fixture.Scaffolder().Scaffold(_fixture.Root, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
         Assert.Contains("docs, automation", ex.Message, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllText(configPath));
+        Assert.Equal(before, _fixture.Memory!.ReadAllText(configPath));
     }
 
     /// <summary>A key with no value at all is still a scalar the scaffolder may fill in.</summary>
@@ -440,10 +395,10 @@ public class MultipleDocsRootTests : IDisposable
     {
         string configPath = WriteHostConfig("ontology:\n  docs-root:\n  excluded-files: []\n");
 
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "handbook");
+        _fixture.Scaffolder().Scaffold(_fixture.Root, "handbook");
 
-        Assert.Equal("handbook", ConfigFileReader.Load(_temp.Path).Ontology.DocsRoot);
-        Assert.Contains("excluded-files: []", File.ReadAllText(configPath), StringComparison.Ordinal);
+        Assert.Equal("handbook", _fixture.Config().Load(_fixture.Root).Ontology.DocsRoot);
+        Assert.Contains("excluded-files: []", _fixture.Memory!.ReadAllText(configPath), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -461,11 +416,11 @@ public class MultipleDocsRootTests : IDisposable
                 automation
               ]
             """);
-        string before = File.ReadAllText(configPath);
+        string before = _fixture.Memory!.ReadAllText(configPath);
 
-        DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "docs");
+        _fixture.Scaffolder().Scaffold(_fixture.Root, "docs");
 
-        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), File.ReadAllText(configPath));
+        Assert.Equal(before.TrimEnd('\r', '\n') + McpWiringFixture.AppendedDeclaration(), _fixture.Memory!.ReadAllText(configPath));
     }
 
     [Fact]
@@ -478,13 +433,13 @@ public class MultipleDocsRootTests : IDisposable
                 automation
               ]
             """);
-        string before = File.ReadAllText(configPath);
+        string before = _fixture.Memory!.ReadAllText(configPath);
 
         InvalidDataException ex = Assert.Throws<InvalidDataException>(
-            () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "handbook"));
+            () => _fixture.Scaffolder().Scaffold(_fixture.Root, "handbook"));
 
         Assert.Contains("handbook", ex.Message, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllText(configPath));
+        Assert.Equal(before, _fixture.Memory!.ReadAllText(configPath));
     }
 
     // --- helpers --------------------------------------------------------------------
@@ -493,41 +448,28 @@ public class MultipleDocsRootTests : IDisposable
         OntologyConfig.ProductDefaults.WithDocsRoots(["docs", "automation", "lab"]);
 
     private OntologyConfig Load(string yaml) =>
-        ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, WriteYaml(yaml));
+        _fixture.LoadOntologyMerged(OntologyConfig.ProductDefaults, WriteYaml(yaml));
 
     private OntologyConfigLoadResult TryLoad(string yaml) =>
-        ConfigFileReader.TryLoadOntology(WriteYaml(yaml));
+        _fixture.Config().TryLoadOntology(WriteYaml(yaml));
 
     private string WriteYaml(string yaml)
     {
-        string path = Path.Combine(_temp.Path, "ontology-" + Guid.NewGuid().ToString("N") + ".yml");
-        File.WriteAllText(path, yaml);
-        return path;
-    }
-
-    private bool TryResolveOntology(
-        string[] docsRoots,
-        out OntologyConfig ontology,
-        out DiagnosticReport report)
-    {
-        report = new DiagnosticReport();
-        DocsSettings settings = new DocsSettings { Path = _temp.Path, DocsRoots = docsRoots };
-        return DocsCommandComposition.TryResolveOntology(ConfigFileReader.Repository, settings, report, out ontology);
+        const string name = "ontology.yml";
+        _fixture.Write(name, yaml);
+        return Path.Combine(_fixture.Root, name);
     }
 
     private string WriteHostConfig(string yaml)
     {
-        string path = Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, yaml);
-        return path;
+        const string relative = ".kyber-weave/kyber-weave.yml";
+        _fixture.Write(relative, yaml);
+        return Path.Combine(_fixture.Root, ".kyber-weave", "kyber-weave.yml");
     }
 
     private void Write(string relativePath, string content)
     {
-        string full = Path.Combine(_temp.Path, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, content);
+        _fixture.Write(relativePath, content);
     }
 
     private void WriteCatalog(
@@ -579,7 +521,5 @@ public class MultipleDocsRootTests : IDisposable
         # A Component
         """;
 
-    private DiagnosticReport Validate(OntologyConfig config) =>
-        RealDocSpecValidator.Create(_temp.Path, config).Validate(
-            RealDocumentLoader.Create(_temp.Path, config).Load());
+    private DiagnosticReport Validate(OntologyConfig config) => _fixture.Validate(config);
 }

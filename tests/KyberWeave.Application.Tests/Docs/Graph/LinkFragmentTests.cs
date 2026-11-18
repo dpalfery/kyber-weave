@@ -1,3 +1,4 @@
+using KyberWeave.Tests;
 using System.Text;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
@@ -7,7 +8,7 @@ using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Graph;
 
 /// <summary>
 /// T7 RED — body links must keep path, fragment, link text, and source line, including
@@ -55,7 +56,7 @@ public sealed class LinkFragmentTests
     [Fact]
     public void AFragmentedLinkResolvesTheTargetDocumentWithoutPassingFragmentToResolveLink()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/linker.md", """
                                        ---
                                        id: docs/source
@@ -106,7 +107,7 @@ public sealed class LinkFragmentTests
     [Fact]
     public void AnEmptyFragmentDoesNotLinkASectionToItsOwnPreamble()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/linker.md", """
                                        ---
                                        id: docs/source
