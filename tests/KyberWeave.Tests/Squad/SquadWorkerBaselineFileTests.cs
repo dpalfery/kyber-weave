@@ -11,7 +11,10 @@ public sealed class SquadWorkerBaselineFileTests
 {
     private static readonly string Source = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "baseline-src");
 
-    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+    private readonly ManualClock _clock = new();
+    private readonly InMemoryFileSystem _files;
+
+    public SquadWorkerBaselineFileTests() => _files = new InMemoryFileSystem(_clock, caseSensitive: true);
 
     private SquadWorkerBaselineFile NewReader() =>
         new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Source));
@@ -101,5 +104,27 @@ public sealed class SquadWorkerBaselineFileTests
 
         Assert.Throws<SquadRenderValidationException>(() => reader.ReadBlock(Source));
         Assert.Throws<SquadRenderValidationException>(() => reader.ReadBlock(Source));
+    }
+
+    [Fact]
+    public void ASameLengthRewriteWithANewerTimestampIsReadAgain()
+    {
+        WriteBaseline("<worker-baseline>\nfirst text\n</worker-baseline>");
+        SquadWorkerBaselineFile reader = NewReader();
+        Assert.Contains("first text", reader.ReadBlock(Source), StringComparison.Ordinal);
+
+        _clock.Advance(TimeSpan.FromSeconds(5));
+        WriteBaseline("<worker-baseline>\nother text\n</worker-baseline>");
+
+        Assert.Contains("other text", reader.ReadBlock(Source), StringComparison.Ordinal);
+    }
+
+    private sealed class ManualClock : TimeProvider
+    {
+        private DateTimeOffset _now = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _now;
+
+        public void Advance(TimeSpan by) => _now += by;
     }
 }
