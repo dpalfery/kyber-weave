@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -20,7 +21,7 @@ public sealed class ConventionTestClassResolverTests
     }
 
     private TestClassResolution Resolve(string relativePath) =>
-        new ConventionTestClassResolver(_files).Resolve(Root, relativePath);
+        new ConventionTestClassResolver(_files, new FakePathResolver(_files)).Resolve(Root, relativePath);
 
     [Fact]
     public void ACoveringClassIsNamedWithItsNamespaceAndNearestProject()

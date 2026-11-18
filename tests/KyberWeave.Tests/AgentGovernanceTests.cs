@@ -12,10 +12,19 @@ namespace KyberWeave.Tests;
 
 public class AgentGovernanceTests
 {
+    private const string WorkingDirectory = "/kw/work";
+
+    private static (TomlAgentParser Toml, MarkdownAgentParser Markdown) ParsersOver(string workingDirectory = WorkingDirectory)
+    {
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+        FakeProcessEnvironment environment = new(currentDirectory: workingDirectory);
+        return (new TomlAgentParser(paths, environment), new MarkdownAgentParser(paths, environment));
+    }
+
     [Fact]
     public void TomlAgentParserParsesCodexManifest()
     {
-        string tempFile = Path.GetTempFileName() + ".toml";
+        const string file = "/kw/agents/architect.toml";
         string content = """
             name = "architect"
             description = "Produces an implementation plan before coding."
@@ -26,29 +35,40 @@ public class AgentGovernanceTests
             Planning behavior: Inspect codebase first.
             '''
             """;
-        File.WriteAllText(tempFile, content);
+        TomlAgentParser parser = ParsersOver().Toml;
 
-        try
-        {
-            TomlAgentParser parser = new TomlAgentParser();
-            Assert.True(parser.CanParse(tempFile));
+        Assert.True(parser.CanParse(file));
+        Assert.False(parser.CanParse("/kw/agents/architect.md"));
 
-            AgentModel agent = parser.Parse(content, tempFile, HarnessKind.Codex);
-            Assert.Equal("architect", agent.RoleName);
-            Assert.Equal("Produces an implementation plan before coding.", agent.Description);
-            Assert.Equal("gpt-5.6-sol", agent.ModelPreference);
-            Assert.Contains("Planning behavior", agent.InstructionsBody, StringComparison.Ordinal);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        AgentModel agent = parser.Parse(content, file, HarnessKind.Codex);
+        Assert.Equal("architect", agent.RoleName);
+        Assert.Equal("Produces an implementation plan before coding.", agent.Description);
+        Assert.Equal("gpt-5.6-sol", agent.ModelPreference);
+        Assert.Contains("Planning behavior", agent.InstructionsBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ParsersResolveARelativeFilePathAgainstTheInjectedWorkingDirectory()
+    {
+        const string toml = "name = \"architect\"\ndescription = \"d\"\n";
+        (TomlAgentParser tomlHere, MarkdownAgentParser markdownHere) = ParsersOver("/kw/here");
+        (TomlAgentParser tomlThere, MarkdownAgentParser markdownThere) = ParsersOver("/kw/there");
+
+        AgentModel fromHere = tomlHere.Parse(toml, "agents/architect.toml", HarnessKind.Codex);
+        AgentModel fromThere = tomlThere.Parse(toml, "agents/architect.toml", HarnessKind.Codex);
+        AgentModel markdownFromHere = markdownHere.Parse("---\nname: dev\n---\nBody", "agents/dev.md", HarnessKind.Claude);
+        AgentModel markdownFromThere = markdownThere.Parse("---\nname: dev\n---\nBody", "agents/dev.md", HarnessKind.Claude);
+
+        Assert.Equal("/kw/here/agents/architect.toml", fromHere.FilePath.Replace('\\', '/'));
+        Assert.Equal("/kw/here/agents", fromHere.DirectoryPath.Replace('\\', '/'));
+        Assert.Equal("/kw/there/agents/architect.toml", fromThere.FilePath.Replace('\\', '/'));
+        Assert.Equal("/kw/here/agents/dev.md", markdownFromHere.FilePath.Replace('\\', '/'));
+        Assert.Equal("/kw/there/agents/dev.md", markdownFromThere.FilePath.Replace('\\', '/'));
     }
 
     [Fact]
     public void MarkdownAgentParserRecoversProvenanceWhenYamlHasUnquotedColon()
     {
-        string tempFile = Path.GetTempFileName() + ".md";
         string content = """
             ---
             name: github-devops
@@ -60,28 +80,21 @@ public class AgentGovernanceTests
             ---
             You own CI/CD.
             """;
-        File.WriteAllText(tempFile, content);
 
-        try
-        {
-            AgentModel agent = new MarkdownAgentParser().Parse(content, tempFile, HarnessKind.Claude);
-            Assert.Equal("github-devops", agent.RoleName);
-            Assert.Equal("David R Palfery", agent.FrontmatterOrMetadata["author"]);
-            Assert.Equal("1.0.0", agent.FrontmatterOrMetadata["version"]);
-            Assert.Equal("MIT", agent.FrontmatterOrMetadata["license"]);
-            Assert.Contains("CI/CD ownership", agent.Description, StringComparison.Ordinal);
-            Assert.Empty(AgentPromptScanner.Scan(agent).Items);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        AgentModel agent = ParsersOver().Markdown.Parse(content, "/kw/agents/github-devops.md", HarnessKind.Claude);
+
+        Assert.Equal("github-devops", agent.RoleName);
+        Assert.Equal("David R Palfery", agent.FrontmatterOrMetadata["author"]);
+        Assert.Equal("1.0.0", agent.FrontmatterOrMetadata["version"]);
+        Assert.Equal("MIT", agent.FrontmatterOrMetadata["license"]);
+        Assert.Contains("CI/CD ownership", agent.Description, StringComparison.Ordinal);
+        Assert.Empty(AgentPromptScanner.Scan(agent).Items);
     }
 
     [Fact]
     public void MarkdownAgentParserParsesCursorManifest()
     {
-        string tempFile = Path.GetTempFileName() + ".agent.md";
+        const string file = "/kw/agents/csharp-dev.agent.md";
         string content = """
             ---
             name: csharp-dev
@@ -90,22 +103,15 @@ public class AgentGovernanceTests
             ---
             You are a senior .NET engineer.
             """;
-        File.WriteAllText(tempFile, content);
+        MarkdownAgentParser parser = ParsersOver().Markdown;
 
-        try
-        {
-            MarkdownAgentParser parser = new MarkdownAgentParser();
-            Assert.True(parser.CanParse(tempFile));
+        Assert.True(parser.CanParse(file));
+        Assert.False(parser.CanParse("/kw/agents/csharp-dev.toml"));
 
-            AgentModel agent = parser.Parse(content, tempFile, HarnessKind.Cursor);
-            Assert.Equal("csharp-dev", agent.RoleName);
-            Assert.Equal("Use when writing C# and .NET code.", agent.Description);
-            Assert.Contains("senior .NET engineer", agent.InstructionsBody, StringComparison.Ordinal);
-        }
-        finally
-        {
-            if (File.Exists(tempFile)) File.Delete(tempFile);
-        }
+        AgentModel agent = parser.Parse(content, file, HarnessKind.Cursor);
+        Assert.Equal("csharp-dev", agent.RoleName);
+        Assert.Equal("Use when writing C# and .NET code.", agent.Description);
+        Assert.Contains("senior .NET engineer", agent.InstructionsBody, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -173,7 +173,9 @@ public sealed class GlossaryGraphExportTests
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = "docs/glossary.md" }
             },
             TimeProvider.System,
-            DocsPorts.Files);
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment);
 
     private static ManagedGlossaryLoadResult CreateLoad(params GlossaryLookupResult[] terms) =>
         new(new AnalysisGlossary([]), terms);

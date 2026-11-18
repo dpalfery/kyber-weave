@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Core;
 
@@ -94,6 +95,8 @@ public static class CopilotPromptFile
     /// True when two paths name the same file: both are made absolute and normalised, trailing separators are
     /// dropped, and case is ignored only on Windows. The doctor's home check uses the same rule.
     /// </summary>
+    /// <param name="paths">The path seam that resolves each side to a full path.</param>
+    /// <param name="baseDirectory">The directory a relative side is resolved against.</param>
     /// <param name="left">One path.</param>
     /// <param name="right">The other path.</param>
     /// <returns>True when the normalised paths are equal; false when either cannot be normalised.</returns>
@@ -102,13 +105,13 @@ public static class CopilotPromptFile
     /// because a case-sensitive APFS volume can hold two files whose names differ only in case; there a mismatch
     /// only makes install refuse, which is the safe direction.
     /// </remarks>
-    public static bool SamePath(string left, string right)
+    public static bool SamePath(IPathResolver paths, string baseDirectory, string left, string right)
     {
         try
         {
             return string.Equals(
-                Path.GetFullPath(left).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
-                Path.GetFullPath(right).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                paths.GetFullPath(left, baseDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+                paths.GetFullPath(right, baseDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
                 OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
         }
         catch (Exception ex) when (ex is ArgumentException or IOException or NotSupportedException)

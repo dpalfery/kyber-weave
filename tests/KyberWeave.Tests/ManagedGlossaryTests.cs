@@ -530,7 +530,9 @@ public sealed class ManagedGlossaryTests
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = glossaryPath }
             },
             new FixedTimeProvider(Today),
-            DocsPorts.Files);
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment);
 
     private static GlossaryProposal Proposal(
         string term,

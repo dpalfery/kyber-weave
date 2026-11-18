@@ -113,11 +113,11 @@ public sealed class AgentSpecValidator(IFileSystem files, IPathResolver paths)
     /// <summary>
     /// Resolves a reference for the diagnostic message, falling back to the reference itself when it cannot be resolved.
     /// </summary>
-    private static string DescribeResolvedPath(string directoryPath, string reference)
+    private string DescribeResolvedPath(string directoryPath, string reference)
     {
         try
         {
-            return Path.GetFullPath(Path.Combine(directoryPath, reference));
+            return paths.GetFullPath(reference, directoryPath);
         }
         catch (Exception exception) when (exception is ArgumentException or PathTooLongException or NotSupportedException)
         {

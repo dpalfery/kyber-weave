@@ -186,9 +186,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
-| `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
-| `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
 | `ArbiterPlanService` (`Arbiter/ArbiterPlanService.cs`) | paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths | 4.3 |
@@ -197,20 +194,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
-| `ManagedGlossary` (`Docs/Analysis/Glossary/ManagedGlossary.cs`) | paths | 4.2 |
-| `PlanCloseout` (`Docs/Closeout/PlanCloseout.cs`) | paths | 4.2 |
-| `PlanFileResolver` (`Docs/Closeout/PlanFileResolver.cs`) | file system, paths | 4.2 |
-| `PlanFinalize` (`Docs/Closeout/PlanFinalize.cs`) | paths | 4.2 |
-| `PullRequestDescription` (`Docs/Delivery/PullRequestDescription.cs`) | file system | 4.2 |
-| `RunDelivery` (`Docs/Delivery/RunDelivery.cs`) | paths | 4.2 |
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 4.2 |
 | `DocumentIndexHost` (`Docs/Search/DocumentIndexHost.cs`) | file system, paths | 4.2 |
-| `ArchiveCloseoutValidator` (`Docs/Validation/ArchiveCloseoutValidator.cs`) | paths | 4.2 |
 | `TaskPromptService` (`Docs/Validation/TaskPromptService.cs`) | file system, paths | 4.2 |
-| `TaskPromptServiceFactory` (`Docs/Validation/TaskPromptServiceFactory.cs`) | paths | 4.2 |
-| `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | paths | 2.5 |
 | `CodeGraphIndexRules` (`Doctor/CodeGraphIndexRules.cs`) | paths | 2.5 |
-| `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
@@ -219,8 +206,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
 | `RunBaseStateFormat` (`RunStart/RunBaseStateFormat.cs`) | paths | 2.5 |
-| `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
-| `SkillParser` (`Skills/Parsing/SkillParser.cs`) | paths | 2.5 |
 | `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |

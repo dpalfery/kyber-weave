@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
@@ -71,13 +72,17 @@ public sealed partial class ArchiveCloseoutValidator
         string repoRoot,
         KyberWeaveConfig config,
         Func<IDocumentSource> loaderFactory,
-        IFileSystem files)
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(loaderFactory);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
         _loaderFactory = loaderFactory;
         _files = files;

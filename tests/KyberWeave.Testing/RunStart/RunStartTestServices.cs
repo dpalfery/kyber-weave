@@ -1,4 +1,5 @@
 using KyberWeave.Application.RunStart;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Facts;
@@ -27,9 +28,11 @@ internal static class RunStartTestServices
 
     /// <summary>The path with every symbolic link on the way resolved, as the checkout guard reports it.</summary>
     internal static string RealPath(string path) =>
-        new RunCheckoutGuard(new PhysicalFileSystem(), RunStateStore(), new ProcessEnvironment()).RealPath(path);
+        new RunCheckoutGuard(new PhysicalFileSystem(), RunStateStore(), new ProcessEnvironment(), RealPaths()).RealPath(path);
 
     /// <summary>The checkout guard over the real file system and the given run records.</summary>
     internal static IRunCheckout Checkout(IRunStateStore? runStates = null) =>
-        new RunCheckoutGuard(new PhysicalFileSystem(), runStates ?? RunStateStore(), new ProcessEnvironment());
+        new RunCheckoutGuard(new PhysicalFileSystem(), runStates ?? RunStateStore(), new ProcessEnvironment(), RealPaths());
+
+    private static IPathResolver RealPaths() => new PhysicalPathResolver(new PhysicalFileSystem());
 }

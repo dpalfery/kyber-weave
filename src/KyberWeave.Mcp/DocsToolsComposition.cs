@@ -74,7 +74,9 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IPlanFinalizeService>(),
             provider.GetRequiredService<IPlanCloseoutService>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
-            provider.GetRequiredService<TimeProvider>()));
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>()));
         services.AddSingleton<IRunDeliveryService>(provider => new RunDeliveryService(
             repositoryRoot,
             provider.GetRequiredService<IDocsQueryService>(),
@@ -200,7 +202,9 @@ internal static class DocsToolsComposition
                 provider.GetRequiredService<IPlanFinalizeService>(),
                 provider.GetRequiredService<IPlanCloseoutService>(),
                 provider.GetRequiredService<IRepositoryFileStore>(),
-                provider.GetRequiredService<TimeProvider>()),
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<IPathResolver>(),
+                provider.GetRequiredService<IProcessEnvironment>()),
             new RunDeliveryService(host.RepositoryRoot, query, hostConfiguration, provider.GetRequiredService<RunDeliveryPorts>())
             {
                 DeliveryExecutor = deliveryExecutor,

@@ -1,11 +1,12 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.Hooks;
 
 namespace KyberWeave.Data.Hooks;
 
 /// <summary>Maps <c>Foo.cs</c> to a <c>FooTests</c> class found in <c>FooTests.cs</c>, and checks the class exists.</summary>
-internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem) : ITestClassResolver
+internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem, IPathResolver paths) : ITestClassResolver
 {
     public TestClassResolution Resolve(string repositoryRoot, string relativePath)
     {
@@ -68,7 +69,7 @@ internal sealed partial class ConventionTestClassResolver(IFileSystem fileSystem
 
     private string? NearestProject(string? directory, string root)
     {
-        while (directory is not null && PathContainment.IsWithin(root, directory))
+        while (directory is not null && PathContainment.IsWithin(paths, root, directory))
         {
             string? project = fileSystem.EnumerateFiles(directory, "*.csproj", recursive: false).Order(StringComparer.Ordinal).FirstOrDefault();
             if (project is not null)

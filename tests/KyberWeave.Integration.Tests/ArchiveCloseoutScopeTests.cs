@@ -136,7 +136,7 @@ public sealed class ArchiveCloseoutScopeTests
                 repo.Root,
                 KyberWeaveConfigDefaults.Product,
                 () => RealDocumentLoader.Create(repo.Root, KyberWeaveConfigDefaults.Product.Ontology),
-                DocsPorts.Files)
+                DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment)
             .Validate(RealDocumentLoader.Create(repo.Root).Load(), changes);
     }
 
@@ -580,7 +580,7 @@ public sealed class ArchiveCloseoutScopeTests
             fixture.Root,
             config,
             () => RealDocumentLoader.Create(fixture.Root, handbook),
-            DocsPorts.Files).Validate(
+            DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate(
             RealDocumentLoader.Create(fixture.Root, handbook).Load(),
             [new ChangedPath(HandbookPlan, ChangeKind.Added)]);
 
@@ -614,7 +614,7 @@ public sealed class ArchiveCloseoutScopeTests
             fixture.Root,
             config,
             () => RealDocumentLoader.Create(fixture.Root, both),
-            DocsPorts.Files).Validate(
+            DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate(
             RealDocumentLoader.Create(fixture.Root, both).Load(),
             [
                 new ChangedPath(PrimaryPlan, ChangeKind.Added),

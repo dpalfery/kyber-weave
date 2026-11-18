@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
+using KyberWeave.Contracts.Host;
 using System.Text.RegularExpressions;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -84,6 +85,7 @@ public sealed partial class RunDelivery
     };
 
     private readonly string _repoRoot;
+    private readonly IEmbeddedResources _resources;
     private readonly KyberWeaveConfig _config;
     private readonly IProcessExecutor _executor;
     private readonly string _homeDirectory;
@@ -113,11 +115,12 @@ public sealed partial class RunDelivery
         ArgumentNullException.ThrowIfNull(ports);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _repoRoot = ports.Paths.GetFullPath(repoRoot, ports.Environment.CurrentDirectory);
         _config = config;
         _executor = executor ?? new BoundedExecutor(ports.Process, TimeSpan.FromMinutes(3));
         _homeDirectory = homeDirectory ?? ports.Environment.HomeDirectory;
         _store = ports.Files;
+        _resources = ports.Resources;
         _runState = ports.RunState;
         _cycles = ports.Cycles;
         _time = ports.Time;
@@ -242,14 +245,14 @@ public sealed partial class RunDelivery
         {
             FollowUps = FiledTodos(mergeBase, todoFolder, report)
         };
-        PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_repoRoot, ReadTemplateFile ?? _store.ReadAllTextBounded);
+        PullRequestDescription.HostTemplate hostTemplate = PullRequestDescription.ReadHostTemplate(_store, _repoRoot, ReadTemplateFile ?? _store.ReadAllTextBounded);
         foreach (string unreadable in hostTemplate.Unreadable)
         {
             report.Add(new Diagnostic(Step, Severity.Warning,
                 $"The pull request template '{unreadable}' could not be read, so it was not used{(hostTemplate.Text is null ? "; the standard description format was used instead" : "; the next template found was used instead")}.", "deliver"));
         }
 
-        string body = PullRequestDescription.Render(content, hostTemplate.Text);
+        string body = PullRequestDescription.Render(_resources, content, hostTemplate.Text);
 
         ProcessResult push = Git("push", "--porcelain", Remote, $"refs/heads/{branch}:refs/heads/{branch}");
         if (push.ExitCode != 0)
