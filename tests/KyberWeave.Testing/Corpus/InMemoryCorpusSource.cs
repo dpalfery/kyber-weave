@@ -64,6 +64,7 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         return _files.Keys
             .Where(path => recursive
                 ? path.StartsWith(directory + "/", StringComparison.Ordinal)
+                    && !CorpusListing.HasSkippedDirectory(directory, path)
                 : CorpusPath.IsDirectChild(directory, path))
             .Where(path => FileSystemName.MatchesSimpleExpression(
                 pattern,

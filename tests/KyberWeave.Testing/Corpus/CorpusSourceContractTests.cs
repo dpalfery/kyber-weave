@@ -25,6 +25,26 @@ public abstract class CorpusSourceContractTests
     /// <summary>Gets the path, relative to the corpus root, of the directory holding <see cref="SampleFile"/>.</summary>
     protected abstract string SampleDirectory { get; }
 
+    /// <summary>
+    /// Gets a directory and a file name pattern whose recursive listing would include a file under a build-output or
+    /// dependency folder, if the corpus listed one.
+    /// </summary>
+    protected abstract (string Directory, string Pattern) BuildOutputProbe { get; }
+
+    [Fact]
+    public void SkipsBuildOutputAndDependencyFoldersWhenListingFiles()
+    {
+        ICorpusSource corpus = CreateCorpus();
+        (string directory, string pattern) = BuildOutputProbe;
+
+        string[] listed = [.. corpus.EnumerateFiles(directory, pattern)];
+
+        Assert.DoesNotContain(listed, path => path
+            .Split('/')
+            .SkipLast(1)
+            .Any(segment => CorpusListing.SkippedDirectoryNames.Contains(segment, StringComparer.Ordinal)));
+    }
+
     [Fact]
     public void ReportsAnAbsoluteRoot()
     {

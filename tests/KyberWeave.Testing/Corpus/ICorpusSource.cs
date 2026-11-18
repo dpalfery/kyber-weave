@@ -48,7 +48,9 @@ public interface ICorpusSource
     /// <param name="recursive">True to descend into subdirectories; false to list the directory's own files.</param>
     /// <returns>
     /// The matching files in the platform's order, each relative to <see cref="Root"/> with forward slashes; empty
-    /// when the directory is missing.
+    /// when the directory is missing. A recursive walk does not descend into build-output or dependency folders
+    /// (<c>bin</c>, <c>obj</c>, <c>node_modules</c>, <c>.git</c>, <c>.venv</c>, <c>dist</c>, <c>out</c>,
+    /// <c>coverage</c>, <c>TestResults</c>, <c>artifacts</c>, <c>target</c>), which are not shipped content.
     /// </returns>
     /// <exception cref="ArgumentException">The path is rooted or climbs above the root.</exception>
     IEnumerable<string> EnumerateFiles(

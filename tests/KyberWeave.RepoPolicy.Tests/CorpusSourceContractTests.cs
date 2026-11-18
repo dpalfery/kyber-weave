@@ -18,6 +18,9 @@ public sealed class CheckoutCorpusSourceContractTests : CorpusSourceContractTest
 
     /// <inheritdoc />
     protected override string SampleDirectory => "products/kyber-squad/agents";
+
+    /// <inheritdoc />
+    protected override (string Directory, string Pattern) BuildOutputProbe => ("tests/KyberWeave.Testing", "*.cs");
 }
 
 /// <summary>Runs the corpus seam's contract suite against the corpus held in memory.</summary>
@@ -31,11 +34,15 @@ public sealed class InMemoryCorpusSourceContractTests : CorpusSourceContractTest
     protected override ICorpusSource CreateCorpus() => new InMemoryCorpusSource()
         .Add("products/kyber-squad/agents/conductor.md", "---\nschema: kyber-squad.agent/v1\nname: conductor\n---\n")
         .Add("products/kyber-squad/agents/conductor/references/spec-path.md", "# Spec path\n")
-        .Add("products/kyber-squad/agents/conductor/notes.txt", "not part of the md pattern\n");
+        .Add("products/kyber-squad/agents/conductor/notes.txt", "not part of the md pattern\n")
+        .Add("products/kyber-squad/node_modules/leftover/x.md", "a dependency folder the listing must skip\n");
 
     /// <inheritdoc />
     protected override string SampleFile => "products/kyber-squad/agents/conductor.md";
 
     /// <inheritdoc />
     protected override string SampleDirectory => "products/kyber-squad/agents";
+
+    /// <inheritdoc />
+    protected override (string Directory, string Pattern) BuildOutputProbe => ("products/kyber-squad", "*");
 }
