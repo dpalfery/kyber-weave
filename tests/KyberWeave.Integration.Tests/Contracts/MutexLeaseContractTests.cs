@@ -64,11 +64,13 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
 
         // Another owner is already queued on the system mutex, so when the first holder lets go it is that owner, not
         // the request below, that takes it.
+        using ManualResetEventSlim foreignQueued = new(initialState: false);
         using ManualResetEventSlim foreignHolds = new(initialState: false);
         using ManualResetEventSlim foreignRelease = new(initialState: false);
         Thread foreign = new(() =>
         {
             using Mutex mutex = new(initiallyOwned: false, name);
+            foreignQueued.Set();
             bool held = mutex.WaitOne(TimeSpan.FromSeconds(30));
             foreignHolds.Set();
             _ = foreignRelease.Wait(TimeSpan.FromSeconds(30));
@@ -82,7 +84,8 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
         };
         foreign.Start();
 
-        // A thread parked in a wait is the observable sign that it is queued on the mutex.
+        // The thread has reached the wait; a thread parked in a wait is the observable sign that it is queued.
+        Assert.True(foreignQueued.Wait(TimeSpan.FromSeconds(30)));
         SpinWait.SpinUntil(
             () => foreign.ThreadState.HasFlag(ThreadState.WaitSleepJoin),
             TimeSpan.FromSeconds(30));
@@ -95,14 +98,20 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
         release.Start();
 
         // The request queues behind the first holder inside the process, then meets a mutex the other owner holds:
-        // the two waits together must stay within the one timeout it was given.
-        _ = Assert.Throws<LeaseTimeoutException>(() => lease.Acquire(name, timeout));
+        // the two waits together must stay within the one timeout it was given. Which of two waiters the operating
+        // system wakes first is not defined (the Linux named-mutex emulation does not queue them in order), so the
+        // request may also win the mutex outright; what must never happen is waiting more than one timeout.
+        Exception? outcome = Record.Exception(() => lease.Acquire(name, timeout).Dispose());
 
         clock.Stop();
+        if (outcome is not null)
+        {
+            _ = Assert.IsType<LeaseTimeoutException>(outcome);
+        }
+
         foreignRelease.Set();
         release.Join();
         foreign.Join();
-        Assert.True(foreignHolds.IsSet, "The other owner never took the mutex.");
         // One timeout is about 800 ms in total; the old double wait was about 1400 ms.
         Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1200), $"The request waited {clock.Elapsed}.");
     }
