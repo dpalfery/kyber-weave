@@ -19,8 +19,9 @@
       through typeof(KyberStandardsTemplates).Assembly, so the templates travel with the type
       that reads them.
 
-      The logical names are the ones KyberStandardsTemplates asks for. They moved here with the
-      class from KyberWeave.Domain in task 2.5.19.
+      The logical names are the ones KyberStandardsTemplates asks for. The class moved here from
+      KyberWeave.Domain in task 2.5.19; KyberWeave.Domain keeps its own copy while
+      ArbiterConfigLoader, which reads its role rules from that assembly, waits for task 2.5.4.
     -->
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.standards.md" LogicalName="Standards.azure.standards.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.rules.md" LogicalName="Standards.azure.rules.md" />
