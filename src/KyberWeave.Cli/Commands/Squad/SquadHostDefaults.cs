@@ -164,6 +164,8 @@ internal static class SquadHostDefaults
             ResolveGlobalRoots(),
             new FileSquadInstanceLinkSync(),
             new PhysicalSquadFileAccess(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
             stateStore);
     }
 

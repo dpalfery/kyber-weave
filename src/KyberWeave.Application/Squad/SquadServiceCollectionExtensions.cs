@@ -76,6 +76,8 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<ISquadGlobalRootResolver>(),
             sp.GetRequiredService<ISquadInstanceLinkSync>(),
             sp.GetRequiredService<ISquadFileAccess>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISquadStateStore>()));
         return services;
     }
