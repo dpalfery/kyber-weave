@@ -1,9 +1,4 @@
-using KyberWeave.Tests.Configuration;
-
-using System.Text;
-using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.Diagnostics;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -23,7 +18,7 @@ namespace KyberWeave.Tests;
 /// invented inherited server third-party for that same reason: <c>first-party</c> is a claim
 /// about the binary Kyber-Weave ships, and a made-up binary name cannot support it.
 /// </remarks>
-public sealed class McpConfigTests : IDisposable
+public sealed class McpConfigParsingTests
 {
     /// <summary>Today's first-party server: the binary Kyber-Weave itself ships.</summary>
     private const string FirstPartyServer = "kyber-weave";
@@ -31,15 +26,6 @@ public sealed class McpConfigTests : IDisposable
     /// <summary>Today's third-party server: a binary the user installs.</summary>
     private const string ThirdPartyServer = "codegraph";
 
-    private const string ConfigFileName = "kyber-weave.yml";
-
-    private readonly TempDirectory _root = new();
-
-    /// <summary>Deletes the repository tree the file-backed cases wrote.</summary>
-    public void Dispose()
-    {
-        _root.Dispose();
-    }
 
     /// <summary>
     /// Every key of the design's worked example reaches the model unchanged, so a host can copy
@@ -235,116 +221,5 @@ public sealed class McpConfigTests : IDisposable
         RequiredMcpServer inherited = Assert.Single(merged.RequiredServers).Value;
         Assert.Equal("inherited", inherited.Name);
         Assert.Equal(["inherited-mcp", "--serve"], inherited.Command);
-    }
-
-    /// <summary>
-    /// A provenance outside the closed vocabulary is a configuration error, not a default. The
-    /// refusal names the section, the server and the offending value, so the operator does not
-    /// have to search the file for the typo.
-    /// </summary>
-    [Theory]
-    [InlineData("firstparty")]
-    [InlineData("third_party")]
-    [InlineData("vendor")]
-    [InlineData("mixed")]
-    public void AMisspelledProvenanceIsRefusedAsKwConfig001(string provenance)
-    {
-        string configPath = WriteRepositoryConfig(ServerEntryYaml(
-            ThirdPartyServer,
-            "command: [codegraph, serve, --mcp]",
-            $"provenance: {provenance}"));
-
-        AssertRefusedAsConfigError(configPath, provenance);
-    }
-
-    /// <summary>
-    /// A level outside the closed vocabulary is refused for the same reason: silently reading
-    /// <c>optional</c> as <c>required</c> would report a finding the operator opted out of.
-    /// </summary>
-    [Theory]
-    [InlineData("optional")]
-    [InlineData("must")]
-    [InlineData("needed")]
-    public void AMisspelledLevelIsRefusedAsKwConfig001(string level)
-    {
-        string configPath = WriteRepositoryConfig(ServerEntryYaml(
-            ThirdPartyServer,
-            "command: [codegraph, serve, --mcp]",
-            "provenance: third-party",
-            $"level: {level}"));
-
-        AssertRefusedAsConfigError(configPath, level);
-    }
-
-    /// <summary>
-    /// R1.1 makes the launch command and the provenance class mandatory on every entry. An
-    /// entry missing one is malformed, so it is refused where the operator wrote it rather
-    /// than defaulting to a binary nobody named.
-    /// </summary>
-    [Theory]
-    [InlineData("command")]
-    [InlineData("provenance")]
-    public void AnEntryMissingARequiredFieldIsRefusedAsKwConfig001(string missingField)
-    {
-        List<string> lines = [];
-        if (!string.Equals(missingField, "command", StringComparison.Ordinal))
-            lines.Add("command: [codegraph, serve, --mcp]");
-        if (!string.Equals(missingField, "provenance", StringComparison.Ordinal))
-            lines.Add("provenance: third-party");
-
-        string configPath = WriteRepositoryConfig(ServerEntryYaml(ThirdPartyServer, [.. lines]));
-
-        AssertRefusedAsConfigError(configPath, missingField);
-    }
-
-    /// <summary>
-    /// Builds a one-server configuration. Written as text because the loader under test is the
-    /// only thing that may interpret it.
-    /// </summary>
-    private static string ServerEntryYaml(string serverName, params string[] lines)
-    {
-        StringBuilder yaml = new();
-        yaml.Append("mcp:\n  required-servers:\n    ").Append(serverName).Append(":\n");
-        foreach (string line in lines)
-            yaml.Append("      ").Append(line).Append('\n');
-
-        return yaml.ToString();
-    }
-
-    private string WriteRepositoryConfig(string yaml)
-    {
-        string directory = Path.Combine(_root.Path, ".kyber-weave");
-        Directory.CreateDirectory(directory);
-        string path = Path.Combine(directory, ConfigFileName);
-        File.WriteAllText(path, yaml);
-        return path;
-    }
-
-    /// <summary>
-    /// Asserts the refusal at both seams: the structured load result, and the
-    /// <c>KW-CONFIG-001</c> diagnostic a command turns it into.
-    /// </summary>
-    private void AssertRefusedAsConfigError(string configPath, string offender)
-    {
-        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
-
-        Assert.False(result.Success);
-        Assert.Null(result.Config);
-        Assert.Equal(configPath, result.ConfigPath);
-
-        string error = result.Error ?? string.Empty;
-        Assert.Contains("mcp.required-servers", error, StringComparison.Ordinal);
-        Assert.Contains(ThirdPartyServer, error, StringComparison.Ordinal);
-        Assert.Contains(offender, error, StringComparison.Ordinal);
-
-        DiagnosticReport report = new();
-        bool loaded = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _root.Path, null, report, out KyberWeaveConfig config);
-
-        Assert.False(loaded);
-        Assert.Equal(KyberWeaveConfigDefaults.Product, config);
-        Diagnostic diagnostic = Assert.Single(report.Items);
-        Assert.Equal(KyberWeaveConfigDiagnosticCodes.LoadError, diagnostic.Code);
-        Assert.Equal(Severity.Error, diagnostic.Severity);
-        Assert.Contains(offender, diagnostic.Message, StringComparison.Ordinal);
     }
 }
