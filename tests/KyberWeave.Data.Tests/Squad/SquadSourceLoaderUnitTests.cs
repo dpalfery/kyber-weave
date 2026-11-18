@@ -49,7 +49,7 @@ public sealed class SquadSourceLoaderUnitTests
         SquadSourceValidationException failure =
             Assert.Throws<SquadSourceValidationException>(() => _loader.Load(missing));
 
-        Assert.Contains("/kw/missing", failure.Message, StringComparison.Ordinal);
+        Assert.Contains($"'{missing}'", failure.Message, StringComparison.Ordinal);
     }
 
     [Fact]
