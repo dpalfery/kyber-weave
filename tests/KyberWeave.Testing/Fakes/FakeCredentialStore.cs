@@ -35,8 +35,18 @@ internal sealed class FakeCredentialStore : ICredentialStore
     /// <summary>Gets the origins deleted, in the order the caller deleted them.</summary>
     public List<string> Deletes { get; } = [];
 
-    /// <summary>Gets the keys the host holds, so a test can arrange one without a call.</summary>
+    /// <summary>Gets the keys the host holds, so a test can assert what was stored.</summary>
     public IReadOnlyDictionary<string, string> Entries => _host.Entries;
+
+    /// <summary>Stores a key without recording a write, for a test arranging what the store already holds.</summary>
+    /// <param name="origin">The endpoint origin.</param>
+    /// <param name="key">The key.</param>
+    public void Seed(string origin, string key)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        ArgumentException.ThrowIfNullOrEmpty(key);
+        _host.Set(origin, key);
+    }
 
     /// <inheritdoc />
     public string? Read(string origin)
