@@ -46,7 +46,7 @@ public sealed class DocsPacketCommandTests
     public void TheCodeGraphPortsComeFromTheInjectedFactory()
     {
         using DocFixture fixture = Ready();
-        FakeCodeGraphPortsFactory codeGraph = new();
+        FakeCodeGraphPortsFactory codeGraph = new(FakeCodeGraphResolver.WithNodes());
         IServiceProvider services = DocsTestCommands.Services(
             collection => collection.AddSingleton<ICodeGraphPortsFactory>(codeGraph));
 

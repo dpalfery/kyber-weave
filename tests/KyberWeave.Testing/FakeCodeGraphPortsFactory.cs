@@ -12,9 +12,9 @@ namespace KyberWeave.Tests;
 /// A port the supplied resolver does not implement answers empty or current, and the factory records each
 /// repository root it was asked for, so a test can prove the caller used it.
 /// </remarks>
-internal sealed class FakeCodeGraphPortsFactory(ICodeGraphResolver? resolver = null) : ICodeGraphPortsFactory
+internal sealed class FakeCodeGraphPortsFactory(ICodeGraphResolver resolver) : ICodeGraphPortsFactory
 {
-    private readonly ICodeGraphResolver _resolver = resolver ?? FakeCodeGraphResolver.WithNodes();
+    private readonly ICodeGraphResolver _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
 
     private readonly List<string> _roots = [];
 

@@ -19,11 +19,7 @@ internal sealed class FakeCodeGraphResolver : ICodeGraphResolver, ICodeGraphSymb
     {
         FakeCodeGraphResolver fake = new FakeCodeGraphResolver();
         foreach ((string? name, CodeGraphNode? node) in symbols)
-        {
-            fake._symbols[name] = [node];
-            if (!string.IsNullOrWhiteSpace(node.FilePath))
-                fake._files.Add(node.FilePath);
-        }
+            fake.Add(name, node);
 
         return fake;
     }
@@ -32,20 +28,23 @@ internal sealed class FakeCodeGraphResolver : ICodeGraphResolver, ICodeGraphSymb
     {
         FakeCodeGraphResolver fake = new FakeCodeGraphResolver();
         foreach (CodeGraphNode node in nodes)
-        {
-            fake._symbols[node.Name] = [node];
-            if (!fake._byKind.TryGetValue(node.Kind, out List<CodeGraphNode>? ofKind))
-            {
-                ofKind = [];
-                fake._byKind[node.Kind] = ofKind;
-            }
-
-            ofKind.Add(node);
-            if (!string.IsNullOrWhiteSpace(node.FilePath))
-                fake._files.Add(node.FilePath);
-        }
+            fake.Add(node.Name, node);
 
         return fake;
+    }
+
+    private void Add(string name, CodeGraphNode node)
+    {
+        _symbols[name] = [node];
+        if (!string.IsNullOrWhiteSpace(node.FilePath))
+            _files.Add(node.FilePath);
+        if (!_byKind.TryGetValue(node.Kind, out List<CodeGraphNode>? ofKind))
+        {
+            ofKind = [];
+            _byKind[node.Kind] = ofKind;
+        }
+
+        ofKind.Add(node);
     }
 
     public static FakeCodeGraphResolver WithRoutes(params string[] routes)

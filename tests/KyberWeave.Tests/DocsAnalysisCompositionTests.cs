@@ -30,6 +30,21 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
 
     public void Dispose() => _temp.Dispose();
 
+    /// <summary>The resolver a docs command gets is the one the injected ports factory answers.</summary>
+    [Fact]
+    public void TheResolverComesFromTheInjectedPortsFactory()
+    {
+        FakeCodeGraphResolver resolver = FakeCodeGraphResolver.WithNodes();
+        FakeCodeGraphPortsFactory codeGraph = new(resolver);
+
+        ICodeGraphResolver actual = DocsCommandComposition.CreateResolver(
+            new DocsSettings { Path = "/some/repo" },
+            codeGraph);
+
+        Assert.Same(resolver, actual);
+        Assert.Equal(["/some/repo"], codeGraph.Roots);
+    }
+
     [Theory]
     [InlineData(DocsAnalysisEmbeddingMode.Off, false, true, 0, 0)]
     [InlineData(DocsAnalysisEmbeddingMode.Prefer, false, true, 0, 0)]
@@ -259,7 +274,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             DisposableEmbeddingGenerator embedding,
             ICodeGraphResolver resolver)
         {
-            Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory())
+            Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory(resolver))
             {
                 IsCacheSafe = _ => cacheSafe,
                 CreatePersistence = _ =>
