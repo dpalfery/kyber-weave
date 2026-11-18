@@ -104,7 +104,7 @@ public static class TaskGateResolver
     /// <summary>
     /// The technology a template names in its standard's <c>builds-on</c> key, or null when it names none, has
     /// no standard of its own, its standard's frontmatter does not parse, or the name is not something a folder
-    /// can be called. A standard this process may not read throws: a permission failure is not an absent parent.
+    /// can be called. A standard that exists but cannot be read throws: a permission or I/O failure is not an absent parent.
     /// </summary>
     /// <param name="repoRoot">The repository root the standards folders sit under.</param>
     /// <param name="config">The effective configuration, whose ontology names the documentation root.</param>
@@ -140,12 +140,14 @@ public static class TaskGateResolver
                 if (Clean(parent.BuildsOn) is { } buildsOn && ConfigSlug.IsValid(buildsOn))
                     return buildsOn;
             }
-            catch (Exception ex) when (ex is IOException or YamlDotNet.Core.YamlException)
+            catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException
+                                           or YamlDotNet.Core.YamlException)
             {
-                // A standard that cannot be read or parsed names no parent. Gate resolution falls back to the
-                // mapped agent's entry, which is what it does for a technology with no standard of its own.
-                // A permission failure, or anything else unexpected, is a broken checkout rather than an
-                // absent parent, so it propagates.
+                // A standard removed between the existence check and the read is absent, and a standard whose
+                // frontmatter does not parse names no parent. Gate resolution falls back to the mapped agent's
+                // entry, which is what it does for a technology with no standard of its own. Any other read
+                // failure (a permission failure, a lock, a device error) is a present but unusable standard
+                // rather than an absent parent, so it propagates.
                 continue;
             }
         }
@@ -158,7 +160,7 @@ public static class TaskGateResolver
     /// </summary>
     /// <remarks>
     /// <see cref="ParentTechnology"/> refuses to turn a standard this process may not read into an absent
-    /// parent, because that hides a broken checkout. A caller that cannot fail the whole run — a packet
+    /// parent, because that hides a broken checkout; nor any other failure to read a standard that exists. A caller that cannot fail the whole run — a packet
     /// renderer, an Arbiter fact build, a gate run about to fall back to the mapped agent — asks for the
     /// parent or none instead: the failure is recorded in <paramref name="problems"/> when the caller
     /// collects them, and the technology names no parent.
@@ -177,7 +179,7 @@ public static class TaskGateResolver
         {
             return ParentTechnology(repoRoot, config, technology);
         }
-        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         {
             problems?.Add(
                 $"The standard for technology '{Clean(technology)}' could not be read, so its parent " +

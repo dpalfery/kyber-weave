@@ -262,6 +262,41 @@ public sealed class TaskGateResolverTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A standard that exists but fails to read for an I/O reason (here, another handle holds it exclusively)
+    /// is a present-but-unusable standard, not an absent parent: it must throw rather than name no parent.
+    /// </summary>
+    [Fact]
+    public void AStandardThatExistsButFailsToReadThrowsInsteadOfNamingNoParent()
+    {
+        Standard("react", "builds-on: dotnet");
+        KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
+        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+
+        using FileStream held = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        Assert.ThrowsAny<IOException>(() => TaskGateResolver.ParentTechnology(_root.Path, config, "react"));
+    }
+
+    /// <summary>
+    /// The caller that must keep going reports any read failure of a present standard, not only a permission
+    /// failure, so an I/O failure is never silently treated as an absent parent.
+    /// </summary>
+    [Fact]
+    public void AStandardThatFailsToReadForAnIoReasonIsReportedToACallerThatCollectsTheProblem()
+    {
+        Standard("react", "builds-on: dotnet");
+        KyberWeaveConfig config = Config("ontology:\n  docs-root: docs\n");
+        string path = Path.Combine(_root.Path, "docs", "standards", "react", "react.standards.md");
+
+        using FileStream held = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+
+        List<string> problems = [];
+        Assert.Null(TaskGateResolver.ParentTechnologyOrNone(_root.Path, config, "react", problems));
+        string problem = Assert.Single(problems);
+        Assert.Contains("react.standards.md", problem, StringComparison.Ordinal);
+    }
+
     [Fact]
     public void TechnologyGatesAreKeyedByTechnologyAndReadInDeclarationOrder()
     {
