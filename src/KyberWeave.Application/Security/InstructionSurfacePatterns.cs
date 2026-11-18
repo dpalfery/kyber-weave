@@ -11,8 +11,14 @@ public static partial class InstructionSurfacePatterns
     public static readonly Regex HtmlComment =
         MyRegex();
 
+    /// <summary>
+    /// A run of base64 characters long enough to hide a payload. The alphabet includes the
+    /// URL-safe <c>-</c> and <c>_</c>, and line breaks are allowed inside a run, because
+    /// wrapping or URL-safe encoding would otherwise carry a payload past this rule unnoticed.
+    /// </summary>
     public static readonly Regex Base64Blob =
-        new("[A-Za-z0-9+/]{120,}={0,2}", RegexOptions.Compiled);
+        new(@"(?:[A-Za-z0-9+/_-]{120,}={0,2})|(?:[A-Za-z0-9+/_-]{60,}(?:\r?\n[A-Za-z0-9+/_-]{60,})+={0,2})",
+            RegexOptions.Compiled);
 
     public static readonly Regex HtmlCommentInstructionHints =
         new(@"\b(ignore|disregard|system|instruction|tool|exfiltrat|send|password|token|secret)\b",

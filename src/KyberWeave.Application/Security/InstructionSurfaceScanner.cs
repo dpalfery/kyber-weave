@@ -16,6 +16,22 @@ public static class InstructionSurfaceScanner
         InstructionSurfaceRuleCodes codes,
         string artifactLabel)
     {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(filePath);
+        ArgumentNullException.ThrowIfNull(codes);
+        ArgumentNullException.ThrowIfNull(artifactLabel);
+
+        return ScanProseCore(body, subject, filePath, codes, artifactLabel);
+    }
+
+    private static IEnumerable<Diagnostic> ScanProseCore(
+        string body,
+        string subject,
+        string filePath,
+        InstructionSurfaceRuleCodes codes,
+        string artifactLabel)
+    {
         foreach ((string? id, Regex? rx, string? label) in InstructionSurfacePatterns.Injection)
         {
             if (!codes.Injection.TryGetValue(id, out string? code))
@@ -60,6 +76,22 @@ public static class InstructionSurfaceScanner
     }
 
     public static IEnumerable<Diagnostic> ScanScriptText(
+        string scriptText,
+        string scriptRelativePath,
+        string scriptAbsolutePath,
+        string subject,
+        InstructionSurfaceRuleCodes codes)
+    {
+        ArgumentNullException.ThrowIfNull(scriptText);
+        ArgumentNullException.ThrowIfNull(scriptRelativePath);
+        ArgumentNullException.ThrowIfNull(scriptAbsolutePath);
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(codes);
+
+        return ScanScriptTextCore(scriptText, scriptRelativePath, scriptAbsolutePath, subject, codes);
+    }
+
+    private static IEnumerable<Diagnostic> ScanScriptTextCore(
         string scriptText,
         string scriptRelativePath,
         string scriptAbsolutePath,

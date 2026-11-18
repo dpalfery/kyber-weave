@@ -39,12 +39,17 @@ different severities.
 
 HTML comments and base64 blobs. Both hide text from a human reviewer that a model still
 reads, which is the defining shape of an instruction-surface attack: the review and the
-execution see different documents.
+execution see different documents. The blob rule accepts the URL-safe alphabet and a payload
+wrapped across lines, so wrapping or URL-safe encoding does not carry one past the scan.
 
-### Risky scripts — `KW-SKILL-SEC-010`…`-013`
+### Risky scripts — `KW-SKILL-SEC-010`…`-014`
 
 `curl | sh`, `wget | sh`, `eval` of base64, and destructive commands. Skills may carry
 executable resources; these are the shapes worth stopping before a skill ships.
+
+`KW-SKILL-SEC-014` is the rule for a script the scan could not read at all — a permission
+error, a broken link, an unreadable encoding. A script nobody could read was not scanned, so
+the report says so rather than staying silent about it.
 
 ### Hardcoded secrets — `-020`…`-025`
 
