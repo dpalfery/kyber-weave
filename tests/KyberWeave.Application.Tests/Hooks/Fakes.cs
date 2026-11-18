@@ -135,12 +135,22 @@ internal sealed class FakeProcessRunner(FakeClock clock) : IProcessRunner
 
     public TimeSpan CostPerRun { get; set; }
 
+    public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return RunAsync([request.Program, .. request.Arguments], request.WorkingDirectory ?? string.Empty, request.Timeout ?? TimeSpan.Zero, cancellationToken);
+    }
+
     public Task<ProcessRunResult> RunAsync(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
     {
         Calls.Add((argv, workingDirectory, timeout));
         clock.Advance(CostPerRun);
         return Task.FromResult(Respond(argv));
     }
+
+    public bool IsAlive(int processId) => false;
+
+    public string? FindOnPath(string program) => null;
 }
 
 internal sealed class FakeTimer(TimerCallback callback, object? state, long due) : ITimer

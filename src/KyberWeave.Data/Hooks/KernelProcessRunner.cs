@@ -5,63 +5,79 @@ using KyberWeave.Core.Processes;
 
 namespace KyberWeave.Data.Hooks;
 
-/// <summary>Runs commands through the kernel's deadlock-safe process runner.</summary>
+/// <summary>Runs programs through the kernel's deadlock-safe process runner and answers process and path questions.</summary>
 internal sealed class KernelProcessRunner : IProcessRunner
 {
-    private const long MaxOutputBytes = 4 * 1024 * 1024;
     private const int MissingExecutableErrorCode = 2;
 
-    public Task<ProcessRunResult> RunAsync(
-        IReadOnlyList<string> argv,
-        string workingDirectory,
-        TimeSpan timeout,
-        CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default)
     {
-        ArgumentNullException.ThrowIfNull(argv);
-        if (argv.Count == 0)
-        {
-            throw new ArgumentException("A command needs at least a program name.", nameof(argv));
-        }
-
-        return Task.Run(() => Run(argv, workingDirectory, timeout, cancellationToken), cancellationToken);
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Program);
+        return Task.Run(() => Run(request, cancellationToken), cancellationToken);
     }
 
-    private static ProcessRunResult Run(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken)
+    /// <inheritdoc />
+    public bool IsAlive(int processId) => ProcessRunner.IsAlive(processId);
+
+    /// <inheritdoc />
+    public string? FindOnPath(string program) => ProcessRunner.FindOnPath(program);
+
+    private static ProcessRunResult Run(ProcessRunRequest request, CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(workingDirectory))
+        if (request.WorkingDirectory is { Length: > 0 } workingDirectory && !Directory.Exists(workingDirectory))
         {
             throw WorkingDirectoryNotFound(workingDirectory);
         }
 
-        ProcessStartInfo startInfo = new(argv[0])
+        ProcessStartInfo startInfo = new(request.Program)
         {
-            WorkingDirectory = workingDirectory,
+            WorkingDirectory = request.WorkingDirectory ?? string.Empty,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
         };
-        foreach (string argument in argv.Skip(1))
+        foreach (string argument in request.Arguments)
         {
             startInfo.ArgumentList.Add(argument);
         }
 
+        if (request.Environment is { } environment)
+        {
+            startInfo.Environment.Clear();
+            foreach (KeyValuePair<string, string?> pair in environment)
+            {
+                if (pair.Value is not null)
+                {
+                    startInfo.Environment[pair.Key] = pair.Value;
+                }
+            }
+        }
+
         try
         {
-            ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, timeout, MaxOutputBytes, cancellationToken);
-            return new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false);
+            ProcessResult result = ProcessRunner.Run(
+                startInfo,
+                request.StandardInput ?? string.Empty,
+                request.Timeout,
+                request.MaxOutputBytes,
+                cancellationToken);
+
+            return new ProcessRunResult(result.ExitCode, result.StandardOutput + result.StandardError, TimedOut: false)
+            {
+                StandardOutput = result.StandardOutput,
+                StandardError = result.StandardError
+            };
         }
         catch (Exception ex) when (IsMissingExecutable(ex))
         {
-            throw MapMissingExecutable(ex, argv[0], workingDirectory);
+            throw MapMissingExecutable(ex, request.Program, request.WorkingDirectory ?? string.Empty);
         }
         catch (TimeoutException)
         {
-            return new ProcessRunResult(-1, string.Empty, TimedOut: true);
-        }
-        catch (OutputLimitExceededException ex)
-        {
-            return new ProcessRunResult(-1, ex.Message, TimedOut: false);
+            return new ProcessRunResult(-1, string.Empty, TimedOut: true) { StandardOutput = string.Empty, StandardError = string.Empty };
         }
     }
 
