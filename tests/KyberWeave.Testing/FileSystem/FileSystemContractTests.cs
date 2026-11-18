@@ -106,6 +106,19 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void DeleteTreeNoFollowRemovesADanglingLinkItself()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string dangling = At(root, "dangling");
+        files.CreateDirectoryLink(dangling, At(root, "missing-target"));
+        Assert.Contains(files.EnumerateEntries(root), entry => entry.Path == dangling && entry.IsLink);
+
+        files.DeleteTreeNoFollow(dangling);
+
+        Assert.DoesNotContain(files.EnumerateEntries(root), entry => entry.Path == dangling);
+    }
+
+    [Fact]
     public void CreateDirectoryCreatesMissingParents()
     {
         IWritableFileSystem files = Starting(out string root);

@@ -245,15 +245,17 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
         }
     }
 
-    private static bool IsLink(string path)
-    {
-        FileSystemInfo info = new FileInfo(path);
-        return info.LinkTarget is not null || new DirectoryInfo(path).LinkTarget is not null;
-    }
+    private static bool IsLink(string path) =>
+        IsLink(new FileInfo(path)) || IsLink(new DirectoryInfo(path));
 
-    /// <summary>A link is removed as a link, so its target survives whether it names a file or a directory.</summary>
+    /// <summary>
+    /// A link is removed as a link, so its target survives whether it names a file or a directory. Checked through
+    /// both <see cref="FileSystemInfo.LinkTarget"/> and the reparse-point attribute: a Windows junction or another
+    /// reparse point need not report a link target.
+    /// </summary>
     private static bool IsLink(FileSystemInfo? entry) =>
-        entry is not null && (entry.LinkTarget is not null || entry.Attributes.HasFlag(FileAttributes.ReparsePoint));
+        entry is not null &&
+        (entry.LinkTarget is not null || (entry.Exists && entry.Attributes.HasFlag(FileAttributes.ReparsePoint)));
 
     private static void DeleteLinkEntry(string path)
     {
