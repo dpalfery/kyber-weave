@@ -133,23 +133,7 @@ public sealed record ArbiterSnapshot(
 /// </summary>
 /// <param name="Root">The directory the run works in: its worktree, or the checkout it branched in place.</param>
 /// <param name="StartedAt">When <c>run start</c> recorded the run; null when the record carries no time.</param>
-public sealed record ArbiterRunScope(string Root, DateTimeOffset? StartedAt)
-{
-    /// <summary>
-    /// Whether a pre event belongs to this run: it was recorded after the run started and names this run's
-    /// directory. An event that names no run (written before the field existed, or evaluated outside any run)
-    /// is placed by its time alone.
-    /// </summary>
-    /// <param name="pre">The pre event.</param>
-    public bool Includes(ArbiterLedgerEvent pre)
-    {
-        ArgumentNullException.ThrowIfNull(pre);
-        return (StartedAt is null || pre.At >= StartedAt)
-            && (pre.Run is null || string.Equals(Normalize(pre.Run), Normalize(Root), StringComparison.Ordinal));
-    }
-
-    private static string Normalize(string path) => path.Replace('\\', '/').TrimEnd('/');
-}
+public sealed record ArbiterRunScope(string Root, DateTimeOffset? StartedAt);
 
 /// <summary>The markers a hook read from a dispatch output.</summary>
 /// <param name="TaskReview">The <c>task-review</c> marker: <c>PASS</c> or <c>FAIL</c> from <c>^RESULT:\s+(PASS|FAIL)\b</c>.</param>

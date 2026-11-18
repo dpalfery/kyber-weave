@@ -231,8 +231,9 @@ sections it checked.
 section of `REVIEW.md`: a table of `Id`, `Finding class`, `Severity` (`critical`, `major`, `minor` or
 `nitpick`), `Applies to` (lens and technology names; empty for every seat) and `Why`. Precedence, as
 seats and the reviewer read it: host override, then the lens's shipped severity guidance, then the
-general definitions. An override changes the grade up or down. `SeverityOverrides`
-(`src/KyberWeave.Domain/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
+general definitions. An override changes the grade up or down. `SeverityOverrideRules`
+(`src/KyberWeave.Application/Review/SeverityOverrideRules.cs`) is the one reader, and it fills `SeverityOverrides`
+(`src/KyberWeave.Domain/Review/SeverityOverrides.cs`); an absent file or section is
 no rows, and rows inside an HTML comment or a code fence are examples, not rows.
 
 - **Delivery.** `review seats` writes into each packet only that seat's rows: unscoped rows, rows
