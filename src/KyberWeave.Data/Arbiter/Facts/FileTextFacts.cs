@@ -26,7 +26,7 @@ public sealed class FileTextFacts : IFileTextFacts
     /// past it is refused rather than finished, so one huge line costs at most this much. It is the document cap
     /// the section selector reads by.
     /// </summary>
-    private const long MaxConsumedCharacters = SectionSelector.MaxDocumentBytes;
+    private const long MaxConsumedCharacters = DocumentSection.MaxDocumentBytes;
 
     /// <summary>
     /// Reads the window around <paramref name="line"/> of <paramref name="path"/>.

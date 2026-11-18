@@ -1,6 +1,6 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Domain.FileSystem;
+using DomainDocsRootPath = KyberWeave.Domain.FileSystem.DocsRootPath;
 
 namespace KyberWeave.Core.Arbiter.Plans;
 
@@ -205,14 +205,14 @@ public static partial class PlanReadInstruction
 
     private static bool IsUnder(string path, string directory)
     {
-        if (DocsRootPath.PathComparer.Compare(path, directory) == 0)
+        if (DomainDocsRootPath.PathComparer.Compare(path, directory) == 0)
         {
             return true;
         }
 
         string prefix = directory + "/";
         return path.Length > prefix.Length
-               && DocsRootPath.PathComparer.Compare(path[..prefix.Length], prefix) == 0;
+               && DomainDocsRootPath.PathComparer.Compare(path[..prefix.Length], prefix) == 0;
     }
 
     /// <summary>One configured directory, without its separator or its prefix-glob suffix.</summary>
