@@ -941,7 +941,7 @@ public sealed class SquadCanonicalContentTests
     [Fact]
     public void NoSquadSourceEntryNamesOrQuotesRetiredTaskReviewer()
     {
-        string[] nameOffenders = Corpus.EnumerateFiles(ProductRoot)
+        string[] nameOffenders = CorpusTree.Entries(Corpus, ProductRoot)
             .Where(path => Path.GetFileName(path).Contains("task-reviewer", StringComparison.Ordinal))
             .ToArray();
         string[] textOffenders = Corpus.EnumerateFiles(ProductRoot)
