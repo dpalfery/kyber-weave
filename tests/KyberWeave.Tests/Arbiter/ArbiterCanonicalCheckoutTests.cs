@@ -11,6 +11,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Tests.RunStart;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -26,6 +27,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     private const string RuleId = "KW-ARB-CHECKOUT-001";
     private const string Branch = "copilot/feat/add-widget";
 
+    private readonly IRunCheckout _checkout = RunStartTestServices.Checkout();
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _parent = new();
     private readonly string _repo;
@@ -56,7 +58,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
 
-        string? refusal = RunCheckout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path);
+        string? refusal = _checkout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path);
 
         Assert.NotNull(refusal);
         Assert.StartsWith(RuleId, refusal, StringComparison.Ordinal);
@@ -68,8 +70,8 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
 
-        Assert.NotNull(RunCheckout.StrayWriteRefusal("src/New.cs", _repo, _home.Path));
-        Assert.Null(RunCheckout.StrayWriteRefusal("src/New.cs", _worktree, _home.Path));
+        Assert.NotNull(_checkout.StrayWriteRefusal("src/New.cs", _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal("src/New.cs", _worktree, _home.Path));
     }
 
     [Fact]
@@ -77,20 +79,20 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         StartInWorktree();
 
-        Assert.Null(RunCheckout.StrayWriteRefusal(Path.Combine(_worktree, "src", "Job.cs"), _repo, _home.Path));
-        Assert.Null(RunCheckout.StrayWriteRefusal(Path.Combine(_parent.Path, "scratch.txt"), _repo, _home.Path));
-        Assert.Null(RunCheckout.StrayWriteRefusal(Path.Combine(_home.Path, ".config", "x.yml"), _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal(Path.Combine(_worktree, "src", "Job.cs"), _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal(Path.Combine(_parent.Path, "scratch.txt"), _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal(Path.Combine(_home.Path, ".config", "x.yml"), _repo, _home.Path));
     }
 
     [Fact]
     public void Refusal_AllowsWhenNoRunIsLive()
     {
-        Assert.Null(RunCheckout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
 
         StartInWorktree();
         Git(_worktree, "switch", "-q", "--detach");
 
-        Assert.Null(RunCheckout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
     }
 
     [Fact]
@@ -99,7 +101,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         Git(_repo, "switch", "-q", "-c", Branch);
         Record(_repo);
 
-        Assert.Null(RunCheckout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
     }
 
     [Fact]
@@ -109,8 +111,8 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         Git(_repo, "worktree", "add", "-q", "-b", Branch, nested);
         Record(nested);
 
-        Assert.Null(RunCheckout.StrayWriteRefusal(Path.Combine(nested, "src", "Job.cs"), _repo, _home.Path));
-        Assert.NotNull(RunCheckout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
+        Assert.Null(_checkout.StrayWriteRefusal(Path.Combine(nested, "src", "Job.cs"), _repo, _home.Path));
+        Assert.NotNull(_checkout.StrayWriteRefusal(Path.Combine(_repo, "src", "Job.cs"), _repo, _home.Path));
     }
 
     [Fact]
@@ -356,7 +358,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     }
 
     private void Record(string worktree) =>
-        RunBaseState.Write(
+        RunStartTestServices.RunStateStore().Write(
             _home.Path,
             Branch,
             "origin/main",

@@ -1,5 +1,6 @@
 using System.Globalization;
 using KyberWeave.Application.Arbiter;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -14,7 +15,8 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 public sealed class ArbiterAuditCommand(
     IArbiterConfigResolver configs,
     IArbiterRepositoryLocator locator,
-    IArbiterAuditService audits) : Command<ArbiterSettings>
+    IArbiterAuditService audits,
+    IRepositoryFileStore files) : Command<ArbiterSettings>
 {
     /// <summary>A ledger event with no decision: the hook was killed, timed out or crashed after recording the event.</summary>
     public const string MissingDecision = ArbiterAuditService.MissingDecision;
@@ -88,13 +90,13 @@ public sealed class ArbiterAuditCommand(
         {
             // --plan takes the spellings the plan commands accept, so an agent that types a slug or a bare file name
             // still matches the repository-relative path the dispatch header carried.
-            if (!PlanArguments.TryResolve(repositoryRoot, config, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
+            if (!PlanArguments.TryResolve(repositoryRoot, config, files, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
             {
                 CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
                 return 1;
             }
 
-            matchesPlan = new PlanFilter(repositoryRoot, config, relative).Matches;
+            matchesPlan = new PlanFilter(repositoryRoot, config, relative, files).Matches;
         }
 
         if (audits.Audit(repositoryRoot, config, since, settings.Session, matchesPlan, report) is not { } audited)
@@ -121,9 +123,9 @@ public sealed class ArbiterAuditCommand(
         Execute(context, settings, CancellationToken.None);
 
     /// <summary>The plan <c>--plan</c> named, resolved to its repository-relative path, and the same resolution of a ledger event's plan file.</summary>
-    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative)
+    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative, IRepositoryFileStore files)
     {
-        private readonly PlanPathResolver _resolver = new(root, config);
+        private readonly PlanFileResolver _resolver = new(root, config, files);
         private readonly Dictionary<string, string> _seen = new(StringComparer.Ordinal);
 
         public bool Matches(string? eventPlan)

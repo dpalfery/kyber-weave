@@ -36,7 +36,6 @@
       assembly-wide, so it exposes every Core internal to them; reach for another only by stating why here.
     -->
     <InternalsVisibleTo Include="KyberWeave.Core.Squad" />
-    <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
   </ItemGroup>
 
 </Project>

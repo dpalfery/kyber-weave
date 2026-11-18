@@ -811,7 +811,7 @@ follows are in [the review council architecture](code-review/architecture.md#the
 ```yaml
 review:
   test-map:
-    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+    "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
 ```
 

@@ -43,7 +43,7 @@ title: DocGraph architecture
 doc-type: architecture
 status: current
 component: DocGraph
-source-root: src/KyberWeave.Core.Docs
+source-root: src/KyberWeave.Application/Docs
 owner: dpalfery
 last-reviewed: 2026-08-01
 code-refs:

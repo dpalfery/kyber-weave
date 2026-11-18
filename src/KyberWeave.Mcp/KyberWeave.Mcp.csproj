@@ -28,7 +28,6 @@
   <ItemGroup>
     <ProjectReference Include="..\KyberWeave.Application\KyberWeave.Application.csproj" />
     <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
-    <ProjectReference Include="..\KyberWeave.Core.Docs\KyberWeave.Core.Docs.csproj" />
   </ItemGroup>
 
   <ItemGroup>

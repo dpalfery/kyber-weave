@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
@@ -19,7 +20,8 @@ public sealed class DocsTasksCommand(
     IPlanTaskService tasks,
     IPlanTaskAgentPickerFactory pickers,
     IArbiterKeyService arbiterKeys,
-    IArbiterDryRunService arbiterDryRun) : Command<DocsTasksSettings>
+    IArbiterDryRunService arbiterDryRun,
+    IRepositoryFileStore files) : Command<DocsTasksSettings>
 {
     /// <summary>Both <c>--write</c> and <c>--check</c> were given; they ask for opposite things.</summary>
     public const string ConflictingModes = "KW-DOC-TASKS-CLI-001";
@@ -80,7 +82,7 @@ public sealed class DocsTasksCommand(
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, typed, settings.WorkingDirectory, "docs tasks", report, out string relative))
+        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs tasks", report, out string relative))
         {
             CommandHelpers.Finish(report, settings, "docs tasks", "Task file");
             return 1;

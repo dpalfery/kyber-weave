@@ -38,11 +38,21 @@ internal static class DocsTestCommands
         return services.AddWeaveApplication().BuildServiceProvider();
     }
 
-    public static DocsCloseoutCommand Closeout(IServiceProvider? services = null) =>
-        new((services ?? Services()).GetRequiredService<IPlanCloseoutService>());
+    public static DocsCloseoutCommand Closeout(IServiceProvider? services = null)
+    {
+        IServiceProvider provider = services ?? Services();
+        return new DocsCloseoutCommand(
+            provider.GetRequiredService<IPlanCloseoutService>(),
+            provider.GetRequiredService<IRepositoryFileStore>());
+    }
 
-    public static DocsFinalizeCommand Finalize(IServiceProvider? services = null) =>
-        new((services ?? Services()).GetRequiredService<IPlanFinalizeService>());
+    public static DocsFinalizeCommand Finalize(IServiceProvider? services = null)
+    {
+        IServiceProvider provider = services ?? Services();
+        return new DocsFinalizeCommand(
+            provider.GetRequiredService<IPlanFinalizeService>(),
+            provider.GetRequiredService<IRepositoryFileStore>());
+    }
 
     public static DocsValidateCommand Validate(IServiceProvider? services = null)
     {
@@ -60,7 +70,8 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IProcessEnvironment>(),
             provider.GetRequiredService<IPlanTaskTargetService>(),
             provider.GetRequiredService<ITaskGateSelectionService>(),
-            provider.GetRequiredService<ICodeGraphPortsFactory>());
+            provider.GetRequiredService<ICodeGraphPortsFactory>(),
+            provider.GetRequiredService<IRepositoryFileStore>());
     }
 
     public static DocsTasksCommand Tasks(IServiceProvider? services = null)
@@ -70,7 +81,8 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPlanTaskAgentPickerFactory>(),
             provider.GetRequiredService<IArbiterKeyService>(),
-            provider.GetRequiredService<IArbiterDryRunService>());
+            provider.GetRequiredService<IArbiterDryRunService>(),
+            provider.GetRequiredService<IRepositoryFileStore>());
     }
 
     public static IDocsSchemaGate SchemaGate => Services().GetRequiredService<IDocsSchemaGate>();

@@ -15,6 +15,7 @@ using KyberWeave.Tests.Fakes;
 using ModelContextProtocol.Server;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -876,7 +877,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
             _remote);
 
         string common = Path.GetFullPath(Path.Combine(_work, Git(_work, "rev-parse", "--git-common-dir").Trim()));
-        RunBaseState.Write(_home, Branch, "origin/main", new RunStartPlace(common, _work, DateTimeOffset.UtcNow.AddMinutes(-5)));
+        RunStartTestServices.RunStateStore().Write(_home, Branch, "origin/main", new RunStartPlace(common, _work, DateTimeOffset.UtcNow.AddMinutes(-5)));
     }
 
     private void Write(string relative, string text)

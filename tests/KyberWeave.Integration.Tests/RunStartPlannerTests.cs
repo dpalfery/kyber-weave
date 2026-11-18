@@ -34,6 +34,15 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class RunStartPlannerTests : IDisposable
 {
+    private static readonly KyberWeave.Contracts.Services.IRunStartEvidence Evidence =
+        new KyberWeave.Application.RunStart.RunStartEvidenceService(
+            new KyberWeave.Core.Arbiter.Facts.GitFacts(),
+            new KyberWeave.Data.RunStart.FileRunStateStore(
+                new KyberWeave.Data.Hooks.PhysicalFileSystem(),
+                new KyberWeave.Data.RunStart.GitCheckedOutBranchReader(
+                    new KyberWeave.Data.RunStart.ProcessGitCommandRunner(
+                        KyberWeave.Data.RunStart.ProcessGitCommandRunner.DefaultTimeout))));
+
     private readonly RunStartProbe _probe = RunStartProbe.Create();
 
     public void Dispose()
@@ -164,13 +173,13 @@ public sealed class RunStartPlannerTests : IDisposable
     {
         if (busy)
             _probe.AddLinkedWorktree("spare");
-        Assert.False(RunStartEvidence.Started(_probe.Root, _probe.Home));
+        Assert.False(Evidence.Started(_probe.Root, _probe.Home));
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0. {result.Output}");
         Assert.True(
-            RunStartEvidence.Started(_probe.Root, _probe.Home),
+            Evidence.Started(_probe.Root, _probe.Home),
             $"run start must leave a record the guard reads as a live run. {result.Output}");
     }
 

@@ -1,6 +1,10 @@
+using KyberWeave.Application.RunStart;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.RunStart;
+using KyberWeave.Tests.RunStart;
 using KyberWeave.Core.Arbiter.Plans;
 using System.Diagnostics;
 using System.Text.Json;
@@ -23,6 +27,9 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
 {
     private const string RuleId = "KW-ARB-RUN-001";
     private const string Branch = "copilot/feat/add-widget";
+
+    private readonly IRunStateStore _runState = RunStartTestServices.RunStateStore();
+    private readonly IRunStartEvidence _evidence = RunStartTestServices.Evidence();
 
     private readonly TempDirectory _home = new();
     private readonly TempDirectory _repoParent = new();
@@ -49,7 +56,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     [Fact]
     public void NoRunRecord_IsNotStarted()
     {
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(_evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
@@ -57,7 +64,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     {
         StartInPlace();
 
-        Assert.True(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.True(_evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
@@ -67,8 +74,8 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         Git(_repo, "worktree", "add", "-q", "-b", Branch, worktree);
         Record(worktree);
 
-        Assert.True(RunStartEvidence.Started(_repo, _home.Path));
-        Assert.True(RunStartEvidence.Started(worktree, _home.Path));
+        Assert.True(_evidence.Started(_repo, _home.Path));
+        Assert.True(_evidence.Started(worktree, _home.Path));
     }
 
     [Fact]
@@ -77,43 +84,43 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
         StartInPlace();
         Git(_repo, "switch", "-q", "main");
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(_evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
     public void ARunWhoseWorktreeIsGone_IsNotStarted()
     {
-        RunBaseState.Write(
+        _runState.Write(
             _home.Path, Branch, "origin/main",
             new RunStartPlace(CommonDir(), Path.Combine(_repoParent.Path, "gone"), DateTimeOffset.UtcNow));
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(_evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
     public void ARunOfAnotherRepository_DoesNotCount()
     {
         Git(_repo, "switch", "-q", "-c", Branch);
-        RunBaseState.Write(
+        _runState.Write(
             _home.Path, Branch, "origin/main",
             new RunStartPlace(Path.Combine(_repoParent.Path, "other", ".git"), _repo, DateTimeOffset.UtcNow));
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(_evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
     public void ARecordFromBeforeThePlaceWasRecorded_IsSkipped()
     {
         Git(_repo, "switch", "-q", "-c", Branch);
-        RunBaseState.Write(_home.Path, Branch, "origin/main");
+        _runState.Write(_home.Path, Branch, "origin/main");
 
-        Assert.False(RunStartEvidence.Started(_repo, _home.Path));
+        Assert.False(_evidence.Started(_repo, _home.Path));
     }
 
     [Fact]
     public void ADirectoryOutsideAnyRepository_IsUnknown()
     {
-        Assert.Null(RunStartEvidence.Started(_home.Path, _home.Path));
+        Assert.Null(_evidence.Started(_home.Path, _home.Path));
     }
 
     [Fact]
@@ -261,7 +268,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
             1,
             [new ArbiterEnvelopeEntry(RuleId, "q", new ArbiterAnswerText("not-started (step 0)"), "e")]);
 
-        Assert.Equal(RunStartEvidence.Remedy, next);
+        Assert.Equal(RunStartEvidenceRules.Remedy, next);
     }
 
     private static ArbiterRule Rule() =>
@@ -319,7 +326,7 @@ public sealed class ArbiterRunStartGuardTests : IDisposable
     }
 
     private void Record(string worktree) =>
-        RunBaseState.Write(_home.Path, Branch, "origin/main", new RunStartPlace(CommonDir(), worktree, DateTimeOffset.UtcNow));
+        _runState.Write(_home.Path, Branch, "origin/main", new RunStartPlace(CommonDir(), worktree, DateTimeOffset.UtcNow));
 
     private string CommonDir() => new GitFacts().GetCommonDirectory(_repo) ?? throw new InvalidOperationException("no git dir");
 

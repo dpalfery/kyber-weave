@@ -9,7 +9,7 @@ using Xunit;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// <see cref="TaskGateSelection.Plan"/> is public, and it is the last decision made before a gate
+/// <see cref="ITaskGateSelectionService.Plan"/> is the last decision made before a gate
 /// process starts. Its inputs are checked rather than trusted: an operating system it does not know
 /// fails closed, and a gate with no program to run is a refusal naming that gate, never an exception
 /// that takes the other gates down with it.
@@ -18,10 +18,26 @@ public sealed class TaskGateSelectionTests
 {
     private static readonly string[] Changed = ["src/KyberWeave.Core/Review/PathGlob.cs"];
 
+    private const string Service = "src/KyberWeave.Application/Review/TaskGateSelectionService.cs";
+    private const string SuppressionScan = "src/KyberWeave.Domain/Review/SuppressionScan.cs";
+
+    private static readonly Dictionary<string, IReadOnlyList<string>> TestMap = new(StringComparer.Ordinal)
+    {
+        [Service] = ["KyberWeave.Tests.TaskGateSelectionTests"],
+        [SuppressionScan] = ["KyberWeave.Tests.SuppressionScanTests"],
+    };
+
     private static ITaskGateSelectionService GateSelection(ITestClassSources? sources = null) =>
         new TaskGateSelectionService(
             new FakeRepositoryTreeProbe(),
-            sources ?? new FakeTestClassSources());
+            sources ?? new FakeTestClassSources
+            {
+                SourcesByName = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["TaskGateSelectionTests"] = "/repo/tests/KyberWeave.Tests/TaskGateSelectionTests.cs",
+                    ["SuppressionScanTests"] = "/repo/tests/KyberWeave.Tests/SuppressionScanTests.cs",
+                },
+            });
 
     [Theory]
     [InlineData("macos")]
@@ -34,7 +50,7 @@ public sealed class TaskGateSelectionTests
         ReviewTaskGate gate = FormatGate();
 
         ArgumentException ex =
-            Assert.ThrowsAny<ArgumentException>(() => TaskGateSelection.Plan([gate], Changed, null, currentOs));
+            Assert.ThrowsAny<ArgumentException>(() => GateSelection().Plan([gate], Changed, null, currentOs));
 
         Assert.Equal("currentOs", ex.ParamName);
     }
@@ -44,7 +60,7 @@ public sealed class TaskGateSelectionTests
     [InlineData("unix")]
     public void WindowsAndUnixAreTheOnlyHostsThatPlanAGate(string currentOs)
     {
-        TaskGatePlan plan = TaskGateSelection.Plan([FormatGate()], Changed, null, currentOs);
+        TaskGatePlan plan = GateSelection().Plan([FormatGate()], Changed, null, currentOs);
 
         Assert.Empty(plan.Refusals);
         Assert.Single(plan.Gates);
@@ -55,7 +71,7 @@ public sealed class TaskGateSelectionTests
     {
         ReviewTaskGate declared = FormatGate() with { FailOnOutput = true };
 
-        TaskGatePlan plan = TaskGateSelection.Plan([declared, FormatGate() with { Id = "other" }], Changed, null, "unix");
+        TaskGatePlan plan = GateSelection().Plan([declared, FormatGate() with { Id = "other" }], Changed, null, "unix");
 
         Assert.True(plan.Gates[0].FailOnOutput);
         Assert.False(plan.Gates[1].FailOnOutput);
@@ -66,7 +82,7 @@ public sealed class TaskGateSelectionTests
     {
         ReviewTaskGate broken = new("broken-gate", ["**/*.cs"], null, [], [], true, 900);
 
-        TaskGatePlan plan = TaskGateSelection.Plan([broken, FormatGate()], Changed, null, "unix");
+        TaskGatePlan plan = GateSelection().Plan([broken, FormatGate()], Changed, null, "unix");
 
         string refusal = Assert.Single(plan.Refusals);
         Assert.Contains("'broken-gate'", refusal, StringComparison.Ordinal);
@@ -86,7 +102,7 @@ public sealed class TaskGateSelectionTests
     {
         ReviewTaskGate gate = DotnetBuildGate();
 
-        TaskGatePlan plan = TaskGateSelection.Plan([gate], Changed, null, "unix");
+        TaskGatePlan plan = GateSelection().Plan([gate], Changed, null, "unix");
 
         string refusal = Assert.Single(plan.Refusals);
         Assert.Contains("'dotnet-build'", refusal, StringComparison.Ordinal);
@@ -105,8 +121,8 @@ public sealed class TaskGateSelectionTests
     {
         ReviewTaskGate gate = DotnetBuildGate();
 
-        TaskGatePlan alpha = TaskGateSelection.Plan([gate], Changed, "t5-alpha", "unix");
-        TaskGatePlan beta = TaskGateSelection.Plan([gate], Changed, "t5-beta", "unix");
+        TaskGatePlan alpha = GateSelection().Plan([gate], Changed, "t5-alpha", "unix");
+        TaskGatePlan beta = GateSelection().Plan([gate], Changed, "t5-beta", "unix");
 
         Assert.Empty(alpha.Refusals);
         Assert.Empty(beta.Refusals);
@@ -128,8 +144,8 @@ public sealed class TaskGateSelectionTests
     [Fact]
     public void TheTestsTokenExpandsToTheFullyQualifiedClassThatCoversTheChange()
     {
-        TaskGatePlan plan = TaskGateSelection.Plan(
-            [TestsGate()], ["src/KyberWeave.Core/Review/TaskGateSelection.cs"], null, "unix");
+        TaskGatePlan plan = GateSelection().Plan(
+            [TestsGate()], [Service], null, "unix", testMap: TestMap);
 
         PlannedTaskGate gate = Assert.Single(plan.Gates);
         string argv = string.Join(" ", gate.Run);
@@ -141,7 +157,7 @@ public sealed class TaskGateSelectionTests
     [Fact]
     public void ClassesThePlanDeclaresFillTheTestsTokenEvenWhenNoTestFileExistsYet()
     {
-        TaskGatePlan plan = TaskGateSelection.Plan(
+        TaskGatePlan plan = GateSelection().Plan(
             [TestsGate()], ["src/KyberWeave.Cli/Program.cs"], null, "unix", declaredClasses: ["Acme.Tests.OrdersTests", "Acme.Tests.CartTests"]);
 
         PlannedTaskGate gate = Assert.Single(plan.Gates);
@@ -160,8 +176,8 @@ public sealed class TaskGateSelectionTests
             true,
             900);
 
-        TaskGatePlan plan = TaskGateSelection.Plan(
-            [gate], ["src/KyberWeave.Core/Review/TaskGateSelection.cs"], "my-task", "unix");
+        TaskGatePlan plan = GateSelection().Plan(
+            [gate], [Service], "my-task", "unix", testMap: TestMap);
 
         PlannedTaskGate plannedGate = Assert.Single(plan.Gates);
         string filterArg = plannedGate.Run[3];
@@ -180,7 +196,7 @@ public sealed class TaskGateSelectionTests
     [Fact]
     public void AChangeNoTestClassCoversSkipsTheTestsGateRatherThanRunningAnEmptyFilter()
     {
-        TaskGatePlan plan = TaskGateSelection.Plan(
+        TaskGatePlan plan = GateSelection().Plan(
             [TestsGate()], ["src/KyberWeave.Cli/Program.cs"], null, "unix");
 
         Assert.True(
@@ -200,8 +216,8 @@ public sealed class TaskGateSelectionTests
     [Fact]
     public void TheSuppressionScanResolvesToAUnitClass()
     {
-        TaskGatePlan plan = TaskGateSelection.Plan(
-            [TestsGate()], ["src/KyberWeave.Domain/Review/SuppressionScan.cs"], null, "unix");
+        TaskGatePlan plan = GateSelection().Plan(
+            [TestsGate()], [SuppressionScan], null, "unix", testMap: TestMap);
 
         PlannedTaskGate gate = Assert.Single(plan.Gates);
         Assert.Contains("KyberWeave.Tests.SuppressionScanTests", string.Join(" ", gate.Run), StringComparison.Ordinal);
@@ -211,7 +227,7 @@ public sealed class TaskGateSelectionTests
     public void AnInaccessibleOrMissingRootRefusesThePlan()
     {
         ReviewTaskGate gate = FormatGate();
-        TaskGatePlan plan = TaskGateSelection.Plan([gate], Changed, null, "unix", "non_existent_directory_xyz");
+        TaskGatePlan plan = GateSelection().Plan([gate], Changed, null, "unix", "non_existent_directory_xyz");
 
         string refusal = Assert.Single(plan.Refusals);
         Assert.Contains("non_existent_directory_xyz", refusal, StringComparison.Ordinal);
@@ -264,9 +280,9 @@ public sealed class TaskGateSelectionTests
             900);
 
         // Changed contains both a .props file (no covering test) and a .cs file (has covering test)
-        TaskGatePlan plan = TaskGateSelection.Plan(
+        TaskGatePlan plan = GateSelection().Plan(
             [propsGate],
-            ["Directory.Build.props", "src/KyberWeave.Core/Review/TaskGateSelection.cs"],
+            ["Directory.Build.props", Service],
             null,
             "unix");
 

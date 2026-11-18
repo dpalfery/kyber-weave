@@ -10,7 +10,7 @@ namespace KyberWeave.Tests;
 /// Application above those, and entry apps that never see Data.
 /// </summary>
 /// <remarks>
-/// The legacy engine assemblies (<c>KyberWeave.Core</c>, <c>.Core.Docs</c>, <c>.Core.Squad</c>) are
+/// The legacy engine assemblies (<c>KyberWeave.Core</c>, <c>.Core.Squad</c>) are
 /// being drained into the layers. Layers never reference them; the entry apps may, until the
 /// last type has moved. <see cref="LegacyReferenceBaseline"/> can only shrink.
 /// </remarks>
@@ -18,7 +18,7 @@ public sealed class LayerReferenceTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string[] LegacyProjects = ["KyberWeave.Core", "KyberWeave.Core.Docs", "KyberWeave.Core.Squad"];
+    private static readonly string[] LegacyProjects = ["KyberWeave.Core", "KyberWeave.Core.Squad"];
 
     /// <summary>Each layer and the only repository projects it may reference.</summary>
     public static TheoryData<string, string[]> LayerReferences => new()
@@ -38,8 +38,8 @@ public sealed class LayerReferenceTests
     /// <summary>Legacy references an entry app still holds. Remove an entry when the reference is dropped; never add one.</summary>
     private static readonly Dictionary<string, string[]> LegacyReferenceBaseline = new(StringComparer.Ordinal)
     {
-        ["KyberWeave.Cli"] = ["KyberWeave.Core", "KyberWeave.Core.Docs", "KyberWeave.Core.Squad"],
-        ["KyberWeave.Mcp"] = ["KyberWeave.Core", "KyberWeave.Core.Docs"],
+        ["KyberWeave.Cli"] = ["KyberWeave.Core", "KyberWeave.Core.Squad"],
+        ["KyberWeave.Mcp"] = ["KyberWeave.Core"],
         ["KyberWeave.Arbiter"] = ["KyberWeave.Core"],
         ["KyberWeave.Hooks"] = []
     };

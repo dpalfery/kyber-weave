@@ -380,7 +380,7 @@ review:
   # against the tree before it is used, and a change nothing covers skips the gate with
   # KW-REVIEW-026 rather than running a filter that matches nothing and exits 0.
   test-map:
-    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+    "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
     "src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs":
       - KyberWeave.Tests.ReviewTaskGatesConfigTests

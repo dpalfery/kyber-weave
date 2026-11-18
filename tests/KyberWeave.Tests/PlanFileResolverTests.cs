@@ -1,4 +1,5 @@
 using KyberWeave.Core.Configuration;
+using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Core.Docs.Closeout;
 using Xunit;
 
@@ -8,14 +9,14 @@ namespace KyberWeave.Tests;
 /// The shared plan argument resolver. The host's docs root is <c>handbook</c>, not <c>docs</c>, so a spelling that
 /// only works against the product default fails here.
 /// </summary>
-public sealed class PlanPathResolverTests : IDisposable
+public sealed class PlanFileResolverTests : IDisposable
 {
     private const string Plan = "handbook/plans/2026-11-13-job-status-cards.md";
     private const string TasksFile = "handbook/specs/search/tasks.md";
     private readonly string _root = Path.Combine(Path.GetTempPath(), "kw-planref-" + Guid.NewGuid().ToString("N"));
-    private readonly PlanPathResolver _resolver;
+    private readonly PlanFileResolver _resolver;
 
-    public PlanPathResolverTests()
+    public PlanFileResolverTests()
     {
         Write(".git/HEAD", "ref: refs/heads/main\n");
         Write(Plan, "# plan\n");
@@ -25,7 +26,7 @@ public sealed class PlanPathResolverTests : IDisposable
         Write("handbook/archive/plans/2026-10-01-job-status-cards.md", "# archived\n");
         Write(TasksFile, "# tasks\n");
         KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: handbook\n");
-        _resolver = new PlanPathResolver(_root, config);
+        _resolver = new PlanFileResolver(_root, config, new PhysicalRepositoryFileStore());
     }
 
     public void Dispose()

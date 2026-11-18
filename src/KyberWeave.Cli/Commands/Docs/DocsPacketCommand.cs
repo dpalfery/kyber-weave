@@ -26,7 +26,8 @@ public sealed class DocsPacketCommand(
     IProcessEnvironment environment,
     IPlanTaskTargetService targets,
     ITaskGateSelectionService taskGates,
-    ICodeGraphPortsFactory codeGraph) : Command<DocsPacketSettings>
+    ICodeGraphPortsFactory codeGraph,
+    IRepositoryFileStore repositoryFiles) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -179,7 +180,7 @@ public sealed class DocsPacketCommand(
     {
         if (settings.Plan is not null)
         {
-            return PlanArguments.TryResolve(root, config, settings.Plan, current, "docs packet", report, out string relative)
+            return PlanArguments.TryResolve(root, config, repositoryFiles, settings.Plan, current, "docs packet", report, out string relative)
                 ? relative
                 : null;
         }

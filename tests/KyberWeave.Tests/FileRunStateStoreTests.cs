@@ -1,5 +1,7 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Tests.RunStart;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -9,9 +11,10 @@ namespace KyberWeave.Tests;
 /// branch-keyed file under the operator's home, so a later dispatch hook can measure the
 /// review from the same base instead of guessing <c>origin/HEAD</c>.
 /// </summary>
-public sealed class RunBaseStateTests : IDisposable
+public sealed class FileRunStateStoreTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
+    private readonly IRunStateStore _state = RunStartTestServices.RunStateStore();
 
     public void Dispose()
     {
@@ -24,10 +27,10 @@ public sealed class RunBaseStateTests : IDisposable
     [Fact]
     public void AWrittenBaseRefReadsBack()
     {
-        RunBaseState.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/main");
+        _state.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/main");
 
         Assert.True(
-            RunBaseState.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef),
+            _state.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef),
             "a recorded base ref must read back.");
         Assert.Equal("origin/main", baseRef);
     }
@@ -40,7 +43,7 @@ public sealed class RunBaseStateTests : IDisposable
     public void AMissingStateReadsAbsent()
     {
         Assert.False(
-            RunBaseState.TryReadBaseRef(_temp.Path, "claude/fix/never-started", out string? baseRef),
+            _state.TryReadBaseRef(_temp.Path, "claude/fix/never-started", out string? baseRef),
             "a branch with no recorded run must read absent.");
         Assert.Null(baseRef);
     }
@@ -52,7 +55,7 @@ public sealed class RunBaseStateTests : IDisposable
     [Fact]
     public void ASlashedBranchNameStaysASingleFile()
     {
-        string path = RunBaseState.StatePath(_temp.Path, "claude/fix/tighten-the-gate");
+        string path = RunBaseStateFormat.StatePath(_temp.Path, "claude/fix/tighten-the-gate");
 
         Assert.Equal(Path.Combine(_temp.Path, ".kyber-weave", "runs"), Path.GetDirectoryName(path));
         Assert.False(
@@ -67,11 +70,11 @@ public sealed class RunBaseStateTests : IDisposable
     [Fact]
     public void ALaterWriteReplacesTheEarlierBaseRef()
     {
-        RunBaseState.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/main");
-        RunBaseState.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/develop");
+        _state.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/main");
+        _state.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/develop");
 
         Assert.True(
-            RunBaseState.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef),
+            _state.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef),
             "a re-recorded base ref must read back.");
         Assert.Equal("origin/develop", baseRef);
     }
@@ -83,14 +86,14 @@ public sealed class RunBaseStateTests : IDisposable
     [Fact]
     public void ACollidingBranchNameKeepsItsOwnRecord()
     {
-        RunBaseState.Write(_temp.Path, "a/b", "origin/main");
-        RunBaseState.Write(_temp.Path, "a-b", "origin/develop");
+        _state.Write(_temp.Path, "a/b", "origin/main");
+        _state.Write(_temp.Path, "a-b", "origin/develop");
 
         Assert.True(
-            RunBaseState.TryReadBaseRef(_temp.Path, "a/b", out string? first),
+            _state.TryReadBaseRef(_temp.Path, "a/b", out string? first),
             "a slashed branch must keep its own record.");
         Assert.True(
-            RunBaseState.TryReadBaseRef(_temp.Path, "a-b", out string? second),
+            _state.TryReadBaseRef(_temp.Path, "a-b", out string? second),
             "a dashed branch must keep its own record.");
         Assert.Equal("origin/main", first);
         Assert.Equal("origin/develop", second);
@@ -102,11 +105,11 @@ public sealed class RunBaseStateTests : IDisposable
     [Fact]
     public void ACorruptStateFileReadsAbsent()
     {
-        RunBaseState.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/main");
-        File.WriteAllText(RunBaseState.StatePath(_temp.Path, "claude/fix/tighten-the-gate"), "{nope");
+        _state.Write(_temp.Path, "claude/fix/tighten-the-gate", "origin/main");
+        File.WriteAllText(RunBaseStateFormat.StatePath(_temp.Path, "claude/fix/tighten-the-gate"), "{nope");
 
         Assert.False(
-            RunBaseState.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out _),
+            _state.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out _),
             "a corrupt state file must read absent, not throw.");
     }
 }

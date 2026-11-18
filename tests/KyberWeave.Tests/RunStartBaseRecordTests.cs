@@ -1,6 +1,8 @@
 using KyberWeave.Application.RunStart;
 using KyberWeave.Cli.Commands.Run;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.RunStart;
+using KyberWeave.Tests.RunStart;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -12,6 +14,7 @@ namespace KyberWeave.Tests;
 public sealed class RunStartBaseRecordTests : IDisposable
 {
     private readonly TempDirectory _temp = new();
+    private readonly IRunStateStore _state = RunStartTestServices.RunStateStore();
 
     public void Dispose()
     {
@@ -22,9 +25,9 @@ public sealed class RunStartBaseRecordTests : IDisposable
     [Fact]
     public void ARecordedBaseReadsBack()
     {
-        Assert.True(RunStartService.RecordBase(RunBaseState.Store, _temp.Path, "claude/fix/tighten-the-gate", "origin/main"));
+        Assert.True(RunStartService.RecordBase(_state, _temp.Path, "claude/fix/tighten-the-gate", "origin/main"));
         Assert.True(
-            RunBaseState.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef));
+            _state.TryReadBaseRef(_temp.Path, "claude/fix/tighten-the-gate", out string? baseRef));
         Assert.Equal("origin/main", baseRef);
     }
 
@@ -35,6 +38,6 @@ public sealed class RunStartBaseRecordTests : IDisposable
     [Fact]
     public void ABlankHomeSkipsTheRecord()
     {
-        Assert.False(RunStartService.RecordBase(RunBaseState.Store, "  ", "claude/fix/tighten-the-gate", "origin/main"));
+        Assert.False(RunStartService.RecordBase(_state, "  ", "claude/fix/tighten-the-gate", "origin/main"));
     }
 }

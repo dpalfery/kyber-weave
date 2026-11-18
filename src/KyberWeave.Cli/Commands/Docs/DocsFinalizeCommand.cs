@@ -1,4 +1,5 @@
 using System.Globalization;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -11,7 +12,7 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Does the mechanical half of finalizing an approved Draft plan: records the approval, sets the plan and its index
 /// row to Ready and writes its task file. The same step the docs server's finalize tool runs.
 /// </summary>
-public sealed class DocsFinalizeCommand(IPlanFinalizeService finalize) : Command<DocsFinalizeSettings>
+public sealed class DocsFinalizeCommand(IPlanFinalizeService finalize, IRepositoryFileStore files) : Command<DocsFinalizeSettings>
 {
     /// <summary>A <c>--date</c> or <c>--approval-mode</c> value is not usable.</summary>
     public const string InvalidOption = "KW-DOC-FINALIZE-007";
@@ -51,7 +52,7 @@ public sealed class DocsFinalizeCommand(IPlanFinalizeService finalize) : Command
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, typed, settings.WorkingDirectory, "docs finalize", report, out string relative))
+        if (!PlanArguments.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs finalize", report, out string relative))
         {
             CommandHelpers.Finish(report, settings, "docs finalize", "Plan");
             return 1;

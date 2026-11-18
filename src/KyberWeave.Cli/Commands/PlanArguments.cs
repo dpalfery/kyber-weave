@@ -10,7 +10,7 @@ namespace KyberWeave.Cli.Commands;
 
 /// <summary>
 /// How a command that takes a plan or specification argument turns it into a file: find the repository, then let the
-/// shared <see cref="PlanPathResolver"/> accept whichever spelling the caller typed.
+/// shared <see cref="PlanFileResolver"/> accept whichever spelling the caller typed.
 /// </summary>
 internal static class PlanArguments
 {
@@ -41,6 +41,7 @@ internal static class PlanArguments
     /// </summary>
     /// <param name="root">The repository root.</param>
     /// <param name="config">The effective configuration, which says where plans live.</param>
+    /// <param name="files">Probes the planning folders.</param>
     /// <param name="argument">What the caller typed.</param>
     /// <param name="workingDirectory">The directory a relative argument is read against; null for the current one.</param>
     /// <param name="subject">The command name the finding is reported under.</param>
@@ -49,6 +50,7 @@ internal static class PlanArguments
     public static bool TryResolve(
         string root,
         KyberWeaveConfig config,
+        IRepositoryFileStore files,
         string argument,
         string? workingDirectory,
         string subject,
@@ -56,7 +58,7 @@ internal static class PlanArguments
         out string relative)
     {
         string current = Path.GetFullPath(workingDirectory ?? Directory.GetCurrentDirectory());
-        PlanPathResolution resolution = new PlanPathResolver(root, config).Resolve(argument, current);
+        PlanPathResolution resolution = new PlanFileResolver(root, config, files).Resolve(argument, current);
         if (resolution.Found)
         {
             relative = resolution.Path!;

@@ -4,7 +4,7 @@ title: Review council architecture
 doc-type: architecture
 status: current
 component: ReviewCouncil
-source-root: src/KyberWeave.Core/Review
+source-root: src/KyberWeave.Application/Review
 owner: dpalfery
 last-reviewed: 2026-11-17
 decided-by:
@@ -24,8 +24,8 @@ code-refs:
   - ReviewConfig
   - ReviewConfigParser
   - ReviewTaskGate
-  - TaskGateSelection
-  - GateCatalogue
+  - TaskGateSelectionService
+  - GateCatalogueRenderer
   - ProjectRootDetection
   - ReviewBlockWriter
   - ReviewCatalogueCommand
@@ -605,7 +605,7 @@ review:
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 
 Both `run` and `fix` are argv for the same reason `review.gates` is. Three tokens expand, and only
-in `TaskGateSelection`: `{changed}` must be an entire list element and becomes one argument per
+in `TaskGateSelectionService`: `{changed}` must be an entire list element and becomes one argument per
 changed file the gate's `include` matches; `{task}` is the `--task` slug and may sit inside an
 argument; `{tests}` is the fully qualified test classes that cover the change, described under
 [the tests a task gate runs](#the-tests-a-task-gate-runs). The program, the first element of
@@ -694,7 +694,7 @@ third token. `{tests}` expands in the same step `{changed}` and `{task}` do, and
 ```yaml
 review:
   test-map:
-    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+    "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
   task-gates:
     csharp-dev:
@@ -969,7 +969,7 @@ id, a non-slug id, a missing or empty `run`, a non-positive timeout, or an unrec
 ### The shipped gate catalogue
 
 `kyber-weave docs init` does not invent per-technology gates. It renders them
-(`ReviewBlockWriter`, planned from `GateCatalogue`) from five embedded families, one per
+(`ReviewBlockWriter`, planned from `GateCatalogueRenderer`) from five embedded families, one per
 version-1 technology set:
 
 | Family | Technologies | Root marker | Nesting | Notes |
