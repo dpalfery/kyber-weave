@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Domain.Doctor;
@@ -22,7 +23,10 @@ namespace KyberWeave.Application.Doctor;
 ///         first error line, truncated, and the environment is never read or shown.
 ///     </para>
 /// </remarks>
-public sealed partial class McpServerLiveProbe(IMcpStdioSessionFactory sessions)
+public sealed partial class McpServerLiveProbe(
+    IMcpStdioSessionFactory sessions,
+    IPathResolver paths,
+    IProcessEnvironment environment)
 {
     /// <summary>
     ///     The metadata the provenance line carries after the root path, as <c>key=value</c> tokens:
@@ -136,7 +140,7 @@ public sealed partial class McpServerLiveProbe(IMcpStdioSessionFactory sessions)
         return $"kyber-weave doctor --check --mcp-timeout {suggested}";
     }
 
-    private static void Exchange(IMcpStdioSession session, string root, DoctorOptions options, List<DoctorCheck> checks)
+    private void Exchange(IMcpStdioSession session, string root, DoctorOptions options, List<DoctorCheck> checks)
     {
         string budget = Seconds(options.McpTimeout);
 
@@ -205,7 +209,7 @@ public sealed partial class McpServerLiveProbe(IMcpStdioSessionFactory sessions)
         checks.Add(CheckRoot(text, root));
     }
 
-    private static DoctorCheck CheckRoot(string text, string root)
+    private DoctorCheck CheckRoot(string text, string root)
     {
         int index = text.IndexOf(ProvenancePrefix, StringComparison.Ordinal);
         if (index < 0)
@@ -361,8 +365,8 @@ public sealed partial class McpServerLiveProbe(IMcpStdioSessionFactory sessions)
     private static string Truncate(string text) =>
         text.Length > MaxDetailLength ? text[..MaxDetailLength] + "..." : text;
 
-    private static string Normalise(string path) =>
-        Path.GetFullPath(path).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+    private string Normalise(string path) =>
+        paths.GetFullPath(path, environment.CurrentDirectory).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
     /// <summary>
     ///     Whether the two paths name the same directory, where either may have come from the child.
@@ -371,7 +375,7 @@ public sealed partial class McpServerLiveProbe(IMcpStdioSessionFactory sessions)
     ///     The served root is server-controlled text, so a value the platform cannot canonicalise — one holding a
     ///     NUL, for instance — must fail the check rather than throw out of the probe.
     /// </remarks>
-    private static bool SamePath(string left, string right)
+    private bool SamePath(string left, string right)
     {
         try
         {
