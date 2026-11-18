@@ -136,7 +136,7 @@ public sealed class PlanTaskFileValidatorTests
     private static DiagnosticReport ValidateScope(DocFixture fixture, OntologyConfig ontology) =>
         new PlanTaskFileValidator(
             fixture.Root,
-            KyberWeaveConfig.ProductDefaults.WithOntology(ontology),
+            KyberWeaveConfigDefaults.Product.WithOntology(ontology),
             DocsPorts.Files).Validate(fixture.Load());
 
     [Fact]
@@ -682,7 +682,7 @@ public sealed class PlanTaskFileValidatorTests
         fixture.Write("6-Docs/plans/zz-later.tasks.json.new", PlanTaskFileProbe.TaskFile());
         OntologyConfig ontology = OntologyConfig.ProductDefaults;
         DocumentSet set = RealDocumentLoader.Create(fixture.Root, ontology).Load();
-        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(ontology);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product.WithOntology(ontology);
         string locked = Path.Combine(fixture.Root, "6-Docs", "plans", "locked");
         File.SetUnixFileMode(locked, UnixFileMode.None);
         try

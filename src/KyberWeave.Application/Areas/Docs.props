@@ -1,6 +1,11 @@
 <Project>
 
   <ItemGroup>
+    <!-- The DocGraph engine's Markdown parser, used by the Docs types. -->
+    <PackageReference Include="Markdig" Version="1.6.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!--
       The one pull request description format, which the create-pull-request skill and the deliver
       tool both fill. The binaries embed no Squad corpus, so this is a copy of the skill's file, and
@@ -19,9 +24,9 @@
       through typeof(KyberStandardsTemplates).Assembly, so the templates travel with the type
       that reads them.
 
-      The logical names are the ones KyberStandardsTemplates asks for. The class moved here from
-      KyberWeave.Domain in task 2.5.19; KyberWeave.Domain keeps its own copy while
-      ArbiterConfigLoader, which reads its role rules from that assembly, waits for task 2.5.4.
+      The logical names are the ones KyberStandardsTemplates and ArbiterConfigLoader ask for.
+      ArbiterConfigLoader merges the three role arbiter-rules files into the shipped rule set, so
+      the template installer and the embedded defaults read the same files.
     -->
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.standards.md" LogicalName="Standards.azure.standards.md" />
     <EmbeddedResource Include="..\..\products\kyber-squad\standards\azure\azure.rules.md" LogicalName="Standards.azure.rules.md" />

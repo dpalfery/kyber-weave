@@ -114,8 +114,8 @@ public class ConfigRegResolutionTests
     {
         Assert.DoesNotContain(
             "intake-assessment",
-            KyberWeaveConfig.ProductDefaults.ConfigReg
-                .Resolve(KyberWeaveConfig.ProductDefaults.Ontology)
+            KyberWeaveConfigDefaults.Product.ConfigReg
+                .Resolve(KyberWeaveConfigDefaults.Product.Ontology)
                 .Select(entry => entry.Name));
         Assert.DoesNotContain("intake-assessment", Names(Resolved("ontology:\n  intake: false\n")));
         Assert.DoesNotContain("intake-assessment", Names(Resolved("ontology:\n  docs-root: docs\n")));
@@ -172,7 +172,7 @@ public class ConfigRegLoadingTests
     [Fact]
     public void AutonomyIsUnsetByDefault()
     {
-        Assert.Null(KyberWeaveConfig.ProductDefaults.ConfigReg.Autonomy);
+        Assert.Null(KyberWeaveConfigDefaults.Product.ConfigReg.Autonomy);
         Assert.Null(KyberWeaveConfigAssembler.FromYaml("config-reg:\n  x: docs/x.md\n").ConfigReg.Autonomy);
     }
 
@@ -320,7 +320,7 @@ public class ConfigRegLoadingTests
     [Fact]
     public void NoTechnologyIsDeclaredByDefault()
     {
-        Assert.Empty(KyberWeaveConfig.ProductDefaults.Ontology.Technologies);
+        Assert.Empty(KyberWeaveConfigDefaults.Product.Ontology.Technologies);
     }
 }
 
@@ -336,7 +336,7 @@ public sealed class ConfigRegValidatorTests : IDisposable
     public void Dispose() => _temp.Dispose();
 
     private KyberWeaveConfig Configured(params string[] technologies) =>
-        KyberWeaveConfig.ProductDefaults.WithOntology(
+        KyberWeaveConfigDefaults.Product.WithOntology(
             new OntologyConfig { DocsRoots = ["docs"], Technologies = technologies });
 
     private void Write(string relativePath, string content)

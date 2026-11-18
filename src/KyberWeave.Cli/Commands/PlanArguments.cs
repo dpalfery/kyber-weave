@@ -90,7 +90,7 @@ internal static class PlanArguments
     {
         ArgumentNullException.ThrowIfNull(configs);
         KyberWeaveConfigLoadResult result = configs.TryLoad(root, configPath);
-        return result is { Success: true, Config: { } loaded } ? loaded : KyberWeaveConfig.ProductDefaults;
+        return result is { Success: true, Config: { } loaded } ? loaded : KyberWeaveConfigDefaults.Product;
     }
 
     /// <summary>Says which file the argument resolved to, in the output a person or an agent reads; the structured formats carry it as a metric.</summary>

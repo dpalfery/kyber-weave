@@ -55,7 +55,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         TimeProvider.System);
 
     private static KyberWeaveConfig ShippedConfig() =>
-        ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules);
+        ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfigDefaults.Product.Rules);
 
     private ArbiterEvent Event(string phase, string target, string prompt, string? output = null) => new()
     {

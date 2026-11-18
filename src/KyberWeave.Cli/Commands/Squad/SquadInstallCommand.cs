@@ -159,7 +159,7 @@ internal sealed class SquadInstallCommand : Command<SquadInstallSettings>
         // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
         // verbatim, timeout-ms as whole hook seconds with headroom.
         SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
-            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfig.ProductDefaults);
+            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfigDefaults.Product);
         // A --global run writes beneath each selected target's own physical global root,
         // not beneath the home anchor. The same injected resolver the lifecycle plans with
         // names the roots, so the confirmation shows the real destinations.

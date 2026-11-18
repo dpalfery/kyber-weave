@@ -13,7 +13,7 @@ namespace KyberWeave.Tests;
 public sealed class PlanTaskFileGeneratorReadTests
 {
     private static PlanTaskFileOutcome Check(DocFixture fixture) =>
-        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfig.ProductDefaults, DocsPorts.Files).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Check);
+        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfigDefaults.Product, DocsPorts.Files).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Check);
 
     [Fact]
     public void ATaskFileThatCannotBeReadIsOneMalformedFindingNotAnException()

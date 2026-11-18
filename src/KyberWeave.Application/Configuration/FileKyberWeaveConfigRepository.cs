@@ -24,7 +24,7 @@ public sealed class FileKyberWeaveConfigRepository(
 
         string? path = ResolveConfigPath(root, configPath);
         if (path is null)
-            return KyberWeaveConfig.ProductDefaults;
+            return KyberWeaveConfigDefaults.Product;
 
         return FromFile(path);
     }
@@ -40,7 +40,7 @@ public sealed class FileKyberWeaveConfigRepository(
         {
             path = ResolveConfigPath(root, configPath);
             if (path is null)
-                return new KyberWeaveConfigLoadResult(success: true, config: KyberWeaveConfig.ProductDefaults);
+                return new KyberWeaveConfigLoadResult(success: true, config: KyberWeaveConfigDefaults.Product);
 
             return new KyberWeaveConfigLoadResult(success: true, config: FromFile(path), configPath: path);
         }
@@ -91,7 +91,7 @@ public sealed class FileKyberWeaveConfigRepository(
         }
 
         if (path is null || !files.FileExists(path))
-            return KyberWeaveConfig.ProductDefaults;
+            return KyberWeaveConfigDefaults.Product;
 
         string yaml = files.ReadAllText(path);
         return KyberWeaveConfigAssembler.FromUserYaml(yaml);
@@ -106,7 +106,7 @@ public sealed class FileKyberWeaveConfigRepository(
         if (path is null)
             return new KyberWeaveConfigLoadResult(
                 success: true,
-                config: KyberWeaveConfig.ProductDefaults,
+                config: KyberWeaveConfigDefaults.Product,
                 configPath: path);
 
         try
@@ -124,7 +124,7 @@ public sealed class FileKyberWeaveConfigRepository(
             if (!files.FileExists(path))
                 return new KyberWeaveConfigLoadResult(
                     success: true,
-                    config: KyberWeaveConfig.ProductDefaults,
+                    config: KyberWeaveConfigDefaults.Product,
                     configPath: path);
 
             string yaml = files.ReadAllText(path);

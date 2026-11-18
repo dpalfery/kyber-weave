@@ -68,10 +68,10 @@ public sealed class ArbiterKiloCouncilItem3Tests : IDisposable
 
     private static KyberWeaveConfig EnforcedConfig() => new()
     {
-        Arbiter = ArbiterConfig.ProductDefaults with
+        Arbiter = ArbiterConfigDefaults.Product with
         {
             Enabled = true,
-            Rules = ArbiterConfig.ProductDefaults.Rules
+            Rules = ArbiterConfigDefaults.Product.Rules
                 .Select(rule => string.Equals(rule.Id, FailureRule, StringComparison.Ordinal) ? rule with { Shadow = false } : rule)
                 .ToList(),
             ModelTargeting = new ArbiterModelTargetingConfig(

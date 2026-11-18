@@ -435,7 +435,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
         // verbatim, timeout-ms as whole hook seconds with headroom.
         SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
-            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfig.ProductDefaults);
+            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfigDefaults.Product);
 
         SquadUpdateRequest updateRequest = new(
             run.TargetRoot,

@@ -742,6 +742,7 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     {
         KyberWeaveConfig config = new()
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
         const string planRead =

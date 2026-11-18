@@ -157,7 +157,7 @@ public class HarnessProfileConfigTests
                 ConfigFileReader.Repository, root, null, report, out KyberWeaveConfig config);
 
             Assert.False(loaded);
-            Assert.Same(KyberWeaveConfig.ProductDefaults, config);
+            Assert.Same(KyberWeaveConfigDefaults.Product, config);
             Diagnostic diagnostic = Assert.Single(report.Items);
             Assert.Equal("KW-CONFIG-001", diagnostic.Code);
             Assert.Equal(Severity.Error, diagnostic.Severity);

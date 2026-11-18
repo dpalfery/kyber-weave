@@ -76,7 +76,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
 
     /// <summary>The effective rules with the comment rule absent from the set.</summary>
     private static IReadOnlyList<ArbiterRule> RulesWithoutCommentRule() =>
-        ArbiterConfig.ProductDefaults.Rules.Where(rule => rule.Id != CommentRule).ToList();
+        ArbiterConfigDefaults.Product.Rules.Where(rule => rule.Id != CommentRule).ToList();
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<ArbiterRule> rules, IReadOnlyList<string>? botLogins = null) =>
         new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins, rules: rules);
@@ -164,7 +164,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(providerFactory: _ => provider, homeDirectory: () => home.Path);
         KyberWeaveConfig config = new()
         {
-            Arbiter = ArbiterConfig.ProductDefaults with
+            Arbiter = ArbiterConfigDefaults.Product with
             {
                 Enabled = true,
                 Rules = rules,

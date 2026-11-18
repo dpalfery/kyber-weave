@@ -111,7 +111,7 @@ public sealed class ArbiterTechnologyRuleScopeTests : IDisposable
     [Fact]
     public void TheShipped36RulesJudgeExactlyAsBeforeWhenTheHostAddsNoFile()
     {
-        IReadOnlyList<ArbiterRule> shipped = ArbiterConfig.ProductDefaults.Rules;
+        IReadOnlyList<ArbiterRule> shipped = ArbiterConfigDefaults.Product.Rules;
 
         Assert.Equal(36, shipped.Select(rule => rule.Id).Distinct(StringComparer.Ordinal).Count());
         Assert.All(shipped, rule => Assert.Null(rule.Technology));

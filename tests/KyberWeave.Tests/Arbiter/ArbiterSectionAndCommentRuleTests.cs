@@ -35,7 +35,7 @@ public sealed class ArbiterSectionAndCommentRuleTests
         $"products/kyber-squad/standards/{role}/{role}.arbiter-rules.yml";
 
     private static ArbiterRule Shipped(string id) =>
-        Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
+        Assert.Single(ArbiterConfigDefaults.Product.Rules, rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
 
     /// <summary>The section rule is a step-1 choice between relevant and not-relevant, floored at 0.9, and shipped in shadow.</summary>
     [Fact]
@@ -92,7 +92,7 @@ public sealed class ArbiterSectionAndCommentRuleTests
     [Fact]
     public void TheNewRulesJoinTheShippedSetWithoutRenumberingAny()
     {
-        string[] ids = ArbiterConfig.ProductDefaults.Rules.Select(rule => rule.Id).Distinct().ToArray();
+        string[] ids = ArbiterConfigDefaults.Product.Rules.Select(rule => rule.Id).Distinct().ToArray();
 
         Assert.Equal(36, ids.Length);
         foreach (string id in new[]

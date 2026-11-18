@@ -22,7 +22,7 @@ public sealed class DeveloperTierSelectionTests
 {
     private const string Plan = PlanTaskFileProbe.PlanPath;
 
-    private static KyberWeaveConfig Tiered => KyberWeaveConfig.ProductDefaults
+    private static KyberWeaveConfig Tiered => KyberWeaveConfigDefaults.Product
         .WithOntology(new OntologyConfig { Technologies = ["csharp"] })
         .WithWorkerRoster(WorkerRosters.Tiered);
 
@@ -430,10 +430,10 @@ public sealed class DeveloperTierSelectionTests
     [InlineData("code-reviewer", "platform-researcher")]
     public void TheRosterRuleAllowsEachListedCallerToDispatchItsNewAgent(string caller, string target)
     {
-        ArbiterRule rule = ArbiterConfig.ProductDefaults.Rules.First(
+        ArbiterRule rule = ArbiterConfigDefaults.Product.Rules.First(
             candidate => string.Equals(candidate.Id, "KW-ARB-ROSTER-001", StringComparison.Ordinal));
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-            "investigate", target, "Do the thing.", caller, ArbiterCallerSources.Harness, KyberWeaveConfig.ProductDefaults);
+            "investigate", target, "Do the thing.", caller, ArbiterCallerSources.Harness, KyberWeaveConfigDefaults.Product);
 
         Assert.Equal("listed", RuleEngine.Decide(rule, facts));
     }

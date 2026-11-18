@@ -15,7 +15,7 @@ public sealed record ReviewQuestion(string Subject, IReadOnlyDictionary<string, 
 public sealed record ReviewAnswer(string Answer, double? Score, double? Threshold)
 {
     /// <summary>The answer of a question that was not asked or got no usable reply.</summary>
-    public static ReviewAnswer Undecidable { get; } = new(RuleEngine.Undecidable, null, null);
+    public static ReviewAnswer Undecidable { get; } = new(RuleEffects.Undecidable, null, null);
 }
 
 /// <summary>One logged decision-model question and what the review did with its answer.</summary>

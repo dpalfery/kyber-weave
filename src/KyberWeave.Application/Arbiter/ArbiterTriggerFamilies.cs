@@ -1,0 +1,193 @@
+namespace KyberWeave.Core.Arbiter;
+
+/// <summary>Family metadata: trigger mapping, effect sets, undecidable mapping and combination.</summary>
+/// <remarks>
+/// Answers are never averaged: any escalating rule escalates the trigger, and
+/// likewise one confident red flag (<c>escalate</c>, <c>skip</c>, <c>verify</c>)
+/// is enough to short-circuit step 1.
+/// </remarks>
+public static class ArbiterTriggerFamilies
+{
+    private static readonly Dictionary<string, ArbiterTriggerFamily> TriggerToFamily =
+        new(StringComparer.Ordinal)
+        {
+            ["delegate"] = ArbiterTriggerFamily.Conductor,
+            ["delegate.returned"] = ArbiterTriggerFamily.Conductor,
+            ["delegate.planner"] = ArbiterTriggerFamily.Conductor,
+            ["delegate.planner.returned"] = ArbiterTriggerFamily.Conductor,
+            ["investigate"] = ArbiterTriggerFamily.Investigate,
+            ["investigate.returned"] = ArbiterTriggerFamily.Investigate,
+            ["lens.spawn"] = ArbiterTriggerFamily.LensSpawn,
+            ["refute.spawn"] = ArbiterTriggerFamily.RefuteSpawn,
+            ["lens.returned"] = ArbiterTriggerFamily.LensReturned,
+            ["refute.returned"] = ArbiterTriggerFamily.LensReturned,
+            ["gate.select"] = ArbiterTriggerFamily.Gate,
+            ["model.target"] = ArbiterTriggerFamily.ModelTarget,
+            ["delegate.model"] = ArbiterTriggerFamily.ModelTarget,
+            ["shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["intake.shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["triage.shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["docs-impact.shortcut"] = ArbiterTriggerFamily.Shortcut,
+            ["failure.cluster"] = ArbiterTriggerFamily.FailureCluster,
+            ["delegate.failure"] = ArbiterTriggerFamily.FailureCluster,
+            ["advice"] = ArbiterTriggerFamily.Advice,
+            ["sections.select"] = ArbiterTriggerFamily.Advice,
+            ["comment.triage"] = ArbiterTriggerFamily.Advice,
+            ["review.verdict"] = ArbiterTriggerFamily.Advice,
+            ["worker.command"] = ArbiterTriggerFamily.WorkerCommand,
+        };
+
+    /// <summary>Every trigger name the Arbiter knows.</summary>
+    public static IReadOnlyList<string> KnownTriggers => [.. TriggerToFamily.Keys];
+
+    /// <summary>Resolves a trigger name to its family.</summary>
+    /// <exception cref="ArgumentException">Thrown for an unknown trigger, with the known names as hint.</exception>
+    public static ArbiterTriggerFamily ForTrigger(string trigger)
+    {
+        ArgumentNullException.ThrowIfNull(trigger);
+        if (TriggerToFamily.TryGetValue(trigger, out ArbiterTriggerFamily family))
+        {
+            return family;
+        }
+
+        throw new ArgumentException(
+            $"Unknown Arbiter trigger '{trigger}'. Known triggers: {string.Join(", ", TriggerToFamily.Keys)}.",
+            nameof(trigger));
+    }
+
+    /// <summary>The effect set the family's rules may use.</summary>
+    public static IReadOnlySet<string> AllowedEffects(ArbiterTriggerFamily family) => family switch
+    {
+        ArbiterTriggerFamily.Conductor => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Escalate,
+        },
+        ArbiterTriggerFamily.Investigate => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Escalate,
+        },
+        ArbiterTriggerFamily.WorkerCommand => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Escalate,
+        },
+        ArbiterTriggerFamily.LensSpawn => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Skip,
+        },
+        ArbiterTriggerFamily.RefuteSpawn => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Verify, Rules.RuleEffects.Drop, Rules.RuleEffects.Duplicate,
+        },
+        ArbiterTriggerFamily.LensReturned => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.Annotate, Rules.RuleEffects.Drop,
+        },
+        ArbiterTriggerFamily.Gate => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Applies, Rules.RuleEffects.NotApplicable,
+        },
+        ArbiterTriggerFamily.ModelTarget => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Keep, Rules.RuleEffects.Retarget,
+        },
+        ArbiterTriggerFamily.Shortcut => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Spawn, Rules.RuleEffects.Answer, Rules.RuleEffects.Keep,
+        },
+        ArbiterTriggerFamily.FailureCluster => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Allow, Rules.RuleEffects.SameFailure,
+        },
+        ArbiterTriggerFamily.Advice => new HashSet<string>(StringComparer.Ordinal)
+        {
+            Rules.RuleEffects.Keep, Rules.RuleEffects.Advise,
+        },
+        _ => new HashSet<string>(StringComparer.Ordinal),
+    };
+
+    /// <summary>
+    /// The effect a shadow rule contributes in this family: the one that lets the trigger proceed
+    /// without gating. Gate runs the gate, so it does not skip; shortcut spawns, so it does not answer.
+    /// </summary>
+    public static string NeutralEffect(ArbiterTriggerFamily family) => family switch
+    {
+        ArbiterTriggerFamily.Gate => Rules.RuleEffects.Applies,
+        ArbiterTriggerFamily.Shortcut => Rules.RuleEffects.Spawn,
+        ArbiterTriggerFamily.ModelTarget => Rules.RuleEffects.Keep,
+        ArbiterTriggerFamily.Advice => Rules.RuleEffects.Keep,
+        _ => Rules.RuleEffects.Allow,
+    };
+
+    /// <summary>
+    /// The fixed effect an undecidable answer maps to: always the effect that lets the trigger proceed.
+    /// A parse miss, a provider error or timeout, a low-confidence answer and a missing fact are all
+    /// undecidable, and none of them may block; the decision record keeps the undecidable answer.
+    /// </summary>
+    public static string UndecidableEffect(ArbiterTriggerFamily family) => family switch
+    {
+        ArbiterTriggerFamily.Conductor => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.Investigate => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.LensSpawn => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.RefuteSpawn => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.LensReturned => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.Gate => Rules.RuleEffects.Applies,
+        ArbiterTriggerFamily.ModelTarget => Rules.RuleEffects.Keep,
+        ArbiterTriggerFamily.Shortcut => Rules.RuleEffects.Spawn,
+        ArbiterTriggerFamily.FailureCluster => Rules.RuleEffects.Allow,
+        ArbiterTriggerFamily.Advice => Rules.RuleEffects.Keep,
+        _ => Rules.RuleEffects.Allow,
+    };
+
+    /// <summary>
+    /// Combines per-rule effects: the red-flag effect wins
+    /// (<c>escalate</c>, <c>skip</c>, <c>verify</c>); any <c>annotate</c> is
+    /// delivered; any <c>applies</c> runs the gate.
+    /// </summary>
+    public static string Combine(ArbiterTriggerFamily family, IEnumerable<string> effects)
+    {
+        ArgumentNullException.ThrowIfNull(effects);
+        HashSet<string> seen = new(effects, StringComparer.Ordinal);
+        return family switch
+        {
+            ArbiterTriggerFamily.Conductor or ArbiterTriggerFamily.Investigate
+                or ArbiterTriggerFamily.WorkerCommand =>
+                seen.Contains(Rules.RuleEffects.Escalate) ? Rules.RuleEffects.Escalate : Rules.RuleEffects.Allow,
+            ArbiterTriggerFamily.LensSpawn =>
+                seen.Contains(Rules.RuleEffects.Skip) ? Rules.RuleEffects.Skip : Rules.RuleEffects.Allow,
+            ArbiterTriggerFamily.RefuteSpawn =>
+                seen.Contains(Rules.RuleEffects.Verify) ? Rules.RuleEffects.Verify
+                : seen.Contains(Rules.RuleEffects.Drop) ? Rules.RuleEffects.Drop
+                : seen.Contains(Rules.RuleEffects.Duplicate) ? Rules.RuleEffects.Duplicate
+                : Rules.RuleEffects.Allow,
+            ArbiterTriggerFamily.LensReturned =>
+                seen.Contains(Rules.RuleEffects.Annotate) ? Rules.RuleEffects.Annotate
+                : seen.Contains(Rules.RuleEffects.Drop) ? Rules.RuleEffects.Drop
+                : Rules.RuleEffects.Allow,
+            ArbiterTriggerFamily.Gate =>
+                seen.Contains(Rules.RuleEffects.Applies) ? Rules.RuleEffects.Applies : Rules.RuleEffects.NotApplicable,
+            ArbiterTriggerFamily.ModelTarget =>
+                seen.Contains(Rules.RuleEffects.Retarget) ? Rules.RuleEffects.Retarget : Rules.RuleEffects.Keep,
+            ArbiterTriggerFamily.Shortcut =>
+                seen.Count == 1 && seen.Contains(Rules.RuleEffects.Answer) ? Rules.RuleEffects.Answer
+                : seen.Count == 1 && seen.Contains(Rules.RuleEffects.Keep) ? Rules.RuleEffects.Keep
+                : Rules.RuleEffects.Spawn,
+            ArbiterTriggerFamily.FailureCluster =>
+                seen.Contains(Rules.RuleEffects.SameFailure) ? Rules.RuleEffects.SameFailure : Rules.RuleEffects.Allow,
+            ArbiterTriggerFamily.Advice =>
+                seen.Count == 1 && seen.Contains(Rules.RuleEffects.Advise) ? Rules.RuleEffects.Advise : Rules.RuleEffects.Keep,
+            _ => Rules.RuleEffects.Allow,
+        };
+    }
+
+    /// <summary>
+    /// Whether the effect is the family's strongest — the step-1 short-circuit
+    /// signal. One confident red flag is enough.
+    /// </summary>
+    public static bool IsStrongestEffect(string effect)
+    {
+        ArgumentNullException.ThrowIfNull(effect);
+        return string.Equals(effect, Rules.RuleEffects.Escalate, StringComparison.Ordinal)
+            || string.Equals(effect, Rules.RuleEffects.Skip, StringComparison.Ordinal)
+            || string.Equals(effect, Rules.RuleEffects.Verify, StringComparison.Ordinal);
+    }
+}

@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Parsing;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Core.Arbiter;
 namespace KyberWeave.Tests;
 
 /// <summary>
@@ -524,6 +525,7 @@ public sealed class ManagedGlossaryTests
             repository.Root,
             new KyberWeaveConfig
             {
+                Arbiter = ArbiterConfigDefaults.Product,
                 Ontology = repository.Ontology,
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = glossaryPath }
             },

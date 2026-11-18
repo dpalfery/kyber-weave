@@ -31,13 +31,14 @@ public sealed class ArbiterPlannerDiffRuleTests
 
     private static KyberWeaveConfig DocsConfig() => new()
     {
+        Arbiter = ArbiterConfigDefaults.Product,
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
     private static ArbiterRule ShippedRule()
     {
         return Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
     }
 

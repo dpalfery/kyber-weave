@@ -116,7 +116,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         Write(Picker(new StubProvider("dev-medium", 0.97)));
         StubProvider second = new("dev-easy", 0.99);
 
-        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files,
+        PlanTaskFileOutcome check = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfigDefaults.Product, DocsPorts.Files,
             Picker(second)).Run(Plan, PlanTaskFileMode.Check);
         PlanTaskFile rewritten = Write(Picker(second));
 
@@ -132,7 +132,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
         FakeArbiterUserSettings settings = new();
         ConfiguredArbiterProviderFactory providers = Configured(settings);
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home.Path));
+        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home.Path));
         Assert.Equal([home.Path], settings.Asked);
     }
 
@@ -147,7 +147,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
             Override = (_, _) => throw new YamlException("The user override could not be read."),
         });
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home.Path));
+        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home.Path));
     }
 
     [Theory]
@@ -157,7 +157,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
     {
         ConfiguredArbiterProviderFactory providers = Configured(new FakeArbiterUserSettings());
 
-        Assert.Null(providers.TryCreate(KyberWeaveConfig.ProductDefaults.Arbiter.Provider, home));
+        Assert.Null(providers.TryCreate(KyberWeaveConfigDefaults.Product.Arbiter.Provider, home));
     }
 
     private static ConfiguredArbiterProviderFactory Configured(FakeArbiterUserSettings settings) =>
@@ -170,7 +170,7 @@ public sealed class PlanTaskAgentPickTests : IDisposable
 
     private PlanTaskFile Write(IPlanTaskAgentPicker? picker)
     {
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfig.ProductDefaults, DocsPorts.Files, picker)
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(_repo.Path, KyberWeaveConfigDefaults.Product, DocsPorts.Files, picker)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(outcome.Report.HasErrors, string.Join("; ", outcome.Report.Items.Select(item => item.Message)));
         return outcome.File!;

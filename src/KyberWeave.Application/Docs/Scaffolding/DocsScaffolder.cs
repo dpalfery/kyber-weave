@@ -104,7 +104,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         // The registry publishes paths under the root being scaffolded into, which is not
         // necessarily the one the loaded configuration names — an operator moving the corpus
         // with --docs-root would otherwise get a registry describing where it used to be.
-        OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults)
+        OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfigDefaults.Product)
             .Ontology.WithDocsRoot(resolvedDocsRoot);
 
         // The two choices add to each other rather than replace each other: an operator may ask
@@ -221,7 +221,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 force));
         }
 
-        ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg;
+        ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfigDefaults.Product).ConfigReg;
         files.Add(WriteConfigReg(root, resolvedDocsRoot, configReg.Resolve(ontology), configReg.Autonomy));
 
         return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files)

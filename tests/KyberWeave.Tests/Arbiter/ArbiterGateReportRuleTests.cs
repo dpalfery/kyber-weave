@@ -70,7 +70,7 @@ public sealed class ArbiterGateReportRuleTests
     private static ArbiterRule Rule()
     {
         return Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, GateReportRule, StringComparison.Ordinal));
     }
 
@@ -149,6 +149,7 @@ public sealed class ArbiterGateReportRuleTests
         ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
         KyberWeaveConfig config = new()
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             Review = new ReviewConfig
             {
                 TaskGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal) { ["dev"] = [gate] }
@@ -175,6 +176,7 @@ public sealed class ArbiterGateReportRuleTests
         ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
         KyberWeaveConfig config = new()
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             Review = new ReviewConfig
             {
                 TechnologyGates = new Dictionary<string, IReadOnlyList<ReviewTaskGate>>(StringComparer.Ordinal)
@@ -220,6 +222,7 @@ public sealed class ArbiterGateReportRuleTests
         ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
         config = new KyberWeaveConfig
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             Ontology = config.Ontology,
             Review = new ReviewConfig
             {
@@ -266,6 +269,7 @@ public sealed class ArbiterGateReportRuleTests
         ReviewTaskGate gate = new("unit", ["**"], null, ["dotnet", "test"], []);
         config = new KyberWeaveConfig
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             Ontology = config.Ontology,
             Review = new ReviewConfig
             {

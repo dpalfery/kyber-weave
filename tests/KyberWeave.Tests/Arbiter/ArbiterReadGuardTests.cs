@@ -70,7 +70,7 @@ public sealed class ArbiterReadGuardTests
     [Fact]
     public void ProtectedDirectories_FromDefaultConfig_CoversTheThreeIndexFolders()
     {
-        IReadOnlyList<string> dirs = ReadGuard.ProtectedDirectories(new KyberWeaveConfig());
+        IReadOnlyList<string> dirs = ReadGuard.ProtectedDirectories(new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product });
 
         Assert.Equal(["6-Docs/plans", "6-Docs/specs", "6-Docs/todo"], dirs);
     }

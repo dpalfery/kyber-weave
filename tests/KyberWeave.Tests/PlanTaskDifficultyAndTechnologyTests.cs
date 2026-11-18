@@ -104,7 +104,7 @@ public sealed class PlanTaskDifficultyAndTechnologyTests
     {
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(
             fixture.Root,
-            KyberWeaveConfig.ProductDefaults,
+            KyberWeaveConfigDefaults.Product,
             DocsPorts.Files).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Preview);
 
         Assert.Null(outcome.Report.Items.FirstOrDefault(item => item.Severity == Core.Diagnostics.Severity.Error));

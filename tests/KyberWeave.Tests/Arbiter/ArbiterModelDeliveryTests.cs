@@ -70,7 +70,7 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
 
     private static KyberWeaveConfig Config(string mode) => new()
     {
-        Arbiter = ArbiterConfig.ProductDefaults with
+        Arbiter = ArbiterConfigDefaults.Product with
         {
             Enabled = true,
             ModelTargeting = new ArbiterModelTargetingConfig(

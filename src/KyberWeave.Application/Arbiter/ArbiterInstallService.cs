@@ -408,7 +408,7 @@ public sealed class ArbiterInstallService(
         KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
         ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
             ? loaded.Config.Arbiter.Provider
-            : KyberWeaveConfig.ProductDefaults.Arbiter.Provider;
+            : KyberWeaveConfigDefaults.Product.Arbiter.Provider;
         ArbiterProviderKind effective =
             userSettings.ApplyTo(repository, environment.HomeDirectory).Kind;
         return (repository.Kind, effective);

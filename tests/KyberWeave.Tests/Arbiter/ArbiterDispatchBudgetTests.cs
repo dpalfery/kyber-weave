@@ -203,7 +203,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     [Fact]
     public void Config_ReadsTheDispatchBudgetAndRefusesANonPositiveLimit()
     {
-        Assert.Equal(new ArbiterDispatchBudgetConfig(15, 150), ArbiterConfig.ProductDefaults.DispatchBudget);
+        Assert.Equal(new ArbiterDispatchBudgetConfig(15, 150), ArbiterConfigDefaults.Product.DispatchBudget);
 
         ArbiterConfig merged = ArbiterConfigLoader.LoadUserConfig(
             "arbiter:\n  dispatch-budget:\n    minutes: 20\n    tool-calls: 90\n");
@@ -212,7 +212,7 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
         Assert.ThrowsAny<YamlException>(() => ArbiterConfigLoader.LoadUserConfig(
             "arbiter:\n  dispatch-budget:\n    tool-calls: 0\n"));
 
-        Assert.Equal(5, ArbiterConfig.ProductDefaults.DispatchBudget.CallMinutes);
+        Assert.Equal(5, ArbiterConfigDefaults.Product.DispatchBudget.CallMinutes);
         Assert.Equal(
             8,
             ArbiterConfigLoader.LoadUserConfig("arbiter:\n  dispatch-budget:\n    call-minutes: 8\n").DispatchBudget.CallMinutes);
@@ -271,12 +271,12 @@ public sealed class ArbiterDispatchBudgetTests : IDisposable
     [Fact]
     public void Config_ReadsTheSeatBudgetAndRefusesANonPositiveLimit()
     {
-        Assert.Equal(new ArbiterDispatchBudgetConfig(3, 30, 2), ArbiterConfig.ProductDefaults.SeatBudget);
+        Assert.Equal(new ArbiterDispatchBudgetConfig(3, 30, 2), ArbiterConfigDefaults.Product.SeatBudget);
 
         ArbiterConfig merged = ArbiterConfigLoader.LoadUserConfig(
             "arbiter:\n  seat-budget:\n    minutes: 4\n    tool-calls: 40\n");
         Assert.Equal(new ArbiterDispatchBudgetConfig(4, 40, 2), merged.SeatBudget);
-        Assert.Equal(ArbiterConfig.ProductDefaults.DispatchBudget, merged.DispatchBudget);
+        Assert.Equal(ArbiterConfigDefaults.Product.DispatchBudget, merged.DispatchBudget);
 
         YamlException refused = Assert.ThrowsAny<YamlException>(() => ArbiterConfigLoader.LoadUserConfig(
             "arbiter:\n  seat-budget:\n    minutes: 0\n"));

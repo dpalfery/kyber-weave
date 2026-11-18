@@ -64,7 +64,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void Defaults_DisabledNoneProviderAndAllShippedRulesEnabled()
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults;
+        ArbiterConfig config = ArbiterConfigDefaults.Product;
 
         Assert.False(config.Enabled);
         Assert.Equal(ArbiterProviderKind.None, config.Provider.Kind);
@@ -319,7 +319,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void PlainHttpRemoteEndpoint_RaisesConfig010()
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        ArbiterConfig config = ArbiterConfigDefaults.Product with
         {
             Provider = new ArbiterProviderConfig(
                 ArbiterProviderKind.Systemone, "http://example.com/v1", "jev-1.13.0", 3000),
@@ -334,7 +334,7 @@ public sealed class ArbiterConfigTests
     [Fact]
     public void PlainHttpLoopbackEndpoint_PassesConfig010()
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        ArbiterConfig config = ArbiterConfigDefaults.Product with
         {
             Provider = new ArbiterProviderConfig(
                 ArbiterProviderKind.Systemone, "http://localhost:11434/v1", "nimble", 3000),
@@ -355,7 +355,7 @@ public sealed class ArbiterConfigTests
     [InlineData("http://localhost.evil.com/v1")]
     public void PlainHttpLookalikeLoopbackEndpoint_RaisesConfig010(string endpoint)
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        ArbiterConfig config = ArbiterConfigDefaults.Product with
         {
             Provider = new ArbiterProviderConfig(
                 ArbiterProviderKind.Systemone, endpoint, "nimble", 3000),
@@ -380,7 +380,7 @@ public sealed class ArbiterConfigTests
     [InlineData("http://[0:0:0:0:0:0:0:1]:11434/v1")]
     public void PlainHttpGenuineLoopbackEndpoint_PassesConfig010(string endpoint)
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        ArbiterConfig config = ArbiterConfigDefaults.Product with
         {
             Provider = new ArbiterProviderConfig(
                 ArbiterProviderKind.Systemone, endpoint, "nimble", 3000),

@@ -116,7 +116,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
 
         Assert.Equal(0, execution.ExitCode);
         ArbiterProviderConfig applied = _host.Get<IArbiterUserSettings>().ApplyTo(
-            ArbiterConfig.ProductDefaults.Provider,
+            ArbiterConfigDefaults.Product.Provider,
             _home.Path);
         Assert.Equal(model.Trim(), applied.Model);
     }

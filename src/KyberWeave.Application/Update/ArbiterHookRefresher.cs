@@ -214,7 +214,7 @@ internal sealed class ArbiterHookRefresher(
             // Fall back to default.
         }
 
-        return Wiring(ArbiterConfig.ProductDefaults).HookTimeoutSeconds;
+        return Wiring(ArbiterConfigDefaults.Product).HookTimeoutSeconds;
     }
 
     private IEnumerable<(string TargetToken, string HookPath, string? RelativePath)> ResolveGlobalHookTargets(string home)

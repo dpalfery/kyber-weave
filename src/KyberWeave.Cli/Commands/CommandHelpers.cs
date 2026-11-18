@@ -54,7 +54,7 @@ public static class CommandHelpers
                 result.Error ?? "Failed to load kyber-weave.yml.",
                 "kyber-weave.yml",
                 result.ConfigPath));
-            config = KyberWeaveConfig.ProductDefaults;
+            config = KyberWeaveConfigDefaults.Product;
             return false;
         }
 

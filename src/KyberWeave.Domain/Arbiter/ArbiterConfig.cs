@@ -156,15 +156,4 @@ public sealed record ArbiterConfig
 
     /// <summary>The <c>arbiter.seat-budget</c> block: the budget of one <c>review-lens</c> or <c>review-triage</c> dispatch.</summary>
     public ArbiterDispatchBudgetConfig SeatBudget { get; init; } = ArbiterDispatchBudgetConfig.SeatDefaults;
-
-    /// <summary>
-    /// Product defaults for an unconfigured host: disabled, no provider, every
-    /// shipped rule enabled.
-    /// </summary>
-    /// <remarks>
-    /// Loaded from the embedded role arbiter-rules files rather than hardcoded so the
-    /// shipped catalogue has exactly one source of truth: the files the validator and
-    /// the documentation both read.
-    /// </remarks>
-    public static ArbiterConfig ProductDefaults { get; } = ArbiterConfigLoader.LoadEmbeddedDefaults();
 }

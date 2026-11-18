@@ -240,11 +240,11 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, ev.Target, ev.Prompt);
         Assert.Equal("delegate.returned", classification.Trigger);
         ArbiterFactSet returned = facts.Enrich(
-            TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults), classification, ev);
+            TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfigDefaults.Product), classification, ev);
 
         Assert.Equal("stray", RuleEngine.Decide(Rule(), returned));
         Assert.Contains(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => rule.Id == RuleId && rule.Trigger == "investigate.returned");
     }
 
@@ -264,7 +264,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             TimeProvider.System);
-        KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules);
+        KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfigDefaults.Product.Rules);
 
         await evaluator.EvaluateAsync(Event("pre", "claude", "conductor"), config, null, TestContext.Current.CancellationToken);
         await File.WriteAllTextAsync(
@@ -320,12 +320,12 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
     {
         ArbiterEvent ev = Event(phase, harness, caller);
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, ev.Target, ev.Prompt);
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfig.ProductDefaults);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, ev.Prompt, KyberWeaveConfigDefaults.Product);
         return git.Enrich(facts, classification, ev);
     }
 
     private static ArbiterRule Rule() =>
-        ArbiterConfig.ProductDefaults.Rules.First(rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
+        ArbiterConfigDefaults.Product.Rules.First(rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
 
     private string CopilotEdit(string agentType, string path, bool subagent) => subagent
         ? JsonSerializer.Serialize(new

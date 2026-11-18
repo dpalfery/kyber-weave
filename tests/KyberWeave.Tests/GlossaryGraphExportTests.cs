@@ -9,6 +9,7 @@ using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Domain.CodeGraph;
 using Xunit;
+using KyberWeave.Core.Arbiter;
 
 namespace KyberWeave.Tests;
 
@@ -167,6 +168,7 @@ public sealed class GlossaryGraphExportTests
             repositoryRoot,
             new KyberWeaveConfig
             {
+                Arbiter = ArbiterConfigDefaults.Product,
                 Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["docs"]),
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = "docs/glossary.md" }
             },

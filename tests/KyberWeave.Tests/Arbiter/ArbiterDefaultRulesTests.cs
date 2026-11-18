@@ -70,7 +70,7 @@ public sealed class ArbiterDefaultRulesTests
         // what matters: every id ships once, and no id was added or removed.
         Assert.Equal(
             ExpectedRuleIds.OrderBy(id => id, StringComparer.Ordinal),
-            ArbiterConfig.ProductDefaults.Rules
+            ArbiterConfigDefaults.Product.Rules
                 .Select(rule => rule.Id)
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(id => id, StringComparer.Ordinal));
@@ -105,7 +105,7 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void ShippedRules_ValidateWithZeroErrors()
     {
-        IReadOnlyList<Diagnostic> diagnostics = RuleValidator.Validate(ArbiterConfig.ProductDefaults);
+        IReadOnlyList<Diagnostic> diagnostics = RuleValidator.Validate(ArbiterConfigDefaults.Product);
 
         List<Diagnostic> errors = diagnostics.Where(diagnostic => diagnostic.Severity == Severity.Error).ToList();
         Assert.Empty(errors);
@@ -115,7 +115,7 @@ public sealed class ArbiterDefaultRulesTests
     public void ProviderNone_WarnsThatModelRulesAreSwitchedOff()
     {
         Diagnostic config006 = Assert.Single(
-            RuleValidator.Validate(ArbiterConfig.ProductDefaults),
+            RuleValidator.Validate(ArbiterConfigDefaults.Product),
             d => d.Code == RuleValidator.ModelRulesSwitchedOff);
         Assert.Equal(Severity.Warning, config006.Severity);
     }
@@ -123,7 +123,7 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void EveryStep1Threshold_IsTunedForJev1130()
     {
-        IReadOnlyList<ArbiterRule> step1 = ArbiterConfig.ProductDefaults.Rules
+        IReadOnlyList<ArbiterRule> step1 = ArbiterConfigDefaults.Product.Rules
             .Where(rule => rule.Ask is not null)
             .ToList();
 
@@ -136,7 +136,7 @@ public sealed class ArbiterDefaultRulesTests
     {
         foreach (string id in new[] { "KW-ARB-SCOPE-001", "KW-ARB-DIFF-001" })
         {
-            ArbiterRule rule = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == id);
+            ArbiterRule rule = ArbiterConfigDefaults.Product.Rules.Single(r => r.Id == id);
             Assert.Contains("no-task-files", rule.Answers);
             Assert.Equal("allow", rule.Effects["no-task-files"]);
         }
@@ -145,7 +145,7 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void Mode002_IsDecidedFromMachineFactsAloneAndLogsAMissingFailingRunWithoutStopping()
     {
-        ArbiterRule mode = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-MODE-002");
+        ArbiterRule mode = ArbiterConfigDefaults.Product.Rules.Single(r => r.Id == "KW-ARB-MODE-002");
 
         Assert.Equal("delegate.returned", mode.Trigger);
         Assert.Equal(["no-task", "not-required", "failing-run-first", "no-failing-run"], mode.Answers);
@@ -159,10 +159,10 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void Mode001_IsRetiredAndOwner001NoLongerHandsTestFirstTasksToTestDev()
     {
-        Assert.DoesNotContain(ArbiterConfig.ProductDefaults.Rules, r => r.Id == "KW-ARB-MODE-001");
+        Assert.DoesNotContain(ArbiterConfigDefaults.Product.Rules, r => r.Id == "KW-ARB-MODE-001");
         Assert.DoesNotContain("ledger.red-evidence", ArbiterTriggerCatalog.FactsByTrigger["delegate"]);
 
-        ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
+        ArbiterRule owner = ArbiterConfigDefaults.Product.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
         // The one step-0 owner answer is the target named among the task's skills; dev-medium is not owner of every test-first task.
         Assert.Single(owner.Decide!, clause => clause.Answer == "owner");
     }
@@ -171,7 +171,7 @@ public sealed class ArbiterDefaultRulesTests
     public void Owner002_IsShippedDisabledSoNoModelCallIsMadeWhenTheTaskNamesNoAgent()
     {
         // A plan task names capabilities, not an agent; the conductor's match is the decision (ADR 0080).
-        ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-002");
+        ArbiterRule owner = ArbiterConfigDefaults.Product.Rules.Single(r => r.Id == "KW-ARB-OWNER-002");
 
         Assert.False(owner.Enabled);
         Assert.Equal("KW-ARB-OWNER-001=no-mapping", owner.Ask!.When);
@@ -189,7 +189,7 @@ public sealed class ArbiterDefaultRulesTests
             - **Files:** `web/src/Orders.tsx`
             - **Capabilities:** React and TypeScript UI with Playwright tests
             """);
-        ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
+        ArbiterRule owner = ArbiterConfigDefaults.Product.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
 
         PlanTask task = Assert.Single(plan.Tasks);
         Assert.Empty(task.Skills);
@@ -202,13 +202,13 @@ public sealed class ArbiterDefaultRulesTests
     {
         Assert.Equal(
             ["tests/**", "**/*.test.*", "**/*.spec.*", "**/*Tests.cs"],
-            ArbiterConfig.ProductDefaults.TestFilePatterns);
+            ArbiterConfigDefaults.Product.TestFilePatterns);
     }
 
     [Fact]
     public void TestFilePatterns_MatchTestPathsAndNotSource()
     {
-        IReadOnlyList<string> patterns = ArbiterConfig.ProductDefaults.TestFilePatterns;
+        IReadOnlyList<string> patterns = ArbiterConfigDefaults.Product.TestFilePatterns;
 
         Assert.True(IsTestPath(patterns, "tests/foo.md"));
         Assert.True(IsTestPath(patterns, "src/ui/App.test.tsx"));
@@ -220,7 +220,7 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void Owner001_DecidesTheSkillsLabelThenAnswersNoMapping()
     {
-        ArbiterRule owner = ArbiterConfig.ProductDefaults.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
+        ArbiterRule owner = ArbiterConfigDefaults.Product.Rules.Single(r => r.Id == "KW-ARB-OWNER-001");
 
         Assert.NotNull(owner.Decide);
         // The no-task guard leads, then the Skills-label owner clause; a task with no Skills line answers no-mapping last.
@@ -236,7 +236,7 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void Lens001_PathTableHoldsOnlyApplicabilityStatedConditions()
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults;
+        ArbiterConfig config = ArbiterConfigDefaults.Product;
 
         Assert.NotEmpty(config.LensPaths);
         ArbiterSquadCatalog catalog = ArbiterSquadCatalog.LoadEmbedded();
@@ -270,7 +270,7 @@ public sealed class ArbiterDefaultRulesTests
             new Dictionary<string, string>(StringComparer.Ordinal) { ["yes"] = "allow", ["no"] = "escalate" },
             [new RuleDecideClause(RulePredicate.Exists("plan.taks", true), "yes")]);
 
-        ArbiterConfig config = ArbiterConfig.ProductDefaults with { Rules = [.. ArbiterConfig.ProductDefaults.Rules, rule] };
+        ArbiterConfig config = ArbiterConfigDefaults.Product with { Rules = [.. ArbiterConfigDefaults.Product.Rules, rule] };
 
         Diagnostic config002 = Assert.Single(
             RuleValidator.Validate(config),
@@ -337,7 +337,7 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void UntunedModel_RaisesConfig007Warning()
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        ArbiterConfig config = ArbiterConfigDefaults.Product with
         {
             Provider = new ArbiterProviderConfig(
                 ArbiterProviderKind.Systemone, "https://api.typesafe.ai/v1", "nimble", 3000),
@@ -353,7 +353,7 @@ public sealed class ArbiterDefaultRulesTests
     [Fact]
     public void TunedModel_PassesConfig007()
     {
-        ArbiterConfig config = ArbiterConfig.ProductDefaults with
+        ArbiterConfig config = ArbiterConfigDefaults.Product with
         {
             Provider = new ArbiterProviderConfig(
                 ArbiterProviderKind.Systemone, "https://api.typesafe.ai/v1", "jev-1.13.0", 3000),
@@ -374,7 +374,7 @@ public sealed class ArbiterDefaultRulesTests
         List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel("jev-1.13-free")).ToList();
         Assert.Empty(diagnostics);
 
-        foreach (ArbiterRule rule in ArbiterConfig.ProductDefaults.Rules)
+        foreach (ArbiterRule rule in ArbiterConfigDefaults.Product.Rules)
         {
             if (!rule.Enabled || rule.Ask is null)
             {
@@ -398,7 +398,7 @@ public sealed class ArbiterDefaultRulesTests
         List<Diagnostic> diagnostics = RuleValidator.CheckModelTuning(WithModel(model)).ToList();
         Assert.Empty(diagnostics);
 
-        foreach (ArbiterRule rule in ArbiterConfig.ProductDefaults.Rules)
+        foreach (ArbiterRule rule in ArbiterConfigDefaults.Product.Rules)
         {
             if (rule.Enabled && rule.Ask is not null)
             {
@@ -475,10 +475,10 @@ public sealed class ArbiterDefaultRulesTests
         patterns.Any(pattern => PathGlob.IsMatch(pattern, path));
 
     private static ArbiterRule Shipped(string id) =>
-        ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == id);
+        ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == id);
 
     private static ArbiterConfig WithModel(string model) =>
-        ArbiterConfig.ProductDefaults with
+        ArbiterConfigDefaults.Product with
         {
             Provider = new ArbiterProviderConfig(
                 ArbiterProviderKind.Systemone, "https://api.typesafe.ai/v1", model, 3000),
@@ -505,9 +505,9 @@ public sealed class ArbiterDefaultRulesTests
     }
 
     private static ArbiterConfig ReplaceRule(ArbiterRule replacement) =>
-        ArbiterConfig.ProductDefaults with
+        ArbiterConfigDefaults.Product with
         {
-            Rules = ArbiterConfig.ProductDefaults.Rules
+            Rules = ArbiterConfigDefaults.Product.Rules
                 .Select(rule => string.Equals(rule.Id, replacement.Id, StringComparison.Ordinal) ? replacement : rule)
                 .ToList(),
         };

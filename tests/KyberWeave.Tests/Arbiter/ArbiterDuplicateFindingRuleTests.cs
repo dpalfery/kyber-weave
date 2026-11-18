@@ -140,7 +140,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
     /// <summary>The rule exactly as shipped, before <see cref="HookAskedRules.AsHookAsked"/>.</summary>
     private static ArbiterRule Raw(string id) =>
         Assert.Single(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, id, StringComparison.Ordinal));
 
     private static ArbiterRule Enforced(string id) => Shipped(id) with { Shadow = false };

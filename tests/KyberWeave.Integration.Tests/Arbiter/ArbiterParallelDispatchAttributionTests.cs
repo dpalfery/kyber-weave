@@ -265,7 +265,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
                 IsDispatch = true,
                 ToolOutput = phase == "post" ? "Done." : null,
             },
-            ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules),
+            ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfigDefaults.Product.Rules),
             null,
             TestContext.Current.CancellationToken);
 
@@ -290,7 +290,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
                 IsDispatch = true,
                 ToolOutput = phase == "post" ? "Done." : null,
             },
-            ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfig.ProductDefaults.Rules),
+            ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfigDefaults.Product.Rules),
             null,
             TestContext.Current.CancellationToken);
 

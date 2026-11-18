@@ -122,7 +122,7 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
 
     private static ArbiterRuleAnswer StepZeroAnswer(ArbiterFactSet facts, string trigger, string ruleId)
     {
-        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(ArbiterConfig.ProductDefaults.Rules, facts, trigger);
+        ArbiterOutcome outcome = RuleEngine.EvaluateStep0(ArbiterConfigDefaults.Product.Rules, facts, trigger);
         return Assert.Single(
             outcome.RuleAnswers,
             ruleAnswer => string.Equals(ruleAnswer.RuleId, ruleId, StringComparison.Ordinal));
@@ -216,7 +216,7 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
     public async Task ACodeLineChangeNeverAsksTheProviderForTheRule()
     {
         Assert.Contains(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             rule => string.Equals(rule.Id, NoCodeChangeRule, StringComparison.Ordinal));
 
         RecordingProvider provider = new();
@@ -234,7 +234,7 @@ public sealed class ArbiterLensNoCodeChangeRuleTests : IDisposable
             TimeProvider.System);
         KyberWeaveConfig config = new()
         {
-            Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfig.ProductDefaults.Rules },
+            Arbiter = new ArbiterConfig { Enabled = true, Rules = ArbiterConfigDefaults.Product.Rules },
         };
 
         ArbiterEvaluationResult result = await evaluator.EvaluateAsync(LensEvent("correctness"), config);

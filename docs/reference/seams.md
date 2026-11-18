@@ -256,6 +256,11 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | 4.8 |
 | `SelfUpdater` (`Update/SelfUpdater.cs`) | file system, paths, environment, network | 4.1 |
 | `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | 4.8 |
+| `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
+| `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
+| `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
+| `ReviewConfigParser` (`Configuration/ReviewConfigParser.cs`) | paths | 2.5 |
+| `TaskGatePlanning` (`Review/TaskGatePlanning.cs`) | paths | 2.5 |
 
 #### KyberWeave.Cli (49 classes)
 
@@ -377,13 +382,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterLedgerEvent` (`Arbiter/Facts/ArbiterLedgerEvent.cs`) | identifiers | 2.5 |
-| `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
-| `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
-| `ReviewConfigParser` (`Configuration/ReviewConfigParser.cs`) | paths | 2.5 |
 | `CopilotPromptFile` (`CopilotPrompt/CopilotPromptFile.cs`) | file system, paths | 2.5 |
-| `TaskGatePlanning` (`Review/TaskGatePlanning.cs`) | paths | 2.5 |
 | `BriefMap` (`Squad/Briefs/BriefMap.cs`) | file system | 2.5 |
 | `SquadGlobalRoots` (`Squad/Deployment/SquadGlobalRoots.cs`) | paths | 2.5 |
 | `SquadPathPolicy` (`Squad/Deployment/SquadPathPolicy.cs`) | paths | 2.5 |

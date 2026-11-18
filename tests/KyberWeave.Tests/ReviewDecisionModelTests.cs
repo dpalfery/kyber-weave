@@ -143,7 +143,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task ProviderNoneAsksNothingAndPrintsNothing()
     {
-        ReviewDecisionSession model = ReviewTestServices.DecisionModel(new NoneProvider(), ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+        ReviewDecisionSession model = ReviewTestServices.DecisionModel(new NoneProvider(), ArbiterConfigDefaults.Product.Rules, LogDirectory, TimeProvider.System);
 
         IReadOnlyDictionary<string, string> notSeated = await ReviewTestServices.DecisionSteps.NotApplicableLensesAsync(model, ["security"], "x");
 
@@ -206,7 +206,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     [Fact]
     public async Task ANitpickRuleInShadowLogsButDropsNothing()
     {
-        IReadOnlyList<ArbiterRule> rules = [.. ArbiterConfig.ProductDefaults.Rules
+        IReadOnlyList<ArbiterRule> rules = [.. ArbiterConfigDefaults.Product.Rules
             .Select(rule => rule.Id == ReviewVerdictRules.NitpickRule ? rule with { Shadow = true } : rule)];
         ReviewDecisionSession model = ReviewTestServices.DecisionModel(new FakeProvider { Choice = "nitpick", Confidence = 0.99 }, rules, LogDirectory, TimeProvider.System);
 
@@ -416,11 +416,11 @@ public sealed class ReviewDecisionModelTests : IDisposable
         string root = Repository();
         FakeProvider first = new() { Choice = "supports", Confidence = 0.95 };
         await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
-            ReviewTestServices.DecisionModel(first, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cacheStore: answers, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]);
+            ReviewTestServices.DecisionModel(first, ArbiterConfigDefaults.Product.Rules, null, TimeProvider.System, cacheStore: answers, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]);
         FakeProvider second = new() { Choice = "contradicts", Confidence = 0.99 };
 
         ClaimCheck check = Assert.Single(await ReviewTestServices.DecisionSteps.CheckClaimsAsync(
-            ReviewTestServices.DecisionModel(second, ArbiterConfig.ProductDefaults.Rules, null, TimeProvider.System, cacheStore: answers, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]));
+            ReviewTestServices.DecisionModel(second, ArbiterConfigDefaults.Product.Rules, null, TimeProvider.System, cacheStore: answers, cachePath: cache), root, [Finding("a", ReviewSeverity.Major)]));
 
         Assert.False(check.NeedsRefuter);
         Assert.Equal(0, second.Calls);
@@ -785,7 +785,7 @@ public sealed class ReviewDecisionModelTests : IDisposable
     private string LogDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
 
     private ReviewDecisionSession Model(IArbiterProvider provider) =>
-        ReviewTestServices.DecisionModel(provider, ArbiterConfig.ProductDefaults.Rules, LogDirectory, TimeProvider.System);
+        ReviewTestServices.DecisionModel(provider, ArbiterConfigDefaults.Product.Rules, LogDirectory, TimeProvider.System);
 
     private string Repository()
     {

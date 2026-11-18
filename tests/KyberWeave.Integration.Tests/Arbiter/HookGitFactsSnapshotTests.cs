@@ -394,7 +394,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         };
         TriggerClassification classification = TriggerClassifier.ClassifySingle(pre, "architect", prompt);
         Assert.Equal("delegate.planner", classification.Trigger);
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfigDefaults.Product);
         ArbiterTestServices.HookGitFacts(_probe.Root, null, _arbiter.Path).Enrich(facts, classification, pre);
     }
 
@@ -413,7 +413,7 @@ public sealed class HookGitFactsSnapshotTests : IDisposable
         };
         TriggerClassification classification = TriggerClassifier.ClassifySingle(post, "architect", prompt);
         Assert.Equal("delegate.planner.returned", classification.Trigger);
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfigDefaults.Product);
         return ArbiterTestServices.HookGitFacts(_probe.Root, null, _arbiter.Path).Enrich(facts, classification, post);
     }
 

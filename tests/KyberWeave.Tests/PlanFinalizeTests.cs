@@ -77,7 +77,7 @@ public sealed class PlanFinalizeTests
     {
         using DocFixture fixture = Repository();
         PlanTaskFileOutcome seeded = new PlanTaskFileGenerator(
-            fixture.Root, KyberWeaveConfig.ProductDefaults, DocsPorts.Files)
+            fixture.Root, KyberWeaveConfigDefaults.Product, DocsPorts.Files)
             .Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Write);
         Assert.False(seeded.Report.HasErrors, string.Join("; ", seeded.Report.Items.Select(item => item.Message)));
         File.WriteAllText(
@@ -308,8 +308,8 @@ public sealed class PlanFinalizeTests
     }
 
     private static PlanFinalize Finalizer(DocFixture fixture, Action<string>? afterActivePlanCheck = null) =>
-        new(fixture.Root, KyberWeaveConfig.ProductDefaults,
-            () => RealDocumentLoader.Create(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+        new(fixture.Root, KyberWeaveConfigDefaults.Product,
+            () => RealDocumentLoader.Create(fixture.Root, KyberWeaveConfigDefaults.Product.Ontology),
             DocsPorts.Files, DocsPorts.Process, DocsTestCommands.SchemaGate)
         {
             AfterActivePlanCheck = afterActivePlanCheck

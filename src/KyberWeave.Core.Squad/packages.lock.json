@@ -32,6 +32,7 @@
           "KyberWeave.Data": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
           "KyberWeave.Kernel": "[0.1.0, )",
+          "Markdig": "[1.6.0, )",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "[10.0.14, )",
           "YamlDotNet": "[18.1.0, )"
         }
@@ -46,9 +47,7 @@
       "kyberweave.core": {
         "type": "Project",
         "dependencies": {
-          "KyberWeave.Application": "[0.1.0, )",
           "KyberWeave.Contracts": "[0.1.0, )",
-          "KyberWeave.Data": "[0.1.0, )",
           "KyberWeave.Domain": "[0.1.0, )",
           "KyberWeave.Kernel": "[0.1.0, )"
         }
@@ -67,7 +66,6 @@
         "type": "Project",
         "dependencies": {
           "KyberWeave.Kernel": "[0.1.0, )",
-          "Markdig": "[1.6.0, )",
           "YamlDotNet": "[18.1.0, )"
         }
       },

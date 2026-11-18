@@ -12,7 +12,7 @@ namespace KyberWeave.Tests;
 public sealed class PlanTaskFileYamlTests
 {
     private static PlanTaskFileOutcome Run(DocFixture fixture, PlanTaskFileMode mode) =>
-        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfig.ProductDefaults, DocsPorts.Files)
+        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfigDefaults.Product, DocsPorts.Files)
             .Run(PlanTaskFileProbe.PlanPath, mode);
 
     private static string FullPath(DocFixture fixture, string relative) =>
@@ -111,7 +111,7 @@ public sealed class PlanTaskFileYamlTests
 
         DiagnosticReport report = new PlanTaskFileValidator(
             fixture.Root,
-            KyberWeaveConfig.ProductDefaults,
+            KyberWeaveConfigDefaults.Product,
             DocsPorts.Files).Validate(fixture.Load());
 
         Diagnostic leftover = Assert.Single(

@@ -16,7 +16,7 @@ public sealed class ArbiterTestsOnlyTaskTests
     private const string RuleId = "KW-ARB-MODE-002";
 
     private static ArbiterRule Rule() =>
-        Assert.Single(ArbiterConfig.ProductDefaults.Rules, rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
+        Assert.Single(ArbiterConfigDefaults.Product.Rules, rule => string.Equals(rule.Id, RuleId, StringComparison.Ordinal));
 
     private static ArbiterFactSet Bag(params string[] files) =>
         new ArbiterFactSet()
@@ -39,7 +39,7 @@ public sealed class ArbiterTestsOnlyTaskTests
             Bag(
                 "tests/KyberWeave.Tests/Arbiter/ArbiterTestsOnlyTaskTests.cs",
                 "dash/web/src/thing.spec.ts"),
-            ArbiterConfig.ProductDefaults.TestFilePatterns);
+            ArbiterConfigDefaults.Product.TestFilePatterns);
 
         Assert.True(facts.TryGet(TriggerFactBuilder.FilesAllTestsFact, out ArbiterFact? fact));
         Assert.True(fact.Value is true);
@@ -52,7 +52,7 @@ public sealed class ArbiterTestsOnlyTaskTests
             Bag(
                 "tests/KyberWeave.Tests/Arbiter/ArbiterTestsOnlyTaskTests.cs",
                 "src/KyberWeave.Domain/Arbiter/Rules/ArbiterRule.cs"),
-            ArbiterConfig.ProductDefaults.TestFilePatterns);
+            ArbiterConfigDefaults.Product.TestFilePatterns);
 
         Assert.True(facts.TryGet(TriggerFactBuilder.FilesAllTestsFact, out ArbiterFact? fact));
         Assert.True(fact.Value is false);
@@ -63,7 +63,7 @@ public sealed class ArbiterTestsOnlyTaskTests
     public void ATaskWithNoFilesLeavesTheFactAbsent()
     {
         ArbiterFactSet facts = TriggerFactBuilder.WithTestsOnlyTaskFact(
-            Bag(), ArbiterConfig.ProductDefaults.TestFilePatterns);
+            Bag(), ArbiterConfigDefaults.Product.TestFilePatterns);
 
         Assert.True(facts.TryGet(TriggerFactBuilder.FilesAllTestsFact, out ArbiterFact? fact));
         Assert.Null(fact.Value);

@@ -430,7 +430,7 @@ public sealed class ArbiterKeyResolutionTests
             Assert.DoesNotContain(SentinelKey, diagnostic.Hint ?? string.Empty, StringComparison.Ordinal);
         }
 
-        foreach (Diagnostic diagnostic in RuleValidator.Validate(ArbiterConfig.ProductDefaults))
+        foreach (Diagnostic diagnostic in RuleValidator.Validate(ArbiterConfigDefaults.Product))
         {
             Assert.DoesNotContain(SentinelKey, diagnostic.ToString(), StringComparison.Ordinal);
         }

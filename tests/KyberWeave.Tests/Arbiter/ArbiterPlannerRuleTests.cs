@@ -22,12 +22,12 @@ public sealed class ArbiterPlannerRuleTests
 
     private static KyberWeaveConfig DocsConfig()
     {
-        return new KyberWeaveConfig { Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs") };
+        return new KyberWeaveConfig { Arbiter = ArbiterConfigDefaults.Product, Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs") };
     }
 
     private static ArbiterRule Shipped(string id)
     {
-        return ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == id);
+        return ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == id);
     }
 
     private static ArbiterFactSet Facts(params (string Name, object? Value)[] entries)

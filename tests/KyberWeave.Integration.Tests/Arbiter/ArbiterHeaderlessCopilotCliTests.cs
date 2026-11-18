@@ -109,10 +109,10 @@ public sealed class ArbiterHeaderlessCopilotCliTests : IDisposable
     [InlineData("devops", "RUN-START: true\nkyber-weave run start --harness copilot --type fix --slug a", "changed")]
     public void ReadOnlyRule_HoldsOnlyDispatchesThatPromiseAnUnchangedTree(string target, string prompt, string expected)
     {
-        ArbiterRule rule = ArbiterConfig.ProductDefaults.Rules.First(
+        ArbiterRule rule = ArbiterConfigDefaults.Product.Rules.First(
             candidate => string.Equals(candidate.Id, "KW-ARB-READONLY-001", StringComparison.Ordinal));
         ArbiterFactSet facts = TriggerFactBuilder.Build(
-                "investigate.returned", target, prompt, "bug-crusher", ArbiterCallerSources.Harness, KyberWeaveConfig.ProductDefaults)
+                "investigate.returned", target, prompt, "bug-crusher", ArbiterCallerSources.Harness, KyberWeaveConfigDefaults.Product)
             .With("git.changed-paths.since-dispatch", new List<string> { "src/a.ts" }, ArbiterFactLabel.Derived)
             .With("git.changed-paths.attributed", new List<string> { "src/a.ts" }, ArbiterFactLabel.Derived);
 

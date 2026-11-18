@@ -43,7 +43,7 @@ public sealed class ArbiterUnobservableReturnsTests
     }
 
     private static ArbiterRule Shipped(string id) =>
-        ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == id);
+        ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == id);
 
     [Fact]
     public void ObservesReturnsFact_IsDeclaredByTheDelegateTriggers()
@@ -119,10 +119,10 @@ public sealed class ArbiterUnobservableReturnsTests
     [Fact]
     public void ShippedRules_KeepTheirIds_AndValidateWithZeroErrors()
     {
-        var diagnostics = RuleValidator.Validate(ArbiterConfig.ProductDefaults);
+        var diagnostics = RuleValidator.Validate(ArbiterConfigDefaults.Product);
 
         Assert.DoesNotContain(diagnostics, d => d.Severity == KyberWeave.Core.Diagnostics.Severity.Error);
-        Assert.Contains(ArbiterConfig.ProductDefaults.Rules, rule => rule.Id == "KW-ARB-READY-001");
+        Assert.Contains(ArbiterConfigDefaults.Product.Rules, rule => rule.Id == "KW-ARB-READY-001");
     }
 
     private sealed class NullEngine : IHookDecisionEngine

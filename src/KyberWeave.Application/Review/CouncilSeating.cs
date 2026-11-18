@@ -220,7 +220,7 @@ public static class CouncilSeating
         foreach (SeverityOverrideRow row in rows)
         {
             text.AppendLine(CultureInfo.InvariantCulture,
-                $"  - {row.Id}: {SeverityOverrides.SeverityName(row.Severity)} — {row.FindingClass}{(row.Why is null ? string.Empty : $" (why: {row.Why})")}");
+                $"  - {row.Id}: {SeverityOverrideRules.SeverityName(row.Severity)} — {row.FindingClass}{(row.Why is null ? string.Empty : $" (why: {row.Why})")}");
         }
     }
 

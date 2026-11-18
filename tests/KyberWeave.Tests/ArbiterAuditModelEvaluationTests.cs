@@ -74,7 +74,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         DiagnosticReport report = new();
         int reported = 0;
 
-        bool configured = _host.Command<ArbiterAuditService>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+        bool configured = _host.Command<ArbiterAuditService>().ModelConfigured(KyberWeaveConfigDefaults.Product, report, ref reported);
 
         Assert.False(configured);
         Assert.Equal(1, reported);
@@ -93,7 +93,7 @@ public sealed class ArbiterAuditModelEvaluationTests : IDisposable
         DiagnosticReport report = new();
         int reported = 0;
 
-        bool configured = _host.Command<ArbiterAuditService>().ModelConfigured(KyberWeaveConfig.ProductDefaults, report, ref reported);
+        bool configured = _host.Command<ArbiterAuditService>().ModelConfigured(KyberWeaveConfigDefaults.Product, report, ref reported);
 
         Assert.True(configured);
         Assert.Equal(0, reported);

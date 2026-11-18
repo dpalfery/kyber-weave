@@ -28,7 +28,7 @@ public sealed class TodoInventoryValidatorTests
     /// The same host overrides todo-index to the repository-root index, so the folder the
     /// validator derives spans the whole docs root, archive subtree included.
     /// </summary>
-    private static readonly KyberWeaveConfig HostOverrides = KyberWeaveConfig.ProductDefaults
+    private static readonly KyberWeaveConfig HostOverrides = KyberWeaveConfigDefaults.Product
         .WithConfigReg(new ConfigRegConfig
         {
             Additions = [new ConfigRegEntry(ConfigRegConfig.TodoIndexProperty, "6-Docs/README.md")]
@@ -69,7 +69,7 @@ public sealed class TodoInventoryValidatorTests
         """;
 
     private static DiagnosticReport Validate(DocFixture fixture) =>
-        new TodoInventoryValidator(KyberWeaveConfig.ProductDefaults).Validate(fixture.Load());
+        new TodoInventoryValidator(KyberWeaveConfigDefaults.Product).Validate(fixture.Load());
 
     private static string Describe(DiagnosticReport report) =>
         string.Join("; ", report.Items.Select(i => $"{i.Code} {i.FilePath}"));
