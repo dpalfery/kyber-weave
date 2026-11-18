@@ -1,45 +1,31 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Tests.Arbiter;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
-using System.Runtime.CompilerServices;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
-/// Task 3.1 contract: the read-only Arbiter CLI surfaces (<c>validate</c>,
-/// <c>rules</c>, <c>plan</c>, <c>eval</c>, <c>audit</c>) and their exit codes.
-/// RED: the <c>arbiter</c> branch is not registered and the commands do not exist yet.
+/// The read-only Arbiter CLI surfaces (<c>validate</c>, <c>rules</c>, <c>plan</c>, <c>eval</c>, <c>audit</c>) and their
+/// exit codes, over the in-memory host: no disk, no process, no host console.
 /// </summary>
 public sealed class ArbiterCliCommandTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
 
-    public void Dispose() => _temp.Dispose();
-
-    [Fact]
-    public void Validate_RepositoryRoot_ExitsZero()
-    {
-        ArbiterValidateCommand command = ArbiterTestServices.Command<ArbiterValidateCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
-            null!,
-            new ArbiterSettings { Path = RepositoryRoot() }));
-
-        Assert.Equal(0, execution.ExitCode);
-    }
+    public void Dispose() => _host.Dispose();
 
     [Fact]
     public void Validate_NoArbiterSection_ExitsZero()
     {
         string empty = NewDir("arbiter-validate-empty");
-        ArbiterValidateCommand command = ArbiterTestServices.Command<ArbiterValidateCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterValidateCommand command = _host.Command<ArbiterValidateCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = empty }));
 
@@ -50,8 +36,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     public void Validate_InvalidSection_ExitsOneWithHintedDiagnostic()
     {
         string host = NewDir("arbiter-validate-invalid");
-        Directory.CreateDirectory(Path.Combine(host, ".kyber-weave"));
-        File.WriteAllText(
+        _host.Write(
             Path.Combine(host, ".kyber-weave", "kyber-weave.yml"),
             """
             arbiter:
@@ -66,8 +51,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
                   effects: { yes: allow }
             """);
 
-        ArbiterValidateCommand command = ArbiterTestServices.Command<ArbiterValidateCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterValidateCommand command = _host.Command<ArbiterValidateCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host, Format = "json" }));
 
@@ -78,8 +63,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
     [Fact]
     public void Rules_ListsRuleFields()
     {
-        ArbiterRulesCommand command = ArbiterTestServices.Command<ArbiterRulesCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterRulesCommand command = _host.Command<ArbiterRulesCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = NewDir("arbiter-rules") }));
 
@@ -95,8 +80,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
     [Fact]
     public void Rules_ListsShadowDefaultAndForEachForEveryShippedRule()
     {
-        ArbiterRulesCommand command = ArbiterTestServices.Command<ArbiterRulesCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterRulesCommand command = _host.Command<ArbiterRulesCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = NewDir("arbiter-rules-columns") }));
 
@@ -109,8 +94,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
     [Fact]
     public void Rules_UnknownTrigger_ExitsNonZero()
     {
-        ArbiterRulesCommand command = ArbiterTestServices.Command<ArbiterRulesCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterRulesCommand command = _host.Command<ArbiterRulesCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = NewDir("arbiter-rules-bad-trigger"), Trigger = "no-such-trigger" }));
 
@@ -131,8 +116,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             **Files:** `src/KyberWeave.Cli/Commands/Arbiter/ArbiterSettings.cs`
             """);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -151,8 +136,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             Nothing actionable here.
             """);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -174,8 +159,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             **Depends on:** T9
             """);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -193,8 +178,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
         string text = DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready");
         string plan = WriteFile("arbiter-plan-digest-json.md", text);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "json" }));
 
@@ -214,8 +199,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
         string text = DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready");
         string plan = WriteFile("arbiter-plan-digest-table.md", text);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -233,8 +218,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
         string text = DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready");
         string plan = WriteFile("arbiter-plan-digest-once.md", text);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -263,11 +248,11 @@ public sealed class ArbiterCliCommandTests : IDisposable
             Nothing actionable here.
             """);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution json = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun json = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "json" }));
-        CommandExecution table = Capture(() => command.Execute(
+        ArbiterCommandRun table = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -293,8 +278,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             Body text with no file scope.
             """);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution json = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun json = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "json" }));
 
@@ -314,14 +299,14 @@ public sealed class ArbiterCliCommandTests : IDisposable
             "arbiter-plan-digest-formats.md",
             DigestPlan(frontmatterStatus: "current", bodyStatus: "Ready"));
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution json = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun json = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "json" }));
-        CommandExecution sarif = Capture(() => command.Execute(
+        ArbiterCommandRun sarif = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "sarif" }));
-        CommandExecution markdown = Capture(() => command.Execute(
+        ArbiterCommandRun markdown = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "markdown" }));
 
@@ -346,11 +331,11 @@ public sealed class ArbiterCliCommandTests : IDisposable
             Nothing is listed yet.
             """);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution json = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun json = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "json" }));
-        CommandExecution table = Capture(() => command.Execute(
+        ArbiterCommandRun table = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -382,11 +367,11 @@ public sealed class ArbiterCliCommandTests : IDisposable
             **Depends on:** T9
             """);
 
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution json = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun json = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan, Format = "json" }));
-        CommandExecution table = Capture(() => command.Execute(
+        ArbiterCommandRun table = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = plan }));
 
@@ -461,7 +446,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
     {
         string host = NewDir("arbiter-eval");
         string eventFile = Path.Combine(host, "event.json");
-        File.WriteAllText(eventFile, JsonSerializer.Serialize(new ArbiterEvent
+        _ = _host.Write(eventFile, JsonSerializer.Serialize(new ArbiterEvent
         {
             Harness = "claude",
             Phase = "pre",
@@ -471,8 +456,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             IsDispatch = true,
         }));
 
-        ArbiterEvalCommand command = ArbiterTestServices.Command<ArbiterEvalCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterEvalCommand command = _host.Command<ArbiterEvalCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings
             {
@@ -488,7 +473,7 @@ public sealed class ArbiterCliCommandTests : IDisposable
             execution.Output.Contains("escalate", StringComparison.Ordinal),
             execution.Output);
         Assert.False(
-            Directory.Exists(Path.Combine(host, "artifacts", "arbiter")),
+            _host.Files.DirectoryExists(Path.Combine(host, "artifacts", "arbiter")),
             "eval is a dry run and must write nothing.");
     }
 
@@ -510,8 +495,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             }).GetAwaiter().GetResult();
         });
 
-        ArbiterAuditCommand command = ArbiterTestServices.Command<ArbiterAuditCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -538,8 +523,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             }).GetAwaiter().GetResult();
         });
 
-        ArbiterAuditCommand command = ArbiterTestServices.Command<ArbiterAuditCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -566,12 +551,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
                 Target = "csharp-dev",
             }).GetAwaiter().GetResult();
         });
-        File.AppendAllText(
-            Path.Combine(host, "artifacts", "arbiter", "ledger.jsonl"),
-            "{\"id\": \"broken\", \"phase\": \n");
+        AppendRawLine(host, "ledger.jsonl", "{\"id\": \"broken\", \"phase\": ");
 
-        ArbiterAuditCommand command = ArbiterTestServices.Command<ArbiterAuditCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -596,12 +579,10 @@ public sealed class ArbiterCliCommandTests : IDisposable
                 Trigger = "delegate",
             }).GetAwaiter().GetResult();
         });
-        File.AppendAllText(
-            Path.Combine(host, "artifacts", "arbiter", "decisions.jsonl"),
-            "not json at all\n");
+        AppendRawLine(host, "decisions.jsonl", "not json at all");
 
-        ArbiterAuditCommand command = ArbiterTestServices.Command<ArbiterAuditCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -642,8 +623,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             ledger.AppendAsync(post).GetAwaiter().GetResult();
         });
 
-        ArbiterAuditCommand command = ArbiterTestServices.Command<ArbiterAuditCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -675,8 +656,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             }).GetAwaiter().GetResult();
         });
 
-        ArbiterAuditCommand command = ArbiterTestServices.Command<ArbiterAuditCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -707,8 +688,8 @@ public sealed class ArbiterCliCommandTests : IDisposable
             }).GetAwaiter().GetResult();
         });
 
-        ArbiterAuditCommand command = ArbiterTestServices.Command<ArbiterAuditCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterAuditCommand command = _host.Command<ArbiterAuditCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = host }));
 
@@ -762,13 +743,12 @@ public sealed class ArbiterCliCommandTests : IDisposable
         """;
 
     /// <summary>
-    /// The execution digest the plan command reports for a plan file. Shared with the task-file
-    /// tests, which record the same digest in a task file they then validate.
+    /// The execution digest the plan command reports for a plan file.
     /// </summary>
-    internal static string ReportedDigestOf(string planPath)
+    private string ReportedDigestOf(string planPath)
     {
-        ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();
-        CommandExecution execution = Capture(() => command.Execute(
+        ArbiterPlanCommand command = _host.Command<ArbiterPlanCommand>();
+        ArbiterCommandRun execution = _host.Run(() => command.Execute(
             null!,
             new ArbiterSettings { Path = planPath, Format = "json" }));
 
@@ -817,33 +797,21 @@ public sealed class ArbiterCliCommandTests : IDisposable
     private string SeedLedger(string name, Action<InFlightLedger> seed)
     {
         string host = NewDir(name);
-        InFlightLedger ledger = RealArbiterState.Ledger(Path.Combine(host, "artifacts", "arbiter"));
-        seed(ledger);
+        seed(_host.State.Ledger(ArbiterDirectory(host)));
         return host;
     }
 
+    private static string ArbiterDirectory(string host) => Path.Combine(host, "artifacts", "arbiter");
+
+    private void AppendRawLine(string host, string fileName, string line) =>
+        _host.State.Log.AppendLineAsync(ArbiterDirectory(host), fileName, line, CancellationToken.None).GetAwaiter().GetResult();
+
     private string NewDir(string name)
     {
-        string dir = Path.Combine(_temp.Path, name);
-        Directory.CreateDirectory(dir);
+        string dir = _host.InWork(name);
+        _host.Files.CreateDirectory(dir);
         return dir;
     }
 
-    private string WriteFile(string name, string content)
-    {
-        string path = Path.Combine(_temp.Path, name);
-        File.WriteAllText(path, content);
-        return path;
-    }
-
-    private static CommandExecution Capture(Func<int> execute)
-    {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(execute);
-        return new CommandExecution(execution.Result, execution.Output);
-    }
-
-    private static string RepositoryRoot([CallerFilePath] string sourcePath = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
-
-    private sealed record CommandExecution(int ExitCode, string Output);
+    private string WriteFile(string name, string content) => _host.Write(_host.InWork(name), content);
 }
