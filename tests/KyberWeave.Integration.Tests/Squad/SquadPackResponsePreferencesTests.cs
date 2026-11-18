@@ -8,6 +8,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Packaging;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Testing.Squad;
 
 namespace KyberWeave.Integration.Tests.Squad;
 
@@ -54,7 +55,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [Fact]
     public void Pack_Apm_ShipsTheShippedDefaultInTheConductorAndBugCrusherCarriers()
     {
-        string archivePath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-apm");
+        string archivePath = RealSquadPacker.Create().PackApm(ProductRoot, _temp.Path, "rp-apm");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
 
         AssertCarrierShipsDefault(archive, ConductorAgent);
@@ -70,7 +71,7 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [Fact]
     public void Pack_Plugins_ShipsTheShippedDefaultInTheBugCrusherSkillCarrier()
     {
-        string archivePath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-plugins");
+        string archivePath = RealSquadPacker.Create().PackPlugins(ProductRoot, _temp.Path, "rp-plugins");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
 
         AssertCarrierShipsDefault(archive, BugCrusherSkill);
@@ -84,8 +85,8 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [Fact]
     public void Pack_NoPackedArchiveHoldsAnEmptyResponsePreferencesBlock()
     {
-        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-empty-apm");
-        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-empty-plugins");
+        string apmPath = RealSquadPacker.Create().PackApm(ProductRoot, _temp.Path, "rp-empty-apm");
+        string pluginsPath = RealSquadPacker.Create().PackPlugins(ProductRoot, _temp.Path, "rp-empty-plugins");
 
         foreach (string archivePath in new[] { apmPath, pluginsPath })
         {
@@ -112,10 +113,10 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
         string firstDirectory = Path.Combine(_temp.Path, "first");
         string secondDirectory = Path.Combine(_temp.Path, "second");
 
-        string firstApm = SquadPacker.PackApm(ProductRoot, firstDirectory, "rp-det");
-        string secondApm = SquadPacker.PackApm(ProductRoot, secondDirectory, "rp-det");
-        string firstPlugins = SquadPacker.PackPlugins(ProductRoot, firstDirectory, "rp-det");
-        string secondPlugins = SquadPacker.PackPlugins(ProductRoot, secondDirectory, "rp-det");
+        string firstApm = RealSquadPacker.Create().PackApm(ProductRoot, firstDirectory, "rp-det");
+        string secondApm = RealSquadPacker.Create().PackApm(ProductRoot, secondDirectory, "rp-det");
+        string firstPlugins = RealSquadPacker.Create().PackPlugins(ProductRoot, firstDirectory, "rp-det");
+        string secondPlugins = RealSquadPacker.Create().PackPlugins(ProductRoot, secondDirectory, "rp-det");
 
         AssertArchivesIdentical(firstApm, secondApm);
         AssertArchivesIdentical(firstPlugins, secondPlugins);
@@ -132,8 +133,8 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [Fact]
     public void Pack_OfTheShippedSourceShipsTheDefaultAndNoOperatorMarkerBecauseItTakesNoHomeInput()
     {
-        string apmPath = SquadPacker.PackApm(ProductRoot, _temp.Path, "rp-home");
-        string pluginsPath = SquadPacker.PackPlugins(ProductRoot, _temp.Path, "rp-home");
+        string apmPath = RealSquadPacker.Create().PackApm(ProductRoot, _temp.Path, "rp-home");
+        string pluginsPath = RealSquadPacker.Create().PackPlugins(ProductRoot, _temp.Path, "rp-home");
 
         using (ZipArchive apmArchive = ZipFile.OpenRead(apmPath))
         {
@@ -266,11 +267,8 @@ public sealed class SquadPackResponsePreferencesTests : IDisposable
     [Fact]
     public void Packer_SourceContainsNoAmbientHomeOrEnvironmentReads()
     {
-        const string packagingDir = "src/KyberWeave.Data/Squad/Packaging";
-        string[] sources = [.. Corpus.EnumerateFiles(packagingDir, "*.cs").Order(StringComparer.Ordinal)];
-        Assert.True(
-            sources.Length > 0,
-            $"Expected packaging source under '{packagingDir}'; the scan found none.");
+        const string packerSource = "src/KyberWeave.Application/Squad/Packaging/SquadPacker.cs";
+        string[] sources = [packerSource];
 
         string[] forbidden =
         [

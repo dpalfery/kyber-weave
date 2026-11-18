@@ -1,106 +1,57 @@
 # KyberWeave.Core
 
-The engine. Everything the CLI and the MCP server do is implemented here and in its two
-feature assemblies; the hosts are thin.
+**This directory holds no source files.** The project stays, but do not delete it and do not add
+code here.
 
-| Assembly | Holds | Referenced by |
-|---|---|---|
-| `KyberWeave.Core` | Everything shared, plus Skills, Agents, Review, Arbiter, Utilities | every host |
-| [`KyberWeave.Core.Docs`](../KyberWeave.Core.Docs) | The DocGraph engine | CLI, MCP server |
-| [`KyberWeave.Core.Squad`](../KyberWeave.Core.Squad) | The Kyber-Squad engine | CLI |
+Every class that used to live here moved when the engine was split into layers:
 
-The two feature assemblies reference Core and never each other. Namespaces did not move with
-the split. Each feature assembly's name is its root namespace, and Core keeps the few Squad and
-Docs types its own code reads (`SquadTarget`, `SquadPathPolicy`, `DocType`) in their original
-namespaces. Move a type down into Core only when Core code needs it. See
-[ADR 0057](../../docs/adr/0057-squad-and-docs-are-their-own-assemblies.md). This file's rules
-apply to all three.
+| It was | It now lives in |
+|---|---|
+| logic — a parser, renderer, validator, resolver, planner or service | [`../KyberWeave.Application`](../KyberWeave.Application) |
+| data — a record, value object, enum, options bag or constants | [`../KyberWeave.Domain`](../KyberWeave.Domain) |
+| an interface | [`../KyberWeave.Contracts`](../KyberWeave.Contracts) |
+| an adapter over a resource — file system, process, git, HTTP | [`../KyberWeave.Data`](../KyberWeave.Data) |
 
-**The code-graph server's name lives here** — `McpConfig.CodeGraphServer`, in `Configuration/` —
-for the same reason: Core code needs it, and the MCP server cannot reference `KyberWeave.Core.Squad`,
-so it cannot read the renderers' copy. `CapabilityDegradations.CodeGraphMcpServer` re-exports the
-constant and the docs server branches on it through `McpConfig.DeclaresCodeGraph`; a second literal
-would let the renderers and the server disagree about which declared server is the code graph.
+A static locator that fronted one of those was deleted rather than moved: its callers take the
+`Contracts` interface and the container registers the `Application` implementation.
+
+## Why the empty project is still here
+
+`LayerReferenceTests` pins what `KyberWeave.Core` may reference — only `KyberWeave.Contracts`,
+`KyberWeave.Domain` and `KyberWeave.Kernel` — and `CoreAssemblySplitTests` pins the hosts' and the
+feature assemblies' reference sets against it. Removing the project would delete the layer those
+tests describe.
+
+That reference set is also why new code does not go here: `KyberWeave.Core` cannot reach
+`KyberWeave.Application` or `KyberWeave.Data`, so logic written here could not use the engine.
+
+## The engine does not construct its own collaborators
+
+This constraint used to be stated in this file for `KyberWeave.Core`; it now applies to
+`KyberWeave.Application`. A class defines or takes **ports** — a `Contracts` interface, or a seam
+such as `IFileSystem`, `IProcessRunner` or `TimeProvider` — as constructor arguments.
+**Composition roots** decide which implementation is used: the CLI's `*CommandComposition` types,
+`Program.cs` in the MCP server, and `ServiceCollectionExtensions` in `Application` itself.
+
+`ICodeGraphResolver` is the worked example: `Application` consumes the interface, the hosts
+construct `CodeGraphResolverAdapter`, and tests inject `FakeCodeGraphResolver` so the whole drift
+and join surface runs without `sqlite3` on the machine. If you find yourself newing up a loader or
+an adapter inside `Application`, the dependency belongs in the caller.
+
+## Where the engine's other rules went
+
+- **Child processes** go through `ProcessRunner` in
+  [`../KyberWeave.Kernel/Processes`](../KyberWeave.Kernel/Processes): never drain one redirected
+  stream before the other, and never use the concatenated `Arguments` string. `ProcessRunnerTests`
+  reintroduces the deadlock against a child that fills both streams.
+- **Rule ids** (`KW-*`) are declared as `public const string` on the validator or linter that emits
+  them, so the id and the condition cannot drift apart. They are permanent: add new ones, never
+  reuse or renumber.
+- **Documented behaviour.** Retrieval scoring and budgeting are described in
+  [`docs/docgraph/retrieval.md`](../../docs/docgraph/retrieval.md), the two-clock corpus reload in
+  [`docs/docgraph/architecture.md`](../../docs/docgraph/architecture.md), and every rule id in
+  [`docs/ci-pipelines/rule-reference.md`](../../docs/ci-pipelines/rule-reference.md). Changing a
+  weight, a threshold or a severity updates those documents in the same change;
+  `docs_find_documents_citing_code_symbol` finds the ones that claim the symbol you are editing.
 
 Read [`/AGENTS.md`](../../AGENTS.md) first for repository-wide rules.
-
-## Core does not construct its own collaborators
-
-This is the constraint most easily broken by accident. Core defines **ports** and takes
-them as constructor arguments or factories. **Composition roots** — `DocsCommandComposition`
-in the CLI, `Program.cs` in the MCP server — decide which implementation is used.
-
-`ICodeGraphResolver` is the worked example: Core consumes the interface, the CLI and MCP
-host construct `CodeGraphResolverAdapter`, and tests inject `FakeCodeGraphResolver` so the
-whole drift and join surface can be driven without `sqlite3` on the machine.
-
-`DocumentIndexHost` takes `Func<ICodeGraphResolver>` and `Func<DocumentSet>` for the same
-reason. If you find yourself newing up a loader or a resolver inside Core, the dependency
-belongs in the caller.
-
-## Layout
-
-| Directory | Holds |
-|---|---|
-| `Skills/`, `Agents/` | Governance per artifact class |
-| `Security/` | `InstructionSurfaceScanner`, shared by skill and agent scanning |
-| `Diagnostics/` | `Diagnostic`, `DiagnosticReport`, `Severity` |
-| `CodeGraph/` | Read-only port over the CodeGraph index |
-| `Configuration/` | `kyber-weave.yml` loading and merging |
-| `Text/`, `Parsing/` | Vectorizer, frontmatter reader |
-
-## Rule ids live next to the code that raises them
-
-Declared as `public const string` on the validator or linter that emits them, so the id
-and the condition cannot drift apart. They are permanent — see the repository rules.
-
-A `Diagnostic` carries `Code`, `Severity`, `Message`, `Subject`, `Path`, and `Hint`. Fill
-the hint whenever the fix is knowable; `StringDistance.Nearest` (in `Text/`) computes an
-edit-distance suggestion and is offered only when the distance is plausibly a typo.
-
-## Configuration merges by replacement
-
-`OntologyConfigLoader.Merge` replaces lists rather than appending, and an **empty list is a
-real value that clears the default** — `Clone` falls back only on null. That is how a host
-drops the inherited `DevOps/*` exclusions. Preserve this when adding config keys, and add
-the key to `OntologyYamlSection` with a hyphenated name.
-
-## Child processes go through `ProcessRunner`
-
-Never call `ReadToEnd()` on one redirected stream and then the other, and never call
-`WaitForExit()` before draining both. An OS pipe buffer is finite, so a child that fills
-the stream you are not currently reading blocks on write while you block on a read that
-can never complete.
-
-This is a silent bug — every fixture and happy path is quiet enough to fit in the buffer,
-so it survives testing and hangs on the first talkative input. It had been written three
-separate times in this repository before being centralised.
-
-`Processes/ProcessRunner.ReadToEnd` starts both reads before awaiting either. Use it for
-anything with `RedirectStandardOutput` or `RedirectStandardError`.
-`ProcessRunner.Run` additionally rebuilds the start info: `UseShellExecute` stays off and
-arguments go through `ArgumentList`, never the concatenated `Arguments` string, so a
-caller cannot re-enable the shell or smuggle metacharacters into argv.
-`ProcessRunnerTests` reintroduces the deadlock against a child that writes 300 KB to each
-stream and fails on a timeout, so a regression is caught rather than hanging CI.
-
-## Dependencies
-
-Markdig and YamlDotNet only. Adding a third needs a stated reason — see the sqlite3
-decision recorded in `CodeGraph/CodeGraphResolverAdapter.cs`.
-
-`InternalsVisibleTo` exposes internals to `KyberWeave.Tests`, so helpers like link
-normalization and vocabulary parsing are unit-tested directly rather than only through the
-public command surface. Marking something `internal` does not put it beyond test reach.
-
-## Documented behaviour
-
-Several algorithms here are described in the governed corpus, and the description is
-expected to stay true:
-
-- Retrieval scoring, authority weighting, and budgeting — [`docs/docgraph/retrieval.md`](../../docs/docgraph/retrieval.md)
-- The corpus/joins two-clock reload — [`docs/docgraph/architecture.md`](../../docs/docgraph/architecture.md)
-- Every rule id — [`docs/ci-pipelines/rule-reference.md`](../../docs/ci-pipelines/rule-reference.md)
-
-Changing a weight, a threshold, or a severity means updating those documents in the same
-change. `docs_find_documents_citing_code_symbol` finds which ones claim the symbol you are editing.

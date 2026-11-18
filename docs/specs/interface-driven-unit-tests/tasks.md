@@ -202,7 +202,7 @@ from this file when it is marked Ready.
     Step 0 outcomes recorded 2026-11-18: these `Data` files wait for phase 3, because squad deployment
     code names them or they need the lease semantics task 3.4 settles: `Squad/Rendering`'s
     `FileSquadRenderInputReader`, `CopilotMcpServerProbe` and `SquadOperatorChannelOverlayFile` (they move
-    together once `SquadWorkerBaselineFile` has an interface), `Squad/Presets/SquadModelPresetValidator`, and
+    together once `SquadWorkerBaselineFile` has an interface), `Squad/Presets/SquadModelPresetValidator`, `Squad/Parsing/SquadSourceLoader` (its 1,904 lines are named by `SquadDeploymentAdapters`), and
     `Squad/Instances/SquadInstanceLinkSync` (its unbounded, in-process-queuing mutex wait needs an `ILease`
     acquire that waits; decide it with 3.4). These stay adapters in `Data`, each now a phase 4 conversion
     rather than a move: `Doctor/FileCodeGraphIndexWorkspace` (task 4.9), `Update/CopilotPromptRefresher`
@@ -210,6 +210,19 @@ from this file when it is marked Ready.
     The squad deployment classes in `Data/Squad/Deployment` are not moved by this task: they reach
     `Application` in tasks 3.2 to 3.4, behind the crash-safety contract tests and the second reviewer
     requirement 10.2 asks for, and the Domain group they pin (2.5.3) moves after 3.4.
+    Step 0's `Core` rows closed 2026-11-18: all 13 are gone, and `src/KyberWeave.Core` now holds no
+    source files (the project stays — `LayerReferenceTests` and `CoreAssemblySplitTests` pin it).
+    None of the 13 held logic of its own; each was a static locator or shim over a service that had
+    already moved, so 2.2 deleted eleven of them (`CodeGraphProvisioner`, `DoctorFileSystem`,
+    `GateCatalogue`, `ChangedFiles`, `ReviewDecisionModel`, `ReviewLensApplicability`,
+    `ReviewVerdictDecisions`, `TaskGateSelection`, `ReviewConfigLoader`, `RunBaseState`,
+    `RunStartEvidence`) and 2.3 the two configuration loaders (`KyberWeaveConfigLoader`,
+    `KyberWeaveYamlFile`). Every caller now takes a `Contracts` interface
+    (`ICodeGraphProvisioner`, `IDoctorFileSystem`, `IReviewGateCatalogue`, `IGitChangeReader`,
+    `IReviewDecisionModelFactory`, `IReviewDecisionSteps`, `ITaskGateSelectionService`,
+    `IRunStateStore`, `IRunStartEvidence`, `IKyberWeaveConfigRepository`), so the 2.1 inventory's
+    prediction for this table — 7 moves, 1 split, 1 interface row — overstated it: there is no
+    `Core` move, split or interface row left.
   - **Rules for every folder task:** a move commit is `git mv` only, with the build and the tests green
     before and after it; a seam conversion is a separate commit; each move updates the path-keyed
     artefacts — document code references and `kyber-weave docs drift .`,
