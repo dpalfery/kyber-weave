@@ -5,108 +5,6 @@ using KyberWeave.Core.Squad.Model;
 
 namespace KyberWeave.Core.Squad.Rendering;
 
-/// <summary>
-/// Defines the contract for lowering canonical Squad source into a coding harness's
-/// native agent and skill files.
-/// </summary>
-/// <remarks>
-/// This is the seam that used to be filled by shelling out to the upstream Agent Package
-/// Manager (<c>apm compile</c>). No released APM version exposes the machine-readable
-/// output this pipeline needs — 0.28.0 has no <c>--format json</c> mode at all, and three
-/// of the ten approved targets (<c>kilo</c>, <c>warp</c>, <c>factory</c>) are absent from
-/// its target matrix — so rendering is native Kyber-Weave code from here on.
-/// </remarks>
-public interface ISquadRenderer
-{
-    /// <summary>The targets this renderer can produce native output for.</summary>
-    IReadOnlyCollection<SquadTarget> SupportedTargets { get; }
-
-    /// <summary>Renders canonical Squad source into harness-native deployment files.</summary>
-    Task<SquadRenderResult> RenderAsync(
-        SquadRenderRequest request,
-        CancellationToken cancellationToken = default);
-}
-
-/// <summary>Parameters for a Squad render execution.</summary>
-/// <param name="SourceDirectory">The canonical Squad source tree to render.</param>
-/// <param name="Targets">The harness targets to render for.</param>
-/// <param name="Scope">Whether the output is project-relative or global.</param>
-/// <param name="UserScopeDirectory">The Kyber-Weave app-data directory, not a harness root.</param>
-/// <param name="TranslationMode">The translation mode for lossy targets.</param>
-/// <param name="GlobalRoots">
-/// Resolves each target's real per-user global root; required only by renderers whose
-/// global-scope output embeds that root.
-/// </param>
-/// <param name="ModelPresets">
-/// Optional model presets to apply per target during rendering.
-/// </param>
-/// <param name="PreloadedSource">
-/// Optional in-memory canonical source, avoiding disk reads when provided.
-/// </param>
-/// <param name="EnvironmentReader">
-/// Optional environment variable reader delegate, avoiding process-level environment mutation.
-/// </param>
-/// <param name="Arbiter">
-/// Optional Arbiter enforcement settings; hooks render only when enabled and project-scoped.
-/// </param>
-/// <param name="DiskInputs">
-/// What a render reads from the Squad source tree and the user's Copilot config, read before the render by the host
-/// so a renderer stays a pure function of its request. A request with no preloaded source and no inputs cannot render.
-/// </param>
-/// <param name="WorkerRoster">
-/// The host's <c>worker-roster</c>, or null for the default. Under <c>tiered</c> a rendered agent's
-/// <c>delegates-to</c> leaves out every agent that declares the <c>technology</c> roster, so the technology
-/// developers are not offered to a run that cannot dispatch them. Any other value renders unchanged.
-/// </param>
-/// <remarks>
-/// <see cref="UserScopeDirectory"/> is the Kyber-Weave app-data directory, so it cannot tell
-/// a renderer where a harness actually reads its global agents from (for Copilot that is
-/// <c>$COPILOT_HOME</c> or <c>~/.copilot</c>). <see cref="GlobalRoots"/> carries that
-/// resolver into the render so a target whose agent bodies cannot rely on file-relative link
-/// anchoring (Copilot, at global scope) can emit absolute resource links. Every site that
-/// renders for deployment or comparison (lifecycle install and update, and doctor's global
-/// collision scan) must supply the same resolver, or install, receipt, and doctor would see
-/// different bytes. It is null-tolerant for project scope and for targets that ignore it; a
-/// Copilot global render without it fails closed rather than shipping relative links.
-/// </remarks>
-public sealed record SquadRenderRequest(
-    string SourceDirectory,
-    IReadOnlyList<SquadTarget> Targets,
-    SquadDeploymentScope Scope,
-    string? UserScopeDirectory = null,
-    string TranslationMode = "best-effort",
-    ISquadGlobalRootResolver? GlobalRoots = null,
-    IReadOnlyDictionary<SquadTarget, SquadModelPreset>? ModelPresets = null,
-    SquadSource? PreloadedSource = null,
-    Func<string, string?>? EnvironmentReader = null,
-    SquadArbiterWiring? Arbiter = null,
-    SquadRenderDiskInputs? DiskInputs = null,
-    string? WorkerRoster = null)
-{
-    /// <summary>
-    /// Convenience constructor applying a single <see cref="SquadModelPreset"/> across all requested targets.
-    /// </summary>
-    public SquadRenderRequest(
-        string SourceDirectory,
-        IReadOnlyList<SquadTarget> Targets,
-        SquadDeploymentScope Scope,
-        SquadModelPreset? ModelPresets)
-        : this(
-            SourceDirectory,
-            Targets,
-            Scope,
-            null,
-            "best-effort",
-            null,
-            ModelPresets is null ? null : Targets.ToDictionary(static target => target, _ => ModelPresets),
-            null,
-            null,
-            null,
-            null)
-    {
-    }
-}
-
 /// <summary>What a render reads from disk, read ahead of the render and carried on the request.</summary>
 /// <param name="SourceFailure">Why the canonical source could not be loaded, rethrown when a render needs the source.</param>
 /// <param name="WorkerBaselineBlock">The worker baseline block, or null when the tree carries none.</param>
@@ -162,7 +60,7 @@ public sealed record SquadRenderedBlockEntry(string Container, JsonNode Entry);
 /// </summary>
 /// <remarks>
 /// Unlike <see cref="SquadDeploymentFile"/>, a block never claims the whole file —
-/// <see cref="SquadDeploymentPlan"/> splices <see cref="Entries"/> into whatever the
+/// <c>SquadDeploymentPlan</c> splices <see cref="Entries"/> into whatever the
 /// user already has at <see cref="RelativePath"/> at plan time, so an existing user
 /// file is content to merge with rather than an unmanaged collision.
 /// </remarks>

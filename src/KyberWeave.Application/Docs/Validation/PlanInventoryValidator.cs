@@ -44,9 +44,9 @@ public sealed partial class PlanInventoryValidator
     /// </summary>
     public const string StaleOpenEntry = "KW-DOC-LIFECYCLE-006";
 
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
 
-    public PlanInventoryValidator(IDocsEngineConfig config)
+    public PlanInventoryValidator(KyberWeaveConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);
         _config = config;

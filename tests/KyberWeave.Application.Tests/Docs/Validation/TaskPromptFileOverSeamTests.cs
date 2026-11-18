@@ -62,11 +62,11 @@ public sealed class TaskPromptFileOverSeamTests
 
     private sealed class UnusedTasks : IPlanTaskService
     {
-        public IReadOnlyList<string> ActivePlans(string repoRoot, IDocsEngineConfig config) => throw new NotSupportedException();
+        public IReadOnlyList<string> ActivePlans(string repoRoot, KyberWeaveConfig config) => throw new NotSupportedException();
 
         public PlanTaskFileOutcome Run(
             string repoRoot,
-            IDocsEngineConfig config,
+            KyberWeaveConfig config,
             string artifactPath,
             PlanTaskFileMode mode,
             IPlanTaskAgentPicker? picker = null) =>

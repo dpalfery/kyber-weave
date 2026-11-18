@@ -28,7 +28,7 @@ public partial class PlanFileResolver
     private const string SpecTaskList = "tasks.md";
 
     private readonly string _repoRoot;
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
     private readonly IPathResolver _paths;
 
@@ -38,7 +38,7 @@ public partial class PlanFileResolver
     /// <param name="files">Probes the planning folders.</param>
     /// <param name="paths">Resolves the repository root and a typed path to full paths.</param>
     /// <param name="environment">Names the directory a relative repository root is resolved against.</param>
-    public PlanFileResolver(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IPathResolver paths, IProcessEnvironment environment)
+    public PlanFileResolver(string repoRoot, KyberWeaveConfig config, IRepositoryFileStore files, IPathResolver paths, IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(paths);

@@ -57,7 +57,7 @@ public sealed class OpenWorkValidator
         (ConfigRegConfig.SpecificationIndexProperty, "Specification", "specs", [DocType.Spec, DocType.Requirements])
     ];
 
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
     private readonly string? _repoRoot;
 
@@ -69,7 +69,7 @@ public sealed class OpenWorkValidator
     /// Markdown and so are not loaded as documents. Null skips that rule, which is what a caller
     /// checking a document set alone asks for.
     /// </param>
-    public OpenWorkValidator(IDocsEngineConfig config, IRepositoryFileStore files, string? repoRoot = null)
+    public OpenWorkValidator(KyberWeaveConfig config, IRepositoryFileStore files, string? repoRoot = null)
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(files);
