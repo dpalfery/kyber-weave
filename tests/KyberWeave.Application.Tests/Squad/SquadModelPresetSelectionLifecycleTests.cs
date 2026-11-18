@@ -4,14 +4,14 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad;
 
 /// <summary>
 ///     Verifies how a stored project selection reaches a real Squad install.
 ///     Acceptance criteria:
 ///     - 6.3: A project selection SHALL NOT change a global install.
 /// </summary>
-public sealed class SquadModelPresetSelectionLifecycleTests : IDisposable
+public sealed class SquadModelPresetSelectionLifecycleTests
 {
     private const string FastPresetYaml = """
                                           schema: kyber-squad.model-preset/v1
@@ -21,32 +21,26 @@ public sealed class SquadModelPresetSelectionLifecycleTests : IDisposable
                                               copilot: gpt-4o-mini
                                           """;
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
+    private readonly InMemorySquadState _state = new();
 
     [Fact]
     public async Task GlobalInstallIgnoresProjectSelection()
     {
         // Arrange (AC 6.3)
-        string projectRoot = Path.Combine(_temp.Path, "global-install-project");
-        Directory.CreateDirectory(projectRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string projectRoot = Path.Combine(_state.Files.Root, "work", "global-install-project");
+        _state.Files.CreateDirectory(projectRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
-        SquadModelPresetSelectionStore selectionStore = RealSquadSelectionStore.Create(userPaths);
+        SquadModelPresetSelectionStore selectionStore = new(userPaths, _state.Files, _state.Semantics);
         selectionStore.Set(projectRoot, SquadTarget.Copilot, "fast");
 
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
-        await File.WriteAllTextAsync(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml);
+        _state.Files.CreateDirectory(presetsDir);
+        _state.Files.WriteAllText(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml);
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -68,21 +62,20 @@ public sealed class SquadModelPresetSelectionLifecycleTests : IDisposable
     public async Task ProjectInstallWithNullModelPresetsAppliesStoredProjectSelection()
     {
         // Arrange (AC 6.3)
-        string projectRoot = Path.Combine(_temp.Path, "project-install-selection");
-        Directory.CreateDirectory(projectRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string projectRoot = Path.Combine(_state.Files.Root, "work", "project-install-selection");
+        _state.Files.CreateDirectory(projectRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
-        SquadModelPresetSelectionStore selectionStore = RealSquadSelectionStore.Create(userPaths);
+        SquadModelPresetSelectionStore selectionStore = new(userPaths, _state.Files, _state.Semantics);
         selectionStore.Set(projectRoot, SquadTarget.Copilot, "fast");
 
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
-        await File.WriteAllTextAsync(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml);
+        _state.Files.CreateDirectory(presetsDir);
+        _state.Files.WriteAllText(Path.Combine(presetsDir, "fast.yml"), FastPresetYaml);
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, selectionStore: selectionStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             projectRoot,
@@ -101,5 +94,12 @@ public sealed class SquadModelPresetSelectionLifecycleTests : IDisposable
         Assert.NotNull(appliedPresets);
         Assert.True(appliedPresets.ContainsKey(SquadTarget.Copilot));
         Assert.Equal("fast", appliedPresets[SquadTarget.Copilot].Name);
+    }
+
+    private FakeSquadReleaseSource ReleaseSource()
+    {
+        string source = Path.Combine(_state.Files.Root, "release", "kyber-squad");
+        _ = CanonicalSquadTree.CopyInto(_state.Files, source);
+        return FakeSquadReleaseSource.FromDirectory(source, _state.Files);
     }
 }
