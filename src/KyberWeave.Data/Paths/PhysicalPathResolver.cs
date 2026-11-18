@@ -16,7 +16,7 @@ public sealed class PhysicalPathResolver : FileSystemPathResolver
     /// <summary>Creates the resolver for this host's file system.</summary>
     /// <param name="files">The file-system adapter.</param>
     public PhysicalPathResolver(IFileSystem files)
-        : base(files, caseSensitiveFileSystem: !OperatingSystem.IsLinux())
+        : base(files, caseSensitiveFileSystem: OperatingSystem.IsLinux())
     {
     }
 
