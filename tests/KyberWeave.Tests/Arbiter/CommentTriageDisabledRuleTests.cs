@@ -13,6 +13,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -61,27 +62,6 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    /// <summary>Answers the comment question with one class at one confidence and counts the calls.</summary>
-    private sealed class CountingProvider(string answer = Nitpick, double confidence = 0.95) : IArbiterProvider
-    {
-        public int Calls { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentRule)
-                .ToDictionary(rule => rule.Id, _ => answer, StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, confidence, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, true, scores));
-        }
-    }
-
     private void WriteCitedFile()
     {
         string full = Path.Combine(Root, CitedPath);
@@ -108,11 +88,11 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     public async Task ADisabledCommentRuleMakesNoProviderCallAndReportsNotEvaluated()
     {
         WriteCitedFile();
-        CountingProvider provider = new();
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick);
 
         CommentTriageResult result = await Service(provider, RulesWithCommentDisabled()).ClassifyAsync(Request());
 
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
         Assert.Equal(Real, result.Class);
         Assert.False(result.Shadow);
         Assert.Null(result.WouldClass);
@@ -124,11 +104,11 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     public async Task AnAbsentCommentRuleMakesNoProviderCallAndReportsNotEvaluated()
     {
         WriteCitedFile();
-        CountingProvider provider = new();
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick);
 
         CommentTriageResult result = await Service(provider, RulesWithoutCommentRule()).ClassifyAsync(Request());
 
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
         Assert.Equal(Real, result.Class);
         Assert.False(result.Shadow);
         Assert.Null(result.WouldClass);
@@ -141,7 +121,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new CountingProvider(), RulesWithCommentDisabled()).ClassifyAsync(Request());
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), RulesWithCommentDisabled()).ClassifyAsync(Request());
 
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), entry => entry.Id == result.DecisionId);
         Assert.Empty(record.Rules);
@@ -153,12 +133,12 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     public async Task EverySummaryRowOfADisabledRuleIsRealAndNotEvaluated()
     {
         WriteCitedFile();
-        CountingProvider provider = new();
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick);
 
         CommentSummaryResult result = await Service(provider, RulesWithCommentDisabled(), [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(Summary, BotLogin));
 
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
         Assert.Equal(2, result.Items.Count);
         Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
         Assert.All(result.Items, item => Assert.False(item.Shadow));
@@ -172,7 +152,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
 
-        CommentTriageResult result = await Service(new CountingProvider(Real, 0.95), KyberWeaveConfigLoader.LoadFromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Real), KyberWeaveConfigLoader.LoadFromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
             .ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
@@ -200,9 +180,9 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument disabled = JsonDocument.Parse(Tools(new CountingProvider(), Root, _home, RulesWithCommentDisabled())
+        using JsonDocument disabled = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, _home, RulesWithCommentDisabled())
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
-        using JsonDocument answered = JsonDocument.Parse(Tools(new CountingProvider(Real, 0.95), Root, _home,
+        using JsonDocument answered = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Real), Root, _home,
                 KyberWeaveConfigLoader.LoadFromYaml("arbiter:\n  enabled: true\n").Arbiter.Rules)
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
 
@@ -218,7 +198,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new CountingProvider(), Root, _home, RulesWithCommentDisabled())
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick), Root, _home, RulesWithCommentDisabled())
             .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];
@@ -232,7 +212,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
     {
         WriteCitedFile();
         WriteHostConfig("arbiter:\n  enabled: true\n  rules:\n    - id: " + CommentRule + "\n      enabled: false\n");
-        ArbiterCommentCommand disabledCommand = ArbiterTestServices.CommentCommand((_, _) => new CountingProvider());
+        ArbiterCommentCommand disabledCommand = ArbiterTestServices.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick));
         CommandExecution disabled = Capture(() => disabledCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));
@@ -242,7 +222,7 @@ public sealed class CommentTriageDisabledRuleTests : IDisposable
         Assert.Contains("status not-evaluated", disabled.Output, StringComparison.Ordinal);
 
         File.Delete(Path.Combine(Root, ".kyber-weave", "kyber-weave.yml"));
-        ArbiterCommentCommand answeredCommand = ArbiterTestServices.CommentCommand((_, _) => new CountingProvider(Real, 0.95));
+        ArbiterCommentCommand answeredCommand = ArbiterTestServices.CommentCommand((_, _) => FakeArbiterProvider.AnsweringRule(CommentRule, Real));
         CommandExecution answered = Capture(() => answeredCommand.Execute(
             null!,
             new ArbiterCommentSettings { Root = Root, Path = CitedPath, Line = 12, Body = "Rename this." }));

@@ -13,6 +13,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Sections;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -37,21 +38,10 @@ public sealed class ArbiterServedContainmentTests : IDisposable
         _outside.Dispose();
     }
 
-    /// <summary>The shipped default with no provider: nothing is asked, so only containment and size decide the answer.</summary>
-    private sealed class NoProviderAnswers : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ArbiterStep1BatchResult(new Dictionary<string, string>(StringComparer.Ordinal), null, null, false));
-    }
-
     private ArbiterTools Tools()
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new NoProviderAnswers(),
+            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null },
             homeDirectory: () => _home.Path);
         return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,

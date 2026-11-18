@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -33,27 +34,6 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     }
 
     private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
-
-    /// <summary>Records every batch it receives and answers each question within the task.</summary>
-    private sealed class RecordingProvider : IArbiterProvider
-    {
-        private readonly List<int> _batchSizes = [];
-
-        public IReadOnlyList<int> BatchSizes => _batchSizes;
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            _batchSizes.Add(rules.Count);
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null)
-                .ToDictionary(rule => rule.Id, _ => "within-task", StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.13.0", null, RequestSent: true));
-        }
-    }
 
     /// <summary>Supplies the list fact the rule expands over.</summary>
     private sealed class FileListPlanReader : IArbiterPlanReader
@@ -115,10 +95,13 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
 
     private IReadOnlyList<ArbiterDecisionRecord> Records() => new DecisionLog(ArbiterDirectory).ReadAll();
 
+    /// <summary>The provider these tests use: it answers every asked rule and reports no confidence.</summary>
+    private static FakeArbiterProvider Recording() => new() { AnswerAsked = "within-task" };
+
     [Fact]
     public async Task ForEachOverListFact_ExpandsToOneQuestionPerItemInOneBatch()
     {
-        RecordingProvider provider = new();
+        FakeArbiterProvider provider = Recording();
         ArbiterEvaluator evaluator = new(
             provider,
             _ => null,
@@ -141,7 +124,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
     public async Task ForEachEntries_EachRecordsItsCandidateInListOrder()
     {
         ArbiterEvaluator evaluator = new(
-            new RecordingProvider(),
+            Recording(),
             _ => null,
             new InFlightLedger(ArbiterDirectory),
             new DecisionLog(ArbiterDirectory),
@@ -158,5 +141,30 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
         Assert.Equal(Files.Length, record.Rules.Count);
         Assert.Equal(Files, record.Rules.Select(entry => entry.Candidate));
         Assert.All(record.Rules, entry => Assert.Equal(RuleEffects.Allow, entry.Effect));
+    }
+
+    /// <summary>
+    /// The provider in these tests reports no confidence, so the decision record must not claim one: a score the
+    /// removed double never sent would put the answer on a path the test does not mean to exercise.
+    /// </summary>
+    [Fact]
+    public async Task AnAnswerFromAProviderThatReportsNoConfidenceRecordsNone()
+    {
+        FakeArbiterProvider provider = Recording();
+        ArbiterEvaluator evaluator = new(
+            provider,
+            _ => null,
+            new InFlightLedger(ArbiterDirectory),
+            new DecisionLog(ArbiterDirectory),
+            new PassThroughGitFacts(),
+            new FileListPlanReader(),
+            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
+            new GateReportFacts(),
+            new FileArbiterStateFactory(),
+            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
+
+        await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
+
+        Assert.All(Records().SelectMany(record => record.Rules), rule => Assert.Null(rule.Confidence));
     }
 }

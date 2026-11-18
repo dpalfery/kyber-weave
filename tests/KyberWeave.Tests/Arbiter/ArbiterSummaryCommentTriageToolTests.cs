@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -41,27 +42,6 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
     {
         _repo.Dispose();
         _home.Dispose();
-    }
-
-    /// <summary>Answers every comment question with a confident nitpick and counts the calls.</summary>
-    private sealed class NitpickProvider : IArbiterProvider
-    {
-        public int Calls { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentTriageService.CommentRuleId)
-                .ToDictionary(rule => rule.Id, _ => "nitpick", StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, 0.95, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, true, scores));
-        }
     }
 
     private void WriteCitedFiles()
@@ -100,7 +80,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
     {
         WriteCitedFiles();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider(), [BotLogin])
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
             .ClassifyBotReviewComment(string.Empty, 0, KiloSummary, null, summary: true, author: BotLogin));
 
         JsonElement items = json.RootElement.GetProperty("items");
@@ -118,7 +98,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
     public void ASummaryFromAHumanAuthorReturnsRealItemsWithoutAProviderCall()
     {
         WriteCitedFiles();
-        NitpickProvider provider = new();
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick");
 
         using JsonDocument json = JsonDocument.Parse(Tools(provider, [BotLogin])
             .ClassifyBotReviewComment(string.Empty, 0, KiloSummary, null, summary: true, author: "dave"));
@@ -130,7 +110,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
             Assert.Equal("real", items[index].GetProperty("class").GetString());
         }
 
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
     }
 
     /// <summary>A summary with no author is real when bot logins are configured, never assumed to be a bot.</summary>
@@ -139,7 +119,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
     {
         WriteCitedFiles();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider(), [BotLogin])
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
             .ClassifyBotReviewComment(string.Empty, 0, KiloSummary, null, summary: true, author: null));
 
         JsonElement items = json.RootElement.GetProperty("items");
@@ -151,7 +131,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
     [Fact]
     public void ASummaryWithANullBodyReturnsAnErrorAnswer()
     {
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider(), [BotLogin])
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
             .ClassifyBotReviewComment(string.Empty, 0, null!, null, summary: true, author: BotLogin));
 
         Assert.True(json.RootElement.TryGetProperty("error", out _));
@@ -164,7 +144,7 @@ public sealed class ArbiterSummaryCommentTriageToolTests : IDisposable
     {
         WriteCitedFiles();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider(), [BotLogin])
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), [BotLogin])
             .ClassifyBotReviewComment("src/Widget.cs", 12, "Rename this.", null));
 
         Assert.True(json.RootElement.TryGetProperty("class", out _));

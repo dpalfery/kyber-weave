@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -52,27 +53,6 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
-
-    /// <summary>Answers each named rule with its own answer at 0.95 confidence, and records the rule ids of every call.</summary>
-    private sealed class AnswerByRuleProvider(IReadOnlyDictionary<string, string> answers) : IArbiterProvider
-    {
-        public List<IReadOnlyList<string>> Calls { get; } = [];
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Calls.Add(rules.Where(rule => rule.Ask is not null).Select(rule => rule.Id).ToArray());
-            Dictionary<string, string> chosen = rules
-                .Where(rule => rule.Ask is not null && answers.ContainsKey(rule.Id))
-                .ToDictionary(rule => rule.Id, rule => answers[rule.Id], StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = chosen.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, 0.95, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(chosen, "jev-1.13.0", null, RequestSent: true, scores));
-        }
-    }
 
     private sealed class PassThroughGitFacts : IArbiterGitFacts
     {
@@ -124,6 +104,18 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
 
+    /// <summary>The provider these tests use: it answers the named rules at 0.95, as a confident model does.</summary>
+    private static FakeArbiterProvider Confident(params (string RuleId, string Answer)[] answers)
+    {
+        FakeArbiterProvider provider = new() { Confidence = 0.95 };
+        foreach ((string ruleId, string answer) in answers)
+        {
+            provider.Answers[ruleId] = answer;
+        }
+
+        return provider;
+    }
+
     private ArbiterEvaluator Evaluator(IArbiterProvider provider) =>
         new(
             provider,
@@ -151,6 +143,25 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     };
 
     /// <summary>
+    /// The second failure's answer records the confidence the model reported, so the rule's 0.85 floor has something
+    /// to compare against. A provider that answered without a score would let any answer stand, confident or not.
+    /// </summary>
+    [Fact]
+    public async Task TheSecondFailureAnswerRecordsTheConfidenceTheProviderReported()
+    {
+        FakeArbiterProvider provider = Confident((FailureRule, Same));
+        ArbiterEvaluator evaluator = Evaluator(provider);
+
+        await evaluator.EvaluateAsync(Rework(FirstFailure), ReworkConfig());
+        await evaluator.EvaluateAsync(Rework(SecondFailure), ReworkConfig());
+
+        ArbiterDecisionRule failure = new DecisionLog(ArbiterDirectory).ReadAll()
+            .SelectMany(record => record.Rules)
+            .Single(rule => rule.Id == FailureRule && rule.Step == 1);
+        Assert.Equal(0.95, failure.Confidence);
+    }
+
+    /// <summary>
     /// A rework dispatch to an implementation target gets the model-targeting retarget decision (the
     /// <c>delegate.model</c> secondary) AND the failure question (the <c>delegate.failure</c> secondary) in the same
     /// evaluation, so the retarget is not silently dropped on the rework path.
@@ -158,18 +169,12 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     [Fact]
     public async Task AReworkDispatchGetsTheRetargetDecisionAndTheFailureQuestion()
     {
-        await Evaluator(new AnswerByRuleProvider(new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [FailureRule] = Different,
-        })).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
+        await Evaluator(Confident((FailureRule, Different))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
 
-        AnswerByRuleProvider provider = new(new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [FailureRule] = Same,
-        });
+        FakeArbiterProvider provider = Confident((FailureRule, Same));
         ArbiterEvaluationResult result = await Evaluator(provider).EvaluateAsync(Rework(SecondFailure), ReworkConfig());
 
-        IReadOnlyList<string> asked = Assert.Single(provider.Calls);
+        IReadOnlyList<string> asked = Assert.Single(provider.Calls).Rules.Select(rule => rule.Id).ToArray();
         Assert.Contains(FailureRule, asked);
 
         ArbiterDispatchEvaluation dispatch = Assert.Single(result.Dispatches);
@@ -185,10 +190,7 @@ public sealed class ArbiterReworkDispatchTests : IDisposable
     [Fact]
     public async Task AnExistingPrimaryDelegateRuleStillFiresOnAReworkDispatch()
     {
-        ArbiterEvaluationResult result = await Evaluator(new AnswerByRuleProvider(new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            [ModelRule] = Hard,
-        })).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
+        ArbiterEvaluationResult result = await Evaluator(Confident((ModelRule, Hard))).EvaluateAsync(Rework(FirstFailure), ReworkConfig());
 
         ArbiterDecisionRecord primary = Assert.Single(
             new DecisionLog(ArbiterDirectory).ReadAll(),

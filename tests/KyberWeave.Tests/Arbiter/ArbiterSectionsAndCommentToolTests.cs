@@ -5,6 +5,7 @@ using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -32,21 +33,10 @@ public sealed class ArbiterSectionsAndCommentToolTests : IDisposable
         _home.Dispose();
     }
 
-    /// <summary>The shipped default: no provider, so step-1 rules are never asked.</summary>
-    private sealed class NoProviderAnswers : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ArbiterStep1BatchResult(new Dictionary<string, string>(StringComparer.Ordinal), null, null, false));
-    }
-
     private ArbiterTools Tools()
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new NoProviderAnswers(),
+            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null },
             homeDirectory: () => _home.Path);
         return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,

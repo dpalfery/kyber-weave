@@ -10,6 +10,7 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -29,28 +30,6 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
     {
         _repo.Dispose();
         _home.Dispose();
-    }
-
-    private sealed class FakeProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            // Provider none semantics: step-1 rules are not evaluated.
-            Dictionary<string, string> answers = new(StringComparer.Ordinal);
-            foreach (ArbiterRule rule in rules)
-            {
-                if (rule.Ask is not null)
-                {
-                    answers[rule.Id] = ArbiterStep1BatchResult.NotEvaluated;
-                }
-            }
-
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, null, null, false));
-        }
     }
 
     /// <summary>
@@ -320,28 +299,6 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                 .With("plan.task.difficulty", "hard", ArbiterFactLabel.Derived);
     }
 
-    /// <summary>Answers scope within-task and difficulty hard, above the floor, so the primary allows and difficulty retargets.</summary>
-    private sealed class HardProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = new(StringComparer.Ordinal)
-            {
-                ["KW-ARB-SCOPE-002"] = "within-task",
-                ["KW-ARB-DIFFICULTY-001"] = "hard",
-            };
-            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal)
-            {
-                ["KW-ARB-DIFFICULTY-001"] = new([0.05, 0.05, 0.9], 0.9, 0.8),
-            };
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, scores));
-        }
-    }
-
     /// <summary>A serve tools instance over its own repository, with the difficulty and scope rules live and the given mode.</summary>
     private ArbiterTools CreateRetargetTools(string repoRoot, string mode)
     {
@@ -362,7 +319,11 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                     .Select(id => $"    - id: {id}\n      enabled: false")) + "\n");
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new HardProvider(),
+            providerFactory: _ => new FakeArbiterProvider
+            {
+                Answers = { ["KW-ARB-SCOPE-002"] = "within-task", ["KW-ARB-DIFFICULTY-001"] = "hard" },
+                Scores = { ["KW-ARB-DIFFICULTY-001"] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
             planReaderFactory: _ => new RecordedDifficulty(),
             homeDirectory: () => _home.Path);
         return ArbiterTestServices.Tools(new ArbiterServeContext(
@@ -391,7 +352,7 @@ public sealed class ArbiterServeToolResponseTests : IDisposable
                     id => $"    - id: {id}\n      enabled: false")) + "\n");
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new FakeProvider(),
+            providerFactory: _ => FakeArbiterProvider.None(),
             homeDirectory: () => _home.Path);
         return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,

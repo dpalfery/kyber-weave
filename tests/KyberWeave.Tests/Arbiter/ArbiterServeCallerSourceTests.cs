@@ -6,6 +6,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -27,28 +28,6 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
         _home.Dispose();
     }
 
-    private sealed class FakeProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            // Provider none semantics: step-1 rules are not evaluated.
-            Dictionary<string, string> answers = new(StringComparer.Ordinal);
-            foreach (ArbiterRule rule in rules)
-            {
-                if (rule.Ask is not null)
-                {
-                    answers[rule.Id] = ArbiterStep1BatchResult.NotEvaluated;
-                }
-            }
-
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, null, null, false));
-        }
-    }
-
     private ArbiterTools CreateTools()
     {
         Directory.CreateDirectory(Path.Combine(_repo.Path, ".kyber-weave"));
@@ -65,7 +44,7 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
                     id => $"    - id: {id}\n      enabled: false")) + "\n");
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new FakeProvider(),
+            providerFactory: _ => FakeArbiterProvider.None(),
             homeDirectory: () => _home.Path);
         return ArbiterTestServices.Tools(new ArbiterServeContext(
             _repo.Path,

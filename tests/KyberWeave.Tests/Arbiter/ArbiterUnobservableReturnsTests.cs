@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -147,41 +148,6 @@ public sealed class ArbiterUnobservableReturnsTests
         public void Dispose() => Repo.Dispose();
     }
 
-    private sealed class WiringProvider : IArbiterProvider
-    {
-        /// <summary>When true, the readiness question is answered waiting with high confidence.</summary>
-        public bool AnswerWaiting { get; init; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = new(StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal);
-            foreach (ArbiterRule rule in rules)
-            {
-                if (rule.Ask is null)
-                {
-                    continue;
-                }
-
-                if (AnswerWaiting && rule.Id == "KW-ARB-READY-001")
-                {
-                    answers[rule.Id] = "waiting";
-                    scores[rule.Id] = new ArbiterStep1Score(null, 0.95, rule.Ask.ConfidenceAtLeast);
-                }
-                else
-                {
-                    answers[rule.Id] = ArbiterStep1BatchResult.NotEvaluated;
-                }
-            }
-
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, null, null, AnswerWaiting, scores));
-        }
-    }
-
     private static string[] NonReadyRuleIds =>
         ArbiterConfigTests.ExpectedRuleIds.Where(id => id != "KW-ARB-READY-001").ToArray();
 
@@ -197,7 +163,15 @@ public sealed class ArbiterUnobservableReturnsTests
     private static HookCommand RealCommand(WiringRepo repo, string home, bool answerWaiting = false)
     {
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new WiringProvider { AnswerWaiting = answerWaiting },
+            providerFactory: _ => answerWaiting
+                ? new FakeArbiterProvider
+                {
+                    Answers = { ["KW-ARB-READY-001"] = "waiting" },
+                    DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+                    Confidence = 0.95,
+                    Model = null,
+                }
+                : FakeArbiterProvider.None(),
             homeDirectory: () => home);
         return ArbiterTestServices.Command(
             ArbiterTestServices.Registry(engine),

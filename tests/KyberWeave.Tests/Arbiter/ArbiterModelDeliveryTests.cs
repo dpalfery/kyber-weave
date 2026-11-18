@@ -9,6 +9,7 @@ using KyberWeave.Core.Arbiter.ModelTargets;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -44,24 +45,6 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     public void Dispose() => _repo.Dispose();
 
     private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
-
-    /// <summary>Answers the primary's scope question as within-task, and the difficulty question as hard, above the floor.</summary>
-    private sealed class HardProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> answers = new(StringComparer.Ordinal) { [ScopeRule] = "within-task", [DifficultyRule] = "hard" };
-            Dictionary<string, ArbiterStep1Score> scores = new(StringComparer.Ordinal)
-            {
-                [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8),
-            };
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, scores));
-        }
-    }
 
     /// <summary>
     /// The plan stands in for a free T2 owned by a developer tier, standard mode, so the primary allows. It
@@ -154,7 +137,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(new HardProvider(), "enforce");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce");
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
         Assert.Equal("opus", outcome.ModelToken);
@@ -165,7 +154,14 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(new HardProvider(), "enforce", dispatchModel: "claude-opus-5-5");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce",
+            dispatchModel: "claude-opus-5-5");
 
         Assert.Null(outcome.ModelToken);
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
@@ -178,7 +174,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable();
 
-        HookOutcome outcome = Decide(new HardProvider(), "shadow");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "shadow");
 
         Assert.Equal(HookOutcomeKind.Allow, outcome.Kind);
         Assert.Null(outcome.Reason);
@@ -196,7 +198,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         // t-deep is not an alias the Agent tool accepts, so no adapter writes it. The decision must not claim it was delivered.
         WriteTable("t-deep");
 
-        HookOutcome outcome = Decide(new HardProvider(), "enforce");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce");
 
         Assert.Null(outcome.ModelToken);
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
@@ -209,7 +217,13 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
     {
         WriteTable("haiku");
 
-        HookOutcome outcome = Decide(new HardProvider(), "enforce");
+        HookOutcome outcome = Decide(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            },
+            "enforce");
 
         Assert.Equal("haiku", outcome.ModelToken);
         ArbiterModelBlock block = Assert.IsType<ArbiterModelBlock>(DelegateModelRecord().Model);
@@ -223,7 +237,15 @@ public sealed class ArbiterModelDeliveryTests : IDisposable
         // The engine decides before the adapter writes. When the adapter's write fails the dispatch runs without
         // the model, so the decision must not say the model was delivered.
         WriteTable("haiku");
-        ClaudeHookAdapter adapter = new(Engine(new HardProvider())) { ModelWriteFault = new IOException("write refused") };
+        ClaudeHookAdapter adapter = new(Engine(
+            new FakeArbiterProvider
+            {
+                Answers = { [ScopeRule] = "within-task", [DifficultyRule] = "hard" },
+                Scores = { [DifficultyRule] = new([0.05, 0.05, 0.9], 0.9, 0.8) },
+            }))
+        {
+            ModelWriteFault = new IOException("write refused"),
+        };
         string raw = AgentDispatchPayload();
         using JsonDocument doc = JsonDocument.Parse(raw);
 

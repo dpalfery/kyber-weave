@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -53,32 +54,6 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
 
     private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
 
-    /// <summary>Answers every comment question with one answer and confidence, and counts the calls.</summary>
-    private sealed class CountingProvider(string answer, double confidence, bool throws = false) : IArbiterProvider
-    {
-        public int Calls { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            if (throws)
-            {
-                throw new HttpRequestException("provider unreachable");
-            }
-
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentTriageService.CommentRuleId)
-                .ToDictionary(rule => rule.Id, _ => answer, StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, confidence, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, true, scores));
-        }
-    }
-
     private sealed class FixedClock(DateTimeOffset now) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => now;
@@ -107,7 +82,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     public async Task AConfiguredBotsSummaryTableYieldsOneClassifiedItemPerRow()
     {
         WriteKiloFiles();
-        CountingProvider provider = new(Nitpick, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick);
 
         CommentSummaryResult result = await Service(provider, [BotLogin]).ClassifySummaryAsync(Summary(BotLogin));
 
@@ -117,7 +92,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
         Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
         Assert.All(result.Items, item => Assert.Equal(Nitpick, item.WouldClass));
         Assert.All(result.Items, item => Assert.False(string.IsNullOrEmpty(item.DecisionId)));
-        Assert.Equal(3, provider.Calls);
+        Assert.Equal(3, provider.CallCount);
     }
 
     /// <summary>Each item keeps the issue text the row states, so the caller can show the worker what the bot asked.</summary>
@@ -126,7 +101,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     {
         WriteKiloFiles();
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(Summary(BotLogin));
 
         Assert.Equal("Rename this variable to something clearer.", result.Items[0].Issue);
@@ -138,13 +113,13 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     public async Task AHumanAuthorsSummaryIsRealWithoutAnyProviderCall()
     {
         WriteKiloFiles();
-        CountingProvider provider = new(Nitpick, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick);
 
         CommentSummaryResult result = await Service(provider, [BotLogin]).ClassifySummaryAsync(Summary(HumanLogin));
 
         Assert.Equal(3, result.Items.Count);
         Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
     }
 
     /// <summary>An absent author is not assumed to be a bot: with bot logins configured, every item stays real.</summary>
@@ -152,12 +127,12 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     public async Task AnAbsentAuthorIsRealWhenBotLoginsAreConfigured()
     {
         WriteKiloFiles();
-        CountingProvider provider = new(Nitpick, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick);
 
         CommentSummaryResult result = await Service(provider, [BotLogin]).ClassifySummaryAsync(Summary(null));
 
         Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
     }
 
     /// <summary>With no bot logins configured, even a bot-looking author is fail-safe real: the default never classifies a summary.</summary>
@@ -165,13 +140,13 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     public async Task WithNoBotLoginsConfiguredEverySummaryItemIsReal()
     {
         WriteKiloFiles();
-        CountingProvider provider = new(Nitpick, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick);
 
         CommentSummaryResult result = await Service(provider, []).ClassifySummaryAsync(Summary(BotLogin));
 
         Assert.Equal(3, result.Items.Count);
         Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
     }
 
     /// <summary>Bot logins match case-insensitively, as GitHub logins do.</summary>
@@ -180,7 +155,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     {
         WriteKiloFiles();
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(Summary("KILO-CODE-BOT"));
 
         Assert.All(result.Items, item => Assert.Equal(Nitpick, item.WouldClass));
@@ -198,7 +173,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
             "| warning | `src/Widget.cs` | 12-14 | Second. |\n" +
             "| warning | `src/Widget.cs:20` | 20 | Third. |\n";
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(body, BotLogin));
 
         Assert.Equal(
@@ -217,7 +192,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
             "| warning | `src/Widget.cs` | L12 | First. |\n" +
             "| warning | `src/Widget.cs` |\n";
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(body, BotLogin));
 
         Assert.Empty(result.Items);
@@ -227,7 +202,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     [Fact]
     public async Task ASummaryWithNoTableYieldsNoItems()
     {
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest("Looks good overall, two notes below.", BotLogin));
 
         Assert.Empty(result.Items);
@@ -241,13 +216,13 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
         string rows = string.Concat(Enumerable.Range(1, CommentTriageService.MaxSummaryRows + 5)
             .Select(i => $"| warning | `src/Widget.cs` | {i} | Issue {i}. |\n"));
         string body = "| Severity | File | Line | Issue |\n|---|---|---|---|\n" + rows;
-        CountingProvider provider = new(Nitpick, 0.95);
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick);
 
         CommentSummaryResult result = await Service(provider, [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(body, BotLogin));
 
         Assert.Equal(CommentTriageService.MaxSummaryRows + 5, result.Items.Count);
-        Assert.Equal(CommentTriageService.MaxSummaryRows, provider.Calls);
+        Assert.Equal(CommentTriageService.MaxSummaryRows, provider.CallCount);
         Assert.All(result.Items.Skip(CommentTriageService.MaxSummaryRows), item => Assert.Equal(Real, item.Class));
     }
 
@@ -257,7 +232,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     {
         WriteKiloFiles();
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.6), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick, 0.6), [BotLogin])
             .ClassifySummaryAsync(Summary(BotLogin));
 
         Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
@@ -269,7 +244,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     {
         WriteKiloFiles();
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95, throws: true), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick, fault: new HttpRequestException("provider unreachable")), [BotLogin])
             .ClassifySummaryAsync(Summary(BotLogin));
 
         Assert.Equal(3, result.Items.Count);
@@ -287,7 +262,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
             "| warning | `src/Widget.cs` | 12 | Present file. |\n" +
             "| warning | `src/Missing.cs` | 4 | Absent file. |\n";
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(body, BotLogin));
 
         Assert.Equal(Real, result.Items[0].Class);
@@ -301,7 +276,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     {
         WriteKiloFiles();
 
-        CommentSummaryResult result = await Service(new CountingProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(Summary(BotLogin));
 
         string decisionId = result.Items[0].DecisionId;

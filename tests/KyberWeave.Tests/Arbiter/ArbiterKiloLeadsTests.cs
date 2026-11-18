@@ -16,6 +16,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Sections;
 using KyberWeave.Core.Arbiter.Stores;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -90,13 +91,13 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     {
         string full = await WriteCitedFileAsync("src/Locked.cs");
         using FileStream holder = LockAgainstReads(full);
-        CountingNitpickProvider provider = new();
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick");
         CommentTriageService service = new(provider, _sandbox.Path, Path.Combine(_sandbox.Path, "artifacts", "arbiter"), new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
 
         CommentTriageResult result = await service.ClassifyAsync(new CommentTriageRequest("src/Locked.cs", 12, "Rename this.", null));
 
         Assert.Equal("real", result.Class);
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
     }
 
     /// <summary>A programming bug is not a provider failure, and a request that timed out is one the fail-safe must absorb.</summary>
@@ -179,7 +180,7 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
     {
         using TempDirectory home = new();
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(
-            providerFactory: _ => new NullAnswerProvider(),
+            providerFactory: _ => new FakeArbiterProvider { RequestSent = false, Model = null },
             homeDirectory: () => home.Path);
         ArbiterTools tools = ArbiterTestServices.Tools(new ArbiterServeContext(
             _sandbox.Path,
@@ -213,35 +214,4 @@ public sealed class ArbiterKiloLeadsTests : IDisposable
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    /// <summary>Counts provider calls and answers a confident nitpick, so a kept-real result is shown to come from the fail-safe, not from an answer.</summary>
-    private sealed class CountingNitpickProvider : IArbiterProvider
-    {
-        public int Calls { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentTriageService.CommentRuleId)
-                .ToDictionary(rule => rule.Id, _ => "nitpick", StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, 0.95, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, true, scores));
-        }
-    }
-
-    /// <summary>Answers nothing; the null-body test never reaches the provider.</summary>
-    private sealed class NullAnswerProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ArbiterStep1BatchResult(new Dictionary<string, string>(StringComparer.Ordinal), null, null, false));
-    }
 }

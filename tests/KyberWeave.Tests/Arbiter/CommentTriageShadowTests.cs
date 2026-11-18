@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -55,45 +56,6 @@ public sealed class CommentTriageShadowTests : IDisposable
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    /// <summary>Answers every comment question with one answer and confidence.</summary>
-    private sealed class ScriptedProvider(string answer, double confidence, bool throws = false) : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            if (throws)
-            {
-                throw new HttpRequestException("provider unreachable");
-            }
-
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentTriageService.CommentRuleId)
-                .ToDictionary(rule => rule.Id, _ => answer, StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, confidence, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, true, scores));
-        }
-    }
-
-    /// <summary>Counts the provider calls and answers nothing, the way a provider that is not configured does.</summary>
-    private sealed class CountingNoAnswerProvider : IArbiterProvider
-    {
-        public int Calls { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            return Task.FromResult(new ArbiterStep1BatchResult(new Dictionary<string, string>(StringComparer.Ordinal), null, null, false));
-        }
-    }
-
     /// <summary>The shipped rules with the comment rule's shadow state set by a host configuration override.</summary>
     private static IReadOnlyList<ArbiterRule> RulesWithCommentShadow(bool shadow)
     {
@@ -124,7 +86,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentTriageResult result = await Service(new ScriptedProvider(Nitpick, 0.95)).ClassifyAsync(Request());
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick)).ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
         Assert.True(result.Shadow);
@@ -138,7 +100,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentTriageResult result = await Service(new ScriptedProvider(AlreadyFixed, 0.95)).ClassifyAsync(Request());
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, AlreadyFixed)).ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
         Assert.Equal(AlreadyFixed, result.WouldClass);
@@ -153,7 +115,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentTriageResult result = await Service(new ScriptedProvider(Nitpick, 0.6)).ClassifyAsync(Request());
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick, 0.6)).ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
         Assert.Equal(Real, result.WouldClass);
@@ -165,7 +127,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentTriageResult result = await Service(new ScriptedProvider(Nitpick, 0.95)).ClassifyAsync(Request());
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick)).ClassifyAsync(Request());
 
         ArbiterDecisionRecord record = Assert.Single(new DecisionLog(ArbiterDirectory).ReadAll(), entry => entry.Id == result.DecisionId);
         Assert.Equal(Nitpick, record.Outcome);
@@ -183,7 +145,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentSummaryResult result = await Service(new ScriptedProvider(Nitpick, 0.95), [BotLogin])
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(Summary, BotLogin));
 
         Assert.Equal(2, result.Items.Count);
@@ -198,7 +160,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     public async Task AHumanSummaryRowReportsShadowWithNoWouldClass()
     {
         WriteCitedFiles();
-        CountingNoAnswerProvider provider = new();
+        FakeArbiterProvider provider = new() { RequestSent = false, Model = null };
 
         CommentSummaryResult result = await Service(provider, [BotLogin])
             .ClassifySummaryAsync(new CommentSummaryRequest(Summary, HumanLogin));
@@ -206,7 +168,7 @@ public sealed class CommentTriageShadowTests : IDisposable
         Assert.All(result.Items, item => Assert.Equal(Real, item.Class));
         Assert.All(result.Items, item => Assert.True(item.Shadow));
         Assert.All(result.Items, item => Assert.Null(item.WouldClass));
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
     }
 
     /// <summary>A host that switches shadow off gets the model's class, with no shadow flag and no would-class.</summary>
@@ -215,7 +177,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentTriageResult result = await Service(new ScriptedProvider(Nitpick, 0.95), rules: RulesWithCommentShadow(false))
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), rules: RulesWithCommentShadow(false))
             .ClassifyAsync(Request());
 
         Assert.Equal(Nitpick, result.Class);
@@ -229,7 +191,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentSummaryResult result = await Service(new ScriptedProvider(Nitpick, 0.95), [BotLogin], RulesWithCommentShadow(false))
+        CommentSummaryResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick), [BotLogin], RulesWithCommentShadow(false))
             .ClassifySummaryAsync(new CommentSummaryRequest(Summary, BotLogin));
 
         Assert.All(result.Items, item => Assert.Equal(Nitpick, item.Class));
@@ -243,7 +205,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         Directory.CreateDirectory(Root);
 
-        CommentTriageResult result = await Service(new ScriptedProvider(AlreadyFixed, 0.95)).ClassifyAsync(Request());
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, AlreadyFixed)).ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
         Assert.True(result.Shadow);
@@ -269,7 +231,7 @@ public sealed class CommentTriageShadowTests : IDisposable
     {
         WriteCitedFiles();
 
-        CommentTriageResult result = await Service(new ScriptedProvider(Nitpick, 0.95, throws: true)).ClassifyAsync(Request());
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, Nitpick, fault: new HttpRequestException("provider unreachable"))).ClassifyAsync(Request());
 
         Assert.Equal(Real, result.Class);
         Assert.True(result.Shadow);

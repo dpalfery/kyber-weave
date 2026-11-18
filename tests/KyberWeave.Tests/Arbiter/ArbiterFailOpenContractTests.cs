@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -39,31 +40,6 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
             new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()).Enrich(facts, classification, root);
-    }
-
-    /// <summary>Answers named rules with the given confidence and leaves every other question unevaluated.</summary>
-    private sealed class ConfidentProvider(double confidence, params (string RuleId, string Answer)[] answers) : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Dictionary<string, string> byRule = answers.ToDictionary(pair => pair.RuleId, pair => pair.Answer, StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(
-                rules.ToDictionary(
-                    rule => rule.Id,
-                    rule => byRule.TryGetValue(rule.Id, out string? answer) ? answer : ArbiterStep1BatchResult.NotEvaluated,
-                    StringComparer.Ordinal),
-                "jev-1.14.0",
-                null,
-                true,
-                rules.ToDictionary(
-                    rule => rule.Id,
-                    rule => new ArbiterStep1Score(null, confidence, rule.Ask?.ConfidenceAtLeast),
-                    StringComparer.Ordinal)));
-        }
     }
 
     private ArbiterEvaluator Evaluator(IArbiterProvider provider, IArbiterGitFacts? git = null) => new(
@@ -154,7 +130,13 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     [Fact]
     public async Task ALowConfidenceViolatingAnswer_Allows()
     {
-        ArbiterEvaluationResult result = await Evaluator(new ConfidentProvider(0.5, ("KW-ARB-PLAN-001", "no-plan")))
+        ArbiterEvaluationResult result = await Evaluator(new FakeArbiterProvider
+        {
+            Answers = { ["KW-ARB-PLAN-001"] = "no-plan" },
+            DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            ScoreDefaultAnswer = true,
+            Confidence = 0.5,
+        })
             .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
@@ -167,7 +149,13 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     [Fact]
     public async Task AConfidentViolatingAnswer_StillEscalates()
     {
-        ArbiterEvaluationResult result = await Evaluator(new ConfidentProvider(0.95, ("KW-ARB-PLAN-001", "no-plan")))
+        ArbiterEvaluationResult result = await Evaluator(new FakeArbiterProvider
+        {
+            Answers = { ["KW-ARB-PLAN-001"] = "no-plan" },
+            DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            ScoreDefaultAnswer = true,
+            Confidence = 0.95,
+        })
             .EvaluateAsync(Event("pre", "dev-medium", "KYBER-ARBITER: true\n\nPlease implement the parser."), ShippedConfig(), null, TestContext.Current.CancellationToken);
 
         Assert.Equal(RuleEffects.Escalate, result.Outcome);

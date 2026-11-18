@@ -7,6 +7,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -38,27 +39,6 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     {
         _repo.Dispose();
         _home.Dispose();
-    }
-
-    /// <summary>Answers every comment question with a confident nitpick and counts the calls.</summary>
-    private sealed class NitpickProvider : IArbiterProvider
-    {
-        public int Calls { get; private set; }
-
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            Dictionary<string, string> answers = rules
-                .Where(rule => rule.Ask is not null && rule.Id == CommentTriageService.CommentRuleId)
-                .ToDictionary(rule => rule.Id, _ => "nitpick", StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = answers.Keys
-                .ToDictionary(id => id, _ => new ArbiterStep1Score(null, 0.95, 0.85), StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "jev-1.14.0", null, true, scores));
-        }
     }
 
     private void WriteCitedFile()
@@ -104,7 +84,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider())
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
 
         Assert.Equal("real", json.RootElement.GetProperty("class").GetString());
@@ -116,7 +96,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     [Fact]
     public void TheInlineJsonAlwaysCarriesShadowAndWouldClassKeys()
     {
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider())
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
             .ClassifyBotReviewComment("src/Missing.cs", 12, "Rename this.", null));
 
         Assert.True(json.RootElement.TryGetProperty("shadow", out JsonElement shadow));
@@ -132,7 +112,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider())
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"))
             .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];
@@ -146,7 +126,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     public void AHumanSummaryItemIsShadowWithANullWouldClass()
     {
         WriteCitedFile();
-        NitpickProvider provider = new();
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick");
 
         using JsonDocument json = JsonDocument.Parse(Tools(provider)
             .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: HumanLogin));
@@ -155,7 +135,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
         Assert.Equal("real", item.GetProperty("class").GetString());
         Assert.True(item.GetProperty("shadow").GetBoolean());
         Assert.Equal(JsonValueKind.Null, item.GetProperty("wouldClass").ValueKind);
-        Assert.Equal(0, provider.Calls);
+        Assert.Equal(0, provider.CallCount);
     }
 
     /// <summary>A host override that switches shadow off is honoured: the model's class is returned with shadow false and no would-class.</summary>
@@ -164,7 +144,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider(), ConfigWithCommentShadow(shadow: false))
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), ConfigWithCommentShadow(shadow: false))
             .ClassifyBotReviewComment(CitedPath, 12, "Rename this.", null));
 
         Assert.Equal("nitpick", json.RootElement.GetProperty("class").GetString());
@@ -178,7 +158,7 @@ public sealed class ArbiterCommentShadowToolTests : IDisposable
     {
         WriteCitedFile();
 
-        using JsonDocument json = JsonDocument.Parse(Tools(new NitpickProvider(), ConfigWithCommentShadow(shadow: false))
+        using JsonDocument json = JsonDocument.Parse(Tools(FakeArbiterProvider.AnsweringRule(CommentTriageService.CommentRuleId, "nitpick"), ConfigWithCommentShadow(shadow: false))
             .ClassifyBotReviewComment(string.Empty, 0, Summary, null, summary: true, author: BotLogin));
 
         JsonElement item = json.RootElement.GetProperty("items")[0];

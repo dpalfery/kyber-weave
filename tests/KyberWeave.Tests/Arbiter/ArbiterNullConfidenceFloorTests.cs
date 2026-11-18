@@ -2,6 +2,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -25,25 +26,6 @@ public sealed class ArbiterNullConfidenceFloorTests : IDisposable
         }
     }
 
-    /// <summary>Answers every step-1 question <c>within-task</c>, with a score whose floor is set and whose confidence is absent.</summary>
-    private sealed class FloorWithoutConfidenceProvider : IArbiterProvider
-    {
-        public Task<ArbiterStep1BatchResult> AskStep1Async(
-            IReadOnlyList<ArbiterRule> rules,
-            ArbiterFactSet facts,
-            IReadOnlyDictionary<string, string>? step0Answers = null,
-            CancellationToken cancellationToken = default)
-        {
-            List<ArbiterRule> asked = rules.Where(rule => rule.Ask is not null).ToList();
-            Dictionary<string, string> answers = asked.ToDictionary(rule => rule.Id, _ => "within-task", StringComparer.Ordinal);
-            Dictionary<string, ArbiterStep1Score> scores = asked.ToDictionary(
-                rule => rule.Id,
-                _ => new ArbiterStep1Score([0.9, 0.1], null, 0.8),
-                StringComparer.Ordinal);
-            return Task.FromResult(new ArbiterStep1BatchResult(answers, "stub", null, true, scores));
-        }
-    }
-
     /// <summary>
     /// The answer <c>within-task</c> maps to allow, and the conductor's undecidable answer escalates, so an answer that
     /// reached the dispatch would show as allow where the floor makes it escalate.
@@ -51,7 +33,12 @@ public sealed class ArbiterNullConfidenceFloorTests : IDisposable
     [Fact]
     public async Task AnAnswerWithAFloorAndNoConfidenceIsUndecidable()
     {
-        ArbiterEvaluator evaluator = ArbiterEvaluatorFixtures.Evaluator(_root, new FloorWithoutConfidenceProvider());
+        ArbiterEvaluator evaluator = ArbiterEvaluatorFixtures.Evaluator(_root, new FakeArbiterProvider
+        {
+            AnswerAsked = "within-task",
+            ScoreForAll = new ArbiterStep1Score([0.9, 0.1], null, 0.8),
+            Model = "stub",
+        });
         // The answer would escalate if it stood; floored to undecidable it allows (ADR 0072).
         ArbiterRule rule = ArbiterEvaluatorFixtures.AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Escalate);
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith([rule with { Ask = rule.Ask! with { ConfidenceAtLeast = 0.8 } }]);
@@ -68,7 +55,12 @@ public sealed class ArbiterNullConfidenceFloorTests : IDisposable
     [Fact]
     public async Task AnAnswerWithNoConfidenceButNoRuleFloorStands()
     {
-        ArbiterEvaluator evaluator = ArbiterEvaluatorFixtures.Evaluator(_root, new FloorWithoutConfidenceProvider());
+        ArbiterEvaluator evaluator = ArbiterEvaluatorFixtures.Evaluator(_root, new FakeArbiterProvider
+        {
+            AnswerAsked = "within-task",
+            ScoreForAll = new ArbiterStep1Score([0.9, 0.1], null, 0.8),
+            Model = "stub",
+        });
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith([
             ArbiterEvaluatorFixtures.AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
         ]);
