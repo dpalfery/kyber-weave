@@ -1,5 +1,7 @@
 using KyberWeave.Core.Configuration;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Review.Catalogue;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -507,12 +509,33 @@ public sealed class GateCatalogueRenderTests
         return null;
     }
 
+    /// <summary>The catalogue is rendered from the repository file store it is given, not from the process's disk.</summary>
+    /// <remarks>
+    /// Production renders through the injected store. A test that built its facts over <see cref="File"/> directly
+    /// would keep passing while a seam fault made <c>docs init</c> fail, so this pins the store as the source.
+    /// </remarks>
+    [Fact]
+    public void TheCatalogueIsRenderedFromTheRepositoryFileStoreItIsGiven()
+    {
+        GateCatalogueFamily family = GateCatalogueRenderer.LoadEmbedded().First(item => item.Family == "csharp");
+        using TempDirectory repository = new();
+        FakeRepositoryFileStore files = new();
+
+        Render(family.Technologies, AtRepositoryRoot([family]), repository.Path, files);
+
+        Assert.NotEmpty(files.ExistsProbes);
+    }
+
     private static RenderedReviewBlock Render(
         IReadOnlyList<string> declaredTechnologies,
         IReadOnlyDictionary<string, ProjectRootSet> rootsByFamily,
-        string repositoryRoot) =>
-        GateCatalogueRenderer.Render(
-            declaredTechnologies, rootsByFamily, repositoryRoot, new GateCatalogueFacts(File.Exists, File.ReadAllText));
+        string repositoryRoot,
+        IRepositoryFileStore? files = null)
+    {
+        IRepositoryFileStore store = files ?? DocsPorts.Files;
+        return GateCatalogueRenderer.Render(
+            declaredTechnologies, rootsByFamily, repositoryRoot, new GateCatalogueFacts(store.FileExists, store.ReadAllText));
+    }
 
     private static GateCatalogueFamily Family(string name)
     {
