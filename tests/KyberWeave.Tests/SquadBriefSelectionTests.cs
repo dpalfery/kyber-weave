@@ -274,7 +274,7 @@ public sealed class SquadBriefSelectionTests : IDisposable
     public void AutonomyResolvesPromptThenRegistryThenConfigurationThenSupervised(
         string? prompt, string? agents, string? configured, string expected, string source)
     {
-        (string value, string from) = BriefFacts.ResolveAutonomy(prompt, agents, configured);
+        (string value, string from) = BriefAutonomy.Resolve(prompt, agents, configured);
 
         Assert.Equal((expected, source), (value, from));
     }
