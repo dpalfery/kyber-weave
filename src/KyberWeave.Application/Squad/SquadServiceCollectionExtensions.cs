@@ -6,6 +6,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,6 +36,10 @@ public static class SquadServiceCollectionExtensions
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
                 ? new LocalCheckoutSquadReleaseSource(local)
                 : sp.GetRequiredService<ISquadReleaseSource>()));
+        services.TryAddSingleton<ISquadModelPresetSelectionStore>(sp => new SquadModelPresetSelectionStore(
+            sp.GetRequiredService<ISquadUserPaths>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>()));
         services.TryAddSingleton<ISquadPackService, SquadPackService>();
         services.TryAddSingleton<IArbiterRefreshTargets, CliArbiterRefreshTargets>();
         services.TryAddSingleton<IArbiterHookRefresherFactory, ArbiterHookRefresherFactory>();

@@ -352,7 +352,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadPacker` (`Squad/Packaging/SquadPacker.cs`) | file system, identifiers | 3.5 |
 | `SquadSourceLoader` (`Squad/Parsing/SquadSourceLoader.cs`) | file system, paths | 3.5 |
 | `SquadCanonicalProfileStore` (`Squad/Presets/SquadCanonicalProfileStore.cs`) | file system, identifiers | 3.5 |
-| `SquadModelPresetSelectionStore` (`Squad/Presets/SquadModelPresetSelectionStore.cs`) | file system, identifiers | 3.5 |
 | `SquadModelPresetStore` (`Squad/Presets/SquadModelPresetStore.cs`) | file system | 3.5 |
 | `SquadModelPresetValidator` (`Squad/Presets/SquadModelPresetValidator.cs`) | file system | 3.5 |
 | `GitHubSquadReleaseSource` (`Squad/Release/GitHubSquadReleaseSource.cs`) | file system, paths, environment, identifiers, network | 3.5 |

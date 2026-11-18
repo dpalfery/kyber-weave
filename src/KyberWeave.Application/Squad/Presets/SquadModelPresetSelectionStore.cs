@@ -17,8 +17,6 @@ namespace KyberWeave.Core.Squad.Model;
 /// </remarks>
 public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSelectionStore
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
-
     /// <summary>
     ///     The YAML schema version identifier for project model preset selections.
     /// </summary>
@@ -31,15 +29,26 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
         SquadTargetCatalog.All.ToDictionary(SquadTargetCatalog.GetToken, static t => t, StringComparer.Ordinal);
 
     private readonly string _selectionsDirectory;
+    private readonly IWritableFileSystem _files;
+    private readonly IFileSystemPathSemantics _semantics;
 
     /// <summary>
     ///     Initializes a new instance of the <see cref="SquadModelPresetSelectionStore" /> class.
     /// </summary>
     /// <param name="userPaths">The user paths provider defining the home directory anchor.</param>
-    public SquadModelPresetSelectionStore(ISquadUserPaths userPaths)
+    /// <param name="files">The file system the selection files are read from and written to.</param>
+    /// <param name="semantics">Resolves a project root to its physical identity.</param>
+    public SquadModelPresetSelectionStore(
+        ISquadUserPaths userPaths,
+        IWritableFileSystem files,
+        IFileSystemPathSemantics semantics)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(semantics);
         ArgumentException.ThrowIfNullOrWhiteSpace(userPaths.HomeDirectory);
+        _files = files;
+        _semantics = semantics;
         _selectionsDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "selections");
     }
 
@@ -52,13 +61,13 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, _semantics);
         string filePath = Path.Combine(_selectionsDirectory, $"{identity.Key}.yml");
-        if (!File.Exists(filePath)) return null;
+        if (!_files.FileExists(filePath)) return null;
 
         try
         {
-            string text = File.ReadAllText(filePath, Encoding.UTF8);
+            string text = _files.ReadAllText(filePath);
             YamlStream stream = new();
             using (StringReader reader = new(text))
             {
@@ -115,7 +124,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
                 $"Invalid preset name '{presetName}'. Preset names must match '^[a-z0-9][a-z0-9-]{{0,63}}$'.",
                 nameof(presetName));
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, _semantics);
         SquadModelPresetSelection? existing = Read(projectRoot);
 
         Dictionary<SquadTarget, string> presets = existing is not null
@@ -140,7 +149,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, _semantics);
         SquadModelPresetSelection? existing = Read(projectRoot);
         if (existing is null) return;
 
@@ -150,7 +159,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
         string targetPath = Path.Combine(_selectionsDirectory, $"{identity.Key}.yml");
         if (presets.Count == 0)
         {
-            if (File.Exists(targetPath)) File.Delete(targetPath);
+            if (_files.FileExists(targetPath)) _files.DeleteFile(targetPath);
         }
         else
         {
@@ -166,9 +175,9 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(projectRoot);
 
-        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, Semantics);
+        SquadPhysicalRootIdentity identity = SquadPhysicalRootIdentity.Resolve(projectRoot, _semantics);
         string targetPath = Path.Combine(_selectionsDirectory, $"{identity.Key}.yml");
-        if (File.Exists(targetPath)) File.Delete(targetPath);
+        if (_files.FileExists(targetPath)) _files.DeleteFile(targetPath);
     }
 
     private static string FormatYamlValue(string value)
@@ -190,9 +199,8 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
 
     private void WriteSelection(SquadPhysicalRootIdentity identity, IReadOnlyDictionary<SquadTarget, string> presets)
     {
-        Directory.CreateDirectory(_selectionsDirectory);
+        _files.CreateDirectory(_selectionsDirectory);
         string targetPath = Path.Combine(_selectionsDirectory, $"{identity.Key}.yml");
-        string temporaryPath = Path.Combine(_selectionsDirectory, $"{identity.Key}.{Guid.NewGuid():N}.tmp");
 
         StringBuilder builder = new();
         builder.Append("schema: ");
@@ -213,28 +221,7 @@ public sealed partial class SquadModelPresetSelectionStore : ISquadModelPresetSe
             builder.Append('\n');
         }
 
-        string text = builder.ToString();
-        try
-        {
-            using (FileStream stream = new(
-                       temporaryPath,
-                       FileMode.CreateNew,
-                       FileAccess.Write,
-                       FileShare.None,
-                       4096,
-                       SquadTransaction.SyncToDisk ? FileOptions.WriteThrough : FileOptions.None))
-            {
-                byte[] bytes = Encoding.UTF8.GetBytes(text);
-                stream.Write(bytes);
-                stream.Flush(flushToDisk: SquadTransaction.SyncToDisk);
-            }
-
-            File.Move(temporaryPath, targetPath, true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
-        }
+        _files.WriteAllTextAtomic(targetPath, builder.ToString(), SquadTransaction.SyncToDisk);
     }
 
     private static bool TryGetTarget(string token, out SquadTarget target)
