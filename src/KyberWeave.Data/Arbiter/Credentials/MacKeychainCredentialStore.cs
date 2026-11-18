@@ -10,6 +10,10 @@ namespace KyberWeave.Core.Arbiter.Credentials;
 /// key travels on stdin only and never appears in argv. Reads use
 /// <c>security find-generic-password -s kyber-weave-arbiter -a &lt;origin&gt; -w</c>.
 /// A missing entry is an absent key (null), not a failure.
+/// <para>
+/// A key must be ASCII. <c>security</c> prints a password holding a character it cannot represent as hex, so a
+/// non-ASCII key would not read back; every Arbiter key is ASCII.
+/// </para>
 /// </remarks>
 public sealed class MacKeychainCredentialStore : ICredentialStore
 {
