@@ -259,7 +259,7 @@ public sealed class DocsAnalysisCompositionTests : IDisposable
             DisposableEmbeddingGenerator embedding,
             ICodeGraphResolver resolver)
         {
-            Factories = new DocsAnalysisCompositionFactories
+            Factories = new DocsAnalysisCompositionFactories(new FakeCodeGraphPortsFactory())
             {
                 IsCacheSafe = _ => cacheSafe,
                 CreatePersistence = _ =>

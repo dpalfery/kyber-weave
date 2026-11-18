@@ -5,7 +5,6 @@ using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
-using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Parsing;
@@ -26,7 +25,8 @@ public sealed class DocsPacketCommand(
     IFileSystem files,
     IProcessEnvironment environment,
     IPlanTaskTargetService targets,
-    ITaskGateSelectionService taskGates) : Command<DocsPacketSettings>
+    ITaskGateSelectionService taskGates,
+    ICodeGraphPortsFactory codeGraph) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -132,7 +132,7 @@ public sealed class DocsPacketCommand(
         // The prompt is built at print time, never written into the task file, so the digest is unaffected.
         DocumentIndex index = DocumentIndex.Build(
             new DocumentLoader(root, config.Ontology).Load(),
-            CodeGraphResolvers.ForRepository(root).Resolver);
+            codeGraph.ForRepository(root).Resolver);
         TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor);
         TaskPromptResult prompt = prompts.Build(
             new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),

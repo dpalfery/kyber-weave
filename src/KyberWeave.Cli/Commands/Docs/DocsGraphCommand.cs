@@ -12,7 +12,7 @@ using Spectre.Console;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Emits the documentation graph as newline-delimited JSON.</summary>
-public sealed class DocsExportGraphCommand(IManagedGlossaryFactory glossaries) : Command<DocsExportGraphSettings>
+public sealed class DocsExportGraphCommand(IManagedGlossaryFactory glossaries, ICodeGraphPortsFactory codeGraph) : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
@@ -28,7 +28,7 @@ public sealed class DocsExportGraphCommand(IManagedGlossaryFactory glossaries) :
         }
 
         DocumentSet set = loader!.Load();
-        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings);
+        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings, codeGraph);
 
         if (!resolver.IsAvailable)
         {

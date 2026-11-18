@@ -8,7 +8,7 @@ using Spectre.Console.Cli;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Entity-drift tier: resolves documented code references against CodeGraph.</summary>
-public sealed class DocsDriftCommand : Command<DocsSettings>
+public sealed class DocsDriftCommand(ICodeGraphPortsFactory codeGraph) : Command<DocsSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
@@ -21,7 +21,7 @@ public sealed class DocsDriftCommand : Command<DocsSettings>
         }
 
         DocumentSet set = loader!.Load();
-        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings);
+        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings, codeGraph);
         report.AddRange(new DocDriftLinter(resolver).Validate(set).Items);
 
         CommandHelpers.Finish(report, settings, "docs drift", "Document");
