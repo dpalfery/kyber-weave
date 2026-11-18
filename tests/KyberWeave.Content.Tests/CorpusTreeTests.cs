@@ -82,13 +82,16 @@ public sealed class CorpusTreeTests
         Assert.True(CorpusTree.DirectoryExists(corpus, "products/kyber-squad/skills/Second-Brain"));
     }
 
-    [Fact]
-    public void DirectoryExistsAnswersTheCheckoutAsTheHostFileSystemDoes()
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public void DirectoryExistsAnswersAWrongCasePathAsTheCorpusFileSystemDoes(bool caseSensitive, bool expected)
     {
-        Assert.True(CorpusTree.DirectoryExists(CheckoutCorpusSource.Checkout, "products/kyber-squad/agents"));
-        Assert.Equal(
-            !OperatingSystem.IsLinux(),
-            CorpusTree.DirectoryExists(CheckoutCorpusSource.Checkout, "PRODUCTS/kyber-squad/agents"));
+        InMemoryCorpusSource corpus = new InMemoryCorpusSource(caseSensitive)
+            .Add("products/kyber-squad/agents/architect.md", "architect");
+
+        Assert.True(CorpusTree.DirectoryExists(corpus, "products/kyber-squad/agents"));
+        Assert.Equal(expected, CorpusTree.DirectoryExists(corpus, "PRODUCTS/kyber-squad/agents"));
     }
 
     [Fact]

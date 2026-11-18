@@ -41,9 +41,8 @@ public sealed class PortableContentTests
 
         foreach (string root in PortableRoots)
         {
-            foreach (string file in Files(root))
+            foreach (string relative in Files(root))
             {
-                string relative = Path.GetRelativePath(Corpus.Root, file).Replace('\\', '/');
                 scanned.Add(relative);
 
                 string[] lines = ReadLines(relative);
@@ -74,47 +73,8 @@ public sealed class PortableContentTests
             "coding standards instead:" + Environment.NewLine + string.Join(Environment.NewLine, offenders));
     }
 
-    /// <summary>
-    /// Every file under the two roots is read as text, in one level at a time so a directory symbolic link
-    /// cannot lead the scan out of the tree.
-    /// </summary>
-    private static IEnumerable<string> Files(string root)
-    {
-        string rootPath = Path.Combine(Corpus.Root, root);
-        if (!Directory.Exists(rootPath))
-            yield break;
-
-        Stack<string> pending = new([rootPath]);
-        while (pending.Count > 0)
-        {
-            DirectoryInfo directory = new(pending.Pop());
-            foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos(
-                         "*",
-                         new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
-            {
-                if (entry.LinkTarget is not null)
-                {
-                    if (entry is DirectoryInfo)
-                        continue;
-
-                    FileSystemInfo? target = entry.ResolveLinkTarget(true);
-                    string targetPath = target?.FullName ?? Path.GetFullPath(entry.FullName);
-                    if (!targetPath.StartsWith(Path.GetFullPath(rootPath) + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                    {
-                        Assert.Fail($"File symlink '{entry.FullName}' targets outside portable root '{root}': {targetPath}");
-                    }
-                }
-
-                if (entry is DirectoryInfo child)
-                {
-                    pending.Push(child.FullName);
-                    continue;
-                }
-
-                yield return entry.FullName;
-            }
-        }
-    }
+    /// <summary>Every file under one portable root, as a path relative to the corpus root.</summary>
+    private static IEnumerable<string> Files(string root) => Corpus.EnumerateFiles(root);
 
     /// <summary>
     /// The lines of a file, or none when it is not text. A binary file has no instruction lines to check, and
