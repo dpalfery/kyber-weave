@@ -220,7 +220,7 @@ public sealed partial class StandardsFolderMigration
                     string content = kind == "arbiter"
                         ? ArbiterRulesStub(scope)
                         : Stub(scope, kind, owner);
-                    if (TryCreateNew(target, content)) applied.Add(change);
+                    if (TryCreateNew(target, new UTF8Encoding(false).GetBytes(content))) applied.Add(change);
                     break;
 
                 case StandardsFolderChangeKind.Reshape:
@@ -243,7 +243,13 @@ public sealed partial class StandardsFolderMigration
     /// target that appeared since the folder was planned makes the change a no-op, so a second
     /// actor's file is left byte-for-byte intact.
     /// </summary>
-    private static bool TryCreateNew(string path, string content)
+    /// <remarks>
+    /// Only the final move can be a skip, because only the move fails for the reason a skip
+    /// means: a second actor created the target in the meantime. Writing the temporary is this
+    /// tool's own I/O, and a failure there — a full disk, a name the platform refuses — is an
+    /// error the operator has to see, never a silent "someone else created it".
+    /// </remarks>
+    private static bool TryCreateNew(string path, byte[] content)
     {
         string directory = Path.GetDirectoryName(path)!;
         string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
@@ -252,17 +258,18 @@ public sealed partial class StandardsFolderMigration
         {
             using (FileStream stream = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
-                stream.Write(new UTF8Encoding(false).GetBytes(content));
+                stream.Write(content);
             }
 
-            if (File.Exists(path)) return false;
-
-            File.Move(temporary, path, overwrite: false);
-            return true;
-        }
-        catch (IOException) when (File.Exists(path))
-        {
-            return false;
+            try
+            {
+                File.Move(temporary, path, overwrite: false);
+                return true;
+            }
+            catch (IOException) when (File.Exists(path))
+            {
+                return false;
+            }
         }
         finally
         {

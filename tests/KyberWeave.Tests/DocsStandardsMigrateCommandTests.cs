@@ -343,6 +343,34 @@ public class DocsStandardsMigrateCommandTests
     }
 
     /// <summary>
+    /// Writing the temporary is this tool's own I/O, not another actor's file appearing, so a
+    /// failure there is reported even when a file already sits at the target. The temporary's
+    /// name adds a dot, a GUID and <c>.tmp</c>, so a target name near the platform's limit makes
+    /// the temporary's name too long while the target's own name is fine.
+    /// </summary>
+    [Fact]
+    public void ATemporaryWriteFailureIsReportedRatherThanTreatedAsARace()
+    {
+        using TempDirectory repo = new();
+        string scope = new('a', 220);
+        string folder = Path.Combine(repo.Path, "6-Docs", "standards", scope);
+        Directory.CreateDirectory(folder);
+        string target = $"{scope}.rules.md";
+        File.WriteAllText(Path.Combine(folder, target), "written by someone else");
+
+        Assert.ThrowsAny<IOException>(() => new StandardsFolderMigration(repo.Path, Declared).Apply(
+            [
+                new StandardsFolderChange(
+                    StandardsFolderChangeKind.Add, string.Empty, $"6-Docs/standards/{scope}/{target}")
+            ],
+            scope,
+            null,
+            null));
+
+        Assert.Equal("written by someone else", File.ReadAllText(Path.Combine(folder, target)));
+    }
+
+    /// <summary>
     /// A standards folder kept as a symbolic link out of the repository is refused: a migration
     /// writes stubs beside the host's standard and must not put them outside the tree it was given.
     /// </summary>
