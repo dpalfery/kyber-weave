@@ -20,7 +20,7 @@ public sealed class DocsStandardsMigrateSettings : DocsSettings
 /// Renames each legacy standards <c>README.md</c> to the folder-prefixed standard and writes
 /// the four files a technology or role folder holds.
 /// </summary>
-public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository configs) : Command<DocsStandardsMigrateSettings>
+public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository configs, IAnsiConsole console) : Command<DocsStandardsMigrateSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -31,7 +31,7 @@ public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository conf
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out _, out OntologyConfig ontology))
         {
-            CommandHelpers.Finish(report, settings, "docs standards migrate", "Folder");
+            CommandHelpers.Finish(console, report, settings, "docs standards migrate", "Folder");
             return 1;
         }
 
@@ -43,7 +43,7 @@ public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository conf
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]The standards folders could not be read or written, so nothing was migrated.[/] " +
                 Markup.Escape(exception.Message));
             return 1;
@@ -51,13 +51,13 @@ public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository conf
 
         if (result.Changes.Count == 0)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 "[green]Nothing to migrate.[/] Every standards folder already has its four " +
                 "files and the six headings in order.");
             return 0;
         }
 
-        AnsiConsole.MarkupLine(settings.DryRun
+        console.MarkupLine(settings.DryRun
             ? "[bold]Standards folders (dry run: nothing written)[/]"
             : "[bold]Standards folders[/]");
 
@@ -67,30 +67,30 @@ public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository conf
             switch (change.Kind)
             {
                 case StandardsFolderChangeKind.Rename:
-                    AnsiConsole.MarkupLine(
+                    console.MarkupLine(
                         $"  [green]renamed[/]  {Markup.Escape(change.From)} -> {target}");
                     break;
 
                 case StandardsFolderChangeKind.Reshape:
-                    AnsiConsole.MarkupLine($"  [green]reshaped[/] {target}");
+                    console.MarkupLine($"  [green]reshaped[/] {target}");
                     break;
 
                 default:
-                    AnsiConsole.MarkupLine($"  [green]added[/]    {target}");
+                    console.MarkupLine($"  [green]added[/]    {target}");
                     break;
             }
         }
 
         foreach (StandardSectionMove move in result.Moves)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"  [green]moved[/] '{Markup.Escape(move.Heading)}' under " +
                 $"'## {Markup.Escape(move.Under)}' in {Markup.Escape(move.Standard)}");
         }
 
         if (settings.DryRun)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[grey]Re-run without --dry-run to apply {result.Changes.Count} change(s).[/]");
         }
 

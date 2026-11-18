@@ -3,6 +3,7 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -11,7 +12,8 @@ namespace KyberWeave.Cli.Commands.Docs;
 public sealed class DocsDriftCommand(
     ICodeGraphPortsFactory codeGraph,
     IKyberWeaveConfigRepository configs,
-    IDocumentSourceFactory documents) : Command<DocsSettings>
+    IDocumentSourceFactory documents,
+    IAnsiConsole console) : Command<DocsSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, DocsSettings settings, CancellationToken cancellationToken)
@@ -19,7 +21,7 @@ public sealed class DocsDriftCommand(
         DiagnosticReport report = new DiagnosticReport();
         if (!DocsCommandComposition.TryCreateLoader(configs, settings, report, documents, out IDocumentSource? loader))
         {
-            CommandHelpers.Finish(report, settings, "docs drift", "Document");
+            CommandHelpers.Finish(console, report, settings, "docs drift", "Document");
             return 1;
         }
 
@@ -27,7 +29,7 @@ public sealed class DocsDriftCommand(
         ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings, codeGraph);
         report.AddRange(new DocDriftLinter(resolver).Validate(set).Items);
 
-        CommandHelpers.Finish(report, settings, "docs drift", "Document");
+        CommandHelpers.Finish(console, report, settings, "docs drift", "Document");
         return report.HasErrors ? 1 : 0;
     }
 }

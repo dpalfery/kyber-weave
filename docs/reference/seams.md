@@ -251,7 +251,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewConfigParser` (`Configuration/ReviewConfigParser.cs`) | paths | 2.5 |
 | `TaskGatePlanning` (`Review/TaskGatePlanning.cs`) | paths | 2.5 |
 
-#### KyberWeave.Cli (49 classes)
+#### KyberWeave.Cli (14 classes)
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
@@ -259,10 +259,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterCommentCommand` (`Commands/Arbiter/ArbiterCommentCommand.cs`) | file system, paths | 4.5 |
 | `ArbiterSectionsCommand` (`Commands/Arbiter/ArbiterSectionsCommand.cs`) | file system, paths | 4.5 |
 | `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
-| `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
-| `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
-| `DocsPacketCommand` (`Commands/Docs/DocsPacketCommand.cs`) | paths, console | 4.5 |
-| `DocsTasksCommand` (`Commands/Docs/DocsTasksCommand.cs`) | console | 4.5 |
 | `RunDeliverCommand` (`Commands/Run/RunDeliverCommand.cs`) | paths | 4.5 |
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
 | `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
