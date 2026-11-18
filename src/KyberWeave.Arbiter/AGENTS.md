@@ -33,7 +33,9 @@ builder, and an event that passes through untouched builds no container at all
   host), the decision engine, `ConductorGuard`, `WorkerGuard` and `HookGitFacts`, behind the
   `Contracts/Services` interfaces.
 - `src/KyberWeave.Domain/Arbiter/Hooks/`: the outcome records and hook context the adapters and the host
-  agree on, and the `IFactoryTranscriptSource` port.
+  agree on.
+- `src/KyberWeave.Contracts/Repositories/`: the `IFactoryTranscriptSource` port the Factory adapter reads a
+  session transcript through; `Data`'s `FileFactoryTranscriptSource` implements it.
 - `src/KyberWeave.Data/Hooks/Arbiter/`: the claim, snapshot and budget files, the Factory transcript reader.
 
 Tests build `HookCommand` through `ArbiterTestServices` with scripted engines and counting config
