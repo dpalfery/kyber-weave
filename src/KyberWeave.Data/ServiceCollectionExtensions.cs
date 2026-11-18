@@ -47,7 +47,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
         services.TryAddSingleton(_ => StatusLineVersionProbeRunner.Create());
-        services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
         services.TryAddSingleton<IGitCheckoutProbe>(_ => new GitCheckoutProbe());
         services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
         services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());

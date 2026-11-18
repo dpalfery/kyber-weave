@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using System.Diagnostics.CodeAnalysis;
 using System.Formats.Tar;
 using System.IO.Compression;
@@ -237,7 +238,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     {
         string home = Path.Combine(_install.Path, "home");
         Directory.CreateDirectory(home);
-        new FileUserHostConfigStore().WriteGlobalTargets(home, ["cursor"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["cursor"]);
         string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
 
         List<string> log = [];
@@ -267,7 +268,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     {
         string home = Path.Combine(_install.Path, "home");
         Directory.CreateDirectory(home);
-        new FileUserHostConfigStore().WriteGlobalTargets(home, ["factory"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["factory"]);
         string hookPath = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Factory), "hooks.json");
         Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
         File.WriteAllText(hookPath, """
@@ -309,7 +310,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     {
         string home = Path.Combine(_install.Path, "home");
         Directory.CreateDirectory(home);
-        new FileUserHostConfigStore().WriteGlobalTargets(home, ["cursor"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["cursor"]);
         string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
 
         string foreign = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Cursor), "foreign.json");
@@ -373,7 +374,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         SquadGlobalRoots roots = new(_ => null, home);
         SquadStateStore store = new(userPaths);
         SeedGlobalBlocks(store, roots, home);
-        new FileUserHostConfigStore().WriteGlobalTargets(home, ["cursor", "codex"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["cursor", "codex"]);
         StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Cursor));
         StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Codex));
 
@@ -459,7 +460,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
                 GlobalInstalledAt,
                 [],
                 [agentEntry, hookEntry])));
-        new FileUserHostConfigStore().WriteGlobalTargets(home, ["copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["copilot"]);
 
         Func<string, string?> environment = name => name switch
         {

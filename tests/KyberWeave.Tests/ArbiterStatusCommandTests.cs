@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Tests.Arbiter;
@@ -36,7 +37,7 @@ public sealed class ArbiterStatusCommandTests : IDisposable
     [Fact]
     public void Status_ReportsGlobalAndProjectScope_WithProjectOverride()
     {
-        new FileUserHostConfigStore().WriteGlobalTargets(_home.Path, ["warp", "opencode", "pi", "copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home.Path, ["warp", "opencode", "pi", "copilot"]);
         WriteProjectConfig(
             """
             arbiter:

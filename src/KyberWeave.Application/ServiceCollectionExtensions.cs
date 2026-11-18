@@ -24,6 +24,7 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -47,6 +48,7 @@ public static class ServiceCollectionExtensions
         _ = services.AddWeaveDataServices();
         services.TryAddSingleton(TimeProvider.System);
         _ = services.AddWeaveRunStartState();
+        services.TryAddSingleton<IUserHostConfigStore>(sp => new FileUserHostConfigStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IProcessEnvironment>()));
