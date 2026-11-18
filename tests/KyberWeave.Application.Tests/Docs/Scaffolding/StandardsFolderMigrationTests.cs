@@ -86,7 +86,10 @@ public sealed class StandardsFolderMigrationTests
     public StandardsFolderMigrationTests() => _paths = new FakePathResolver(_disk);
 
     private StandardsFolderMigration Migration(string repoRoot = "repo") =>
-        new(_disk, repoRoot, Declared, _paths, _environment, new FakeIdGenerator());
+        Migration(repoRoot, Declared);
+
+    private StandardsFolderMigration Migration(string repoRoot, OntologyConfig config) =>
+        new(_disk, repoRoot, config, _paths, _environment, new FakeIdGenerator());
 
     [Fact]
     public void ItRenamesALegacyStandardUnderTheInjectedWorkingDirectory()
@@ -128,6 +131,20 @@ public sealed class StandardsFolderMigrationTests
         Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
         Assert.Equal(StandardWithOwnHeadings, _disk.ReadAllText("/kw/shared/csharp-standard.md"));
         Assert.True(_disk.FileExists($"{Folder}/csharp.standards.md"));
+    }
+
+    [Fact]
+    public void ADanglingLinkWhereAStubWouldBeWrittenIsRefusedAndLeftInPlace()
+    {
+        _disk.CreateDirectory(Folder);
+        _disk.CreateFileLink($"{Folder}/csharp.standards.md", "/kw/missing.md");
+
+        IOException error = Assert.Throws<IOException>(() => Migration().Run());
+
+        Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            _disk.EnumerateEntries(Folder),
+            entry => entry.IsLink && entry.Path.EndsWith("csharp.standards.md", StringComparison.Ordinal));
     }
 
     [Fact]

@@ -458,16 +458,34 @@ public sealed partial class StandardsFolderMigration
                      Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
-            string? linkTarget = _files.GetLinkTarget(current);
-            if (linkTarget is null) continue;
+            if (!IsLink(current)) continue;
 
+            string? linkTarget = _files.GetLinkTarget(current);
             throw new IOException(
                 $"Refusing to write '{named}': '{current}' is the symbolic link " +
-                $"'{linkTarget}', and a migration does not write through or replace a link, " +
+                $"'{linkTarget ?? "whose target is missing"}', and a migration does not write through or replace a link, " +
                 "so nothing was written.");
         }
 
         return full;
+    }
+
+    /// <summary>
+    /// True when the entry at <paramref name="path"/> is a symbolic link, including one whose target is
+    /// missing.
+    /// </summary>
+    /// <remarks>
+    /// The seam's link-target read answers null for a dangling link, because a target that does not exist
+    /// reads as no link at all. The parent's listing reports each child's kind without following it, so it
+    /// is what tells a dangling link from a regular file — and refusing a dangling link matters most,
+    /// since a write would otherwise rename over it and silently replace the host's link.
+    /// </remarks>
+    private bool IsLink(string path)
+    {
+        string? parent = Path.GetDirectoryName(path);
+        return parent is not null
+            && _files.EnumerateEntries(parent)
+                .Any(entry => entry.IsLink && _paths.AreSame(entry.Path, path));
     }
 
     /// <summary>
