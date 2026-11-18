@@ -187,7 +187,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
 | `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
-| `ArbiterEvaluator` (`Arbiter/ArbiterEvaluator.cs`) | clock | 4.3 |
 | `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | paths | 4.3 |
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
@@ -202,7 +201,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
 | `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
 | `HookCommand` (`Arbiter/Hooks/HookCommand.cs`) | identifiers | 4.3 |
-| `HookGitFacts` (`Arbiter/Hooks/HookGitFacts.cs`) | clock | 4.3 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
 | `ArbiterRootResolver` (`Arbiter/Mcp/ArbiterRootResolver.cs`) | paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
@@ -236,12 +234,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
-| `GateRunService` (`Review/GateRunService.cs`) | paths, clock | 4.3 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
 | `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
 | `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
 | `ReviewCycleView` (`Review/ReviewCycleView.cs`) | paths | 4.3 |
-| `ReviewDecisionSession` (`Review/ReviewDecisionSession.cs`) | clock | 4.3 |
 | `ReviewDuplicatesService` (`Review/ReviewDuplicatesService.cs`) | paths | 4.3 |
 | `ReviewEvidenceService` (`Review/ReviewEvidenceService.cs`) | paths | 4.3 |
 | `ReviewGatesService` (`Review/ReviewGatesService.cs`) | file system, paths | 4.3 |

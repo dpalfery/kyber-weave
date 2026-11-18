@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Contracts.Repositories;
@@ -120,7 +119,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArgumentNullException.ThrowIfNull(ev);
         ArgumentNullException.ThrowIfNull(config);
         ArbiterEvaluatorOptions effective = options ?? new ArbiterEvaluatorOptions();
-        Stopwatch elapsed = Stopwatch.StartNew();
+        long elapsed = _clock.GetTimestamp();
         // Under the tiered roster the model-targeting block and the two rules follow the developer tiers; the
         // configuration a host loads keeps the shipped block, and this is the run's effective one.
         ArbiterModelTargetingConfig targeting = ModelTargetingRules.Targeting(config.Arbiter.ModelTargeting);
@@ -237,7 +236,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArbiterModelTargets? table,
         ArbiterEvaluatorOptions effective,
         string ledgerId,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken)
     {
         string? trigger = classification.Trigger;
@@ -989,7 +988,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         ArbiterEvaluatorOptions effective,
         string ledgerId,
         string? planDigest,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken)
     {
         List<ArbiterDecisionRule> rules = [];
@@ -1035,7 +1034,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string ledgerId,
         string? planDigest,
         string? priorDecisionId,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken)
     {
         string neutral = ArbiterTriggerFamilies.NeutralEffect(plan.Family);
@@ -1263,18 +1262,21 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             ? ArbiterTriggerFamilies.NeutralEffect(family)
             : MapStep1AnswerToEffect(rule, answer, family);
 
-    private static ArbiterProviderRecord ProviderRecord(
+    private ArbiterProviderRecord ProviderRecord(
         KyberWeaveConfig config,
         Step1Call call,
         string status,
-        Stopwatch elapsed) =>
+        long elapsed) =>
         new(
             ProviderKindName(config),
             EndpointOrigin(config),
             call.Model,
             call.Usage is null ? null : new ArbiterProviderUsage(call.Usage.InputTokens, call.Usage.OutputTokens),
-            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds),
+            ElapsedMilliseconds(elapsed),
             status);
+
+    private int ElapsedMilliseconds(long startedAt) =>
+        (int)Math.Min(int.MaxValue, (long)_clock.GetElapsedTime(startedAt).TotalMilliseconds);
 
     private async Task AppendRecordAsync(
         TriggerClassification classification,
@@ -1289,7 +1291,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
         string? planDigest,
         KyberWeaveConfig config,
         IReadOnlyList<ArbiterRule> effectiveRules,
-        Stopwatch elapsed,
+        long elapsed,
         CancellationToken cancellationToken,
         ArbiterModelBlock? model = null,
         string? recordId = null)
@@ -1318,7 +1320,7 @@ public sealed class ArbiterEvaluator : IArbiterEvaluator
             provider,
             outcome,
             repeat,
-            (int)Math.Min(int.MaxValue, elapsed.ElapsedMilliseconds),
+            ElapsedMilliseconds(elapsed),
             primaryLedgerId: primaryLedgerId,
             model: model);
         if (!effective.DryRun)

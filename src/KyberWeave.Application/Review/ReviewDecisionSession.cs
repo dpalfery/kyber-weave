@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -195,7 +194,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
     {
         Dictionary<string, ArbiterFact> facts = new(StringComparer.Ordinal);
         ArbiterRule expanded = Expand(rule, question, 0, facts);
-        Stopwatch watch = Stopwatch.StartNew();
+        long started = _clock.GetTimestamp();
         ArbiterStep1BatchResult? batch = null;
         string? faultType = null;
         try
@@ -208,7 +207,7 @@ public class ReviewDecisionSession : IReviewDecisionModel
             faultType = ex.GetType().Name;
         }
 
-        return new Sent(question, expanded.Id, batch, (int)watch.ElapsedMilliseconds, faultType);
+        return new Sent(question, expanded.Id, batch, (int)_clock.GetElapsedTime(started).TotalMilliseconds, faultType);
     }
 
     private async Task RecordAsync(
