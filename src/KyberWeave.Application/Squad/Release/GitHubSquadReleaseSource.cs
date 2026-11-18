@@ -699,10 +699,12 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
                 ZipArchiveEntry entry = archive.Entries[index];
                 ValidatedArchiveEntry validated = entries[index];
-                string destination = Path.Combine(
-                    stagingRoot,
-                    validated.RelativePath.Replace('/', Path.DirectorySeparatorChar));
-                if (!_paths.GetFullPath(destination, stagingRoot).StartsWith(stagingPrefix, comparison))
+                // The path written is the checked full path itself (Path.GetFullPath with an
+                // explicit base is pure string work), so no unchecked form reaches the file system.
+                string destination = Path.GetFullPath(
+                    validated.RelativePath.Replace('/', Path.DirectorySeparatorChar),
+                    stagingRoot);
+                if (!destination.StartsWith(stagingPrefix, comparison))
                 {
                     throw new InvalidDataException(
                         $"The Squad archive path escapes its extraction root: '{entry.FullName}'.");
