@@ -44,7 +44,13 @@ internal static class SquadCliServices
         services.TryAddSingleton(new SquadRunOptions());
         services.TryAddSingleton(new SquadDoctorOptions());
         services.TryAddSingleton<ISquadProjectPicker, SpectreSquadProjectPicker>();
-        services.TryAddSingleton(_ => KyberDashCapturePluginStep.CreateDefault());
+        services.TryAddSingleton(sp => new KyberDashLocator(
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IFileSystem>(),
+            () => Environment.ProcessPath));
+        services.TryAddSingleton(sp => KyberDashCapturePluginStep.Create(
+            sp.GetRequiredService<KyberDashLocator>(),
+            sp.GetRequiredService<SquadConsole>()));
         return services;
     }
 }

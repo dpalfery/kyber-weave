@@ -366,6 +366,10 @@ internal static class SquadTestCommands
         public ISquadTransaction Create(ISquadTransactionObserver? observer) => throw new NotSupportedException();
     }
 
+    /// <summary>A capture-plugin step whose output goes to whichever test is capturing the process console.</summary>
+    public static KyberDashCapturePluginStep CapturePluginStep(IProcessExecutor executor, Func<string?> locateKyberDash) =>
+        new(executor, locateKyberDash, CapturedSquadConsole());
+
     /// <summary>The roots over an in-memory file system and a fake environment, for a command test that touches no disk.</summary>
     public static SquadCommandRoots InMemoryRoots(
         SquadConsole console,

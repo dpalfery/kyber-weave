@@ -40,7 +40,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     public void RunInvokesThePluginVerbWithPreserveAndTheResolvedConfigDir()
     {
         FakeProcessExecutor executor = new();
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out _);
 
@@ -59,7 +59,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     public void RunPassesDryRunThroughToTheVerb()
     {
         FakeProcessExecutor executor = new();
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         Capture(() => step.Run(FakeOpenCodeRoot, true), out _);
 
@@ -76,7 +76,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     public void RunWithoutKyberDashSkipsWithoutStartingAnything()
     {
         FakeProcessExecutor executor = new();
-        KyberDashCapturePluginStep step = new(executor, () => null);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => null);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -99,7 +99,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             $"opencode plugin: {verdict} /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -120,7 +120,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             "opencode plugin: installed /fake/opencode/plugins/kyberdash-opencode.js\n" +
             $"{HarnessPrefix}{GuidanceAlpha}\n" +
             $"{HarnessPrefix}{GuidanceBeta}\n");
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -141,7 +141,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             $"opencode plugin: {verdict} /fake/opencode/plugins/kyberdash-opencode.js\n{HarnessPrefix}{GuidanceAlpha}\n");
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -163,7 +163,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             $"{HarnessPrefix}{GuidanceAlpha}\n" +
             "verb chatter that is not guidance\n" +
             "verb note: harness opencode: mid-line mention\n");
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -178,7 +178,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput(
             "kyberdash",
             "opencode plugin: kept-edited /fake/opencode/plugins/kyberdash-opencode.js\n");
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -195,7 +195,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             "kyberdash",
             "error: unknown command 'capture'\n",
             1);
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -208,7 +208,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     public void RunReportsANonZeroExitAsAWarningAndNamesTheExitCode()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithProbeOutput("kyberdash", string.Empty, 3);
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -221,7 +221,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
     public void RunWhenTheProcessCannotStartIsAWarningNotAnException()
     {
         FakeProcessExecutor executor = new FakeProcessExecutor().WithFailure("kyberdash", "cannot start kyberdash");
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -236,7 +236,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor().WithException(
             "kyberdash",
             new UnauthorizedAccessException("Access to the path '/fake/bin/kyberdash' is denied."));
-        KyberDashCapturePluginStep step = new(executor, () => FakeKyberDash);
+        KyberDashCapturePluginStep step = SquadTestCommands.CapturePluginStep(executor, () => FakeKyberDash);
 
         CapturePluginStepOutcome outcome = Capture(() => step.Run(FakeOpenCodeRoot, false), out string output);
 
@@ -913,7 +913,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             IProcessExecutor executor,
             Func<string?>? locateKyberDash = null)
         {
-            return new KyberDashCapturePluginStep(executor, locateKyberDash ?? (() => FakeKyberDash));
+            return SquadTestCommands.CapturePluginStep(executor, locateKyberDash ?? (() => FakeKyberDash));
         }
     }
 
