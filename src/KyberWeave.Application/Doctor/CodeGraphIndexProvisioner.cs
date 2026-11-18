@@ -32,7 +32,8 @@ public sealed class CodeGraphIndexProvisioner(
     IDoctorFileSystem files,
     ICodeGraphIndexWorkspace workspace,
     IPathResolver paths,
-    IProcessEnvironment environment) : ICodeGraphProvisioner
+    IProcessEnvironment environment,
+    TimeProvider timeProvider) : ICodeGraphProvisioner
 {
     /// <summary>The directory name CodeGraph keeps its index in, at the repository root.</summary>
     private const string IndexDirectoryName = CodeGraphIndexRules.IndexDirectoryName;
@@ -241,7 +242,7 @@ public sealed class CodeGraphIndexProvisioner(
             if (!FoundIndexLockHeld(prepared, options))
                 break;
 
-            Thread.Sleep(pause);
+            Task.Delay(pause, timeProvider).GetAwaiter().GetResult();
             prepared = PrepareIndex(root, verb, options, executor);
         }
 
