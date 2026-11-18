@@ -1201,6 +1201,33 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     }
 
     /// <summary>
+    /// A home reached through a symbolic link is refused: the comparison follows the link through
+    /// the path seam, so a root spelled as a link to the home directory is the home directory.
+    /// </summary>
+    [Fact]
+    public void AHomeReachedThroughALinkIsRefused()
+    {
+        string home = Path.Combine(FakeAnchor, "home");
+        string link = Path.Combine(FakeAnchor, "linked-home");
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
+        paths.Files.CreateDirectory(home);
+        paths.Files.CreateDirectoryLink(link, home);
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            new DocsMcpMigrateCommand(
+                new UnreachedWiringService(),
+                paths,
+                new FakeProcessEnvironment(
+                    currentDirectory: Path.Combine(FakeAnchor, "work"),
+                    homeDirectory: home)).Execute(
+                null!,
+                new DocsMcpMigrateSettings { Path = link }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A fully qualified anchor for the fake paths a case hands the seams, spelled the way the
     /// platform spells one: the path seam refuses a base the platform does not call fully
     /// qualified, and a Unix-absolute base is drive-relative on Windows.
