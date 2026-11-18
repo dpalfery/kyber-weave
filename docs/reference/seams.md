@@ -226,7 +226,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
 | `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
-| `ReviewEvidenceService` (`Review/ReviewEvidenceService.cs`) | paths | 4.3 |
 | `ReviewSeatsService` (`Review/ReviewSeatsService.cs`) | paths | 4.3 |
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
@@ -238,7 +237,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
 | `ReviewConfigParser` (`Configuration/ReviewConfigParser.cs`) | paths | 2.5 |
-| `TaskGatePlanning` (`Review/TaskGatePlanning.cs`) | paths | 2.5 |
 
 #### KyberWeave.Cli (14 classes)
 
