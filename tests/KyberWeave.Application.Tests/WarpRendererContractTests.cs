@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Model;
@@ -10,7 +11,7 @@ using KyberWeave.Tests.Corpus;
 namespace KyberWeave.Tests;
 
 /// <summary>
-/// Renders the real, checked-in canonical Squad source (<c>products/kyber-squad</c>) through
+/// Renders the real, checked-in canonical Squad source (<c>products/kyber-squad</c>), copied into an in-memory file system, through
 /// <see cref="WarpRenderer"/> and pins the fallback role-skill contract
 /// (skills under <c>.warp/skills/</c>, no native agent files).
 /// </summary>
@@ -88,7 +89,8 @@ public sealed class WarpRendererContractTests : IDisposable
     [Fact]
     public async Task RenderAsync_Warp_RendersTheRealCanonicalCorpus()
     {
-        SquadSource source = TestSquadCorpus.CanonicalSource;
+        CanonicalSquadTree tree = CanonicalSquadTree.Create();
+        SquadSource source = tree.Load();
         HashSet<string> shared = SharedIdentities(source).ToHashSet(StringComparer.Ordinal);
         HashSet<string> collisions = DeriveCollisions(source);
         // The removal left no distinct-body collision: every agent identity a canonical skill also carries is a
@@ -96,8 +98,8 @@ public sealed class WarpRendererContractTests : IDisposable
         // here, and the loop below asserts the projection it demands.
         Assert.Empty(collisions);
 
-        SquadRenderResult result = await SquadTestRegistry.Create([new WarpRenderer()]).RenderAsync(
-            new SquadRenderRequest(ProductRoot, [SquadTarget.Warp], SquadDeploymentScope.Project).Prepared());
+        SquadRenderResult result = await tree.Registry([new WarpRenderer()]).RenderAsync(
+            tree.Prepare(new SquadRenderRequest(tree.ProductRoot, [SquadTarget.Warp], SquadDeploymentScope.Project)));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("/agents/", StringComparison.OrdinalIgnoreCase));
