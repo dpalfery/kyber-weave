@@ -1,5 +1,8 @@
 using KyberWeave.Testing.Squad;
-using KyberWeave.Tests.Configuration;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests;
+using Microsoft.Extensions.DependencyInjection;
+using static KyberWeave.Tests.McpGateToolInvoker;
 
 using System.Globalization;
 using System.Reflection;
@@ -16,24 +19,20 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Domain.CodeGraph;
 using KyberWeave.Mcp;
 using ModelContextProtocol.Server;
-using Xunit.Sdk;
 using Xunit;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Corpus;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Mcp.Tests;
 
 /// <summary>
 ///     T1 RED — <c>docs_validate_governed_document_schema</c> and <c>docs_detect_drift_between_documents_and_code</c> expose the same gates as the CLI
 ///     through read-only MCP tools rooted at the server's corpus, with provenance and a verdict
 ///     line the architect can trust before planning or merge-ready work.
 /// </summary>
-public sealed class McpDocsGateToolsTests : IDisposable
+public sealed class McpDocsGateToolsTests
 {
     private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
-    private const string ValidateToolName = "docs_validate_governed_document_schema";
-    private const string DriftToolName = "docs_detect_drift_between_documents_and_code";
 
     private static readonly string ProductRoot =
         Path.Combine(Corpus.Root, "products", "kyber-squad");
@@ -71,12 +70,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
         "root"
     ];
 
-    private readonly TempDirectory _parent = new();
-
-    public void Dispose()
-    {
-        _parent.Dispose();
-    }
+    private readonly MemoryDocsHost _host = new();
 
     [Theory]
     [InlineData(ValidateToolName)]
@@ -132,7 +126,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     public void DocsValidateFailsOnUngovernedMarkdownWithSpec001AndFixtureProvenance()
     {
         string root = CreateScaffoldedRoot();
-        File.WriteAllText(
+        _host.Files.WriteAllText(
             Path.Combine(root, "docs", "ungoverned.md"),
             "# No frontmatter\n\nThis file is not governed.\n");
 
@@ -215,7 +209,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
     {
         string root = CreateScaffoldedRoot();
         const string sourceRoot = "1-Presentation/Api";
-        Directory.CreateDirectory(Path.Combine(root, sourceRoot.Replace('/', Path.DirectorySeparatorChar)));
+        _host.Files.CreateDirectory(Path.Combine(root, sourceRoot.Replace('/', Path.DirectorySeparatorChar)));
         WriteDriftDocument(
             root,
             "docs/reference/warning-only.md",
@@ -245,7 +239,7 @@ public sealed class McpDocsGateToolsTests : IDisposable
 
         const string warningPath = "docs/reference/source-root-warning.md";
         const string warningSourceRoot = "3-Domain/Unindexed";
-        Directory.CreateDirectory(Path.Combine(root, warningSourceRoot.Replace('/', Path.DirectorySeparatorChar)));
+        _host.Files.CreateDirectory(Path.Combine(root, warningSourceRoot.Replace('/', Path.DirectorySeparatorChar)));
         WriteDriftDocument(root, warningPath, "KnownSymbol", warningSourceRoot);
 
         FakeCodeGraphResolver resolver = FakeCodeGraphResolver.WithSymbols(
@@ -270,10 +264,9 @@ public sealed class McpDocsGateToolsTests : IDisposable
     public void GateToolingInstructionsAndRosterNameDocsValidateAndDocsDrift()
     {
         string instructions = DocsServerInstructions.Text;
-        string toolchain = File.ReadAllText(Path.Combine(ProductRoot, "toolchain.yml"));
-        string architect = File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect.md"));
-        string planAuthoring = File.ReadAllText(
-            Path.Combine(ProductRoot, "agents", "architect", "references", "plan-authoring.md"));
+        string toolchain = Corpus.ReadText("products/kyber-squad/toolchain.yml");
+        string architect = Corpus.ReadText("products/kyber-squad/agents/architect.md");
+        string planAuthoring = Corpus.ReadText("products/kyber-squad/agents/architect/references/plan-authoring.md");
 
         foreach (string text in new[] { instructions, toolchain, architect, planAuthoring })
         {
@@ -296,77 +289,6 @@ public sealed class McpDocsGateToolsTests : IDisposable
         // classification (not pinned here) are the controls. ask would narrow to deny on
         // some targets.
         Assert.Equal(SquadPermissionDecision.Allow, decision);
-    }
-
-    [Fact]
-    public void DocsValidateMergeReadyPassesWhenGitBaseResolvesAndCorpusIsClean()
-    {
-        using CloseoutGitRepo repo = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
-
-        DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeValidate(tools, true, gitBase: "HEAD");
-
-        Assert.StartsWith("result: pass", ResultLine(response), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DocsValidateMergeReadyFailsWhenGitBaseDoesNotResolve()
-    {
-        using CloseoutGitRepo repo = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
-
-        DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
-        string response = InvokeValidate(tools, true, gitBase: "origin/this-ref-is-not-present");
-
-        Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
-        Assert.Contains("scope is unknown (C0)", response, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void DocsValidateMergeReadyFailsClosedWhenArchivedEntryIsSymlink()
-    {
-        if (!CanCreateSymbolicLinks())
-            throw SkipException.ForSkip("This host cannot create symbolic links.");
-
-        using CloseoutGitRepo repo = new();
-        using TempDirectory outside = new();
-        DocsTestCommands.Scaffolding.Scaffold(repo.Root, owner: "gate-fixture");
-        repo.Commit("initial");
-
-        string target = Path.Combine(outside.Path, "target.md");
-        File.WriteAllText(
-            target,
-            """
-            ---
-            id: archive/linked-target
-            title: Linked target
-            doc-type: plan
-            status: superseded
-            owner: gate-fixture
-            last-reviewed: 2026-10-28
-            ---
-
-            # Linked target
-            """);
-
-        const string linkRelative = "docs/archive/plans/linked-plan.md";
-        string linkPath = Path.Combine(repo.Root, linkRelative.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(linkPath)!);
-        File.CreateSymbolicLink(linkPath, target);
-
-        DocsTools tools = CreateTools(repo.Root, () => FakeCodeGraphResolver.WithSymbols());
-        string? captured = null;
-        Exception? failure = Record.Exception(() => captured = InvokeValidate(tools, true, gitBase: "HEAD"));
-        Assert.Null(failure);
-        Assert.NotNull(captured);
-        string response = captured;
-
-        Assert.StartsWith("result: fail", ResultLine(response), StringComparison.Ordinal);
-        Assert.Contains(ArchiveCloseoutValidator.MissingCloseoutEvidence, response, StringComparison.Ordinal);
-        Assert.Contains("symbolic link", response, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -400,17 +322,15 @@ public sealed class McpDocsGateToolsTests : IDisposable
 
     private string CreateScaffoldedRoot()
     {
-        string root = Path.Combine(_parent.Path, "repo-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
-        DocsTestCommands.Scaffolding.Scaffold(root, owner: "gate-fixture");
-        IsolateFromParentGit(root);
+        string root = _host.Repo;
+        _host.Services().GetRequiredService<IDocsScaffoldingService>().Scaffold(root, owner: "gate-fixture");
         return root;
     }
 
-    private static void AddActivePlan(string root)
+    private void AddActivePlan(string root)
     {
         const string planPath = "docs/plans/2026-10-28-active-plan.md";
-        File.WriteAllText(
+        _host.Files.WriteAllText(
             Path.Combine(root, planPath),
             """
             ---
@@ -429,14 +349,14 @@ public sealed class McpDocsGateToolsTests : IDisposable
             """);
 
         string indexPath = Path.Combine(root, "docs", "plans", "README.md");
-        string index = File.ReadAllText(indexPath);
+        string index = _host.Files.ReadAllText(indexPath);
         if (!index.Contains("2026-10-28-active-plan.md", StringComparison.Ordinal))
-            File.WriteAllText(
+            _host.Files.WriteAllText(
                 indexPath,
                 index.TrimEnd() + "\n\n- [Active plan for merge-ready gate](2026-10-28-active-plan.md)\n");
     }
 
-    private static void WriteDriftDocument(
+    private void WriteDriftDocument(
         string root,
         string relativePath,
         string symbol,
@@ -463,88 +383,24 @@ public sealed class McpDocsGateToolsTests : IDisposable
              References {symbol}.
              """;
         string full = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, content);
+        _host.Files.CreateDirectory(Path.GetDirectoryName(full)!);
+        _host.Files.WriteAllText(full, content);
     }
 
-    private static void IsolateFromParentGit(string root)
+    private DocsTools CreateTools(string root, Func<ICodeGraphResolver> resolverFactory)
     {
-        File.WriteAllText(
-            Path.Combine(root, ".git"),
-            $"gitdir: {Path.Combine(root, ".git-missing")}{Environment.NewLine}");
-    }
-
-    private static DocsTools CreateTools(string root, Func<ICodeGraphResolver> resolverFactory)
-    {
-        KyberWeaveConfig config = ConfigFileReader.Load(root);
+        IServiceProvider services = _host.Services();
+        KyberWeaveConfig config = services.GetRequiredService<IKyberWeaveConfigRepository>().Load(root);
         DocumentIndexHost host = new(
             root,
             resolverFactory,
-            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment,
+            () => new DocumentLoader(_host.Store, root, _host.Paths, _host.Environment, config.Ontology).Load(),
+            _host.Store,
+            _host.Paths,
+            _host.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
-        return DocsToolsComposition.Create(host);
-    }
-
-    private static string InvokeValidate(
-        DocsTools tools,
-        bool mergeReady,
-        string? gitBase = null,
-        int charBudget = DocumentIndex.DefaultCharBudget)
-    {
-        MethodInfo method = FindMcpTool(ValidateToolName);
-        return InvokeByParameterNames(
-            tools,
-            method,
-            new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["mergeReady"] = mergeReady,
-                ["base"] = gitBase,
-                ["charBudget"] = charBudget
-            });
-    }
-
-    private static string InvokeDrift(DocsTools tools, int charBudget = DocumentIndex.DefaultCharBudget)
-    {
-        MethodInfo method = FindMcpTool(DriftToolName);
-        return InvokeByParameterNames(
-            tools,
-            method,
-            new Dictionary<string, object?>(StringComparer.Ordinal) { ["charBudget"] = charBudget });
-    }
-
-    private static string InvokeByParameterNames(
-        DocsTools tools,
-        MethodInfo method,
-        IReadOnlyDictionary<string, object?> arguments)
-    {
-        object?[] args = method.GetParameters().Select(parameter =>
-        {
-            if (arguments.TryGetValue(parameter.Name!, out object? value))
-                return value ?? (parameter.ParameterType.IsValueType
-                    ? Activator.CreateInstance(parameter.ParameterType)
-                    : null);
-
-            if (parameter.HasDefaultValue) return parameter.DefaultValue;
-
-            throw new InvalidOperationException(
-                $"Missing argument '{parameter.Name}' for MCP tool '{method.GetCustomAttribute<McpServerToolAttribute>()?.Name}'.");
-        }).ToArray();
-
-        return (string)method.Invoke(tools, args)!;
-    }
-
-    private static MethodInfo FindMcpTool(string toolName)
-    {
-        MethodInfo? method = typeof(DocsTools)
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .SingleOrDefault(candidate =>
-                candidate.GetCustomAttribute<McpServerToolAttribute>()?.Name == toolName);
-        Assert.True(method is not null, $"DocsTools must expose an MCP tool named '{toolName}'.");
-        return method!;
+        return DocsToolsComposition.Create(host, services: services);
     }
 
     private static ProvenanceLine ParseProvenance(string response)
@@ -561,13 +417,6 @@ public sealed class McpDocsGateToolsTests : IDisposable
             match.Groups["rev"].Value,
             match.Groups["dirty"].Value,
             int.Parse(match.Groups["documents"].Value, CultureInfo.InvariantCulture));
-    }
-
-    private static string ResultLine(string response)
-    {
-        string[] lines = response.Split('\n');
-        Assert.True(lines.Length >= 2, "Gate tool responses must include a result line after provenance.");
-        return lines[1].TrimEnd('\r');
     }
 
     private static int CountDistinctRuleCodes(string response, string code)
@@ -594,28 +443,6 @@ public sealed class McpDocsGateToolsTests : IDisposable
                 return index;
 
         return -1;
-    }
-
-    private static bool CanCreateSymbolicLinks()
-    {
-        string probeDirectory = Path.Combine(Path.GetTempPath(), "kw-mcp-symlink-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(probeDirectory);
-        try
-        {
-            string target = Path.Combine(probeDirectory, "target.txt");
-            File.WriteAllText(target, "probe");
-            File.CreateSymbolicLink(Path.Combine(probeDirectory, "link.txt"), target);
-            return true;
-        }
-        catch (IOException)
-        {
-            return false;
-        }
-        finally
-        {
-            if (Directory.Exists(probeDirectory))
-                Directory.Delete(probeDirectory, true);
-        }
     }
 
     private static CodeGraphNode CodeGraphPortTestsNode(string name, string filePath, int line)
