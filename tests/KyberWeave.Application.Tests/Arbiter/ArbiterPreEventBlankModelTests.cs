@@ -18,18 +18,14 @@ namespace KyberWeave.Tests.Arbiter;
 /// Review-round contract for the pre event's model fields: a blank caller model names nothing, so the pre event
 /// names the rendered agent's model, not the caller's.
 /// </summary>
-public sealed class ArbiterPreEventBlankModelTests : IDisposable
+public sealed class ArbiterPreEventBlankModelTests
 {
     private const string ScopeRule = "KW-ARB-SCOPE-002";
     private const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
     private const string Harness = "claude";
     private const string Rendered = "claude-sonnet-5-5";
 
-    private readonly TempDirectory _repo = new();
-
-    public void Dispose() => _repo.Dispose();
-
-    private string ArbiterDirectory => Path.Combine(_repo.Path, "artifacts", "arbiter");
+    private readonly InMemoryArbiterState _state = new();
 
     private sealed class PlanFacts : IArbiterPlanReader
     {
@@ -56,17 +52,11 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
         Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
     };
 
-    private ArbiterEvaluator Evaluator() => new(
-        FakeArbiterProvider.AnsweringByRule((ScopeRule, "within-task")),
-        _ => null,
-        RealArbiterState.Ledger(ArbiterDirectory),
-        RealArbiterState.Decisions(ArbiterDirectory),
-        new NoGitFacts(),
-        new PlanFacts(),
-        new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
-        TimeProvider.System, new FakeIdGenerator());
+    private ArbiterEvaluator Evaluator() =>
+        _state.Evaluator(
+            FakeArbiterProvider.AnsweringByRule((ScopeRule, "within-task")),
+            planReader: new PlanFacts(),
+            gitFacts: new NoGitFacts());
 
     private ArbiterEvent Dispatch(string? model) => new()
     {
@@ -76,7 +66,7 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
         Prompt = Prompt,
         HarnessCaller = "conductor",
         Session = "s1",
-        Cwd = _repo.Path,
+        Cwd = ArbiterTestRoots.Under("pre-blank-model"),
         ModelOverrideField = "model",
         Model = model,
         RenderedModelToken = Rendered,
@@ -85,7 +75,7 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
 
     private void WriteTable()
     {
-        Directory.CreateDirectory(ArbiterDirectory);
+        _state.Files.CreateDirectory(InMemoryArbiterState.Directory);
         ArbiterModelTargets table = new(
             ArbiterModelTargets.SchemaName,
             Harness,
@@ -101,8 +91,8 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
             {
                 ["dev-medium"] = new("general", "sonnet"),
             });
-        File.WriteAllText(
-            Path.Combine(ArbiterDirectory, $"model-targets.{Harness}.json"),
+        _state.Files.WriteAllText(
+            Path.Combine(InMemoryArbiterState.Directory, $"model-targets.{Harness}.json"),
             JsonSerializer.Serialize(table));
     }
 
@@ -115,7 +105,7 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
         WriteTable();
         _ = await Evaluator().EvaluateAsync(Dispatch(model), Config(), null, TestContext.Current.CancellationToken);
 
-        ArbiterLedgerEvent pre = RealArbiterState.Ledger(ArbiterDirectory).ReadAll().Single(
+        ArbiterLedgerEvent pre = _state.LedgerStore.ReadAll().Single(
             ev => ev.Phase == ArbiterLedgerPhases.Pre && ev.Trigger == "delegate");
         Assert.Equal("rendered", pre.ModelSource);
         Assert.Equal("sonnet", pre.ModelToken);

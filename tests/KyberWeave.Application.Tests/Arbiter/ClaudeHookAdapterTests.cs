@@ -20,8 +20,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ClaudeHookAdapterTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private sealed class ScriptedEngine : IHookDecisionEngine
     {
         public string? SeenPreCaller;
@@ -49,7 +47,7 @@ public sealed class ClaudeHookAdapterTests
         new() { Arbiter = new ArbiterConfig { Enabled = true } };
 
     private static string Fixture(string name) =>
-        Corpus.ReadText($"tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/{name}");
+        EmbeddedFixtureText.Read(typeof(ClaudeHookAdapterTests).Assembly, $"arbiter-hooks/claude/{name}");
 
     private static (int Exit, string Stdout) Run(
         string stdin, string? caller, ScriptedEngine engine)
@@ -436,7 +434,7 @@ public sealed class ClaudeHookAdapterTests
         ClaudeHookAdapter adapter = new(engine) { ModelWriteFault = new IOException("write refused") };
         using JsonDocument doc = JsonDocument.Parse(DispatchPayload(HeaderedPrompt));
         using StringWriter log = new();
-        HookContext context = new(Directory.GetCurrentDirectory(), () => "decision-27", log);
+        HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
 
         string stdout = adapter.Handle(doc.RootElement, DispatchPayload(HeaderedPrompt), "conductor", EnabledConfig(), context);
 
@@ -471,7 +469,7 @@ public sealed class ClaudeHookAdapterTests
         ClaudeHookAdapter adapter = new(engine) { ModelWriteFault = new IOException("write refused") };
         using JsonDocument doc = JsonDocument.Parse(DispatchPayload(HeaderedPrompt));
         using StringWriter log = new();
-        HookContext context = new(Directory.GetCurrentDirectory(), () => "decision-27", log);
+        HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
 
         string stdout = adapter.Handle(doc.RootElement, DispatchPayload(HeaderedPrompt), "conductor", EnabledConfig(), context);
 
@@ -497,7 +495,7 @@ public sealed class ClaudeHookAdapterTests
         string raw = DispatchPayload(HeaderedPrompt, subagent: subagent);
         using JsonDocument doc = JsonDocument.Parse(raw);
         using StringWriter log = new();
-        HookContext context = new(Directory.GetCurrentDirectory(), () => "decision-27", log);
+        HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
 
         string stdout = adapter.Handle(doc.RootElement, raw, "conductor", EnabledConfig(), context);
 

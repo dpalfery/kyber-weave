@@ -40,7 +40,7 @@ public sealed class ArbiterServeCallerSourceTests : IDisposable
             "  rules:\n" +
             string.Join(
                 "\n",
-                ArbiterConfigTests.ExpectedRuleIds.Select(
+                ArbiterExpectedRuleIds.All.Select(
                     id => $"    - id: {id}\n      enabled: false")) + "\n");
 
         ArbiterHookDecisionEngine engine = ArbiterTestServices.Engine(

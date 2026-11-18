@@ -11,11 +11,9 @@ namespace KyberWeave.Tests.Arbiter;
 /// technology that builds on it. Role folder rules and <c>arbiter.rules</c> judge every event, and an event
 /// that names no task technology is judged by them alone.
 /// </summary>
-public sealed class ArbiterTechnologyRuleScopeTests : IDisposable
+public sealed class ArbiterTechnologyRuleScopeTests
 {
-    private readonly TempDirectory _root = new();
-
-    public void Dispose() => _root.Dispose();
+    private readonly InMemoryArbiterState _state = new();
 
     [Fact]
     public void ASqlServerRuleDoesNotJudgeACsharpTask()
@@ -182,8 +180,7 @@ public sealed class ArbiterTechnologyRuleScopeTests : IDisposable
             },
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
-        ArbiterEvaluator evaluator = ArbiterEvaluatorFixtures.Evaluator(
-            _root.Path,
+        ArbiterEvaluator evaluator = _state.Evaluator(
             new ArbiterEvaluatorFixtures.ScriptedProvider(),
             planReader: new ArbiterEvaluatorFixtures.PlanFacts(planFacts));
         ArbiterEvent ev = new()
@@ -197,6 +194,6 @@ public sealed class ArbiterTechnologyRuleScopeTests : IDisposable
         };
 
         ArbiterEvaluationResult result = evaluator.EvaluateAsync(ev, config).GetAwaiter().GetResult();
-        return (result.Outcome, ArbiterEvaluatorFixtures.Records(_root.Path));
+        return (result.Outcome, _state.Records);
     }
 }

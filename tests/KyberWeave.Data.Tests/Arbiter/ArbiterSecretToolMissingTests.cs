@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.Arbiter;
@@ -67,23 +68,6 @@ public sealed class ArbiterSecretToolMissingTests
         Assert.Contains("kyber-weave arbiter setup", message, StringComparison.Ordinal);
         Assert.DoesNotContain('\n', message);
         Assert.DoesNotContain('\r', message);
-    }
-
-    /// <summary>
-    /// Reproduces what <see cref="ProcessRunner"/> raises when <c>secret-tool</c> is not
-    /// installed: <c>Process.Start</c> fails with ENOENT as a <see cref="Win32Exception"/>.
-    /// </summary>
-    internal sealed class MissingExecutableCredentialProcessRunner : ICredentialProcessRunner
-    {
-        public ProcessResult Run(ProcessStartInfo startInfo, string standardInput)
-        {
-            ArgumentNullException.ThrowIfNull(startInfo);
-            ArgumentNullException.ThrowIfNull(standardInput);
-            throw new Win32Exception(
-                2,
-                $"An error occurred trying to start process '{startInfo.FileName}' with working directory " +
-                "'/home/runner'. No such file or directory");
-        }
     }
 
     private sealed class FakeRunner(ProcessResult next) : ICredentialProcessRunner

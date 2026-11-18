@@ -17,8 +17,6 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ClaudeHookAdapterModelWriteTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private const string HeaderedPrompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/x.md\nTASK: T2\n\nImplement T2.";
 
     /// <summary>Asks the adapter to write <see cref="Token"/> and allows, with the token only when the write held.</summary>
@@ -115,8 +113,8 @@ public sealed class ClaudeHookAdapterModelWriteTests
             ["prompt"] = HeaderedPrompt,
             ["description"] = "Implement T2",
         };
-        JsonNode root = JsonNode.Parse(Corpus.ReadText(
-            "tests/KyberWeave.Tests/Fixtures/arbiter-hooks/claude/pre-agent-dispatch.json"))
+        JsonNode root = JsonNode.Parse(EmbeddedFixtureText.Read(
+            typeof(ClaudeHookAdapterModelWriteTests).Assembly, "arbiter-hooks/claude/pre-agent-dispatch.json"))
             ?? throw new InvalidOperationException("The shipped Claude fixture is not a JSON document.");
         root["tool_input"] = input;
         return root.ToJsonString();
@@ -127,7 +125,7 @@ public sealed class ClaudeHookAdapterModelWriteTests
         string raw = DispatchPayload();
         ClaudeHookAdapter adapter = new(new WritingEngine { Token = token }) { ModelWriteFault = fault };
         using JsonDocument doc = JsonDocument.Parse(raw);
-        HookContext context = new(Directory.GetCurrentDirectory(), () => "decision-27", log);
+        HookContext context = new(ArbiterTestRoots.Under("claude-hook"), () => "decision-27", log);
         return adapter.Handle(doc.RootElement, raw, "conductor", EnabledConfig(), context);
     }
 
