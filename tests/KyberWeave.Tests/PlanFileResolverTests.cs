@@ -25,7 +25,7 @@ public sealed class PlanFileResolverTests : IDisposable
         Write("handbook/plans/2026-11-12-job-board.md", "# plan\n");
         Write("handbook/archive/plans/2026-10-01-job-status-cards.md", "# archived\n");
         Write(TasksFile, "# tasks\n");
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("ontology:\n  docs-root: handbook\n");
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("ontology:\n  docs-root: handbook\n");
         _resolver = new PlanFileResolver(_root, config, new PhysicalRepositoryFileStore());
     }
 

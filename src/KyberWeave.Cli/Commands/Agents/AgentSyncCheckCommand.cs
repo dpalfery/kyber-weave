@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -5,13 +6,13 @@ using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Agents;
 
-public sealed class AgentSyncCheckCommand(IAgentGovernanceService agents) : Command<AnalysisSettings>
+public sealed class AgentSyncCheckCommand(IAgentGovernanceService agents, IKyberWeaveConfigRepository configs) : Command<AnalysisSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, AnalysisSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig config))
+        if (!CommandHelpers.TryLoadConfig(configs, settings.Path, settings.Config, report, out KyberWeaveConfig config))
         {
             CommandHelpers.Finish(report, settings, "agent sync-check", "Agent");
             return 1;

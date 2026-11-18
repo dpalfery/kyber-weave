@@ -213,7 +213,7 @@ public sealed class ArbiterGateReportRuleTests
 
             # React standard
             """);
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             ontology:
               docs-root: docs
             """);
@@ -259,7 +259,7 @@ public sealed class ArbiterGateReportRuleTests
 
             # React standard
             """);
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("""
             ontology:
               docs-root: docs
             """);

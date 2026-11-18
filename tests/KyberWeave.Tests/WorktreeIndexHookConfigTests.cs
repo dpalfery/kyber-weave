@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using Xunit;
 
@@ -24,7 +26,7 @@ public sealed class WorktreeIndexHookConfigTests : IDisposable
     {
         WriteConfig("stop-on-tool-failure: true\n");
 
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
 
         Assert.True(result.Success, result.Error);
         Assert.NotNull(result.Config);
@@ -36,7 +38,7 @@ public sealed class WorktreeIndexHookConfigTests : IDisposable
     {
         WriteConfig("stop-on-tool-failure: true\nworktree-index-hook: false\n");
 
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
 
         Assert.True(result.Success, result.Error);
         Assert.NotNull(result.Config);
@@ -52,7 +54,7 @@ public sealed class WorktreeIndexHookConfigTests : IDisposable
     {
         WriteConfig("worktree-index-hook: maybe\n");
 
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(_root.Path);
+        KyberWeaveConfigLoadResult result = ConfigFileReader.TryLoad(_root.Path);
 
         Assert.False(result.Success);
         string error = result.Error ?? string.Empty;

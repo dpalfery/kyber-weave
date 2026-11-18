@@ -848,7 +848,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     private const string Config = "ontology:\n  docs-root: docs\n";
 
     private DeliveryOutcome Deliver(ScriptedGh gh, DeliveryRequest request, Action<string>? afterPlanFound = null, Func<string, string>? readTemplateFile = null) =>
-        new RunDelivery(_work, KyberWeaveConfigLoader.LoadFromYaml(Config), gh, _home, DocsTestCommands.DeliveryPorts) { AfterPlanFound = afterPlanFound, ReadTemplateFile = readTemplateFile }.Run(request);
+        new RunDelivery(_work, KyberWeaveConfigAssembler.FromYaml(Config), gh, _home, DocsTestCommands.DeliveryPorts) { AfterPlanFound = afterPlanFound, ReadTemplateFile = readTemplateFile }.Run(request);
 
     private void AssertRefusedBeforeAnythingLeaves(DeliveryOutcome outcome, ScriptedGh gh, string code)
     {

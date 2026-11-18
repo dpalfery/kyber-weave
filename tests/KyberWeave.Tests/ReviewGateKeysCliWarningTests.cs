@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using KyberWeave.Cli.Commands;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -37,11 +38,11 @@ public sealed class ReviewGateKeysCliWarningTests : IDisposable
             """);
 
         DiagnosticReport report = new DiagnosticReport();
-        bool success = CommandHelpers.TryLoadConfig(_temp.Path, null, report, out KyberWeaveConfig config);
+        bool success = CommandHelpers.TryLoadConfig(ConfigFileReader.Repository, _temp.Path, null, report, out KyberWeaveConfig config);
 
         Assert.True(success);
         Diagnostic diagnostic = Assert.Single(report.Items);
-        Assert.Equal(KyberWeaveConfigLoader.ConfigWarningCode, diagnostic.Code);
+        Assert.Equal(KyberWeaveConfigDiagnosticCodes.Warning, diagnostic.Code);
         Assert.Equal(Severity.Warning, diagnostic.Severity);
         Assert.Contains("includes", diagnostic.Message, StringComparison.Ordinal);
         Assert.Contains("build", diagnostic.Message, StringComparison.Ordinal);

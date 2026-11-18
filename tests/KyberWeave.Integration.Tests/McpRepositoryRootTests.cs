@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Diagnostics;
 
 using KyberWeave.Core.Configuration;
@@ -29,7 +31,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     {
         DocsTestCommands.Scaffolding.Scaffold(_parent.Path);
 
-        string resolved = RepositoryRootResolver.Resolve([], _parent.Path, null);
+        string resolved = RepositoryRootResolver.Resolve(ConfigFileReader.Repository, [], _parent.Path, null);
 
         Assert.Equal(Path.GetFullPath(_parent.Path), resolved);
     }
@@ -46,8 +48,8 @@ public sealed class McpRepositoryRootTests : IDisposable
         WriteMarker(first, "first-only-marker");
         WriteMarker(second, "second-only-marker");
 
-        string firstRoot = RepositoryRootResolver.Resolve(["--repo-root", "."], first, null);
-        string secondRoot = RepositoryRootResolver.Resolve(["--repo-root", "."], second, null);
+        string firstRoot = RepositoryRootResolver.Resolve(ConfigFileReader.Repository, ["--repo-root", "."], first, null);
+        string secondRoot = RepositoryRootResolver.Resolve(ConfigFileReader.Repository, ["--repo-root", "."], second, null);
 
         ExploreAnswer firstAnswer = CreateHost(firstRoot).Current().Explore("first-only-marker");
         ExploreAnswer secondAnswer = CreateHost(secondRoot).Current().Explore("second-only-marker");
@@ -63,7 +65,7 @@ public sealed class McpRepositoryRootTests : IDisposable
     public void AnUninitializedWorkingDirectoryFailsInsteadOfGuessingAParentRepository()
     {
         InvalidOperationException error = Assert.Throws<InvalidOperationException>(() =>
-            RepositoryRootResolver.Resolve([], _parent.Path, null));
+            RepositoryRootResolver.Resolve(ConfigFileReader.Repository, [], _parent.Path, null));
 
         Assert.Contains("kyber-weave docs init", error.Message, StringComparison.Ordinal);
         Assert.Contains("will not guess a parent repository", error.Message, StringComparison.Ordinal);
@@ -81,6 +83,7 @@ public sealed class McpRepositoryRootTests : IDisposable
 
         ExpectedRootMismatchException error = Assert.Throws<ExpectedRootMismatchException>(() =>
             RepositoryRootResolver.Resolve(
+                ConfigFileReader.Repository,
                 ["--repo-root", first, "--expect-root", second],
                 first,
                 null));
@@ -95,6 +98,7 @@ public sealed class McpRepositoryRootTests : IDisposable
         (string first, _) = CreateTwoInitializedRepositories();
 
         string resolved = RepositoryRootResolver.Resolve(
+            ConfigFileReader.Repository,
             ["--repo-root", ".", "--expect-root", first],
             first,
             null);
@@ -108,6 +112,7 @@ public sealed class McpRepositoryRootTests : IDisposable
         (string first, _) = CreateTwoInitializedRepositories();
 
         string resolved = RepositoryRootResolver.Resolve(
+            ConfigFileReader.Repository,
             ["--repo-root", ".", "--expect-root", "."],
             first,
             null);
@@ -168,7 +173,7 @@ public sealed class McpRepositoryRootTests : IDisposable
 
     private static DocumentIndexHost CreateHost(string root)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         return new DocumentIndexHost(
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),

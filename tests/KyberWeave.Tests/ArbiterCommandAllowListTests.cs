@@ -502,7 +502,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             fixture.Write($"6-Docs/standards/{technology}/{name}", ShippedStandardsFile($"{technology}/{name}"));
         }
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml(
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(
             $"ontology:\n  docs-root: 6-Docs\n  technologies: [{technology}]\n");
         IServiceProvider provider = DocsTestCommands.Services();
         DocumentIndex index = DocumentIndex.Build(

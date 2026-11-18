@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Agents.Model;
@@ -129,7 +131,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_temp.Path, "docs"));
 
         ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
-        string validateRoot = KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot;
+        string validateRoot = ConfigFileReader.Load(_temp.Path).Ontology.DocsRoot;
 
         Assert.Equal(validateRoot, result.DocsRoot);
         Assert.Equal(DocsRootSource.Configuration, result.DocsRootSource);
@@ -151,7 +153,7 @@ public sealed class DocsScaffolderTests : IDisposable
         InvalidDataException exception = Assert.Throws<InvalidDataException>(
             () => DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot));
 
-        Assert.Contains(KyberWeaveConfigLoader.ConfigLoadErrorCode, exception.Message, StringComparison.Ordinal);
+        Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, exception.Message, StringComparison.Ordinal);
         Assert.Contains("kyber-weave.yml", exception.Message, StringComparison.Ordinal);
         Assert.Equal(yaml, Read(ConfigPath));
         Assert.Single(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
@@ -178,7 +180,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         Assert.Equal(1, attempt.ExitCode);
         Assert.Null(attempt.Result);
-        Assert.Contains(KyberWeaveConfigLoader.ConfigLoadErrorCode, attempt.Error, StringComparison.Ordinal);
+        Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, attempt.Error, StringComparison.Ordinal);
         Assert.Contains("kyber-weave.yml", attempt.Error, StringComparison.Ordinal);
         Assert.Equal(yaml, Read(ConfigPath));
         Assert.Single(Directory.GetFiles(_temp.Path, "*", SearchOption.AllDirectories));
@@ -211,7 +213,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
 
         Assert.Equal("handbook", config.Ontology.DocsRoot);
     }
@@ -225,7 +227,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
 
         Assert.Empty(config.Ontology.ExcludedFiles);
     }
@@ -408,7 +410,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook", force: true);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
 
         // Every other override the operator wrote is still in force.
@@ -468,7 +470,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
         Assert.Equal(["archive"], config.Ontology.ExcludedPathSegments);
     }
@@ -512,7 +514,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         string text = Read(ConfigPath);
         Assert.Contains("\n  docs-root: 'handbook'\n", text, StringComparison.Ordinal);
-        Assert.Equal("handbook", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
+        Assert.Equal("handbook", ConfigFileReader.Load(_temp.Path).Ontology.DocsRoot);
     }
 
     /// <summary>
@@ -532,7 +534,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot: "handbook");
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
         Assert.Equal(".agents/agents", config.Harness.Profiles[HarnessKind.Claude].DirectoryName);
     }
@@ -552,7 +554,7 @@ public sealed class DocsScaffolderTests : IDisposable
         Assert.False(File.Exists(Path.Combine(_temp.Path, ".kyber-weave", "kyber-weave.yml")));
         Assert.Equal("cache/\nreceipts/\n", Read(".kyber-weave/.gitignore"));
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Equal("handbook", config.Ontology.DocsRoot);
         Assert.Equal(3, config.Ontology.CatalogComponentColumn);
         Assert.Contains(result.Files, f => f.RelativePath == "kyber-weave.yml");
@@ -680,7 +682,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot, owner);
 
-        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
         Assert.Equal(docsRoot, ontology.DocsRoot);
         Assert.Contains(owner, set.Owners);
@@ -698,7 +700,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: owner, kyberStandards: true);
 
-        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
         Assert.Contains(owner, set.Owners);
@@ -712,7 +714,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: " platform ");
 
-        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
         Assert.Contains("platform", set.Owners);
@@ -794,7 +796,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         // The load is the assertion that matters: it is what raised a duplicate-key error before
         // the writer read the file under its own line endings.
-        Assert.Equal("docs", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
+        Assert.Equal("docs", ConfigFileReader.Load(_temp.Path).Ontology.DocsRoot);
 
         string updated = Read(ConfigPath);
         Assert.Single(updated.Split('\r'), line => string.Equals(line, "ontology:", StringComparison.Ordinal));
@@ -815,7 +817,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot);
 
-        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
 
@@ -952,7 +954,7 @@ public sealed class DocsScaffolderTests : IDisposable
             Read("AGENTS.md"),
             StringComparison.Ordinal);
 
-        OntologyConfig ontology = KyberWeaveConfigLoader.Load(_temp.Path).Ontology;
+        OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology)
             .Validate(new DocumentLoader(_temp.Path, ontology).Load());
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
@@ -1003,7 +1005,7 @@ public sealed class DocsScaffolderTests : IDisposable
         }
 
         // .kyber-weave/kyber-weave.yml contains all 11 technologies under ontology.technologies
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_temp.Path);
+        KyberWeaveConfig config = ConfigFileReader.Load(_temp.Path);
         Assert.Equal(
             KyberStandardsTemplates.All.OrderBy(t => t),
             config.Ontology.Technologies.OrderBy(t => t));

@@ -40,6 +40,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly IZCodeMcpInspector _zcodeMcp;
     private readonly SquadDoctorOptions _options;
     private readonly IFileSystemPathSemantics _pathSemantics;
+    private readonly IKyberWeaveConfigRepository _configs;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -72,7 +73,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         IDevinImportOverlapInspector devinOverlap,
         IZCodeMcpInspector zcodeMcp,
         SquadDoctorOptions options,
-        IFileSystemPathSemantics pathSemantics)
+        IFileSystemPathSemantics pathSemantics,
+        IKyberWeaveConfigRepository configs)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -89,6 +91,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ArgumentNullException.ThrowIfNull(zcodeMcp);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(pathSemantics);
+        ArgumentNullException.ThrowIfNull(configs);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
@@ -104,6 +107,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _zcodeMcp = zcodeMcp;
         _options = options;
         _pathSemantics = pathSemantics;
+        _configs = configs;
     }
 
     /// <inheritdoc />
@@ -334,7 +338,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
     private bool ReportArbiterBinary(string workingDirectory)
     {
-        if (!ArbiterEnabled(workingDirectory))
+        if (!IsArbiterEnabled(workingDirectory))
         {
             AnsiConsole.MarkupLine(
                 "  [grey]info[/] Kyber-Weave Arbiter: not checked (Arbiter is not enabled)");
@@ -362,9 +366,9 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
     /// <summary>Whether the repository configuration enables the Arbiter. An unreadable
     /// configuration reads as disabled, the product default.</summary>
-    private static bool ArbiterEnabled(string workingDirectory)
+    private bool IsArbiterEnabled(string workingDirectory)
     {
-        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(workingDirectory);
+        KyberWeaveConfigLoadResult configResult = _configs.TryLoad(workingDirectory);
         return configResult.Success && configResult.Config?.Arbiter.Enabled == true;
     }
 
@@ -395,7 +399,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // with the Arbiter enabled. The scope is the one the deployment is inspected at: the same
         // scope ReportOwnedBlockDrift reads the receipt for, so it is never unknowable here.
         bool arbiterGranted = SquadCommandComposition.ResolveScope(isGlobal) == SquadDeploymentScope.Project
-            && ArbiterEnabled(workingDirectory);
+            && IsArbiterEnabled(workingDirectory);
         IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys
             .Where(server => arbiterGranted || !string.Equals(server, ArbiterServer, StringComparison.Ordinal))
             .ToArray();

@@ -52,7 +52,7 @@ public sealed class RunSettingsConfigTests
     [Fact]
     public void AConfiguredStopOnToolFailureIsNotPublishedInTheRegistry()
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.LoadFromYaml("stop-on-tool-failure: false\n");
+        KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml("stop-on-tool-failure: false\n");
 
         Assert.DoesNotContain(
             config.ConfigReg.Resolve(config.Ontology),
@@ -68,8 +68,8 @@ public sealed class RunSettingsConfigTests
     public void AConfiguredRunBaseBranchIsPublishedAndAnUnsetOneIsSilent()
     {
         KyberWeaveConfig configured =
-            KyberWeaveConfigLoader.LoadFromYaml("run:\n  base-branch: develop\n");
-        KyberWeaveConfig unset = KyberWeaveConfigLoader.LoadFromYaml("stop-on-tool-failure: false\n");
+            KyberWeaveConfigAssembler.FromYaml("run:\n  base-branch: develop\n");
+        KyberWeaveConfig unset = KyberWeaveConfigAssembler.FromYaml("stop-on-tool-failure: false\n");
 
         ConfigRegEntry entry = Assert.Single(
             configured.ConfigReg.Resolve(configured.Ontology),
@@ -115,6 +115,6 @@ public sealed class RunSettingsConfigTests
 
     private static YamlException AssertInvalid(string yaml)
     {
-        return Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml(yaml));
+        return Assert.ThrowsAny<YamlException>(() => KyberWeaveConfigAssembler.FromYaml(yaml));
     }
 }

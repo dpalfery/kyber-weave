@@ -42,11 +42,16 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
     internal const string TargetPlaceholder = "<harness>[,<harness>]";
 
     private readonly IMcpWiringService _wiring;
+    private readonly IKyberWeaveConfigRepository _configs;
 
     /// <summary>Creates the command over the MCP wiring service the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
-    public DocsMcpWireCommand(IMcpWiringService wiring) =>
+    /// <param name="configs">Reads the repository's declared MCP servers.</param>
+    public DocsMcpWireCommand(IMcpWiringService wiring, IKyberWeaveConfigRepository configs)
+    {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
+        _configs = configs ?? throw new ArgumentNullException(nameof(configs));
+    }
 
     /// <inheritdoc />
     public override int Execute(
@@ -58,7 +63,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
 
         DiagnosticReport report = new();
         if (!TryRoot(settings.Path, report, out string root) ||
-            !CommandHelpers.TryLoadConfig(root, configPath: null, report, out KyberWeaveConfig config))
+            !CommandHelpers.TryLoadConfig(_configs, root, configPath: null, report, out KyberWeaveConfig config))
         {
             PrintDiagnostics(report);
             return 1;
@@ -116,7 +121,7 @@ public sealed class DocsMcpWireCommand : Command<DocsMcpWireSettings>
         {
             root = string.Empty;
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                KyberWeaveConfigDiagnosticCodes.LoadError,
                 Severity.Error,
                 $"Cannot resolve path '{path}': {exception.Message}",
                 "kyber-weave.yml",

@@ -43,7 +43,8 @@ internal static class DocsTestCommands
         IServiceProvider provider = services ?? Services();
         return new DocsCloseoutCommand(
             provider.GetRequiredService<IPlanCloseoutService>(),
-            provider.GetRequiredService<IRepositoryFileStore>());
+            provider.GetRequiredService<IRepositoryFileStore>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 
     public static DocsFinalizeCommand Finalize(IServiceProvider? services = null)
@@ -51,13 +52,17 @@ internal static class DocsTestCommands
         IServiceProvider provider = services ?? Services();
         return new DocsFinalizeCommand(
             provider.GetRequiredService<IPlanFinalizeService>(),
-            provider.GetRequiredService<IRepositoryFileStore>());
+            provider.GetRequiredService<IRepositoryFileStore>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 
     public static DocsValidateCommand Validate(IServiceProvider? services = null)
     {
         IServiceProvider provider = services ?? Services();
-        return new DocsValidateCommand(provider.GetRequiredService<IDocsSchemaGate>(), provider.GetRequiredService<IDocumentSourceFactory>());
+        return new DocsValidateCommand(
+            provider.GetRequiredService<IDocsSchemaGate>(),
+            provider.GetRequiredService<IDocumentSourceFactory>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 
     public static DocsPacketCommand Packet(IServiceProvider? services = null)
@@ -72,7 +77,8 @@ internal static class DocsTestCommands
             provider.GetRequiredService<ITaskGateSelectionService>(),
             provider.GetRequiredService<ICodeGraphPortsFactory>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
-            provider.GetRequiredService<IGitRepositoryFacts>());
+            provider.GetRequiredService<IGitRepositoryFacts>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 
     public static DocsTasksCommand Tasks(IServiceProvider? services = null)
@@ -83,7 +89,8 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IPlanTaskAgentPickerFactory>(),
             provider.GetRequiredService<IArbiterKeyService>(),
             provider.GetRequiredService<IArbiterDryRunService>(),
-            provider.GetRequiredService<IRepositoryFileStore>());
+            provider.GetRequiredService<IRepositoryFileStore>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 
     public static IDocsSchemaGate SchemaGate => Services().GetRequiredService<IDocsSchemaGate>();
@@ -92,7 +99,10 @@ internal static class DocsTestCommands
     {
         IServiceProvider provider = Services();
         return new RepositoryDocsAnalysisCommandService(
-            factories, provider.GetRequiredService<IManagedGlossaryFactory>(), provider.GetRequiredService<IDocumentSourceFactory>());
+            factories,
+            provider.GetRequiredService<IManagedGlossaryFactory>(),
+            provider.GetRequiredService<IDocumentSourceFactory>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 
     public static DocsReviewImportCommand ReviewImport(IDocsAnalysisCommandService service) =>
@@ -100,7 +110,8 @@ internal static class DocsTestCommands
 
     public static DocsExportGraphCommand ExportGraph() => new(
         Services().GetRequiredService<IManagedGlossaryFactory>(),
-        Services().GetRequiredService<ICodeGraphPortsFactory>());
+        Services().GetRequiredService<ICodeGraphPortsFactory>(),
+        Services().GetRequiredService<IKyberWeaveConfigRepository>());
 
     public static DocsRootRegistry Registry(string root, Func<string, DocsTools> factory)
     {

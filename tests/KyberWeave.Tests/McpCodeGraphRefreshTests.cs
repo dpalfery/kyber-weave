@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Diagnostics;
 using System.Text.RegularExpressions;
 
@@ -201,7 +203,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         DocsTestCommands.Scaffolding.Scaffold(Root);
         McpDeclarationFixture.RequireCodeGraph(Root);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(Root);
         DocumentIndexHost host = new(
             Root,
             () => throw new InvalidOperationException("boom resolver"),
@@ -631,7 +633,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         IProcessExecutor? executor = null,
         Action<TimeSpan>? pause = null)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentIndexHost host = new(
             root,
             resolverFactory,

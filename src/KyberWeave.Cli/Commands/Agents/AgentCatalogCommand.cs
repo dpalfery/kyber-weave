@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Agents.Model;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -8,13 +9,13 @@ using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Agents;
 
-public sealed class AgentCatalogCommand(IAgentGovernanceService agents) : Command<AgentCatalogSettings>
+public sealed class AgentCatalogCommand(IAgentGovernanceService agents, IKyberWeaveConfigRepository configs) : Command<AgentCatalogSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, AgentCatalogSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new DiagnosticReport();
-        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out KyberWeaveConfig config))
+        if (!CommandHelpers.TryLoadConfig(configs, settings.Path, settings.Config, report, out KyberWeaveConfig config))
         {
             ReportRenderer.Render(report, OutputFormat.Table, "agent catalog", "Config");
             return 1;

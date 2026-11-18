@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using KyberWeave.Application;
 using KyberWeave.Cli.Composition;
 using KyberWeave.Contracts.Repositories;
@@ -54,7 +55,7 @@ public sealed class DocsInitProvisionTests : IDisposable
     public void DocsInit_WithProvision_UsesTheInjectedDoctor()
     {
         FakeRepositoryDoctor doctor = new();
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor);
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor, ConfigFileReader.Repository);
         DocsInitSettings settings = new()
         {
             Path = _repo.Path,
@@ -83,7 +84,7 @@ public sealed class DocsInitProvisionTests : IDisposable
     {
         ScriptedProcessExecutor executor = new(_ => DoctorHarness.Ok());
         FakeRepositoryDoctor doctor = new();
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor)
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor, ConfigFileReader.Repository)
         {
             Executor = executor,
             McpExecutable = "kyber-weave-mcp-stub",
@@ -121,7 +122,7 @@ public sealed class DocsInitProvisionTests : IDisposable
                 3,
                 [new DoctorCheck("codegraph.binary", false, "codegraph is missing", "install codegraph")]),
         };
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor);
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, doctor, ConfigFileReader.Repository);
         DocsInitSettings settings = new()
         {
             Path = _repo.Path,
@@ -152,7 +153,7 @@ public sealed class DocsInitProvisionTests : IDisposable
         using TempDirectory stubs = new();
         string repo = _repo.Path;
         ScriptedProcessExecutor executor = DoctorHarness.Executor(repo);
-        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, DoctorTestServices.Doctor)
+        DocsInitCommand command = new(McpWiringTestServices.Wiring, DocsTestCommands.Scaffolding, DoctorTestServices.Doctor, ConfigFileReader.Repository)
         {
             Executor = executor,
             McpExecutable = DoctorHarness.HealthyStub(stubs.Path, repo),

@@ -296,7 +296,7 @@ public sealed class HostConfigYamlTests
 
         string result = HostConfigYaml.WithTechnologies(yaml, ["csharp"]);
 
-        Assert.Contains("csharp", KyberWeaveConfigLoader.LoadFromYaml(result).Ontology.Technologies);
+        Assert.Contains("csharp", KyberWeaveConfigAssembler.FromYaml(result).Ontology.Technologies);
         Assert.DoesNotContain("\n", result, StringComparison.Ordinal);
         Assert.Contains("  technologies:\r", result, StringComparison.Ordinal);
     }

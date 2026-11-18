@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -369,7 +371,7 @@ public class MultipleDocsRootTests : IDisposable
 
         Assert.False(TryResolveOntology(["../elsewhere"], out _, out DiagnosticReport report));
         Assert.Contains(report.Items, i =>
-            i.Code == KyberWeaveConfigLoader.ConfigLoadErrorCode &&
+            i.Code == KyberWeaveConfigDiagnosticCodes.LoadError &&
             i.Message.Contains("escapes the repository root", StringComparison.Ordinal));
     }
 
@@ -440,7 +442,7 @@ public class MultipleDocsRootTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, "handbook");
 
-        Assert.Equal("handbook", KyberWeaveConfigLoader.Load(_temp.Path).Ontology.DocsRoot);
+        Assert.Equal("handbook", ConfigFileReader.Load(_temp.Path).Ontology.DocsRoot);
         Assert.Contains("excluded-files: []", File.ReadAllText(configPath), StringComparison.Ordinal);
     }
 
@@ -491,10 +493,10 @@ public class MultipleDocsRootTests : IDisposable
         OntologyConfig.ProductDefaults.WithDocsRoots(["docs", "automation", "lab"]);
 
     private OntologyConfig Load(string yaml) =>
-        KyberWeaveYamlFile.LoadOntologyMerged(OntologyConfig.ProductDefaults, WriteYaml(yaml));
+        ConfigFileReader.LoadOntologyMerged(OntologyConfig.ProductDefaults, WriteYaml(yaml));
 
     private OntologyConfigLoadResult TryLoad(string yaml) =>
-        KyberWeaveYamlFile.TryLoadOntology(WriteYaml(yaml));
+        ConfigFileReader.TryLoadOntology(WriteYaml(yaml));
 
     private string WriteYaml(string yaml)
     {
@@ -510,7 +512,7 @@ public class MultipleDocsRootTests : IDisposable
     {
         report = new DiagnosticReport();
         DocsSettings settings = new DocsSettings { Path = _temp.Path, DocsRoots = docsRoots };
-        return DocsCommandComposition.TryResolveOntology(settings, report, out ontology);
+        return DocsCommandComposition.TryResolveOntology(ConfigFileReader.Repository, settings, report, out ontology);
     }
 
     private string WriteHostConfig(string yaml)

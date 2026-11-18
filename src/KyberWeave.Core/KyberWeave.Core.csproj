@@ -15,13 +15,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The legacy engine is being drained into these layers (ADR 0057 split, superseded by the layering
-         in LayerReferenceTests). It references them; they never reference it. -->
+    <!-- The legacy engine's remaining code sits on the shared layers and references nothing above them
+         (LayerReferenceTests). Code that needs Data or Application belongs in the host or in that layer. -->
     <ProjectReference Include="..\KyberWeave.Kernel\KyberWeave.Kernel.csproj" />
     <ProjectReference Include="..\KyberWeave.Domain\KyberWeave.Domain.csproj" />
     <ProjectReference Include="..\KyberWeave.Contracts\KyberWeave.Contracts.csproj" />
-    <ProjectReference Include="..\KyberWeave.Data\KyberWeave.Data.csproj" />
-    <ProjectReference Include="..\KyberWeave.Application\KyberWeave.Application.csproj" />
   </ItemGroup>
 
   <ItemGroup>

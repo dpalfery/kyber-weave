@@ -515,7 +515,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     {
         // Assert that CLI, Core, Squad, Docs and MCP assemblies do not bundle the raw products/kyber-squad corpus in embedded resources
         Assembly cliAssembly = typeof(SquadPackCommand).Assembly;
-        Assembly coreAssembly = typeof(KyberWeaveConfigLoader).Assembly;
+        Assembly coreAssembly = typeof(KyberWeave.Core.Diagnostics.DiagnosticReport).Assembly;
         Assembly squadAssembly = typeof(SquadSource).Assembly;
         Assembly docsAssembly = typeof(KyberStandardsTemplates).Assembly;
         Assembly mcpAssembly = typeof(DocsTools).Assembly;
@@ -553,7 +553,6 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         [
             "src/KyberWeave.Cli/KyberWeave.Cli.csproj",
             "src/KyberWeave.Core/KyberWeave.Core.csproj",
-            "src/KyberWeave.Core.Docs/KyberWeave.Core.Docs.csproj",
             "src/KyberWeave.Core.Squad/KyberWeave.Core.Squad.csproj",
             "src/KyberWeave.Mcp/KyberWeave.Mcp.csproj",
             "src/KyberWeave.Domain/KyberWeave.Domain.csproj",

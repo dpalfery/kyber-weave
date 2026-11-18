@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Scaffolding;
@@ -19,7 +20,7 @@ public sealed class DocsStandardsMigrateSettings : DocsSettings
 /// Renames each legacy standards <c>README.md</c> to the folder-prefixed standard and writes
 /// the four files a technology or role folder holds.
 /// </summary>
-public sealed class DocsStandardsMigrateCommand : Command<DocsStandardsMigrateSettings>
+public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository configs) : Command<DocsStandardsMigrateSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -28,7 +29,7 @@ public sealed class DocsStandardsMigrateCommand : Command<DocsStandardsMigrateSe
         CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        if (!DocsCommandComposition.TryResolveConfig(settings, report, out _, out OntologyConfig ontology))
+        if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out _, out OntologyConfig ontology))
         {
             CommandHelpers.Finish(report, settings, "docs standards migrate", "Folder");
             return 1;

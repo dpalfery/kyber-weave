@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Text;
@@ -85,7 +87,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
         // The hand-owned block must load, or the scaffold preflight would reject it and
         // this test would prove nothing about preservation.
-        KyberWeaveConfig loaded = KyberWeaveConfigLoader.Load(repo);
+        KyberWeaveConfig loaded = ConfigFileReader.Load(repo);
         Assert.Contains(
             loaded.Review.Gates, gate => string.Equals(gate.Id, "hand-owned-council", StringComparison.Ordinal));
 
@@ -269,7 +271,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
     }
 
     /// <summary>
-    ///     The file <c>docs init</c> writes must load through <c>KyberWeaveConfigLoader</c>
+    ///     The file <c>docs init</c> writes must load through <c>ConfigFileReader</c>
     ///     with no configuration error. A catalogue that cannot load is a bug the tests catch
     ///     first, not the host's first review.
     /// </summary>
@@ -280,12 +282,12 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(repo);
 
-        KyberWeaveConfigLoadResult loaded = KyberWeaveConfigLoader.TryLoad(repo);
+        KyberWeaveConfigLoadResult loaded = ConfigFileReader.TryLoad(repo);
         Assert.True(
             loaded.Success,
             $"docs init wrote a host config that does not load: {loaded.Error ?? "no error"}");
         Assert.DoesNotContain(
-            KyberWeaveConfigLoader.ConfigLoadErrorCode, loaded.Error ?? string.Empty, StringComparison.Ordinal);
+            KyberWeaveConfigDiagnosticCodes.LoadError, loaded.Error ?? string.Empty, StringComparison.Ordinal);
         Assert.NotNull(loaded.Config);
         Assert.NotEmpty(loaded.Config.Review.Gates);
     }
@@ -316,7 +318,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
             .Select(gate => family + "-" + gate.Id)
             .ToHashSet(StringComparer.Ordinal);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(repo);
 
         Assert.NotEmpty(config.Review.Gates);
         string[] wrong = config.Review.Gates
@@ -352,12 +354,12 @@ public sealed class DocsInitReviewGatesTests : IDisposable
 
         DocsTestCommands.Scaffolding.Scaffold(repo);
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo);
+        KyberWeaveConfig config = ConfigFileReader.Load(repo);
 
         Assert.True(
             config.Review.Warnings.Count == 0,
             $"docs init wrote a review block this release reports as containing unknown keys " +
-            $"({KyberWeaveConfigLoader.ConfigWarningCode}): {string.Join("; ", config.Review.Warnings)}");
+            $"({KyberWeaveConfigDiagnosticCodes.Warning}): {string.Join("; ", config.Review.Warnings)}");
     }
 
     /// <summary>
@@ -394,7 +396,7 @@ public sealed class DocsInitReviewGatesTests : IDisposable
         }
         else
         {
-            KyberWeaveConfig config = KyberWeaveConfigLoader.Load(repo);
+            KyberWeaveConfig config = ConfigFileReader.Load(repo);
             Assert.True(
                 config.Review.TaskGates.ContainsKey("rust-dev"),
                 "docs init wrote no rust-dev task gates, so there was nothing to select.");

@@ -40,7 +40,7 @@ public sealed class DocumentationAnalyzerTests
         DocumentSet documents = Set(
             Document("current", "docs/current.md", Status.Current, "One current claim with enough useful words."),
             Document("custom-terms", "docs/glossary.md", Status.Current, "Glossary prose must never become an analysis claim."));
-        DocsAnalysisConfig config = KyberWeaveConfigLoader.LoadFromYaml("""
+        DocsAnalysisConfig config = KyberWeaveConfigAssembler.FromYaml("""
             ontology:
               docs-root: docs
             """).DocsAnalysis;

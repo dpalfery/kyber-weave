@@ -17,7 +17,7 @@ public sealed class ArbiterRuleIdAtSignTests
     [Fact]
     public void HostRuleLoad_IdWithAtSign_IsRejectedNamingTheAtSign()
     {
-        YamlException exception = Assert.Throws<YamlException>(() => KyberWeaveConfigLoader.LoadFromYaml("""
+        YamlException exception = Assert.Throws<YamlException>(() => KyberWeaveConfigAssembler.FromYaml("""
             arbiter:
               rules:
                 - id: HOST-A@1

@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Globalization;
 using System.Reflection;
 using System.Text.RegularExpressions;
@@ -1013,7 +1015,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
     private static DocsTools BuildRepositorySurface()
     {
         string root = Shipped.Root;
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentIndexHost host = new(
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),
@@ -1036,7 +1038,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             _corpus.Write(relativePath, text);
         }
 
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(_corpus.Root);
+        KyberWeaveConfig config = ConfigFileReader.Load(_corpus.Root);
         DocumentIndexHost host = new(
             _corpus.Root,
             () => CodeGraphResolverAdapter.ForRepository(_corpus.Root),

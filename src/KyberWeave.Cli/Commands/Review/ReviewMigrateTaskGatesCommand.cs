@@ -2,9 +2,8 @@ using System.ComponentModel;
 using System.Text;
 
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.FileSystem;
-using KyberWeave.Data.Review;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using YamlDotNet.Core;
@@ -57,10 +56,15 @@ public sealed class ReviewMigrateTaskGatesSettings : CommandSettings
 ///     which case no byte is written.
 /// </para>
 /// </remarks>
-public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGatesSettings>
+/// <param name="configs">Resolves the configuration file the repository already has.</param>
+/// <param name="files">Reads the file's bytes and writes the rewrite.</param>
+/// <param name="tree">Answers whether a directory exists and whether a link leads out of the repository.</param>
+public sealed class ReviewMigrateTaskGatesCommand(
+    IKyberWeaveConfigRepository configs,
+    IWritableFileSystem files,
+    IRepositoryTreeProbe tree)
+    : Command<ReviewMigrateTaskGatesSettings>
 {
-    private static readonly FileRepositoryTreeProbe Tree = new();
-
     /// <summary>The marker that turns a line of the printed change into a removed line.</summary>
     private const char Removed = '-';
 
@@ -87,6 +91,10 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
     {
         ArgumentNullException.ThrowIfNull(settings);
 
+        ArgumentNullException.ThrowIfNull(configs);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(tree);
+
         string root = Path.GetFullPath(settings.Path);
         string? path = ResolveConfigPath(root, settings.Config);
         if (path is null)
@@ -99,7 +107,7 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
         bool bom;
         try
         {
-            byte[] bytes = File.ReadAllBytes(path);
+            byte[] bytes = files.ReadAllBytes(path);
             bom = bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF;
             text = new UTF8Encoding(false).GetString(bytes, bom ? 3 : 0, bytes.Length - (bom ? 3 : 0));
         }
@@ -125,10 +133,10 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
         // A file that keeps some agent-keyed entries gains a second mapping, and the two mappings can be written in
         // either order. Only a YAML anchor can tell them apart: an alias has to follow its definition. So the first
         // order that loads is the one written, and one that keeps an anchor valid is reported as such.
-        if (plan.Changes && Load(plan.Text, root) is null && plan.Kept.Count > 0)
+        if (plan.Changes && Load(plan.Text, root, Facts()) is null && plan.Kept.Count > 0)
         {
             TaskGateMigrationPlan retry = ReviewTaskGateMigration.Plan(text, before.Review, technologyBlockFirst: true);
-            if (Load(retry.Text, root) is not null)
+            if (Load(retry.Text, root, Facts()) is not null)
             {
                 plan = retry;
                 reordered = true;
@@ -154,7 +162,7 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
             return 0;
         }
 
-        if (Check(plan, before, root) is { } refusal)
+        if (Check(plan, before, root, Facts()) is { } refusal)
             return Refuse(refusal);
 
         AnsiConsole.WriteLine();
@@ -173,7 +181,7 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
         // committed it.
         string relative = Path.GetRelativePath(root, path);
         if (relative.StartsWith("..", StringComparison.Ordinal)
-            || Tree.LeadsOutsideThroughSymlink(root, relative))
+            || tree.LeadsOutsideThroughSymlink(root, relative))
         {
             return Refuse(
                 $"'{path}' is, or is reached through, a symbolic link that leads outside '{root}'. " +
@@ -183,7 +191,7 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
         try
         {
             byte[] body = new UTF8Encoding(false).GetBytes(plan.Text);
-            AtomicFile.WriteAllBytes(path, bom ? [.. Encoding.UTF8.GetPreamble(), .. body] : body);
+            files.WriteAllBytesAtomic(path, bom ? [.. Encoding.UTF8.GetPreamble(), .. body] : body);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -194,17 +202,21 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
         return 0;
     }
 
-    private static ReviewWorkingDirectoryFacts Facts() =>
-        new(Tree.DirectoryExists, Tree.LeadsOutsideThroughSymlink);
+    private ReviewWorkingDirectoryFacts Facts() =>
+        new(tree.DirectoryExists, tree.LeadsOutsideThroughSymlink);
 
     /// <summary>
     /// Checks the rewrite before it can reach the disk: it has to load, and every entry has to still hold the gates it
     /// held before, whether it moved, folded into another entry, or stayed where it was.
     /// </summary>
     /// <returns>The reason the rewrite must not be written, or null when it may be.</returns>
-    private static string? Check(TaskGateMigrationPlan plan, KyberWeaveConfig before, string root)
+    private static string? Check(
+        TaskGateMigrationPlan plan,
+        KyberWeaveConfig before,
+        string root,
+        ReviewWorkingDirectoryFacts facts)
     {
-        KyberWeaveConfig? after = Load(plan.Text, root);
+        KyberWeaveConfig? after = Load(plan.Text, root, facts);
         if (after is null)
         {
             return "The rewrite would not load as a configuration, so nothing was written. An anchor definition a " +
@@ -236,11 +248,11 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
     }
 
     /// <summary>The configuration the rewritten text parses to, or null when it does not load.</summary>
-    private static KyberWeaveConfig? Load(string text, string root)
+    private static KyberWeaveConfig? Load(string text, string root, ReviewWorkingDirectoryFacts facts)
     {
         try
         {
-            return KyberWeaveConfigAssembler.FromRepositoryYaml(text, root, Facts());
+            return KyberWeaveConfigAssembler.FromRepositoryYaml(text, root, facts);
         }
         catch (YamlException)
         {
@@ -418,20 +430,20 @@ public sealed class ReviewMigrateTaskGatesCommand : Command<ReviewMigrateTaskGat
     /// <summary>A line without its line ending, which is what makes two spellings of the same line compare equal.</summary>
     private static string Trim(string line) => line.TrimEnd('\r');
 
-    private static string? ResolveConfigPath(string root, string? config)
+    private string? ResolveConfigPath(string root, string? config)
     {
         if (!string.IsNullOrWhiteSpace(config))
         {
             string named = Path.IsPathRooted(config) ? config : Path.Combine(root, config);
-            return File.Exists(named) ? Path.GetFullPath(named) : null;
+            return files.FileExists(named) ? Path.GetFullPath(named) : null;
         }
 
-        return KyberWeaveConfigLoader.FindConfigPath(root);
+        return configs.FindConfigPath(root);
     }
 
     private static int Refuse(string message)
     {
-        AnsiConsole.MarkupLine($"[red]{Markup.Escape(KyberWeaveConfigLoader.ConfigLoadErrorCode)}[/] " +
+        AnsiConsole.MarkupLine($"[red]{Markup.Escape(KyberWeaveConfigDiagnosticCodes.LoadError)}[/] " +
                                Markup.Escape(TerminalText.Line(message)));
         return 1;
     }
