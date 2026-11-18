@@ -49,7 +49,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     public void ValidInstanceRootResolvesStateLockAndReceiptUnderInstanceState()
     {
         string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeUserPaths userPaths = new(applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = new(userPaths);
 
@@ -93,7 +93,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     public void InvalidInstanceRootThrowsArgumentException(string scenario)
     {
         string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeUserPaths userPaths = new(applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = new(userPaths);
 
@@ -120,7 +120,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     public void ExecuteInstanceTransactionDeploysToInstanceRootAndStoresStateUnderInstanceState()
     {
         string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeUserPaths userPaths = new(applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = new(userPaths);
 
@@ -177,7 +177,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     public void ExecuteInstanceTransactionNeverRegistersInProjectRegistry()
     {
         string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeUserPaths userPaths = new(applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = new(userPaths);
 
@@ -222,7 +222,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     public void SquadStateMigrationIgnoresInstanceStateDirectory()
     {
         string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeUserPaths userPaths = new(applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
         SquadStateStore store = new(userPaths);
 
@@ -281,7 +281,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     public async Task ClaudeInstanceRendersAgentsUnderInstanceRoot()
     {
         string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeUserPaths userPaths = new(applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData);
         string instanceRoot = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
@@ -318,7 +318,7 @@ public sealed class SquadInstanceScopeTests : IDisposable
     public async Task CopilotInstanceAbsoluteLinksPointInsideInstanceRoot()
     {
         string applicationData = Path.Combine(_temp.Path, "app-data");
-        FakeUserPaths userPaths = new(applicationData);
+        FakeSquadUserPaths userPaths = new(applicationData);
         string instanceRoot = Path.Combine(
             userPaths.HomeDirectory,
             ".kyber-weave",
@@ -372,12 +372,5 @@ public sealed class SquadInstanceScopeTests : IDisposable
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => value;
-    }
-
-    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = appDataDirectory;
-
-        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
     }
 }

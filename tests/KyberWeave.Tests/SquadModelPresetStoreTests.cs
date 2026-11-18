@@ -329,7 +329,7 @@ public sealed class SquadModelPresetStoreTests
     [InlineData("   ")]
     public void ConstructorWithEmptyOrWhitespaceHomeDirectoryThrowsArgumentException(string homeDirectory)
     {
-        ISquadUserPaths userPaths = new FakeSquadUserPathsWithCustomHome(homeDirectory);
+        ISquadUserPaths userPaths = new FakeSquadUserPaths("/dummy/appdata", homeDirectory);
         Assert.Throws<ArgumentException>(() => new SquadModelPresetStore(userPaths));
     }
 
@@ -374,11 +374,5 @@ public sealed class SquadModelPresetStoreTests
             Assert.NotNull(diagnostic.StartLine);
 
         return diagnostic;
-    }
-
-    private sealed class FakeSquadUserPathsWithCustomHome(string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory => "/dummy/appdata";
-        public string HomeDirectory { get; } = homeDirectory;
     }
 }

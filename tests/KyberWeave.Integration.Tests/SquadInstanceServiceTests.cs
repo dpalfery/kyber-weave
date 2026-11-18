@@ -337,7 +337,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
     {
         string root = _temp.Path;
         string appData = Path.Combine(root, "app-data");
-        FakeUserPaths userPaths = new(appData);
+        FakeSquadUserPaths userPaths = new(appData);
         Directory.CreateDirectory(userPaths.HomeDirectory);
 
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
@@ -376,7 +376,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
         private readonly FakeReleaseSource _releaseSource;
 
         public TestContext(
-            FakeUserPaths userPaths,
+            FakeSquadUserPaths userPaths,
             FakeGlobalRootResolver globalRoots,
             FakeSquadLinkFileSystem linkFileSystem,
             SquadModelPresetStore presetStore,
@@ -391,7 +391,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
             _releaseSource = releaseSource;
         }
 
-        public FakeUserPaths UserPaths { get; }
+        public FakeSquadUserPaths UserPaths { get; }
         public FakeGlobalRootResolver GlobalRoots { get; }
         public FakeSquadLinkFileSystem LinkFileSystem { get; }
         public SquadModelPresetStore PresetStore { get; }
@@ -407,14 +407,6 @@ public sealed class SquadInstanceServiceTests : IDisposable
             return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots, new FileSquadInstanceLinkSync(), new PhysicalSquadFileAccess());
         }
     }
-
-    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = appDataDirectory;
-
-        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
-    }
-
     private sealed class FakeGlobalRootResolver(string baseGlobalRoot) : ISquadGlobalRootResolver
     {
         public string ResolveGlobalRoot(SquadTarget target)

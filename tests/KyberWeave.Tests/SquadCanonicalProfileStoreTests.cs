@@ -302,7 +302,7 @@ public sealed class SquadCanonicalProfileStoreTests
     [InlineData("   ")]
     public void ConstructorWithEmptyOrWhitespaceHomeDirectoryThrowsArgumentException(string homeDirectory)
     {
-        ISquadUserPaths userPaths = new FakeSquadUserPathsWithCustomHome(homeDirectory);
+        ISquadUserPaths userPaths = new FakeSquadUserPaths("/dummy/appdata", homeDirectory);
         Assert.Throws<ArgumentException>(() => new SquadCanonicalProfileStore(userPaths));
     }
 
@@ -381,11 +381,5 @@ public sealed class SquadCanonicalProfileStoreTests
             version,
             CreateSnapshot(version).Profiles,
             agents);
-    }
-
-    private sealed class FakeSquadUserPathsWithCustomHome(string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory => "/dummy/appdata";
-        public string HomeDirectory { get; } = homeDirectory;
     }
 }

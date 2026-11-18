@@ -54,7 +54,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
         Directory.CreateDirectory(globalRootsDirectory);
         Directory.CreateDirectory(home);
 
-        HomeUserPaths userPaths = new(applicationData, home);
+        FakeSquadUserPaths userPaths = new(applicationData, home);
         SquadStateStore store = new(userPaths);
         TempGlobalRoots roots = new(globalRootsDirectory);
         string guidancePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
@@ -174,7 +174,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
             byte[] homeGuidance = Encoding.UTF8.GetBytes(HomeGuidanceBody);
             File.WriteAllBytes(guidancePath, homeGuidance);
 
-            HomeUserPaths userPaths = new(applicationData, home);
+            FakeSquadUserPaths userPaths = new(applicationData, home);
             SquadStateStore store = new(userPaths);
             TempGlobalRoots roots = new(globalRoots);
             using SeededPriorReleaseSource prior = new(directory.Path);
@@ -231,7 +231,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
         /// <summary>The home guidance bytes the template held before its install ran.</summary>
         public byte[] HomeGuidanceBeforeInstall { get; } = homeGuidanceBeforeInstall;
 
-        public void CopyInto(HomeUserPaths userPaths, string destinationAnchor, string destinationGlobalRoots)
+        public void CopyInto(FakeSquadUserPaths userPaths, string destinationAnchor, string destinationGlobalRoots)
         {
             ArgumentNullException.ThrowIfNull(userPaths);
             ArgumentException.ThrowIfNullOrWhiteSpace(destinationAnchor);
@@ -344,12 +344,6 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
             foreach (string directory in Directory.EnumerateDirectories(source))
                 CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
         }
-    }
-
-    private sealed class HomeUserPaths(string applicationDataDirectory, string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-        public string HomeDirectory { get; } = homeDirectory;
     }
 
     private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver

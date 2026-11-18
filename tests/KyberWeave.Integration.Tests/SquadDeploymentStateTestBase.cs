@@ -1973,13 +1973,6 @@ public abstract class SquadDeploymentStateTestBase
         }
     }
 
-    internal sealed class FakeSquadUserPaths(string applicationDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-
-        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
-    }
-
     internal sealed class FakeGlobalRootResolver(IReadOnlyDictionary<SquadTarget, string> roots)
         : ISquadGlobalRootResolver
     {

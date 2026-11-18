@@ -833,7 +833,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         private readonly ISquadGlobalRootResolver _globalRoots;
         private readonly SyntheticValidSquadReleaseSource _releaseSource = new();
         private readonly SquadStateStore _store;
-        private readonly HomeUserPaths _userPaths;
+        private readonly FakeSquadUserPaths _userPaths;
 
         public Harness(string root, ISquadGlobalRootResolver? globalRoots = null)
         {
@@ -845,7 +845,7 @@ public sealed class SquadCapturePluginStepTests : IDisposable
             Directory.CreateDirectory(applicationData);
             Directory.CreateDirectory(home);
             Directory.CreateDirectory(GlobalRootsDirectory);
-            _userPaths = new HomeUserPaths(applicationData, home);
+            _userPaths = new FakeSquadUserPaths(applicationData, home);
             _store = new SquadStateStore(_userPaths);
             _globalRoots = globalRoots ?? new TempGlobalRoots(GlobalRootsDirectory);
         }
@@ -915,13 +915,6 @@ public sealed class SquadCapturePluginStepTests : IDisposable
         {
             return new KyberDashCapturePluginStep(executor, locateKyberDash ?? (() => FakeKyberDash));
         }
-    }
-
-    private sealed class HomeUserPaths(string applicationDataDirectory, string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-
-        public string HomeDirectory { get; } = homeDirectory;
     }
 
     private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver

@@ -491,7 +491,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
     [Fact]
     public void AnotherTargetIsDeployed_UnreadableState_ReportsNoOtherTargetWithoutThrowing()
     {
-        SquadStateStore store = new(new BlankHomeUserPaths(Path.Combine(_temp.Path, "blank-home")));
+        SquadStateStore store = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "blank-home"), string.Empty));
         using ArbiterTestHost stateHost = HostWith(store);
 
         Assert.False(
@@ -578,14 +578,6 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
     private static SquadOwnedFile OwnedFile(string relativePath, string target)
     {
         return new SquadOwnedFile(relativePath, new string('0', 64), target, Adopted: false);
-    }
-
-    /// <summary>A user-paths stub with no home, so any state read fails on an unresolved home.</summary>
-    private sealed class BlankHomeUserPaths(string applicationDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-
-        public string HomeDirectory => string.Empty;
     }
 
     private string NewDir(string name)
