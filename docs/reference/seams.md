@@ -275,7 +275,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewSuppressionsCommand` (`Commands/Review/ReviewSuppressionsCommand.cs`) | console | 4.5 |
 | `ReviewVerdictCommand` (`Commands/Review/ReviewVerdictCommand.cs`) | console | 4.5 |
 | `RunDeliverCommand` (`Commands/Run/RunDeliverCommand.cs`) | paths | 4.5 |
-| `RunStartCommand` (`Commands/Run/RunStartCommand.cs`) | console | 4.5 |
 | `CatalogCommand` (`Commands/Skills/CatalogCommand.cs`) | console | 4.5 |
 | `RouteCommand` (`Commands/Skills/RouteCommand.cs`) | console | 4.5 |
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
