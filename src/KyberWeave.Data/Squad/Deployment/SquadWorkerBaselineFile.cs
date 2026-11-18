@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
-using System.Text;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Core.FileSystem;
@@ -7,52 +8,50 @@ using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Core.Squad.Deployment;
 
 /// <summary>Reads the shared worker baseline block from a Squad source tree, caching it by file stamp.</summary>
-public static class SquadWorkerBaselineFile
+/// <remarks>The cache belongs to the instance, so two readers never share a stamp and a test never inherits another's.</remarks>
+/// <param name="files">Reads the baseline file and its stamp.</param>
+/// <param name="paths">Turns the source directory into a full path.</param>
+/// <param name="environment">Supplies the base directory a relative source directory resolves against.</param>
+public sealed class SquadWorkerBaselineFile(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISquadWorkerBaselineFile
 {
     private const int MaxCacheEntries = 64;
 
     private sealed record CacheEntry(DateTime LastWriteTimeUtc, long FileLength, string? Block);
 
-    private static readonly ConcurrentDictionary<string, CacheEntry> CachedBlocks = new(
+    private readonly ConcurrentDictionary<string, CacheEntry> _cachedBlocks = new(
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
 
-    /// <summary>Empties the baseline block cache.</summary>
-    public static void ClearCache() => CachedBlocks.Clear();
-
-    /// <summary>
-    /// Reads the injection block from <paramref name="sourceDirectory"/>, or returns null when the
-    /// tree carries no baseline file.
-    /// </summary>
+    /// <inheritdoc />
     /// <remarks>
     /// A test fixture renders from a minimal source tree and has no baseline; a shipped corpus does,
     /// and the suite fails when a render carries no block rather than letting the render go quiet.
     /// </remarks>
-    /// <param name="sourceDirectory">The Squad source root the render loaded from.</param>
-    /// <returns>The block, tags included, or null when the tree carries no baseline file.</returns>
-    public static string? ReadBlock(string sourceDirectory)
+    public string? ReadBlock(string sourceDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
-        string normalized = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
+        string normalized = Path.TrimEndingDirectorySeparator(paths.GetFullPath(sourceDirectory, environment.CurrentDirectory));
         string path = Path.Combine(normalized, SquadWorkerBaselineInjector.RelativePath.Replace('/', Path.DirectorySeparatorChar));
 
         try
         {
-            FileInfo info = new(path);
-            if (!info.Exists)
+            if (!files.FileExists(path))
             {
-                if (CachedBlocks.TryGetValue(normalized, out CacheEntry? missing) && missing.LastWriteTimeUtc == DateTime.MinValue)
+                if (_cachedBlocks.TryGetValue(normalized, out CacheEntry? missing) && missing.LastWriteTimeUtc == DateTime.MinValue)
                     return missing.Block;
 
-                if (CachedBlocks.Count >= MaxCacheEntries)
-                    CachedBlocks.Clear();
+                if (_cachedBlocks.Count >= MaxCacheEntries)
+                    _cachedBlocks.Clear();
 
-                CachedBlocks[normalized] = new CacheEntry(DateTime.MinValue, 0, null);
+                _cachedBlocks[normalized] = new CacheEntry(DateTime.MinValue, 0, null);
                 return null;
             }
 
-            DateTime lastWrite = info.LastWriteTimeUtc;
-            long length = info.Length;
-            if (CachedBlocks.TryGetValue(normalized, out CacheEntry? entry)
+            DateTime lastWrite = files.GetLastWriteTimeUtc(path);
+            long length = files.GetLength(path);
+            if (_cachedBlocks.TryGetValue(normalized, out CacheEntry? entry)
                 && entry.LastWriteTimeUtc == lastWrite
                 && entry.FileLength == length)
             {
@@ -60,10 +59,10 @@ public static class SquadWorkerBaselineFile
             }
 
             string? block = ReadBlockUncached(path);
-            if (CachedBlocks.Count >= MaxCacheEntries)
-                CachedBlocks.Clear();
+            if (_cachedBlocks.Count >= MaxCacheEntries)
+                _cachedBlocks.Clear();
 
-            CachedBlocks[normalized] = new CacheEntry(lastWrite, length, block);
+            _cachedBlocks[normalized] = new CacheEntry(lastWrite, length, block);
             return block;
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -72,12 +71,12 @@ public static class SquadWorkerBaselineFile
         }
     }
 
-    private static string? ReadBlockUncached(string path)
+    private string? ReadBlockUncached(string path)
     {
         string text;
         try
         {
-            text = File.ReadAllText(path, Encoding.UTF8);
+            text = files.ReadAllText(path);
         }
         catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
         {

@@ -1,4 +1,7 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -27,7 +30,13 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// two tiers define the same server differently.
 /// </para>
 /// </remarks>
-public static class ZCodeMcpConfiguration
+/// <param name="files">Reads ZCode's config files and finds the worktree marker.</param>
+/// <param name="paths">Turns the working directory into a full path.</param>
+/// <param name="environment">Supplies the base directory a relative working directory resolves against.</param>
+public sealed class ZCodeMcpConfiguration(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IZCodeMcpInspector
 {
     private const string WorktreeMarker = ".git";
 
@@ -37,24 +46,21 @@ public static class ZCodeMcpConfiguration
     /// <param name="requiredServers">Server names the canonical toolchain declares.</param>
     /// <param name="zcodeStorageRoot">The resolved ZCode storage root.</param>
     /// <param name="workingDirectory">The directory a ZCode session would start in.</param>
-    /// <param name="readFileText">Reads a file's text, or null when absent or unreadable.</param>
-    public static ZCodeMcpConfigurationReport Inspect(
+    public ZCodeMcpConfigurationReport Inspect(
         IReadOnlyCollection<string> requiredServers,
         string zcodeStorageRoot,
-        string workingDirectory,
-        Func<string, string?> readFileText)
+        string workingDirectory)
     {
         ArgumentNullException.ThrowIfNull(requiredServers);
         ArgumentException.ThrowIfNullOrWhiteSpace(zcodeStorageRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-        ArgumentNullException.ThrowIfNull(readFileText);
 
         SortedSet<string> configured = new(StringComparer.Ordinal);
         List<string> inspected = [];
 
         foreach (string path in CandidatePaths(zcodeStorageRoot, workingDirectory))
         {
-            string? text = readFileText(path);
+            string? text = ReadFileTextOrNull(path);
             if (string.IsNullOrWhiteSpace(text))
             {
                 continue;
@@ -77,7 +83,7 @@ public static class ZCodeMcpConfiguration
         return new ZCodeMcpConfigurationReport([.. configured], missing, inspected);
     }
 
-    private static IEnumerable<string> CandidatePaths(string zcodeStorageRoot, string workingDirectory)
+    private IEnumerable<string> CandidatePaths(string zcodeStorageRoot, string workingDirectory)
     {
         yield return Path.Combine(zcodeStorageRoot, "cli", "config.json");
 
@@ -93,15 +99,16 @@ public static class ZCodeMcpConfiguration
     /// <c>getProjectConfigDirectories</c>. A directory tree with no worktree marker contributes
     /// only the starting directory, as it does there.
     /// </summary>
-    private static IReadOnlyList<string> ProjectConfigDirectories(string workingDirectory)
+    private IReadOnlyList<string> ProjectConfigDirectories(string workingDirectory)
     {
-        string start = Path.GetFullPath(workingDirectory);
+        string start = paths.GetFullPath(workingDirectory, environment.CurrentDirectory);
         List<string> directories = [];
         string current = start;
         while (true)
         {
             directories.Add(current);
-            if (Path.Exists(Path.Combine(current, WorktreeMarker)))
+            string marker = Path.Combine(current, WorktreeMarker);
+            if (files.FileExists(marker) || files.DirectoryExists(marker))
             {
                 return directories;
             }
@@ -113,6 +120,19 @@ public static class ZCodeMcpConfiguration
             }
 
             current = parent;
+        }
+    }
+
+    /// <summary>Reads a file's text, or null when it is absent or unreadable: an unreadable tier declares nothing.</summary>
+    private string? ReadFileTextOrNull(string path)
+    {
+        try
+        {
+            return files.FileExists(path) ? files.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return null;
         }
     }
 

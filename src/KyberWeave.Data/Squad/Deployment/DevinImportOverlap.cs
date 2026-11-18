@@ -1,4 +1,7 @@
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -30,7 +33,13 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// overlap depends on every workspace it meets, which one working directory cannot answer.
 /// </para>
 /// </remarks>
-public static class DevinImportOverlap
+/// <param name="files">Lists the skill and agent trees and reads Devin's configuration files.</param>
+/// <param name="paths">Turns the working directory into a full path.</param>
+/// <param name="environment">Supplies the base directory a relative working directory resolves against.</param>
+public sealed class DevinImportOverlap(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IDevinImportOverlapInspector
 {
     private const string SkillKind = "skill";
     private const string AgentKind = "agent";
@@ -54,16 +63,11 @@ public static class DevinImportOverlap
     /// </summary>
     /// <param name="workingDirectory">The workspace a Devin session would open.</param>
     /// <param name="devinUserRoot">The Devin user configuration directory, or null when it cannot be resolved.</param>
-    /// <param name="readFileText">Reads a file's text, or null when absent or unreadable.</param>
-    public static DevinImportOverlapReport Inspect(
-        string workingDirectory,
-        string? devinUserRoot,
-        Func<string, string?> readFileText)
+    public DevinImportOverlapReport Inspect(string workingDirectory, string? devinUserRoot)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
-        ArgumentNullException.ThrowIfNull(readFileText);
 
-        string root = Path.GetFullPath(workingDirectory);
+        string root = paths.GetFullPath(workingDirectory, environment.CurrentDirectory);
         HashSet<string> devinSkills = ReadIdentities(Path.Combine(root, ".devin", "skills"), SkillKind);
         HashSet<string> devinAgents = ReadIdentities(Path.Combine(root, ".devin", "agents"), AgentKind);
 
@@ -80,7 +84,7 @@ public static class DevinImportOverlap
         List<DevinImportOverlapEntry> overlaps = [];
         foreach ((string relativeRoot, string kind, string? setting) in ImportedRoots)
         {
-            if (setting is not null && IsImportDisabled(setting, configPaths, readFileText))
+            if (setting is not null && IsImportDisabled(setting, configPaths))
             {
                 continue;
             }
@@ -113,10 +117,10 @@ public static class DevinImportOverlap
     /// doctor warning built on part of a tree is still true, and a doctor that crashes on one
     /// unreadable folder reports nothing at all.
     /// </remarks>
-    private static HashSet<string> ReadIdentities(string directory, string kind)
+    private HashSet<string> ReadIdentities(string directory, string kind)
     {
         HashSet<string> identities = new(StringComparer.Ordinal);
-        if (!Directory.Exists(directory))
+        if (!files.DirectoryExists(directory))
         {
             return identities;
         }
@@ -124,9 +128,9 @@ public static class DevinImportOverlap
         string[] definitionNames = kind == SkillKind ? ["SKILL.md"] : AgentDefinitionFileNames;
         try
         {
-            foreach (string child in Directory.EnumerateDirectories(directory))
+            foreach (string child in files.EnumerateDirectories(directory))
             {
-                if (definitionNames.Any(name => File.Exists(Path.Combine(child, name))))
+                if (definitionNames.Any(name => files.FileExists(Path.Combine(child, name))))
                 {
                     identities.Add(Path.GetFileName(child));
                 }
@@ -134,7 +138,7 @@ public static class DevinImportOverlap
 
             if (kind == AgentKind)
             {
-                foreach (string file in Directory.EnumerateFiles(directory, "*.md"))
+                foreach (string file in files.EnumerateFiles(directory, "*.md", recursive: false))
                 {
                     identities.Add(Path.GetFileNameWithoutExtension(file));
                 }
@@ -148,14 +152,11 @@ public static class DevinImportOverlap
         return identities;
     }
 
-    private static bool IsImportDisabled(
-        string setting,
-        IReadOnlyList<string> configPaths,
-        Func<string, string?> readFileText)
+    private bool IsImportDisabled(string setting, IReadOnlyList<string> configPaths)
     {
         foreach (string path in configPaths)
         {
-            bool? declared = ReadImportSetting(readFileText(path), setting);
+            bool? declared = ReadImportSetting(ReadFileTextOrNull(path), setting);
             if (declared is not null)
             {
                 return declared == false;
@@ -163,6 +164,19 @@ public static class DevinImportOverlap
         }
 
         return false;
+    }
+
+    /// <summary>Reads a file's text, or null when it is absent or unreadable: an unreadable setting declares nothing.</summary>
+    private string? ReadFileTextOrNull(string path)
+    {
+        try
+        {
+            return files.FileExists(path) ? files.ReadAllText(path) : null;
+        }
+        catch (Exception ex) when (FileFailure.Is(ex))
+        {
+            return null;
+        }
     }
 
     /// <summary>

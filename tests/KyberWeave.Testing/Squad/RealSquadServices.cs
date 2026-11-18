@@ -55,12 +55,37 @@ public static class RealSquadServices
     /// <returns>The reader.</returns>
     public static SquadOperatorChannelOverlayFile OperatorChannelOverlay() => new(new PhysicalFileSystem());
 
+    /// <summary>Creates a worker baseline reader over the real disk, with a cache of its own.</summary>
+    /// <returns>The reader.</returns>
+    public static SquadWorkerBaselineFile WorkerBaseline()
+    {
+        PhysicalFileSystem files = new();
+        return new SquadWorkerBaselineFile(files, new PhysicalPathResolver(files), new ProcessEnvironment());
+    }
+
+    /// <summary>Creates the hook JSON file editor over the real disk.</summary>
+    /// <returns>The editor.</returns>
+    public static SquadHookJsonFile HookJsonFile()
+    {
+        PhysicalFileSystem files = new();
+        return new SquadHookJsonFile(files, new PhysicalPathResolver(files), new ProcessEnvironment());
+    }
+
+    /// <summary>Creates the worktree MCP binding helper over the real disk.</summary>
+    /// <returns>The helper.</returns>
+    public static SquadWorktreeMcp WorktreeMcp()
+    {
+        PhysicalFileSystem files = new();
+        return new SquadWorktreeMcp(files, new PhysicalPathResolver(files), new ProcessEnvironment());
+    }
+
     /// <summary>Creates the render input reader over the real disk.</summary>
     /// <returns>The reader.</returns>
     public static FileSquadRenderInputReader RenderInputReader() => new(
         SourceLoader(),
         CopilotProbe(),
         OperatorChannelOverlay(),
+        WorkerBaseline(),
         new PhysicalFileSystem(),
         new ProcessEnvironment());
 
