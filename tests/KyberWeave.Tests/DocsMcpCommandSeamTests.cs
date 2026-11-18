@@ -37,6 +37,41 @@ public sealed class DocsMcpCommandSeamTests
     }
 
     /// <summary>
+    /// A harness is only as satisfied as its own file: the retired-key check is scoped to the named harness, so a
+    /// proven old key in that file is not hidden by another harness's clean scan.
+    /// </summary>
+    [Fact]
+    public void ASatisfiedCheckScopesItsRetiredKeyScanToTheNamedHarness()
+    {
+        _files.CreateDirectory(Root);
+        _files.WriteAllText($"{Root}/.mcp.json", """{"mcpServers": {}}""");
+
+        _ = Wire("repo", targets: "claude-code");
+
+        Assert.Equal(["claude-code"], _wiring.ScanHarnesses);
+    }
+
+    /// <summary>
+    /// The migrate verb forwards the targets the operator named, so a named harness is the one the rename engine is
+    /// asked about and no other.
+    /// </summary>
+    [Fact]
+    public void AMigrateRunForwardsItsTargetsThroughTheWiringService()
+    {
+        DocsMcpMigrateCommand command = new(
+            _wiring,
+            new FakePathResolver(_files),
+            _environment,
+            _console);
+
+        int exit = command.Execute(null!, new DocsMcpMigrateSettings { Path = Root, Target = "cursor" });
+
+        Assert.Equal(0, exit);
+        Assert.Equal([Root], _wiring.MigratedRoots);
+        Assert.Equal<IReadOnlyList<string>>(["cursor"], _wiring.MigrateTargets[0]);
+    }
+
+    /// <summary>
     /// A relative root is resolved against the directory the environment seam names, so the answer does not depend
     /// on where the process happens to have been started.
     /// </summary>

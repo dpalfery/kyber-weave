@@ -15,7 +15,9 @@ public sealed class FakeMcpWiringService : IMcpWiringService
     private readonly List<string> _repairedRoots = [];
     private readonly List<string> _unwiredRoots = [];
     private readonly List<string> _scannedRoots = [];
+    private readonly List<string?> _scanHarnesses = [];
     private readonly List<string> _migratedRoots = [];
+    private readonly List<IReadOnlyList<string>> _migrateTargets = [];
 
     /// <summary>The roots <see cref="Inspect"/> was asked about, in call order.</summary>
     public IReadOnlyList<string> InspectedRoots => _inspectedRoots;
@@ -29,8 +31,14 @@ public sealed class FakeMcpWiringService : IMcpWiringService
     /// <summary>The roots <see cref="Scan"/> was asked about, in call order.</summary>
     public IReadOnlyList<string> ScannedRoots => _scannedRoots;
 
+    /// <summary>The harness each <see cref="Scan"/> was scoped to, in call order; null means every harness.</summary>
+    public IReadOnlyList<string?> ScanHarnesses => _scanHarnesses;
+
     /// <summary>The roots <see cref="Migrate"/> was asked to rewrite, in call order.</summary>
     public IReadOnlyList<string> MigratedRoots => _migratedRoots;
+
+    /// <summary>The targets each <see cref="Migrate"/> was asked to rewrite, in call order.</summary>
+    public IReadOnlyList<IReadOnlyList<string>> MigrateTargets => _migrateTargets;
 
     /// <summary>The findings <see cref="Inspect"/> reports. Empty by default, which means every harness is wired.</summary>
     public IReadOnlyList<McpWiringFinding> Findings { get; set; } = [];
@@ -86,6 +94,7 @@ public sealed class FakeMcpWiringService : IMcpWiringService
     public IReadOnlyList<McpRenameChange> Scan(string repositoryRoot, string? harness = null)
     {
         _scannedRoots.Add(repositoryRoot);
+        _scanHarnesses.Add(harness);
         return Changes;
     }
 
@@ -93,6 +102,7 @@ public sealed class FakeMcpWiringService : IMcpWiringService
     public IReadOnlyList<McpRenameChange> Migrate(string repositoryRoot, IReadOnlyList<string> targets, bool dryRun = false)
     {
         _migratedRoots.Add(repositoryRoot);
+        _migrateTargets.Add(targets);
         return Changes;
     }
 
