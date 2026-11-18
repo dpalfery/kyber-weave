@@ -55,6 +55,14 @@ public static class RealSquadServices
     /// <returns>The reader.</returns>
     public static SquadOperatorChannelOverlayFile OperatorChannelOverlay() => new(new PhysicalFileSystem());
 
+    /// <summary>Creates the hook JSON file editor over the real disk.</summary>
+    /// <returns>The editor.</returns>
+    public static SquadHookJsonFile HookJsonFile()
+    {
+        PhysicalFileSystem files = new();
+        return new SquadHookJsonFile(files, new PhysicalPathResolver(files), new ProcessEnvironment());
+    }
+
     /// <summary>Creates the render input reader over the real disk.</summary>
     /// <returns>The reader.</returns>
     public static FileSquadRenderInputReader RenderInputReader() => new(

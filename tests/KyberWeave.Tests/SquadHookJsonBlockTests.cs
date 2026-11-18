@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -12,6 +14,13 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadHookJsonBlockTests
 {
+    private static readonly string Base = Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "hook-json");
+
+    private readonly InMemoryFileSystem _files = new(caseSensitive: true);
+
+    private SquadHookJsonFile Hooks =>
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: Base));
+
     private static string Harness(SquadHookBlockFormat format) =>
         format switch
         {
@@ -58,15 +67,15 @@ public sealed class SquadHookJsonBlockTests
     [Fact]
     public void SpliceFile_SubagentStopForAnotherFormat_NamesTheCallerBug()
     {
-        string path = Path.Combine(Path.GetTempPath(), "kw-hook-" + Guid.NewGuid().ToString("N") + ".json");
+        string path = Path.Combine(Base, "kw-hook.json");
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Cursor);
 
         InvalidOperationException failure = Assert.Throws<InvalidOperationException>(
-            () => SquadHookJsonFile.SpliceFile(SquadHookBlockFormat.Cursor, path, pre, post, pre));
+            () => Hooks.SpliceFile(SquadHookBlockFormat.Cursor, path, pre, post, pre));
 
         Assert.Contains("Only the Factory", failure.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("does not parse", failure.Message, StringComparison.Ordinal);
-        Assert.False(File.Exists(path));
+        Assert.False(_files.FileExists(path));
     }
 
     private static (IReadOnlyList<JsonNode> Pre, IReadOnlyList<JsonNode> Post) UserEntries(SquadHookBlockFormat format) =>
@@ -119,8 +128,8 @@ public sealed class SquadHookJsonBlockTests
     private static JsonNode Clone(JsonNode node) =>
         JsonNode.Parse(node.ToJsonString())!;
 
-    private static string HookFile(TempDirectory fixture, SquadHookBlockFormat format) =>
-        Path.Combine(fixture.Path, SquadHookJsonBlock.RelativePath(format));
+    private static string HookFile(SquadHookBlockFormat format) =>
+        Path.Combine(Base, SquadHookJsonBlock.RelativePath(format));
 
     private static JsonNode? Resolve(JsonNode root, string pointer)
     {
@@ -151,14 +160,13 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void SpliceIntoAbsentFileCreatesContainersAndAppendsManaged(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
+        string path = HookFile(format);
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
 
-        IReadOnlyList<SquadHookOwnedEntry> owned = SquadHookJsonFile.SpliceFile(format, path, pre, post);
+        IReadOnlyList<SquadHookOwnedEntry> owned = Hooks.SpliceFile(format, path, pre, post);
 
-        Assert.True(File.Exists(path));
-        string content = File.ReadAllText(path);
+        Assert.True(_files.FileExists(path));
+        string content = _files.ReadAllText(path);
         Assert.EndsWith("\n", content, StringComparison.Ordinal);
         JsonNode root = JsonNode.Parse(content)!;
         Assert.Equal(2, owned.Count);
@@ -178,16 +186,15 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void SpliceIntoEmptyFileKeepsNothingAndWritesManaged(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, string.Empty);
+        string path = HookFile(format);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, string.Empty);
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
 
-        IReadOnlyList<SquadHookOwnedEntry> owned = SquadHookJsonFile.SpliceFile(format, path, pre, post);
+        IReadOnlyList<SquadHookOwnedEntry> owned = Hooks.SpliceFile(format, path, pre, post);
 
         Assert.Equal(2, owned.Count);
-        JsonNode root = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode root = JsonNode.Parse(_files.ReadAllText(path))!;
         foreach (SquadHookOwnedEntry entry in owned)
         {
             Assert.Equal(entry.Digest, SquadHookJsonBlock.CanonicalDigest(Resolve(root, entry.Location)!));
@@ -202,16 +209,15 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void SpliceIntoUserFileKeepsUserOrderAndValuesAndAppendsManaged(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, UserFileContent(format));
+        string path = HookFile(format);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, UserFileContent(format));
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
         (IReadOnlyList<JsonNode> userPre, IReadOnlyList<JsonNode> userPost) = UserEntries(format);
 
-        IReadOnlyList<SquadHookOwnedEntry> owned = SquadHookJsonFile.SpliceFile(format, path, pre, post);
+        IReadOnlyList<SquadHookOwnedEntry> owned = Hooks.SpliceFile(format, path, pre, post);
 
-        JsonNode root = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode root = JsonNode.Parse(_files.ReadAllText(path))!;
         foreach (SquadHookOwnedEntry entry in owned)
         {
             Assert.Equal(SquadHookJsonBlock.CanonicalDigest(Resolve(root, entry.Location)!), entry.Digest);
@@ -240,7 +246,7 @@ public sealed class SquadHookJsonBlockTests
         }
 
         // A second splice replaces Squad's entries instead of duplicating them.
-        IReadOnlyList<SquadHookOwnedEntry> again = SquadHookJsonFile.SpliceFile(format, path, ManagedEntries(format).Pre, ManagedEntries(format).Post);
+        IReadOnlyList<SquadHookOwnedEntry> again = Hooks.SpliceFile(format, path, ManagedEntries(format).Pre, ManagedEntries(format).Post);
         Assert.Equal(owned.Count, again.Count);
     }
 
@@ -252,17 +258,16 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void RemoveRestoresUserContent(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string path = HookFile(format);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
         string before = UserFileContent(format);
-        File.WriteAllText(path, before);
+        _files.WriteAllText(path, before);
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
-        SquadHookJsonFile.SpliceFile(format, path, pre, post);
+        Hooks.SpliceFile(format, path, pre, post);
 
-        SquadHookJsonFile.RemoveFile(format, path);
+        Hooks.RemoveFile(format, path);
 
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(before), JsonNode.Parse(File.ReadAllText(path))));
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(before), JsonNode.Parse(_files.ReadAllText(path))));
     }
 
     [Theory]
@@ -273,14 +278,13 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void RemoveFile_FileSquadCreated_LeavesNoEmptyContainers(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
+        string path = HookFile(format);
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
-        SquadHookJsonFile.SpliceFile(format, path, pre, post);
+        Hooks.SpliceFile(format, path, pre, post);
 
-        SquadHookJsonFile.RemoveFile(format, path);
+        Hooks.RemoveFile(format, path);
 
-        JsonObject root = JsonNode.Parse(File.ReadAllText(path))!.AsObject();
+        JsonObject root = JsonNode.Parse(_files.ReadAllText(path))!.AsObject();
         string[] removed = ["hooks", "PreToolUse", "PostToolUse"];
         Assert.DoesNotContain(root, property => removed.Contains(property.Key, StringComparer.OrdinalIgnoreCase));
     }
@@ -321,12 +325,11 @@ public sealed class SquadHookJsonBlockTests
         Assert.True(SquadHookJsonBlock.IsEmpty(format, null));
         Assert.False(SquadHookJsonBlock.IsEmpty(format, UserFileContent(format)));
 
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
+        string path = HookFile(format);
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
-        SquadHookJsonFile.SpliceFile(format, path, pre, post);
-        SquadHookJsonFile.RemoveFile(format, path);
-        Assert.True(SquadHookJsonBlock.IsEmpty(format, File.ReadAllText(path)));
+        Hooks.SpliceFile(format, path, pre, post);
+        Hooks.RemoveFile(format, path);
+        Assert.True(SquadHookJsonBlock.IsEmpty(format, _files.ReadAllText(path)));
     }
 
     [Fact]
@@ -387,8 +390,7 @@ public sealed class SquadHookJsonBlockTests
     [Fact]
     public void MixedMatcherGroupIsKeptAsUserContent()
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, SquadHookBlockFormat.Codex);
+        string path = HookFile(SquadHookBlockFormat.Codex);
         var mixed = MatcherGroup("codex", "mixed", "kyber-weave-arbiter hook --harness codex", "user-tool");
         var root = new JsonObject
         {
@@ -398,13 +400,13 @@ public sealed class SquadHookJsonBlockTests
                 ["PostToolUse"] = new JsonArray(),
             },
         };
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, root.ToJsonString() + "\n");
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, root.ToJsonString() + "\n");
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Codex);
 
-        SquadHookJsonFile.SpliceFile(SquadHookBlockFormat.Codex, path, pre, post);
+        Hooks.SpliceFile(SquadHookBlockFormat.Codex, path, pre, post);
 
-        JsonNode after = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode after = JsonNode.Parse(_files.ReadAllText(path))!;
         var array = (JsonArray)after["hooks"]!["PreToolUse"]!;
         Assert.Equal(2, array.Count);
         Assert.True(JsonNode.DeepEquals(mixed, array[0]));
@@ -418,8 +420,7 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void SpliceWritesOnlyDocumentedFields(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
+        string path = HookFile(format);
         JsonObject extra = format == SquadHookBlockFormat.Cursor
             ? new JsonObject
             {
@@ -447,9 +448,9 @@ public sealed class SquadHookJsonBlockTests
                 ["sentinel"] = "kyber-managed",
             };
 
-        SquadHookJsonFile.SpliceFile(format, path, [extra], []);
+        Hooks.SpliceFile(format, path, [extra], []);
 
-        string content = File.ReadAllText(path);
+        string content = _files.ReadAllText(path);
         Assert.DoesNotContain("sentinel", content, StringComparison.Ordinal);
         Assert.DoesNotContain("bogus", content, StringComparison.Ordinal);
     }
@@ -462,15 +463,14 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void DriftReportsModifiedAndMissingOwnedEntries(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
+        string path = HookFile(format);
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
-        IReadOnlyList<SquadHookOwnedEntry> owned = SquadHookJsonFile.SpliceFile(format, path, pre, post);
+        IReadOnlyList<SquadHookOwnedEntry> owned = Hooks.SpliceFile(format, path, pre, post);
         var record = owned.ToDictionary(e => e.Location, e => e.Digest, StringComparer.Ordinal);
 
-        Assert.Empty(SquadHookJsonBlock.FindDrift(format, File.ReadAllText(path), record));
+        Assert.Empty(SquadHookJsonBlock.FindDrift(format, _files.ReadAllText(path), record));
 
-        JsonNode tampered = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode tampered = JsonNode.Parse(_files.ReadAllText(path))!;
         JsonNode? target = Resolve(tampered, owned[0].Location)!;
         if (format == SquadHookBlockFormat.Cursor)
         {
@@ -481,18 +481,18 @@ public sealed class SquadHookJsonBlockTests
             ((JsonObject)target)["matcher"] = "hand-edited";
         }
 
-        File.WriteAllText(path, tampered.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n");
-        IReadOnlyList<SquadHookDrift> modified = SquadHookJsonBlock.FindDrift(format, File.ReadAllText(path), record);
+        _files.WriteAllText(path, tampered.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n");
+        IReadOnlyList<SquadHookDrift> modified = SquadHookJsonBlock.FindDrift(format, _files.ReadAllText(path), record);
         Assert.Single(modified);
         Assert.Equal(owned[0].Location, modified[0].Location);
 
-        JsonNode removed = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode removed = JsonNode.Parse(_files.ReadAllText(path))!;
         string pointer = owned[1].Location;
         string container = pointer[..pointer.LastIndexOf('/')];
         int index = int.Parse(pointer[(pointer.LastIndexOf('/') + 1)..], System.Globalization.CultureInfo.InvariantCulture);
         ((JsonArray)Resolve(removed, container)!).RemoveAt(index);
-        File.WriteAllText(path, removed.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n");
-        IReadOnlyList<SquadHookDrift> drift = SquadHookJsonBlock.FindDrift(format, File.ReadAllText(path), record);
+        _files.WriteAllText(path, removed.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }) + "\n");
+        IReadOnlyList<SquadHookDrift> drift = SquadHookJsonBlock.FindDrift(format, _files.ReadAllText(path), record);
         Assert.Equal(2, drift.Count);
         Assert.Contains(drift, d => string.Equals(d.Location, pointer, StringComparison.Ordinal));
     }
@@ -505,22 +505,91 @@ public sealed class SquadHookJsonBlockTests
     [InlineData(SquadHookBlockFormat.Antigravity)]
     public void UnparsableFileFailsNamingTheFileAndWritesNothing(SquadHookBlockFormat format)
     {
-        using TempDirectory fixture = new();
-        string path = HookFile(fixture, format);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string path = HookFile(format);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
         const string Garbage = "{ this is not json";
-        File.WriteAllText(path, Garbage);
+        _files.WriteAllText(path, Garbage);
         (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(format);
 
         InvalidOperationException spliceFailure = Assert.Throws<InvalidOperationException>(
-            () => SquadHookJsonFile.SpliceFile(format, path, pre, post));
+            () => Hooks.SpliceFile(format, path, pre, post));
         Assert.Contains(path, spliceFailure.Message, StringComparison.Ordinal);
-        Assert.Equal(Garbage, File.ReadAllText(path));
+        Assert.Equal(Garbage, _files.ReadAllText(path));
 
         InvalidOperationException removeFailure = Assert.Throws<InvalidOperationException>(
-            () => SquadHookJsonFile.RemoveFile(format, path));
+            () => Hooks.RemoveFile(format, path));
         Assert.Contains(path, removeFailure.Message, StringComparison.Ordinal);
-        Assert.Equal(Garbage, File.ReadAllText(path));
+        Assert.Equal(Garbage, _files.ReadAllText(path));
+    }
+
+    /// <summary>
+    /// The user's hook file is rewritten in place and nothing else is left beside it: a plain overwrite keeps a
+    /// file the user reaches through a link, where a renamed temporary would replace the link.
+    /// </summary>
+    [Fact]
+    public void SpliceOverwritesTheHookFileInPlaceAndLeavesNoSibling()
+    {
+        string path = HookFile(SquadHookBlockFormat.Codex);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, UserFileContent(SquadHookBlockFormat.Codex));
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Codex);
+
+        Hooks.SpliceFile(SquadHookBlockFormat.Codex, path, pre, post);
+
+        Assert.Equal([path], _files.EnumerateFiles(Base, "*", recursive: true).ToArray());
+    }
+
+    /// <summary>A write that fails leaves the user's earlier hook file as it was, and the failure reaches the caller.</summary>
+    [Fact]
+    public void SpliceWhoseWriteFailsLeavesTheEarlierHookFile()
+    {
+        string path = HookFile(SquadHookBlockFormat.Codex);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        string before = UserFileContent(SquadHookBlockFormat.Codex);
+        _files.WriteAllText(path, before);
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Codex);
+        _files.FailWhen(operation => operation.Name == "WriteAllText", new IOException("disk full"));
+
+        Assert.Throws<IOException>(() => Hooks.SpliceFile(SquadHookBlockFormat.Codex, path, pre, post));
+
+        Assert.Equal(before, _files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void RemoveWhoseWriteFailsLeavesTheSplicedHookFile()
+    {
+        string path = HookFile(SquadHookBlockFormat.Codex);
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Codex);
+        Hooks.SpliceFile(SquadHookBlockFormat.Codex, path, pre, post);
+        string spliced = _files.ReadAllText(path);
+        _files.FailWhen(operation => operation.Name == "WriteAllText", new IOException("disk full"));
+
+        Assert.Throws<IOException>(() => Hooks.RemoveFile(SquadHookBlockFormat.Codex, path));
+
+        Assert.Equal(spliced, _files.ReadAllText(path));
+    }
+
+    [Fact]
+    public void RemoveOfAMissingFileNeedsNoWork()
+    {
+        string path = HookFile(SquadHookBlockFormat.Codex);
+
+        Hooks.RemoveFile(SquadHookBlockFormat.Codex, path);
+
+        Assert.False(_files.FileExists(path));
+        Assert.False(_files.DirectoryExists(Path.GetDirectoryName(path)!));
+    }
+
+    /// <summary>A relative hook path resolves against the process's current directory, as the on-disk write did.</summary>
+    [Fact]
+    public void SpliceOfARelativePathWritesUnderTheCurrentDirectory()
+    {
+        (IReadOnlyList<JsonNode> pre, IReadOnlyList<JsonNode> post) = ManagedEntries(SquadHookBlockFormat.Codex);
+        string relative = Path.Combine("nested", "hooks.json");
+
+        Hooks.SpliceFile(SquadHookBlockFormat.Codex, relative, pre, post);
+
+        Assert.True(_files.FileExists(Path.Combine(Base, relative)));
     }
 }
 
