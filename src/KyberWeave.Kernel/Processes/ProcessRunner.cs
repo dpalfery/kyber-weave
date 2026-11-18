@@ -287,11 +287,11 @@ public static class ProcessRunner
         startInfo.RedirectStandardOutput = false;
         startInfo.RedirectStandardError = false;
 
-        // UseShellExecute is explicitly disabled above, and upstream callers (such as
-        // SquadHarnessLauncher.BuildStartInfo) validate executables and arguments
-        // against command-injection characters before launch.
-        // nosemgrep: csharp.lang.security.injections.os-command.os-command-injection
-        using Process process = Process.Start(startInfo)
+        // UseShellExecute is explicitly disabled above. The one caller that sets the
+        // concatenated Arguments string is SquadHarnessLauncher.BuildStartInfo, for Windows
+        // cmd/bat shims, and it refuses any argument containing a cmd metacharacter
+        // (quotes, %, !, ^, &, |, <, >, ;, $, backtick, parentheses, CR, LF) before launch.
+        using Process process = Process.Start(startInfo) // nosemgrep
                                 ?? throw new InvalidOperationException("The child process could not be started.");
 
         process.WaitForExit();
