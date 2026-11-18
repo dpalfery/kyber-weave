@@ -30,7 +30,7 @@ internal static class UpdateCommandTestServices
         ServiceCollection services = [];
         services.AddSingleton<Func<SelfUpdateHost>>(() => host);
         services.AddSingleton(handler);
-        services.AddSingleton<IProcessEnvironment>(new EmptyEnvironment());
+        services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(readVariable: _ => null));
         services.AddSingleton<ISelfUpdateSystem>(new HandOffSystem(finishingProcess));
         if (arbiterHookRefresher is not null)
             services.AddSingleton<IArbiterHookRefresherFactory>(new FixedRefresherFactory(arbiterHookRefresher));
@@ -39,19 +39,6 @@ internal static class UpdateCommandTestServices
         _ = services.AddWeaveApplication();
         ServiceProvider provider = services.BuildServiceProvider();
         return new UpdateCommand(provider.GetRequiredService<ISelfUpdateService>());
-    }
-
-    private sealed class EmptyEnvironment : IProcessEnvironment
-    {
-        public bool IsInputRedirected => true;
-
-        public string CurrentDirectory => Environment.CurrentDirectory;
-
-        public string HomeDirectory => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-
-        public string TempDirectory => Path.GetTempPath();
-
-        public string? GetVariable(string name) => null;
     }
 
     private sealed class FixedRefresherFactory(IArbiterHookRefresher refresher) : IArbiterHookRefresherFactory

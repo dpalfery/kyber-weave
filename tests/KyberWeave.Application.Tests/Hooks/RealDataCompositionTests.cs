@@ -1,4 +1,5 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Domain.Hooks;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,7 +36,10 @@ public sealed class RealDataCompositionTests : IDisposable
     {
         ServiceCollection services = [];
         _ = services.AddSingleton<IProcessRunner>(runner);
-        _ = services.AddSingleton<IProcessEnvironment>(new SandboxEnvironment(UserHome));
+        _ = services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
+            currentDirectory: UserHome,
+            homeDirectory: UserHome,
+            readVariable: name => name is "HOME" or "USERPROFILE" ? UserHome : null));
         _ = services.AddWeaveApplication();
         return services.BuildServiceProvider();
     }
@@ -83,7 +87,10 @@ public sealed class RealDataCompositionTests : IDisposable
                 run: [kyber-weave-no-such-command-xyz, "{file}"]
             """);
         ServiceCollection services = [];
-        _ = services.AddSingleton<IProcessEnvironment>(new SandboxEnvironment(UserHome));
+        _ = services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
+            currentDirectory: UserHome,
+            homeDirectory: UserHome,
+            readVariable: name => name is "HOME" or "USERPROFILE" ? UserHome : null));
         _ = services.AddWeaveApplication();
         using ServiceProvider provider = services.BuildServiceProvider();
 
@@ -326,17 +333,3 @@ public sealed class RealDataCompositionTests : IDisposable
     }
 }
 
-/// <summary>A process environment whose home is the test's own directory, so no real user file is read.</summary>
-/// <param name="home">The sandboxed home directory.</param>
-internal sealed class SandboxEnvironment(string home) : IProcessEnvironment
-{
-    public string CurrentDirectory => home;
-
-    public bool IsInputRedirected => true;
-
-    public string HomeDirectory => home;
-
-    public string TempDirectory => Path.GetTempPath();
-
-    public string? GetVariable(string name) => name is "HOME" or "USERPROFILE" ? home : null;
-}

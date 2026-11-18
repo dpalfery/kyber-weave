@@ -105,7 +105,7 @@ internal static class SquadTestCommands
 
     public static SquadPackCommand Pack(string? workingDirectory = null) =>
         new(new SquadPackService(
-            new WorkingDirectoryEnvironment(workingDirectory),
+            new FakeProcessEnvironment(currentDirectory: workingDirectory ?? "/kw/work"),
             new FileSquadSourceLocator(),
             new FileSquadPackager()));
 
@@ -163,7 +163,7 @@ internal static class SquadTestCommands
             new SquadModelPresetStore(store.UserPaths),
             new FileSquadDeploymentPlanner(),
             new FileSquadResponseGuidanceStore(),
-            new ReaderEnvironment(environmentReader),
+            new FakeProcessEnvironment(readVariable: environmentReader),
             new FileSquadSourceLocator(),
             new FileSquadSourceLoader(),
             new FileSquadSkillShadowing(),
@@ -279,35 +279,5 @@ internal static class SquadTestCommands
 
         public SquadModelPreset? TryLoad(string name) =>
             new(name, string.Empty, string.Empty, new Dictionary<string, SquadModelProfile>());
-    }
-
-    private sealed class ReaderEnvironment(Func<string, string?>? reader) : IProcessEnvironment
-    {
-        private readonly ProcessEnvironment _real = new();
-
-        public string CurrentDirectory => _real.CurrentDirectory;
-
-        public string HomeDirectory => _real.HomeDirectory;
-
-        public string TempDirectory => _real.TempDirectory;
-
-        public bool IsInputRedirected => _real.IsInputRedirected;
-
-        public string? GetVariable(string name) => (reader ?? _real.GetVariable)(name);
-    }
-
-    private sealed class WorkingDirectoryEnvironment(string? workingDirectory) : IProcessEnvironment
-    {
-        private readonly ProcessEnvironment _real = new();
-
-        public bool IsInputRedirected => _real.IsInputRedirected;
-
-        public string CurrentDirectory => workingDirectory ?? _real.CurrentDirectory;
-
-        public string HomeDirectory => _real.HomeDirectory;
-
-        public string TempDirectory => _real.TempDirectory;
-
-        public string? GetVariable(string name) => _real.GetVariable(name);
     }
 }

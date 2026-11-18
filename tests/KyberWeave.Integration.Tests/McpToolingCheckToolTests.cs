@@ -37,7 +37,7 @@ public sealed class McpToolingCheckToolTests : IDisposable
     private DocsTools Tools(Func<IReadOnlyList<string>, ProcessResult>? codegraph = null)
     {
         IServiceProvider provider = DocsTestCommands.Services(services =>
-            services.AddSingleton<IProcessEnvironment>(new DoctorTestEnvironment(false, _ => null)));
+            services.AddSingleton<IProcessEnvironment>(DoctorTestEnvironment.Create(false, _ => null)));
         return DocsRootRegistry.CreateTools(
             Root,
             codeGraphRefreshEnabled: false,

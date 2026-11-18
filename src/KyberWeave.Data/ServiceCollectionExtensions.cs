@@ -91,6 +91,7 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IWritableFileSystem>(_ => new PhysicalFileSystem());
         services.TryAddSingleton<IFileSystem>(sp => sp.GetRequiredService<IWritableFileSystem>());
         services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
+        services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
         services.TryAddSingleton<IRunStateStore>(sp => new FileRunStateStore(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<ICheckedOutBranchReader>()));

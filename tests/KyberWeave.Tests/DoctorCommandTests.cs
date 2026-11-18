@@ -60,7 +60,7 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(true, _ => null), executor, stubPath);
+        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
 
         DoctorSettings settings = new()
         {
@@ -107,7 +107,7 @@ public sealed class DoctorCommandTests : IDisposable
             throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'.");
         });
 
-        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(true, _ => null), executor, stubPath);
+        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, stubPath);
 
         DoctorSettings settings = new()
         {
@@ -175,7 +175,7 @@ public sealed class DoctorCommandTests : IDisposable
                 ? new ProcessResult(128, string.Empty, "fatal: not a git repository")
                 : throw new InvalidOperationException($"Unexpected child process: '{startInfo.FileName}'."));
 
-        DoctorCommand command = new(DoctorServices.Doctor, new DoctorTestEnvironment(true, _ => null), executor, "kyber-weave-mcp-absent");
+        DoctorCommand command = new(DoctorServices.Doctor, DoctorTestEnvironment.Create(true, _ => null), executor, "kyber-weave-mcp-absent");
 
         DoctorSettings settings = new()
         {
@@ -233,7 +233,7 @@ public sealed class DoctorCommandTests : IDisposable
             _ => throw DoctorHarness.BinaryNotFound());
 
         int exitCode = DoctorAppHarness.Run(
-            new DoctorCommand(DoctorServices.Doctor, new DoctorTestEnvironment(false, _ => null), executor, "kyber-weave-mcp-absent"),
+            new DoctorCommand(DoctorServices.Doctor, DoctorTestEnvironment.Create(false, _ => null), executor, "kyber-weave-mcp-absent"),
             "doctor",
             "--ensure",
             CanonicalPath);

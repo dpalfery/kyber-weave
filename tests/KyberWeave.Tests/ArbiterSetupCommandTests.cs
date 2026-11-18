@@ -10,6 +10,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Credentials;
 using KyberWeave.Core.Processes;
 using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
