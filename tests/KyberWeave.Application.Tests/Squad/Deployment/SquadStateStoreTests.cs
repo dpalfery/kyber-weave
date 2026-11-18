@@ -165,6 +165,19 @@ public sealed class SquadStateStoreTests
     }
 
     [Fact]
+    public void AProjectsDirectoryThatMayNotBeListedIsAnEmptyOne()
+    {
+        string root = _state.CreateRoot("alpha");
+        WriteProjectReceipt(root);
+        string projects = Path.GetDirectoryName(Layout.HomeProjectDirectory(root))!;
+        Files.FailWhen(
+            operation => operation.Name == nameof(InMemoryFileSystem.EnumerateEntries) && operation.Path == projects,
+            new UnauthorizedAccessException("denied"));
+
+        Assert.Empty(Store.ListProjectsWithoutRebuild());
+    }
+
+    [Fact]
     public void AStateDirectoryThatIsALinkOrIsNotARootKeyIsNotAProject()
     {
         string root = _state.CreateRoot("alpha");
