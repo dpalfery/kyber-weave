@@ -21,7 +21,8 @@ public sealed partial class PlanTaskService(
 
     /// <inheritdoc />
     public PlanTaskFileOutcome Run(string repoRoot, IDocsEngineConfig config, string artifactPath, PlanTaskFileMode mode, IPlanTaskAgentPicker? picker = null) =>
-        new PlanTaskFileGenerator(repoRoot, config, files, picker).Run(artifactPath, mode);
+        new PlanTaskFileGenerator(paths.GetFullPath(repoRoot, environment.CurrentDirectory), config, files, picker)
+            .Run(artifactPath, mode);
 
     /// <inheritdoc />
     public IReadOnlyList<string> ActivePlans(string repoRoot, IDocsEngineConfig config)

@@ -90,4 +90,21 @@ public sealed class RepositoryRootOverPathSeamTests
 
         Assert.Equal(["docs/plans/2026-01-01-widget/tasks.md"], plans);
     }
+
+    [Fact]
+    public void PlanTaskServiceRunReadsThePlanUnderTheInjectedWorkingDirectory()
+    {
+        _disk.CreateDirectory($"{WorkingDirectory}/{RelativeRoot}/docs/plans");
+        _disk.WriteAllText(
+            $"{WorkingDirectory}/{RelativeRoot}/docs/plans/2026-01-01-widget.md",
+            "---\nid: plans/2026-01-01-widget\ntitle: Widget\ndoc-type: plan\nstatus: draft\n---\n\n"
+            + "## Tasks\n\n- [ ] 1. Do the thing\n");
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product
+            .WithOntology(new OntologyConfig { DocsRoots = ["docs"] });
+
+        PlanTaskFileOutcome outcome = new PlanTaskService(_store, _paths, _environment)
+            .Run(RelativeRoot, config, "docs/plans/2026-01-01-widget.md", PlanTaskFileMode.Preview);
+
+        Assert.DoesNotContain(outcome.Report.Items, item => item.Code == PlanTaskFileGenerator.PlanNotReadable);
+    }
 }
