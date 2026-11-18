@@ -99,6 +99,7 @@ task's list.
 | `MacKeychainCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security`, through `ICredentialProcessRunner` |
 | `SecretServiceCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool`, through `ICredentialProcessRunner` |
 | `WindowsCredentialStore` | Credentials (`ICredentialStore`) | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; the only code that calls the native credential API; task 4.10 adds its fake and contract suite |
+| `OperatingSystemCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/OperatingSystemCredentialStore.cs` | Picks the store the platform offers from `IProcessEnvironment.OperatingSystem`; calls no credential resource itself |
 | `ProcessEnvironment` | Environment and platform | `KyberWeave.Data` | `Host/ProcessEnvironment.cs` | The environment and platform adapter |
 | `SystemIdGenerator` | Identifiers | `KyberWeave.Data` | `Host/SystemIdGenerator.cs` | GUIDs, random tokens and temp names |
 | `SystemConsole` | Console | `KyberWeave.Data` | `Host/SystemConsole.cs` | Console output, error and input |
