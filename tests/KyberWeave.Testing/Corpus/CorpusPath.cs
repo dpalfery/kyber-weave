@@ -1,0 +1,61 @@
+namespace KyberWeave.Tests.Corpus;
+
+/// <summary>Turns a corpus-relative path into a canonical one, so both corpus implementations agree on what a path means.</summary>
+internal static class CorpusPath
+{
+    private const string Separator = "/";
+
+    /// <summary>Canonicalizes a path relative to the corpus root.</summary>
+    /// <param name="relativePath">The path a test supplied, with either slash.</param>
+    /// <returns>The path with forward slashes, without a leading <c>./</c> or trailing slash.</returns>
+    /// <exception cref="ArgumentException">The path is empty, rooted, or climbs above the root with <c>..</c>.</exception>
+    public static string Normalize(string relativePath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(relativePath);
+
+        string candidate = relativePath.Replace('\\', '/');
+
+        if (candidate.StartsWith('/') || Path.IsPathRooted(relativePath))
+            throw new ArgumentException($"A corpus path must be relative to the repository root; '{relativePath}' is rooted.", nameof(relativePath));
+
+        string[] segments = candidate.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        List<string> kept = new(segments.Length);
+
+        foreach (string segment in segments)
+        {
+            if (segment == ".")
+                continue;
+
+            if (segment == "..")
+            {
+                if (kept.Count == 0)
+                    throw new ArgumentException($"A corpus path must not climb above the repository root; '{relativePath}' does.", nameof(relativePath));
+
+                kept.RemoveAt(kept.Count - 1);
+                continue;
+            }
+
+            kept.Add(segment);
+        }
+
+        if (kept.Count == 0)
+            throw new ArgumentException($"A corpus path must name something under the repository root; '{relativePath}' does not.", nameof(relativePath));
+
+        return string.Join(Separator, kept);
+    }
+
+    /// <summary>Resolves a canonical corpus path against a root.</summary>
+    /// <param name="root">The absolute corpus root.</param>
+    /// <param name="canonicalPath">A path <see cref="Normalize"/> returned.</param>
+    /// <returns>The absolute path.</returns>
+    public static string Resolve(string root, string canonicalPath) =>
+        Path.Combine(root, canonicalPath.Replace('/', Path.DirectorySeparatorChar));
+
+    /// <summary>Gets whether a canonical path names a file directly in a canonical directory.</summary>
+    /// <param name="directory">The directory's canonical path.</param>
+    /// <param name="path">The file's canonical path.</param>
+    /// <returns>True when the file sits directly in the directory.</returns>
+    public static bool IsDirectChild(string directory, string path) =>
+        path.StartsWith(directory + Separator, StringComparison.Ordinal)
+        && path.IndexOf('/', directory.Length + 1) < 0;
+}
