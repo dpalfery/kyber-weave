@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
@@ -1024,7 +1025,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
         Assert.False(
             SquadMcpGrantProjection.GrantsKyberWeave(source, denied, SquadTarget.Antigravity),
@@ -1084,7 +1085,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     public async Task AnMcpDeclarationWithoutTheKyberWeaveServerGrantsOnlyOrchestratorExcludedServers()
     {
         using McpDeclarationCorpusFixture fixture = McpDeclarationCorpusFixture.WithServers("other-server");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         Assert.Equal(["other-server"], SquadMcpDeclaration.ServerNames(source));
 
         // The profiles still entitle agents, so a passing render cannot be explained by an empty
@@ -1176,7 +1177,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
         Assert.False(
             SquadMcpGrantProjection.GrantsKyberWeave(source, denied, SquadTarget.Antigravity),
@@ -1219,7 +1220,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithServersAndFileReadDeniedAgent("review-lens", "codegraph");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         // Promote the read-denied profile to a shell gap as well: execute allowed while write
@@ -1280,7 +1281,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         using JsonDocument declaration = JsonDocument.Parse("{}");
@@ -1316,7 +1317,7 @@ public sealed class AntigravityRendererContractTests : IDisposable
     {
         using McpDeclarationCorpusFixture fixture =
             McpDeclarationCorpusFixture.WithFileReadDeniedAgent("review-lens");
-        SquadSource source = SquadSourceLoader.Load(fixture.ProductRoot);
+        SquadSource source = RealSquadServices.Load(fixture.ProductRoot);
         SquadAgent denied = Assert.Single(source.Agents, agent => agent.Name == "review-lens");
 
         Dictionary<string, SquadCapabilityProfile> profiles = new(

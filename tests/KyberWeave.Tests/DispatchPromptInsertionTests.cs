@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Arbiter.Hooks;
@@ -643,7 +644,7 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     [Fact]
     public void AFreshHostWithTheArbiterOffInstallsTheDispatchHookOnTheDispatchersOnly()
     {
-        SquadSource source = SquadSourceLoader.Load(ArbiterSquadFixturePath());
+        SquadSource source = RealSquadServices.Load(ArbiterSquadFixturePath());
         IReadOnlyList<SquadArbiterHook> hooks = ArbiterHookWiring.BuildHooks(
             source, new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: 5), SquadDeploymentScope.Project);
 

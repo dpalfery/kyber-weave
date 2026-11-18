@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Tests.Fakes;
 using System.Text.RegularExpressions;
@@ -42,7 +43,7 @@ public sealed class SquadDocsHarvestContractTests
 
     private static string DocsDevDescription()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == "docs-dev");
         return agent.Description;
     }
@@ -212,7 +213,7 @@ public sealed class SquadDocsHarvestContractTests
     [Fact]
     public void BugCrusherDelegatesToDocsDev()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == "bug-crusher");
 
         Assert.Contains("docs-dev", agent.DelegatesTo);
@@ -461,7 +462,7 @@ public sealed class SquadDocsHarvestContractTests
     [Fact]
     public void DocumentationProfileIsConsumedOnlyByDocsDevAndGrantsExecute()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         string[] expectedConsumers = ["docs-dev"];
         string[] consumers = source.Agents
             .Where(agent => agent.CapabilityProfile == "documentation")

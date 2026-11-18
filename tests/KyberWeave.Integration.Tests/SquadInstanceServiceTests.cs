@@ -415,7 +415,7 @@ public sealed class SquadInstanceServiceTests : IDisposable
 
         public SquadInstanceService CreateService()
         {
-            return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots, new FileSquadInstanceLinkSync(), new PhysicalSquadFileAccess(), new PhysicalPathResolver(new PhysicalFileSystem()), new ProcessEnvironment());
+            return new SquadInstanceService(LifecycleService, PresetStore, LinkFileSystem, GlobalRoots, RealSquadServices.InstanceLinkSync(), new PhysicalSquadFileAccess(), new PhysicalPathResolver(new PhysicalFileSystem()), new ProcessEnvironment());
         }
     }
     private sealed class FakeGlobalRootResolver(string baseGlobalRoot) : ISquadGlobalRootResolver

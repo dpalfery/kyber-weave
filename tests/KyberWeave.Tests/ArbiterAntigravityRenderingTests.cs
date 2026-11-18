@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.Json.Nodes;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
@@ -143,7 +144,7 @@ public sealed class ArbiterAntigravityRenderingTests : IDisposable
         IReadOnlyList<SquadDegradationRecord> records = result.Degradations
             .Where(d => string.Equals(d.Code, "arbiter-not-enforced", StringComparison.Ordinal))
             .ToList();
-        IReadOnlyList<string> agents = SquadSourceLoader.Load(_fixture.Path).Agents
+        IReadOnlyList<string> agents = RealSquadServices.Load(_fixture.Path).Agents
             .Select(agent => agent.Name)
             .Order(StringComparer.Ordinal)
             .ToList();

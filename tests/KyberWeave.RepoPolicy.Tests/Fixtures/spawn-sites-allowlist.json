@@ -584,18 +584,6 @@
       "bound": "Fake: the start information is handed to a scripted process runner that records the request and starts nothing."
     },
     {
-      "file": "tests/KyberWeave.Tests/SquadHarnessLauncherTests.cs",
-      "text": "ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(",
-      "count": 8,
-      "bound": "Builds only: SquadHarnessLauncher.BuildStartInfo returns a ProcessStartInfo, and this file never starts it (no Process.Start, RunInteractive or ProcessRunner call)."
-    },
-    {
-      "file": "tests/KyberWeave.Tests/SquadHarnessLauncherTests.cs",
-      "text": "SquadHarnessLauncher.BuildStartInfo(",
-      "count": 9,
-      "bound": "Builds only: SquadHarnessLauncher.BuildStartInfo returns a ProcessStartInfo, and this file never starts it (no Process.Start, RunInteractive or ProcessRunner call)."
-    },
-    {
       "file": "tests/KyberWeave.Integration.Tests/SquadPresetCliTests.cs",
       "text": "ProcessStartInfo startInfo = new(host)",
       "count": 1,
@@ -710,12 +698,6 @@
       "bound": "Builds only; nothing starts on this line. Started through IProcessExecutor.Run; every ProcessExecutor is bounded (DefaultTimeout 60 s, or the WithTimeout value) at IProcessExecutor.cs:45."
     },
     {
-      "file": "src/KyberWeave.Data/Squad/Instances/ProcessSquadHarnessLauncher.cs",
-      "text": "SquadHarnessLauncher.BuildStartInfo(row, instanceRoot, args, getEnv, findOnPath, isWindows);",
-      "count": 1,
-      "bound": "Builds only; nothing starts here. The default runner is ProcessRunner.RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
-    },
-    {
       "file": "src/KyberWeave.Data/Utilities/StatusLineVersionProbeRunner.cs",
       "text": "return static (startInfo, standardInput) => ProcessRunner.Run(startInfo, standardInput, VersionProbeTimeout);",
       "count": 1,
@@ -801,21 +783,9 @@
     },
     {
       "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
-      "text": "public static ProcessStartInfo BuildStartInfo(",
-      "count": 2,
-      "bound": "Method definitions (two overloads). They start nothing; they return a ProcessStartInfo."
-    },
-    {
-      "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
       "text": "ProcessStartInfo startInfo = new()",
       "count": 1,
       "bound": "Builds only; nothing starts on this line. Started by RunInteractive (ProcessRunner.cs:177), unbounded by design (see that entry)."
-    },
-    {
-      "file": "src/KyberWeave.Data/Squad/Instances/SquadHarnessLauncher.cs",
-      "text": "return BuildStartInfo(",
-      "count": 1,
-      "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."
     },
     {
       "file": "src/KyberWeave.Cli/Commands/Squad/Infrastructure/IProcessExecutor.cs",
@@ -863,7 +833,7 @@
       "file": "src/KyberWeave.Data/Squad/Instances/ProcessSquadHarnessLauncher.cs",
       "text": "public int RunInteractive(ProcessStartInfo startInfo) => ProcessRunner.RunInteractive(startInfo);",
       "count": 1,
-      "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console. This line only selects the delegate; the spawn happens at line 183 (runner(startInfo)), starting the harness built at line 161 from SquadHarnessLauncher.BuildStartInfo. An injected _runner replaces it in tests."
+      "bound": "unbounded by design: user-attended interactive harness session (`squad run`); ends when the user ends it; a timeout would kill the live session; child inherits the console. This line only selects the delegate; the spawn happens at line 183 (runner(startInfo)), starting the harness built at line 161 from SquadHarnessLauncher.PrepareLaunch. An injected _runner replaces it in tests."
     },
     {
       "file": "src/KyberWeave.Application/Doctor/CodeGraphIndexProvisioner.cs",
