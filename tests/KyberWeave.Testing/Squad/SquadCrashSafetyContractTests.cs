@@ -77,6 +77,8 @@ public abstract class SquadCrashSafetyContractTests
 
         IReadOnlyDictionary<string, SquadTreeEntry> oldTree = fixture.Capture();
         IReadOnlyList<string> faultPoints = fixture.ExecuteClean(flow);
+        SquadCrashRunGuard.RequireFaultPoints(flow, faultPoints);
+        SquadCrashRunGuard.RequireCleanRunChangedTheTree(flow, TreeDifference(oldTree, fixture.Capture()));
         fixture.Restore(oldTree);
 
         List<(SquadCrashCase Case, string Detail)> failures = [];
@@ -116,12 +118,8 @@ public abstract class SquadCrashSafetyContractTests
         IReadOnlyList<string> faultPoints = fixture.ExecuteClean(flow);
         IReadOnlyDictionary<string, SquadTreeEntry> newTree = fixture.Capture();
 
-        Assert.True(
-            faultPoints.Count > 0,
-            $"{flow} reported no fault point, so the run would prove nothing. The flow must report one per durable step it takes.");
-        Assert.True(
-            TreeDifference(oldTree, newTree) is not null,
-            "The clean flow left the tree unchanged.");
+        SquadCrashRunGuard.RequireFaultPoints(flow, faultPoints);
+        SquadCrashRunGuard.RequireCleanRunChangedTheTree(flow, TreeDifference(oldTree, newTree));
 
         List<(SquadCrashCase Case, string Detail)> failures = [];
         foreach (string faultPoint in faultPoints)
