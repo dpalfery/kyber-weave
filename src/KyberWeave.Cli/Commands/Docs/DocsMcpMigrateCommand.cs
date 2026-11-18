@@ -34,9 +34,10 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// — <c>.cursor/mcp.json</c> — is the user-scope file ADR 0052 decision 2 says is never read or
 /// written. Containment alone is therefore not the guarantee this paragraph states, and a root that
 /// <em>is</em> the operator's home directory is refused before the first read, with no byte written
-/// and no receipt. The home is resolved through an injected reader — as
-/// <c>IRepositoryDoctor.Run</c> does, defaulting to the process environment — so the refusal is
-/// testable without touching the developer's own home.
+/// and no receipt. Both sides of that comparison come from seams — the home directory from
+/// <see cref="IProcessEnvironment" /> and the canonical spelling from <see cref="IPathResolver" /> —
+/// so the refusal is testable without touching the developer's own home, and a root the path seam
+/// cannot resolve is refused rather than assumed safe.
 /// </para>
 /// </remarks>
 public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
