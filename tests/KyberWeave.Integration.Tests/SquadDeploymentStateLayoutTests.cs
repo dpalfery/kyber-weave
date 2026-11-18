@@ -370,9 +370,10 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt));
         SquadTransaction activeTransaction = new(store, blocker);
-        Task activeExecution = Task.Run(() => activeTransaction.Execute(activePlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task activeExecution = BlockedTransaction.Start(() => activeTransaction.Execute(activePlan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            activeExecution,
             "The first case-distinct root did not acquire its physical-root lease.");
 
         Exception? siblingException;
@@ -442,9 +443,10 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt));
         SquadTransaction activeTransaction = new(store, blocker);
-        Task activeExecution = Task.Run(() => activeTransaction.Execute(activePlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task activeExecution = BlockedTransaction.Start(() => activeTransaction.Execute(activePlan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            activeExecution,
             "The physical-root alias did not acquire its shared lease.");
 
         Exception? aliasException;

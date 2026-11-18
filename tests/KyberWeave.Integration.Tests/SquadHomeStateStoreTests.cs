@@ -442,11 +442,12 @@ public sealed class SquadHomeStateStoreTests
         SquadDeploymentPlan contenderPlan)
     {
         using LeaseHoldingObserver holder = new LeaseHoldingObserver(SquadTransactionStepKind.IntentWritten);
-        Task active = Task.Run(() => new SquadTransaction(store, holder).Execute(activePlan));
+        Task active = BlockedTransaction.Start(() => new SquadTransaction(store, holder).Execute(activePlan));
         try
         {
-            Assert.True(
-                holder.Reached.Wait(TimeSpan.FromSeconds(5)),
+            BlockedTransaction.WaitForStep(
+                holder.Reached,
+                active,
                 "The active transaction did not reach its durable intent, so it never held a lease.");
             return Record.Exception(() => new SquadTransaction(store).Execute(contenderPlan));
         }
