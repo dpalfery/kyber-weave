@@ -1,14 +1,12 @@
-using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fakes;
-using KyberWeave.Tests.Fixtures;
+using KyberWeave.Testing.Squad;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad;
 
 /// <summary>
 /// Pins the Global-scope Arbiter hook contract: an enabled Arbiter render at global scope
@@ -22,6 +20,8 @@ public sealed class ArbiterGlobalHookFileRenderingTests
 {
     private static readonly DateTimeOffset InstalledAt = new(2026, 11, 05, 12, 00, 00, TimeSpan.Zero);
 
+    private readonly InMemorySquadState _state = new();
+
     [Theory]
     [InlineData(SquadTarget.Codex, SquadHookBlockFormat.Codex, "hooks.json")]
     [InlineData(SquadTarget.Cursor, SquadHookBlockFormat.Cursor, "hooks.json")]
@@ -33,15 +33,14 @@ public sealed class ArbiterGlobalHookFileRenderingTests
         SquadHookBlockFormat format,
         string relativePath)
     {
-        using TempDirectory fixture = new();
-        string home = Path.Combine(fixture.Path, "home");
-        Directory.CreateDirectory(home);
+        string root = _state.CreateRoot("project");
+        string home = _state.Layout.PhysicalOf(_state.Layout.Home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
 
         SquadRenderedBlock block = CreateBlock(target, format);
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Global,
             Lock(),
             [],
@@ -51,15 +50,15 @@ public sealed class ArbiterGlobalHookFileRenderingTests
             globalRoots: globalRoots,
             blocks: [block]);
 
-        RealSquadDeployment.Transaction(Store(fixture.Path)).Execute(plan);
+        _state.Transaction().Execute(plan);
 
         string actualPath = Path.Combine(
             globalRoots.ResolveGlobalRoot(target),
             relativePath.Replace('/', Path.DirectorySeparatorChar));
 
-        Assert.True(File.Exists(actualPath), $"Expected global hook file '{actualPath}' to exist.");
+        Assert.True(_state.Files.FileExists(actualPath), $"Expected global hook file '{actualPath}' to exist.");
 
-        string content = File.ReadAllText(actualPath);
+        string content = _state.Files.ReadAllText(actualPath);
         Assert.Contains($"kyber-weave-arbiter hook --harness {SquadTargetCatalog.GetToken(target)} --scope global", content, StringComparison.Ordinal);
         Assert.DoesNotContain("project-only", content, StringComparison.Ordinal);
     }
@@ -67,19 +66,18 @@ public sealed class ArbiterGlobalHookFileRenderingTests
     [Fact]
     public void CreateInstall_GlobalScope_KeepsUserHooksAndOnlyOwnsTheManagedEntries()
     {
-        using TempDirectory fixture = new();
-        string home = Path.Combine(fixture.Path, "home");
-        Directory.CreateDirectory(home);
+        string root = _state.CreateRoot("project");
+        string home = _state.Layout.PhysicalOf(_state.Layout.Home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
 
         string hookPath = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Cursor), "hooks.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
-        File.WriteAllText(hookPath, "{ \"hooks\": { \"preToolUse\": [{ \"command\": \"user-own-lint\", \"matcher\": \"Edit\", \"timeout\": 7, \"failClosed\": false }], \"postToolUse\": [] } }");
+        _state.Files.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        _state.Files.WriteAllText(hookPath, "{ \"hooks\": { \"preToolUse\": [{ \"command\": \"user-own-lint\", \"matcher\": \"Edit\", \"timeout\": 7, \"failClosed\": false }], \"postToolUse\": [] } }");
 
         SquadRenderedBlock block = CreateBlock(SquadTarget.Cursor, SquadHookBlockFormat.Cursor);
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Global,
             Lock(),
             [],
@@ -89,9 +87,9 @@ public sealed class ArbiterGlobalHookFileRenderingTests
             globalRoots: globalRoots,
             blocks: [block]);
 
-        RealSquadDeployment.Transaction(Store(fixture.Path)).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        string content = File.ReadAllText(hookPath);
+        string content = _state.Files.ReadAllText(hookPath);
         Assert.Contains("user-own-lint", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
     }
@@ -99,19 +97,17 @@ public sealed class ArbiterGlobalHookFileRenderingTests
     [Fact]
     public void CreateInstallAndUninstall_GlobalFactory_OwnsSubagentStopAndKeepsTheUsersOwn()
     {
-        using TempDirectory fixture = new();
-        string home = Path.Combine(fixture.Path, "home");
-        Directory.CreateDirectory(home);
+        string home = _state.Layout.PhysicalOf(_state.Layout.Home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = Store(fixture.Path);
+        SquadStateStore store = _state.Store;
 
         string hookPath = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Factory), "hooks.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
-        File.WriteAllText(hookPath, """
+        _state.Files.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        _state.Files.WriteAllText(hookPath, """
             {"SubagentStop": [{"hooks": [{"type": "command", "command": "user-own-stop-notifier"}]}]}
             """);
 
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateInstall(
+        _state.Transaction().Execute(_state.Planner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -122,7 +118,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
             globalRoots: globalRoots,
             blocks: [CreateBlock(SquadTarget.Factory, SquadHookBlockFormat.Factory)]));
 
-        JsonObject installed = Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(hookPath)));
+        JsonObject installed = Assert.IsType<JsonObject>(JsonNode.Parse(_state.Files.ReadAllText(hookPath)));
         JsonArray stop = Assert.IsType<JsonArray>(installed["SubagentStop"]);
         Assert.Equal(2, stop.Count);
         JsonObject squadStop = Assert.IsType<JsonObject>(stop[1]);
@@ -131,13 +127,13 @@ public sealed class ArbiterGlobalHookFileRenderingTests
         Assert.Contains("user-own-stop-notifier", stop.ToJsonString(), StringComparison.Ordinal);
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
+        _state.Transaction().Execute(_state.Planner.CreateUninstall(
             home,
             SquadDeploymentScope.Global,
             receipt,
             globalRoots));
 
-        string remaining = File.ReadAllText(hookPath);
+        string remaining = _state.Files.ReadAllText(hookPath);
         Assert.DoesNotContain("kyber-weave-arbiter hook --harness factory", remaining, StringComparison.Ordinal);
         Assert.Contains("user-own-stop-notifier", remaining, StringComparison.Ordinal);
     }
@@ -151,16 +147,13 @@ public sealed class ArbiterGlobalHookFileRenderingTests
     [Fact]
     public void CreateUninstall_StaleAntigravityRecordAtAgentsHooksJson_RemovesTheStaleGroup()
     {
-        using TempDirectory fixture = new();
-        FakeSquadUserPaths userPaths = new(fixture.Path);
-        string home = userPaths.HomeDirectory;
-        Directory.CreateDirectory(home);
+        string home = _state.Layout.PhysicalOf(_state.Layout.Home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = RealSquadState.Store(userPaths);
+        SquadStateStore store = _state.Store;
 
         SquadRenderedBlock current = CreateBlock(SquadTarget.Antigravity, SquadHookBlockFormat.Antigravity);
         SquadRenderedBlock stale = current with { RelativePath = ".agents/hooks.json" };
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateInstall(
+        _state.Transaction().Execute(_state.Planner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -172,17 +165,17 @@ public sealed class ArbiterGlobalHookFileRenderingTests
             blocks: [stale]));
 
         string staleFile = Path.Combine(globalRoots.ResolveGlobalRoot(SquadTarget.Antigravity), ".agents", "hooks.json");
-        Assert.Contains("kyber-arbiter", File.ReadAllText(staleFile), StringComparison.Ordinal);
+        Assert.Contains("kyber-arbiter", _state.Files.ReadAllText(staleFile), StringComparison.Ordinal);
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
         Assert.Equal(".agents/hooks.json", Assert.Single(receipt.Blocks).RelativePath);
 
-        RealSquadDeployment.Transaction(store).Execute(RealSquadDeployment.Planner.CreateUninstall(
+        _state.Transaction().Execute(_state.Planner.CreateUninstall(
             home,
             SquadDeploymentScope.Global,
             receipt,
             globalRoots));
 
-        Assert.False(File.Exists(staleFile), "Uninstall left the stale kyber-arbiter group behind.");
+        Assert.False(_state.Files.FileExists(staleFile), "Uninstall left the stale kyber-arbiter group behind.");
         Assert.Null(store.ReadReceipt(home, SquadDeploymentScope.Global));
     }
 
@@ -271,9 +264,6 @@ public sealed class ArbiterGlobalHookFileRenderingTests
             });
         return group;
     }
-
-    private static SquadStateStore Store(string applicationData) =>
-        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(

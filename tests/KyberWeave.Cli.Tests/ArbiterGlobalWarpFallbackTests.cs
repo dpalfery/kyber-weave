@@ -1,24 +1,22 @@
-using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Warp has no hook primitive. Under a global-scope Arbiter install it stays advisory and
 /// fallback-only, and the install must write an explicit Arbiter MCP entry into the target's own
 /// <c>.warp/.mcp.json</c> without clobbering any foreign JSON the user already kept there.
 /// </summary>
-public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
+public sealed class ArbiterGlobalWarpFallbackTests
 {
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose() => _temp.Dispose();
+    private readonly InMemorySquadState _state = new();
 
     [Fact]
     public void TargetDegradations_GlobalScope_WarpUsesFallbackOnlyReason()
@@ -35,9 +33,9 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
     [InlineData(false)]
     public void GlobalWarpInstall_WritesNothingAndReportsMcpRegistration(bool withForeignConfig)
     {
-        string home = Path.Combine(_temp.Path, "home");
+        string home = _state.Layout.PhysicalOf(_state.Layout.Home);
         string warpRoot = Path.Combine(home, ".warp");
-        Directory.CreateDirectory(warpRoot);
+        _state.Files.CreateDirectory(warpRoot);
 
         string mcpConfigPath = Path.Combine(warpRoot, ".mcp.json");
         byte[] originalBytes = Encoding.UTF8.GetBytes(
@@ -58,18 +56,15 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
 
         if (withForeignConfig)
         {
-            File.WriteAllBytes(mcpConfigPath, originalBytes);
+            _state.Files.WriteAllBytes(mcpConfigPath, originalBytes);
         }
 
-        using FakeSquadReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
         FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "app-data"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(
+            _state,
+            releaseSource,
+            renderer,
             globalRoots: new FixedGlobalRoots(home),
             isInteractive: false);
 
@@ -89,11 +84,11 @@ public sealed class ArbiterGlobalWarpFallbackTests : IDisposable
 
         if (withForeignConfig)
         {
-            Assert.Equal(originalBytes, File.ReadAllBytes(mcpConfigPath));
+            Assert.Equal(originalBytes, _state.Files.ReadAllBytes(mcpConfigPath));
         }
         else
         {
-            Assert.False(File.Exists(mcpConfigPath), $"global Warp install must not create {mcpConfigPath}");
+            Assert.False(_state.Files.FileExists(mcpConfigPath), $"global Warp install must not create {mcpConfigPath}");
         }
     }
 

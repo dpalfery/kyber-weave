@@ -1,12 +1,10 @@
-using System.Text.Json.Nodes;
-using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fixtures;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// A background sub-agent reports back through <c>SubagentHandback</c>, not through the dispatcher's
@@ -20,26 +18,34 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
 
     private static readonly string AgentFile = Path.Combine(".claude", "agents", "csharp-dev.md");
 
-    private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
+    private readonly InMemoryFileSystem _files = new();
+    private readonly ArbiterSquadFixture _fixture;
+    private readonly ArbiterGlobalHookScenario _scenario = ArbiterGlobalHookScenario.Create();
 
-    public void Dispose() => _fixture.Dispose();
+    public ArbiterGlobalHandbackTests() => _fixture = ArbiterSquadFixture.CreateInMemory(_files);
+
+    public void Dispose()
+    {
+        _fixture.Dispose();
+        _scenario.Dispose();
+    }
 
     [Fact]
     public async Task RenderAsync_GlobalClaudeBlock_RecordsSubagentHandbackOnPreToolUseOnly()
     {
         string home = Path.Combine(_fixture.Path, "home");
         string claudeRoot = Path.Combine(home, "custom-claude");
-        Directory.CreateDirectory(claudeRoot);
+        _files.CreateDirectory(claudeRoot);
         SquadGlobalRoots globalRoots = new(
             name => string.Equals(name, "CLAUDE_CONFIG_DIR", StringComparison.Ordinal) ? claudeRoot : null,
             home);
 
-        SquadRenderResult result = await new ClaudeRenderer().RenderAsync(new SquadRenderRequest(
+        SquadRenderResult result = await new ClaudeRenderer().RenderAsync(_fixture.Prepare(new SquadRenderRequest(
             SourceDirectory: _fixture.Path,
             Targets: [SquadTarget.Claude],
             Scope: SquadDeploymentScope.Global,
             GlobalRoots: globalRoots,
-            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5)).Prepared());
+            Arbiter: new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: 5))));
 
         Assert.True(result.Success, string.Join("; ", result.Errors));
         SquadRenderedBlock block = Assert.Single(result.Blocks!, b => b.Target == "claude");
@@ -50,45 +56,34 @@ public sealed class ArbiterGlobalHandbackTests : IDisposable
     }
 
     [Fact]
-    public async Task GlobalScope_WhenNoProjectHookCoversTheHandback_ClaimsAndEvaluatesIt()
+    public void GlobalScope_WhenNoProjectHookCoversTheHandback_ClaimsAndEvaluatesIt()
     {
-        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
-        string payload = Handback(scenario.ProjectRoot);
+        string payload = HandbackPayload();
 
-        HookRun run = await scenario.RunGlobal(payload);
+        HookRun run = _scenario.RunGlobal(payload);
 
         Assert.Equal(0, run.Exit);
-        string claim = ArbiterGlobalHookScenario.ClaimPath(scenario.ProjectRoot, ToolUseId, "handback");
-        Assert.True(File.Exists(claim), $"The user-level hook must claim the hand-back: missing {claim}. Stderr: {run.Stderr}");
-        Assert.Equal("global", (await File.ReadAllTextAsync(claim)).Trim());
+        Assert.True(_scenario.ClaimExists(ToolUseId, "handback"), $"The user-level hook must claim the hand-back. Stderr: {run.Stderr}");
+        Assert.Equal("global", _scenario.ClaimOwner(ToolUseId, "handback"));
     }
 
     [Fact]
-    public async Task GlobalScope_WhenTheAgentFileRecordsTheHandbackAndClaimedIt_DefersToIt()
+    public void GlobalScope_WhenTheAgentFileRecordsTheHandbackAndClaimedIt_DefersToIt()
     {
-        using ArbiterGlobalHookScenario scenario = ArbiterGlobalHookScenario.Create();
-        scenario.WriteProjectFile(
+        _scenario.WriteProjectFile(
             AgentFile,
             ArbiterGlobalHookScenario.HookDocument(
                 "csharp-dev",
                 ArbiterGlobalHookScenario.CsharpDevCommand,
                 ("PreToolUse", HandbackMatcher)));
-        ArbiterGlobalHookScenario.WriteClaim(scenario.ProjectRoot, ToolUseId, "handback", "project");
+        _scenario.WriteClaim(ToolUseId, "handback", "project");
 
-        HookRun run = await scenario.RunGlobal(Handback(scenario.ProjectRoot));
+        HookRun run = _scenario.RunGlobal(HandbackPayload());
 
         Assert.Equal(0, run.Exit);
         Assert.Contains(ArbiterGlobalHookScenario.DeferredLog, run.Stderr, StringComparison.Ordinal);
-        string claim = ArbiterGlobalHookScenario.ClaimPath(scenario.ProjectRoot, ToolUseId, "handback");
-        Assert.Equal("project", (await File.ReadAllTextAsync(claim)).Trim());
+        Assert.Equal("project", _scenario.ClaimOwner(ToolUseId, "handback"));
     }
 
-    private static string Handback(string root)
-    {
-        string fixturePath = "tests/KyberWeave.Application.Tests/Fixtures/arbiter-hooks/claude/pre-subagent-handback.json";
-        JsonObject payload = JsonNode.Parse(CheckoutCorpusSource.Checkout.ReadText(fixturePath))!.AsObject();
-        payload["cwd"] = root;
-        payload["transcript_path"] = Path.Combine(root, "transcript.jsonl");
-        return payload.ToJsonString();
-    }
+    private string HandbackPayload() => ArbiterGlobalHookScenario.Handback(_scenario.ProjectRoot);
 }
