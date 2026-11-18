@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -16,11 +17,11 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ReviewGateWorkflowTemplateTests
 {
-    private static readonly string TemplatePath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "templates", "github-actions", "kyber-weave-review-gate.yml");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static readonly string ReadmePath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "templates", "github-actions", "README.md");
+    private const string TemplatePath = "templates/github-actions/kyber-weave-review-gate.yml";
+
+    private const string ReadmePath = "templates/github-actions/README.md";
 
     private static readonly Regex FullCommitSha = new(@"@[0-9a-f]{40}\z", RegexOptions.CultureInvariant);
 
@@ -167,7 +168,7 @@ public sealed class ReviewGateWorkflowTemplateTests
     [Fact]
     public void TheTemplateReadmeListsTheReviewGateWorkflow()
     {
-        string readme = File.ReadAllText(ReadmePath);
+        string readme = Corpus.ReadText(ReadmePath);
 
         Assert.Contains("kyber-weave-review-gate.yml", readme, StringComparison.Ordinal);
     }
@@ -175,11 +176,11 @@ public sealed class ReviewGateWorkflowTemplateTests
     private static YamlMappingNode LoadTemplate()
     {
         Assert.True(
-            File.Exists(TemplatePath),
+            Corpus.Exists(TemplatePath),
             $"The review-gate workflow template is missing at '{TemplatePath}'.");
 
         YamlStream stream = new();
-        using StringReader reader = new(File.ReadAllText(TemplatePath));
+        using StringReader reader = new(Corpus.ReadText(TemplatePath));
         stream.Load(reader);
 
         Assert.Single(stream.Documents);
