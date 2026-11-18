@@ -138,7 +138,7 @@ public sealed partial class DocumentIndex
         {
             List<CodeJoin> joins = new();
 
-            foreach (string keyword in doc.Keywords)
+            foreach (string keyword in doc.Keywords())
             {
                 string trimmed = keyword.Trim();
                 if (trimmed.Length == 0) continue;
@@ -151,7 +151,7 @@ public sealed partial class DocumentIndex
                 if (!list.Contains(doc)) list.Add(doc);
             }
 
-            foreach (string symbol in doc.CodeRefs)
+            foreach (string symbol in doc.CodeRefs())
             {
                 foreach (string key in SymbolKeys(symbol))
                 {
@@ -546,7 +546,7 @@ public sealed partial class DocumentIndex
             score += ComponentWeight;
         }
 
-        foreach (string keyword in doc.Keywords)
+        foreach (string keyword in doc.Keywords())
         {
             if (string.Equals(keyword, query, StringComparison.OrdinalIgnoreCase))
             {
@@ -555,7 +555,7 @@ public sealed partial class DocumentIndex
             }
         }
 
-        foreach (string reference in doc.CodeRefs)
+        foreach (string reference in doc.CodeRefs())
         {
             if (SymbolKeys(reference).Contains(query, StringComparer.Ordinal))
             {
@@ -683,10 +683,10 @@ public sealed partial class DocumentIndex
         Func<string, double>? weight = corpus is null ? null : corpus.IdentityTokenWeight;
 
         double keywordCoverage = 0;
-        if (doc.Keywords.Count > 0)
+        if (doc.Keywords().Count > 0)
         {
             double matched = 0;
-            foreach (string keyword in doc.Keywords)
+            foreach (string keyword in doc.Keywords())
             {
                 double cov = Coverage(keyword, queryVector, weight);
                 if (cov > 0)

@@ -198,7 +198,7 @@ public sealed partial class ClaimExtractor
             document.BodyStartLine + endBodyLine - 1,
             IgnoreFor(startBodyLine, endBodyLine, ignores),
             code ? contextDetail : null,
-            document.CodeRefs));
+            document.CodeRefs()));
     }
 
     private static IReadOnlyList<SectionAtLine> ReadSections(MarkdownDocument syntax, string markdown) =>

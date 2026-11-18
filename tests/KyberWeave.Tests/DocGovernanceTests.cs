@@ -563,7 +563,7 @@ public class DocSpecValidatorTests
         Assert.Equal(DocType.Architecture, doc.DocType);
         Assert.Equal(DocStatus.Current, doc.Status);
         Assert.Equal("1-Presentation/Api", doc.Frontmatter.SourceRoot);
-        Assert.Equal(["SomeService"], doc.CodeRefs);
+        Assert.Equal(["SomeService"], doc.CodeRefs());
         Assert.Equal(["GET /api/thing"], doc.ApiEndpoints);
     }
 
@@ -589,7 +589,7 @@ public class DocSpecValidatorTests
 
         DocumentModel doc = Assert.Single(fixture.LoadSubjects());
 
-        Assert.Equal(["dashboard", "tauri"], doc.Keywords);
+        Assert.Equal(["dashboard", "tauri"], doc.Keywords());
         Assert.NotNull(doc.Frontmatter.Keywords);
         Assert.Equal(["dashboard", "tauri"], doc.Frontmatter.Keywords);
     }
@@ -616,7 +616,7 @@ public class DocSpecValidatorTests
 
         DocumentModel doc = Assert.Single(fixture.LoadSubjects());
 
-        Assert.Equal(["dashboard", "tauri"], doc.Keywords);
+        Assert.Equal(["dashboard", "tauri"], doc.Keywords());
         Assert.NotNull(doc.Frontmatter.Aliases);
         Assert.Equal(["dashboard", "tauri"], doc.Frontmatter.Aliases);
     }

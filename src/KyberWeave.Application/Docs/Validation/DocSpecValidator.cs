@@ -375,10 +375,10 @@ public sealed class DocSpecValidator
             case DocType.Architecture:
                 if (!string.IsNullOrWhiteSpace(fm.SourceRoot))
                 {
-                    RequireList(doc.CodeRefs, "code-refs", doc, report,
+                    RequireList(doc.CodeRefs(), "code-refs", doc, report,
                         "An architecture document with a source-root must name the symbols it describes.");
                 }
-                else if (doc.CodeRefs.Count > 0)
+                else if (doc.CodeRefs().Count > 0)
                 {
                     RequireValue(fm.SourceRoot, "source-root", doc, report);
                 }
@@ -388,7 +388,7 @@ public sealed class DocSpecValidator
             case DocType.Runbook:
                 if (!string.IsNullOrWhiteSpace(fm.SourceRoot))
                 {
-                    RequireList(doc.CodeRefs, "code-refs", doc, report,
+                    RequireList(doc.CodeRefs(), "code-refs", doc, report,
                         "A runbook with a source-root must name the symbols it operates, or drop source-root if it is process-only.");
                 }
 

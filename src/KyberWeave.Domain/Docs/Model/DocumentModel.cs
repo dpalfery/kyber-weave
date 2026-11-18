@@ -163,44 +163,9 @@ public sealed class DocumentModel
     public string Subject =>
         string.IsNullOrWhiteSpace(Frontmatter.Id) ? RelativePath : Frontmatter.Id!;
 
-    public IReadOnlyList<string> CodeRefs
-    {
-        get
-        {
-            List<string> items = new();
-            if (Frontmatter.CodeRefs is not null)
-            {
-                items.AddRange(Frontmatter.CodeRefs);
-            }
-
-            AppendSectionCodeRefs(items);
-            return items;
-        }
-    }
-
     public IReadOnlyList<string> ApiEndpoints => Frontmatter.ApiEndpoints ?? [];
     public IReadOnlyList<string> DecidedBy => Frontmatter.DecidedBy ?? [];
     public IReadOnlyList<string> Supersedes => Frontmatter.Supersedes ?? [];
-
-    /// <summary>Domain synonyms, acronyms, or query aliases declared for this document.</summary>
-    public IReadOnlyList<string> Keywords
-    {
-        get
-        {
-            List<string> items = new();
-            if (Frontmatter.Keywords is not null)
-            {
-                items.AddRange(Frontmatter.Keywords);
-            }
-            else if (Frontmatter.Aliases is not null)
-            {
-                items.AddRange(Frontmatter.Aliases);
-            }
-
-            AppendSectionKeywords(items);
-            return items;
-        }
-    }
 
     /// <summary>
     /// Leaf id that receives the exact document-id lead bonus; preamble when
@@ -218,48 +183,6 @@ public sealed class DocumentModel
             }
 
             return string.Create(CultureInfo.InvariantCulture, $"{docId}#{slug}");
-        }
-    }
-
-    private void AppendSectionKeywords(List<string> items)
-    {
-        if (Frontmatter.Sections is null)
-        {
-            return;
-        }
-
-        foreach (DocumentSectionVocabulary section in Frontmatter.Sections.Values)
-        {
-            if (section is null)
-            {
-                continue;
-            }
-
-            if (section.Keywords is not null)
-            {
-                items.AddRange(section.Keywords);
-            }
-        }
-    }
-
-    private void AppendSectionCodeRefs(List<string> items)
-    {
-        if (Frontmatter.Sections is null)
-        {
-            return;
-        }
-
-        foreach (DocumentSectionVocabulary section in Frontmatter.Sections.Values)
-        {
-            if (section is null)
-            {
-                continue;
-            }
-
-            if (section.CodeRefs is not null)
-            {
-                items.AddRange(section.CodeRefs);
-            }
         }
     }
 }
