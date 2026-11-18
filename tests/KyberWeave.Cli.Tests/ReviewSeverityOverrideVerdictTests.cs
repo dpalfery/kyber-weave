@@ -1,33 +1,33 @@
 using System.Text.Json;
+using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Review;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Spectre.Console.Cli;
 using Xunit;
 using static KyberWeave.Tests.ReviewDiagnosticAssert;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// <c>review verdict</c> with a host severity override: the overridden severity is the one the verdict rules, the
-/// fix-level routing and <c>findings.json</c> read. Runs in process against a temporary repository; no model.
+/// fix-level routing and <c>findings.json</c> read. Runs in process over the in-memory file system; no model.
 /// </summary>
 public sealed class ReviewSeverityOverrideVerdictTests : IDisposable
 {
     private const string FixRound = "KW-REVIEW-056";
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
     private readonly string _repo;
     private readonly string _seats;
 
     public ReviewSeverityOverrideVerdictTests()
     {
-        _repo = Path.Combine(_temp.Path, "repo");
-        TestGitRepositoryTemplate.CreateReviewGatesCouncilRepository(_repo);
-        Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
-        _seats = Path.Combine(_temp.Path, "seats");
-        Directory.CreateDirectory(_seats);
-        File.WriteAllText(Path.Combine(_repo, "REVIEW.md"), """
+        _repo = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
+        _seats = Path.Combine(_services.Root, "seats");
+        _services.Files.CreateDirectory(_seats);
+        _services.Files.WriteAllText(Path.Combine(_repo, "REVIEW.md"), """
             # Review guidance
 
             ## Severity overrides
@@ -39,14 +39,14 @@ public sealed class ReviewSeverityOverrideVerdictTests : IDisposable
             """);
     }
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _services.Dispose();
 
     [Fact]
     public void AMinorRaisedToMajorByOverrideBlocksAtOneMajorAndIsFixedAtLevelMajor()
     {
         UsePolicy("    major-count-blocks: 1\n    fix-level: major\n");
         WriteSeat("model-placement", Seat("model-placement/wrong-folder", "minor", "SO-1"));
-        string findings = Path.Combine(_temp.Path, "findings.json");
+        string findings = Path.Combine(_services.Root, "findings.json");
 
         CapturedConsoleExecution<int> run = Verdict(["--seats", _seats, "--out", findings, .. NotSeatedExcept("model-placement")]);
 
@@ -55,7 +55,7 @@ public sealed class ReviewSeverityOverrideVerdictTests : IDisposable
             "'model-placement/wrong-folder': severity set by host override SO-1 (minor → major; cited by the seat, which graded it differently).",
             MessagesWithCode(run.Output, SeverityOverrides.AppliedCode));
         Assert.Contains("fix: model-placement/wrong-folder (major) src/Foo.cs:12", MessagesWithCode(run.Output, FixRound));
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(findings));
+        using JsonDocument document = JsonDocument.Parse(_services.Files.ReadAllText(findings));
         JsonElement finding = document.RootElement.GetProperty("findings")[0];
         Assert.Equal("major", finding.GetProperty("severity").GetString());
         Assert.Equal("SO-1", finding.GetProperty("override").GetString());
@@ -117,7 +117,7 @@ public sealed class ReviewSeverityOverrideVerdictTests : IDisposable
     }
 
     private void UsePolicy(string extra) =>
-        File.WriteAllText(
+        _services.Files.WriteAllText(
             Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"),
             "ontology:\n  docs-root: docs\nreview:\n  policy:\n    strictness: balanced\n" + extra);
 
@@ -156,17 +156,7 @@ public sealed class ReviewSeverityOverrideVerdictTests : IDisposable
         return string.Join('\n', lines) + "\n";
     }
 
-    private void WriteSeat(string lens, string content) => File.WriteAllText(Path.Combine(_seats, lens + ".md"), content);
+    private void WriteSeat(string lens, string content) => _services.Files.WriteAllText(Path.Combine(_seats, lens + ".md"), content);
 
-    private static CommandApp CreateApp()
-    {
-        CommandApp app = new(ReviewTestServices.Registrar());
-        app.Configure(config =>
-        {
-            config.SetApplicationName("kyber-weave");
-            config.AddBranch("review", review =>
-                review.AddCommand<ReviewVerdictCommand>("verdict").WithDescription(ReviewVerdictCommand.Description));
-        });
-        return app;
-    }
+    private CommandApp CreateApp() => CliApplication.Create(_services.Register);
 }
