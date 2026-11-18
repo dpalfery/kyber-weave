@@ -35,7 +35,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     private const string InstallVersion = "1.2.3";
     private const string UpdateVersion = "1.2.4";
 
-    /// <summary>The newline before and after the padding text that <see cref="PaddedConductorReleaseSource" /> appends.</summary>
+    /// <summary>The newline before and after the padding text the padded release appends.</summary>
     private const int PaddingFramingCharacters = 2;
 
     /// <summary>
@@ -210,7 +210,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         AssertBodyAloneFitsCap(padding);
 
         InstallCase(ReleaseKind.Corpus, gateValue: "true", declareServer: true).CopyInto(h);
-        using PaddedConductorReleaseSource padded = new(padding);
+        using FakeSquadReleaseSource padded = PaddedCorpus(PaddingOf(padding));
         Func<string, string?> env = h.CreateEnvironmentReader("true");
         SquadLifecycleResult result = await NewService(h, padded, env).UpdateAsync(
             new SquadUpdateRequest(
@@ -474,10 +474,41 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
     private static ISquadReleaseSource ReleaseSource(ReleaseKind kind, int paddingCharacters) => kind switch
     {
         ReleaseKind.Corpus => new SyntheticValidSquadReleaseSource(),
-        ReleaseKind.Oversized => new OversizedConductorReleaseSource(),
-        ReleaseKind.Padded => new PaddedConductorReleaseSource(paddingCharacters),
+        ReleaseKind.Oversized => PaddedCorpus(OversizedPadding()),
+        ReleaseKind.Padded => PaddedCorpus(PaddingOf(paddingCharacters)),
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown release kind."),
     };
+
+    /// <summary>
+    ///     The synthetic corpus with <paramref name="padding" /> characters of prose appended to the conductor, so the
+    ///     renderer measures a longer body. The corpus is copied into the extraction directory, so the repository tree is
+    ///     never written.
+    /// </summary>
+    private static FakeSquadReleaseSource PaddedCorpus(string padding) => new()
+    {
+        SourceDirectory = SyntheticValidSquadReleaseSource.SyntheticCorpusRoot,
+        AfterExtract = (root, token) => File.AppendAllTextAsync(
+            Path.Combine(root, "agents", "conductor.md"),
+            "\n" + padding + "\n",
+            token),
+    };
+
+    /// <summary>Repeated until the conductor body is well past the 30,000 character Copilot agent cap.</summary>
+    private static string OversizedPadding()
+    {
+        const string PaddingSentence =
+            "The conductor body is padded here so that the rendered agent file exceeds the Copilot custom agent cap. ";
+        return string.Concat(Enumerable.Repeat(PaddingSentence, 600));
+    }
+
+    /// <summary>Exactly <paramref name="paddingCharacters" /> characters, enough to put the body plus overlay over the cap.</summary>
+    private static string PaddingOf(int paddingCharacters)
+    {
+        const string Sentence =
+            "The conductor body is padded here so that the operator channel overlay pushes the agent file past the cap. ";
+        string repeated = string.Concat(Enumerable.Repeat(Sentence, paddingCharacters / Sentence.Length + 1));
+        return repeated[..paddingCharacters];
+    }
 
     private static IReadOnlyList<string> WarningsOf(SquadLifecycleResult result)
     {
@@ -517,66 +548,6 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
         Corpus,
         Oversized,
         Padded,
-    }
-
-    /// <summary>
-    ///     The real checked-in corpus, with a long paragraph appended to the conductor so that the Copilot
-    ///     renderer emits <c>agent-body-too-long</c>. The corpus is copied into the extraction directory, so
-    ///     the repository tree is never written.
-    /// </summary>
-    private sealed class OversizedConductorReleaseSource : ISquadReleaseSource
-    {
-        /// <summary>Repeated until the conductor body is well past the 30,000 character Copilot agent cap.</summary>
-        private const string PaddingSentence =
-            "The conductor body is padded here so that the rendered agent file exceeds the Copilot custom agent cap. ";
-
-        private readonly SyntheticValidSquadReleaseSource _corpus = new();
-
-        public async Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            SquadReleaseResult result = await _corpus.DownloadAndExtractAsync(request, cancellationToken);
-            string conductor = Path.Combine(result.ExtractionRoot, "agents", "conductor.md");
-            string padding = string.Concat(Enumerable.Repeat(PaddingSentence, 600));
-            await File.AppendAllTextAsync(conductor, "\n" + padding + "\n", cancellationToken);
-            return result;
-        }
-
-        public void Dispose()
-        {
-            _corpus.Dispose();
-        }
-    }
-
-    /// <summary>
-    ///     The real corpus with exactly <paramref name="paddingCharacters" /> characters of prose appended to the conductor.
-    ///     It puts the body plus overlay over the Copilot cap while the body alone stays under it. The corpus is copied into
-    ///     the extraction directory, so the repository tree is never written.
-    /// </summary>
-    private sealed class PaddedConductorReleaseSource(int paddingCharacters) : ISquadReleaseSource
-    {
-        private const string Sentence =
-            "The conductor body is padded here so that the operator channel overlay pushes the agent file past the cap. ";
-
-        private readonly SyntheticValidSquadReleaseSource _corpus = new();
-
-        public async Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken = default)
-        {
-            SquadReleaseResult result = await _corpus.DownloadAndExtractAsync(request, cancellationToken);
-            string repeated = string.Concat(Enumerable.Repeat(Sentence, paddingCharacters / Sentence.Length + 1));
-            string padding = repeated[..paddingCharacters];
-            string conductor = Path.Combine(result.ExtractionRoot, "agents", "conductor.md");
-            await File.AppendAllTextAsync(conductor, "\n" + padding + "\n", cancellationToken);
-            return result;
-        }
-
-        public void Dispose()
-        {
-            _corpus.Dispose();
-        }
     }
 
     /// <summary>
@@ -640,7 +611,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
             Store = new SquadStateStore(new FakeSquadUserPaths(userHome));
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
             Renderer = FakeSquadRenderer.Wrapping(SquadTestRegistry.Create([new CopilotRenderer()]));
-            Oversized = new OversizedConductorReleaseSource();
+            Oversized = PaddedCorpus(OversizedPadding());
         }
 
         public string Anchor { get; }
@@ -655,7 +626,7 @@ public sealed class SquadLifecycleRenderWarningFilterTests : IDisposable
 
         public FakeSquadRenderer Renderer { get; }
 
-        public OversizedConductorReleaseSource Oversized { get; }
+        public FakeSquadReleaseSource Oversized { get; }
 
         public void Dispose()
         {
