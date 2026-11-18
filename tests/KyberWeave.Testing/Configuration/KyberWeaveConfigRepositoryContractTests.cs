@@ -39,6 +39,10 @@ public abstract class KyberWeaveConfigRepositoryContractTests : IDisposable
     /// <summary>Writes <paramref name="yaml"/> at <paramref name="fileName"/> under <paramref name="root"/>.</summary>
     protected abstract void WriteConfigFile(string root, string fileName, string yaml);
 
+    /// <summary>Creates a directory under a root, so a gate's <c>working-directory</c> can name one that exists.</summary>
+    /// <param name="path">The full path of the directory.</param>
+    protected abstract void CreateDirectory(string path);
+
     /// <summary>
     /// Makes the file at <paramref name="path"/> exist but fail every read until the returned value is disposed, the way
     /// a permission or sharing failure does on disk.
@@ -236,6 +240,27 @@ public abstract class KyberWeaveConfigRepositoryContractTests : IDisposable
             Assert.NotNull(result.Error);
             Assert.Equal(UserConfigPath(home), result.ConfigPath);
         }
+    }
+
+    [Fact]
+    public void AGateWorkingDirectoryThatExistsInTheRepositoryIsAccepted()
+    {
+        string root = NewRoot();
+        CreateDirectory(Path.Combine(Path.GetFullPath(root), "web"));
+        WriteRepositoryConfig(root, """
+            review:
+              gates:
+                - id: web-build
+                  run: [npm, run, build]
+                  working-directory: web
+            """);
+        IKyberWeaveConfigRepository repository = CreateRepository();
+
+        KyberWeaveConfig config = repository.Load(root);
+        KyberWeaveConfigLoadResult result = repository.TryLoad(root);
+
+        Assert.Equal("web", Assert.Single(config.Review.Gates).WorkingDirectory);
+        Assert.True(result.Success, result.Error);
     }
 
     [Fact]

@@ -36,6 +36,9 @@ public sealed class FileKyberWeaveConfigRepositoryContractTests : KyberWeaveConf
         WriteFile(Path.Combine(Path.GetFullPath(root), fileName), yaml);
 
     /// <inheritdoc />
+    protected override void CreateDirectory(string path) => Directory.CreateDirectory(path);
+
+    /// <inheritdoc />
     protected override IDisposable MakeUnreadable(string path) =>
         new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
 

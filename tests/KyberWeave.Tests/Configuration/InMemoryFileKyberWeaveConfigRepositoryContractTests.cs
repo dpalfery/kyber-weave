@@ -1,5 +1,6 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
@@ -13,12 +14,15 @@ namespace KyberWeave.Tests.Configuration;
 public sealed class InMemoryFileKyberWeaveConfigRepositoryContractTests : KyberWeaveConfigRepositoryContractTests
 {
     private readonly InMemoryFileSystem _files = new();
-    private readonly FakeRepositoryTreeProbe _tree = new();
     private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/kw/config-repository");
 
     /// <inheritdoc />
     protected override IKyberWeaveConfigRepository CreateRepository() =>
-        new FileKyberWeaveConfigRepository(_tree, _files, new FakePathResolver(_files), _environment);
+        new FileKyberWeaveConfigRepository(
+            new FileRepositoryTreeProbe(_files),
+            _files,
+            new FakePathResolver(_files),
+            _environment);
 
     /// <inheritdoc />
     protected override string NewRoot() => NewDirectory("kw-in-memory-config");
@@ -41,6 +45,9 @@ public sealed class InMemoryFileKyberWeaveConfigRepositoryContractTests : KyberW
     /// <inheritdoc />
     protected override void WriteConfigFile(string root, string fileName, string yaml) =>
         Write(Path.Combine(Path.GetFullPath(root), fileName), yaml);
+
+    /// <inheritdoc />
+    protected override void CreateDirectory(string path) => _files.CreateDirectory(path);
 
     private string NewDirectory(string prefix)
     {
