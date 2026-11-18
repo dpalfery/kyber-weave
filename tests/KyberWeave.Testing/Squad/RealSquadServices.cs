@@ -68,7 +68,7 @@ public static class RealSquadServices
     public static SquadHookJsonFile HookJsonFile()
     {
         PhysicalFileSystem files = new();
-        return new SquadHookJsonFile(files, new PhysicalPathResolver(files), new ProcessEnvironment());
+        return new SquadHookJsonFile(files, new ProcessEnvironment());
     }
 
     /// <summary>Creates the worktree MCP binding helper over the real disk.</summary>

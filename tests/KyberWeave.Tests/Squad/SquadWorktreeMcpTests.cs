@@ -148,6 +148,26 @@ public sealed class SquadWorktreeMcpTests
     }
 
     [Fact]
+    public void ALinkWhoseTargetPassesThroughAnotherLinkThatLeavesTheRootIsRefused()
+    {
+        _files.CreateDirectoryLink(Path.Combine(Canonical, "sublink"), Outside);
+        _files.CreateDirectoryLink(Path.Combine(Canonical, "via"), Path.Combine(Canonical, "sublink", "x"));
+
+        Assert.Throws<ArgumentException>(() => Mcp.SpliceArguments(["--path", "via"], Canonical));
+    }
+
+    [Fact]
+    public void ALinkWhoseTargetPassesThroughAnotherLinkThatStaysInsideIsResolvedFully()
+    {
+        string real = Path.Combine(Canonical, "real");
+        _files.CreateDirectory(Path.Combine(real, "x"));
+        _files.CreateDirectoryLink(Path.Combine(Canonical, "sublink"), real);
+        _files.CreateDirectoryLink(Path.Combine(Canonical, "via"), Path.Combine(Canonical, "sublink", "x"));
+
+        Assert.Equal(["--path", Path.Combine(real, "x")], Mcp.SpliceArguments(["--path", "via"], Canonical));
+    }
+
+    [Fact]
     public void ALinkThatCannotBeResolvedIsAnArgumentErrorNotALeakedPlatformError()
     {
         string loop = Path.Combine(Canonical, "loop");

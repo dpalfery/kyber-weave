@@ -155,60 +155,60 @@ public sealed class SquadWorktreeMcp(
 
     /// <summary>
     ///     Resolves every symbolic link in an absolute path so the containment check sees the path
-    ///     real I/O would reach, not just its lexically normalized spelling.
+    ///     real I/O would reach, not just its lexically normalized spelling. A link's target is resolved
+    ///     the same way, so links among the target's own parent folders are followed too.
     /// </summary>
     private string ResolveRealPath(string absolutePath)
     {
-        string root = Path.GetPathRoot(absolutePath)
-                      ?? throw new ArgumentException("The path must be absolute.", nameof(absolutePath));
+        int hops = 0;
+        return ResolveRealPath(absolutePath, absolutePath, ref hops);
+    }
+
+    private string ResolveRealPath(string path, string originalPath, ref int hops)
+    {
+        string root = Path.GetPathRoot(path)
+                      ?? throw new ArgumentException("The path must be absolute.", nameof(originalPath));
         string current = root;
 
-        foreach (string segment in absolutePath[root.Length..].Split(
+        foreach (string segment in path[root.Length..].Split(
                      [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                      StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
 
-            if (files.GetLinkTarget(current) is not null)
+            string? target = ReadLinkTarget(current, originalPath);
+            if (target is not null)
             {
-                current = FollowLinks(current, absolutePath);
+                if (++hops > MaxLinkHops)
+                {
+                    throw new ArgumentException($"Symbolic link '{current}' cannot be resolved.", nameof(originalPath));
+                }
+
+                string directory = Path.GetDirectoryName(current) ?? current;
+                current = ResolveRealPath(paths.GetFullPath(target, directory), originalPath, ref hops);
             }
             else if ((files.DirectoryExists(current) || files.FileExists(current)) &&
                      files.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
             {
                 throw new ArgumentException(
                     $"Reparse point '{current}' cannot be resolved safely.",
-                    nameof(absolutePath));
+                    nameof(originalPath));
             }
         }
 
         return current;
     }
 
-    /// <summary>Follows a link chain to the path it ends at, which may name nothing: a dangling link still resolves.</summary>
-    private string FollowLinks(string link, string absolutePath)
+    private string? ReadLinkTarget(string link, string originalPath)
     {
-        string current = link;
         try
         {
-            for (int hop = 0; hop < MaxLinkHops; hop++)
-            {
-                string? target = files.GetLinkTarget(current);
-                if (target is null)
-                {
-                    return current;
-                }
-
-                string directory = Path.GetDirectoryName(current) ?? current;
-                current = paths.GetFullPath(target, directory);
-            }
+            return files.GetLinkTarget(link);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            throw new ArgumentException($"Symbolic link '{link}' cannot be resolved.", nameof(absolutePath), ex);
+            throw new ArgumentException($"Symbolic link '{link}' cannot be resolved.", nameof(originalPath), ex);
         }
-
-        throw new ArgumentException($"Symbolic link '{link}' cannot be resolved.", nameof(absolutePath));
     }
 
     /// <summary>

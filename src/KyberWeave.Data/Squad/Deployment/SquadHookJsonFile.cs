@@ -1,6 +1,5 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
-using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -11,11 +10,9 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// place with a plain overwrite as before; an atomic rename would replace the link with a regular file.
 /// </remarks>
 /// <param name="files">Reads and rewrites the hook files.</param>
-/// <param name="paths">Turns a hook file path into the full path whose directory is created.</param>
 /// <param name="environment">Supplies the base directory a relative hook file path resolves against.</param>
 public sealed class SquadHookJsonFile(
     IWritableFileSystem files,
-    IPathResolver paths,
     IProcessEnvironment environment) : ISquadHookJsonFile
 {
     /// <summary>
@@ -36,7 +33,7 @@ public sealed class SquadHookJsonFile(
         ArgumentNullException.ThrowIfNull(postToolUse);
         SquadHookJsonBlock.RefuseForeignSubagentStop(format, subagentStop);
 
-        string fullPath = paths.GetFullPath(filePath, environment.CurrentDirectory);
+        string fullPath = FullPath(filePath);
         string? existing = files.FileExists(fullPath) ? files.ReadAllText(fullPath) : null;
         string content;
         IReadOnlyList<SquadHookOwnedEntry> owned;
@@ -69,7 +66,7 @@ public sealed class SquadHookJsonFile(
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(filePath);
 
-        string fullPath = paths.GetFullPath(filePath, environment.CurrentDirectory);
+        string fullPath = FullPath(filePath);
         if (!files.FileExists(fullPath))
         {
             return;
@@ -90,4 +87,11 @@ public sealed class SquadHookJsonFile(
 
         files.WriteAllText(fullPath, content);
     }
+
+    /// <summary>
+    ///     Returns the path as given when it is rooted, otherwise joined onto the working directory. The spelling is
+    ///     kept as is, because a decomposed Unicode folder name must still name the folder that holds the file.
+    /// </summary>
+    private string FullPath(string filePath) =>
+        Path.IsPathRooted(filePath) ? filePath : Path.Combine(environment.CurrentDirectory, filePath);
 }

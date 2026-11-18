@@ -67,6 +67,20 @@ public sealed class SquadWorktreeMcpLinkTests : IDisposable
     }
 
     [Fact]
+    public void ALinkWhoseTargetPassesThroughAnotherLinkThatLeavesTheRootIsRefused()
+    {
+        Assert.SkipWhen(OperatingSystem.IsWindows(), "Symlinks are not created on Windows without developer mode.");
+        string canonical = MakeDirectory("canonical");
+        string outside = MakeDirectory("outside");
+        Directory.CreateDirectory(Path.Combine(outside, "x"));
+        Directory.CreateSymbolicLink(Path.Combine(canonical, "sublink"), outside);
+        Directory.CreateSymbolicLink(Path.Combine(canonical, "via"), Path.Combine(RealRoot(canonical), "sublink", "x"));
+
+        Assert.Throws<ArgumentException>(
+            () => RealSquadServices.WorktreeMcp().SpliceArguments(["--path", "via"], canonical));
+    }
+
+    [Fact]
     public void ALinkThatLoopsOnItselfIsAnArgumentError()
     {
         Assert.SkipWhen(OperatingSystem.IsWindows(), "Self-referential symlinks are not created on Windows without developer mode.");
