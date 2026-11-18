@@ -1,10 +1,8 @@
 using KyberWeave.Testing.Squad;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
-using JetBrains.Annotations;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Rendering;
@@ -14,7 +12,7 @@ using Spectre.Console;
 using Spectre.Console.Cli;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Contract suite for squad target-root argument safety (development mode: test-first,
@@ -50,13 +48,14 @@ namespace KyberWeave.Integration.Tests;
 /// check report non-interactive. The <c>--global</c> pins sandbox the real per-target
 /// root resolution through the same overrides production reads first
 /// (<c>CODEX_HOME</c>, <c>CLAUDE_CONFIG_DIR</c>), so the sandbox roots are where the runs
-/// genuinely write; see <see cref="RunWithEnvironment{T}"/>.
+/// write; here the in-memory <c>SquadGlobalRoots</c> is handed those overrides directly instead of the process environment.
 /// </remarks>
-public sealed class SquadPathSafetyTests : IDisposable
+public sealed class SquadPathSafetyTests
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemorySquadState _state = new();
+    private readonly FakeSquadRenderer _renderer = new();
 
-    public void Dispose() => _temp.Dispose();
+    private string Work => Path.Combine(_state.Files.Root, "work");
 
     #region Parser contract (§6 T3 row a): strict parsing and --path binding
 
@@ -65,7 +64,7 @@ public sealed class SquadPathSafetyTests : IDisposable
     {
         // --path must bind the separate PathOption property, leaving the positional
         // argument at its "." default; the coalescing rule (N6) then lets --path win.
-        string deploymentRoot = Path.Combine(_temp.Path, "bind-root");
+        string deploymentRoot = Path.Combine(Work, "bind-root");
 
         PathBindingStubCommand.Captured = null;
         (int ExitCode, string Output) execution = RunThroughStrictApp(["install", "--path", deploymentRoot]);
@@ -150,18 +149,18 @@ public sealed class SquadPathSafetyTests : IDisposable
     {
         // The command wiring surfaces the conflict as the convention's exit-2 abort
         // before any resolution or filesystem work, with the hint naming both forms.
-        string targetDir = Path.Combine(_temp.Path, "conflict-target");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Path.Combine(Work, "conflict-target");
+        _state.Files.CreateDirectory(targetDir);
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "conflict-user"));
-        SquadInstallCommand command = SquadTestCommands.Install(userPaths);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, _renderer);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
             new SquadInstallSettings
             {
-                Path = Path.Combine(_temp.Path, "conflicting-positional-root"),
-                PathOption = Path.Combine(_temp.Path, "conflicting-option-root"),
+                Path = Path.Combine(Work, "conflicting-positional-root"),
+                PathOption = Path.Combine(Work, "conflicting-option-root"),
                 Targets = ["codex"]
             }));
 
@@ -169,7 +168,7 @@ public sealed class SquadPathSafetyTests : IDisposable
         string normalized = Normalize(execution.Output);
         Assert.Contains("conflicting-positional-root", normalized, StringComparison.Ordinal);
         Assert.Contains("--path", normalized, StringComparison.Ordinal);
-        Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+        Assert.False(_state.Files.DirectoryExists(Path.Combine(targetDir, ".kyber-weave")));
     }
 
     #endregion
@@ -188,28 +187,26 @@ public sealed class SquadPathSafetyTests : IDisposable
         // never have been reached: zero release requests, zero filesystem writes. Update
         // sits behind a receipt prerequisite, so its zero-writes proof is the seeded tree
         // being left byte-for-byte unchanged rather than the directory being absent.
-        string targetDir = Path.Combine(_temp.Path, $"decline-{verb}-target");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Path.Combine(Work, $"decline-{verb}-target");
+        _state.Files.CreateDirectory(targetDir);
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"decline-{verb}-user"));
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadStateStore stateStore = _state.Store;
         if (verb == "update")
         {
             SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
                 (".codex/agents/architect.toml", "name = \"architect\"\n"));
         }
 
-        string[] filesBefore = Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories);
+        string[] filesBefore = Files(targetDir);
 
         (int ExitCode, string Output) execution = Capture(() => verb switch
         {
-            "install" => SquadTestCommands.Install(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                releaseSource: releaseSource,
-                renderer: renderer,
+            "install" => SquadTestCommands.InMemoryInstall(
+                _state,
+                releaseSource,
+                renderer,
                 isInteractive: true,
                 readAnswer: _ => false).Execute(
                 null!,
@@ -221,11 +218,10 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     Adopt = false
                 }),
-            "update" => SquadTestCommands.Update(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                releaseSource: releaseSource,
-                renderer: renderer,
+            "update" => SquadTestCommands.InMemoryUpdate(
+                _state,
+                releaseSource,
+                renderer,
                 isInteractive: true,
                 readAnswer: _ => false).Execute(
                 null!,
@@ -236,10 +232,10 @@ public sealed class SquadPathSafetyTests : IDisposable
                     Global = false,
                     DryRun = false
                 }),
-            _ => SquadTestCommands.Uninstall(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                lifecycleService: SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore),
+            _ => SquadTestCommands.InMemoryUninstall(
+                _state,
+                releaseSource,
+                renderer,
                 isInteractive: true,
                 readAnswer: _ => false).Execute(
                 null!,
@@ -255,14 +251,14 @@ public sealed class SquadPathSafetyTests : IDisposable
         string normalized = Normalize(execution.Output);
         Assert.Contains("Declined. No changes were made.", normalized, StringComparison.Ordinal);
         Assert.Contains($"squad {verb}", normalized, StringComparison.Ordinal);
-        string[] filesAfter = Directory.GetFiles(targetDir, "*", SearchOption.AllDirectories);
+        string[] filesAfter = Files(targetDir);
         if (verb == "update")
         {
             Assert.Equal(filesBefore, filesAfter);
         }
         else
         {
-            Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave")));
+            Assert.False(_state.Files.DirectoryExists(Path.Combine(targetDir, ".kyber-weave")));
         }
 
         Assert.Empty(releaseSource.Requests);
@@ -280,13 +276,12 @@ public sealed class SquadPathSafetyTests : IDisposable
         // word is asserted because the pre-existing success line does not name it — its
         // presence is what proves the N4 echo happened. Update and uninstall cannot
         // reach their gates without an existing deployment, so those rows seed one.
-        string targetDir = Path.Combine(_temp.Path, $"echo-root-{verb}-target");
-        Directory.CreateDirectory(targetDir);
+        string targetDir = Path.Combine(Work, $"echo-root-{verb}-target");
+        _state.Files.CreateDirectory(targetDir);
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"echo-root-{verb}-user"));
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadStateStore stateStore = _state.Store;
         if (verb is "update" or "uninstall")
         {
             SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
@@ -299,11 +294,10 @@ public sealed class SquadPathSafetyTests : IDisposable
 
         (int ExitCode, string Output) execution = Capture(() => verb switch
         {
-            "install" => SquadTestCommands.Install(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                releaseSource: releaseSource,
-                renderer: renderer,
+            "install" => SquadTestCommands.InMemoryInstall(
+                _state,
+                releaseSource,
+                renderer,
                 isInteractive: false,
                 readAnswer: _ =>
                 {
@@ -319,11 +313,10 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     Adopt = false
                 }),
-            "update" => SquadTestCommands.Update(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                releaseSource: releaseSource,
-                renderer: renderer,
+            "update" => SquadTestCommands.InMemoryUpdate(
+                _state,
+                releaseSource,
+                renderer,
                 isInteractive: false,
                 readAnswer: _ =>
                 {
@@ -339,10 +332,10 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     ReplaceManaged = true
                 }),
-            _ => SquadTestCommands.Uninstall(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                lifecycleService: SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore),
+            _ => SquadTestCommands.InMemoryUninstall(
+                _state,
+                releaseSource,
+                renderer,
                 isInteractive: false,
                 readAnswer: _ =>
                 {
@@ -378,7 +371,7 @@ public sealed class SquadPathSafetyTests : IDisposable
             // transaction journal may still sit beside the root, which is why only the squad state
             // directory is asserted absent.
             Assert.NotNull(stateStore.ReadLock(targetDir, SquadDeploymentScope.Project));
-            Assert.False(Directory.Exists(Path.Combine(targetDir, ".kyber-weave", "squad")));
+            Assert.False(_state.Files.DirectoryExists(Path.Combine(targetDir, ".kyber-weave", "squad")));
         }
     }
 
@@ -408,15 +401,14 @@ public sealed class SquadPathSafetyTests : IDisposable
         // mutation targets, and the runs really do succeed into them. The state anchor and
         // the success lines may still name targetRoot after the fix — the contract is that
         // the per-target roots appear, not that the anchor is suppressed.
-        string anchorRoot = Path.Combine(_temp.Path, $"global-echo-{verb}-anchor");
-        Directory.CreateDirectory(anchorRoot);
-        string codexGlobalRoot = Path.Combine(_temp.Path, $"global-echo-{verb}-codex-home");
-        Directory.CreateDirectory(codexGlobalRoot);
-        string claudeGlobalRoot = Path.Combine(_temp.Path, $"global-echo-{verb}-claude-home");
-        Directory.CreateDirectory(claudeGlobalRoot);
+        string anchorRoot = Path.Combine(Work, $"global-echo-{verb}-anchor");
+        _state.Files.CreateDirectory(anchorRoot);
+        string codexGlobalRoot = Path.Combine(Work, $"global-echo-{verb}-codex-home");
+        _state.Files.CreateDirectory(codexGlobalRoot);
+        string claudeGlobalRoot = Path.Combine(Work, $"global-echo-{verb}-claude-home");
+        _state.Files.CreateDirectory(claudeGlobalRoot);
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, $"global-echo-{verb}-user"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        SquadStateStore stateStore = _state.Store;
         if (verb is "update" or "uninstall")
         {
             // Update and uninstall cannot reach their gates without an existing global
@@ -427,8 +419,8 @@ public sealed class SquadPathSafetyTests : IDisposable
                 ("agents/reviewer.md", "You are reviewer.\nReview changes.\n", "claude"));
         }
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
         int promptCount = 0;
 
         Dictionary<string, string> globalRootOverrides = new(StringComparer.Ordinal)
@@ -436,14 +428,17 @@ public sealed class SquadPathSafetyTests : IDisposable
             ["CODEX_HOME"] = codexGlobalRoot,
             ["CLAUDE_CONFIG_DIR"] = claudeGlobalRoot
         };
+        SquadGlobalRoots globalRoots = new(
+            name => globalRootOverrides.GetValueOrDefault(name),
+            _state.UserPaths.HomeDirectory);
 
-        (int ExitCode, string Output) execution = RunWithEnvironment(globalRootOverrides, () => Capture(() => verb switch
+        (int ExitCode, string Output) execution = Capture(() => verb switch
         {
-            "install" => SquadTestCommands.Install(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                releaseSource: releaseSource,
-                renderer: renderer,
+            "install" => SquadTestCommands.InMemoryInstall(
+                _state,
+                releaseSource,
+                renderer,
+                globalRoots: globalRoots,
                 isInteractive: true,
                 readAnswer: _ =>
                 {
@@ -459,11 +454,11 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     Adopt = false
                 }),
-            "update" => SquadTestCommands.Update(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                releaseSource: releaseSource,
-                renderer: renderer,
+            "update" => SquadTestCommands.InMemoryUpdate(
+                _state,
+                releaseSource,
+                renderer,
+                globalRoots: globalRoots,
                 isInteractive: true,
                 readAnswer: _ =>
                 {
@@ -479,14 +474,11 @@ public sealed class SquadPathSafetyTests : IDisposable
                     DryRun = false,
                     ReplaceManaged = true
                 }),
-            _ => SquadTestCommands.Uninstall(
-                userPaths: userPaths,
-                stateStore: stateStore,
-                lifecycleService: SquadHostDefaults.CreateLifecycleService(
-                    releaseSource,
-                    renderer,
-                    stateStore,
-                    globalRoots: new SquadGlobalRoots(Environment.GetEnvironmentVariable, anchorRoot)),
+            _ => SquadTestCommands.InMemoryUninstall(
+                _state,
+                releaseSource,
+                renderer,
+                globalRoots: globalRoots,
                 isInteractive: true,
                 readAnswer: _ =>
                 {
@@ -500,7 +492,7 @@ public sealed class SquadPathSafetyTests : IDisposable
                     Global = true,
                     DryRun = false
                 })
-        }));
+        });
 
         string normalized = Normalize(execution.Output);
 
@@ -524,15 +516,14 @@ public sealed class SquadPathSafetyTests : IDisposable
         // root-observable section: --path aimed at a root whose squad.yml does not parse
         // must fail doctor for THAT root. RED today: the option never reaches Execute, the
         // source-less default root is diagnosed instead, and doctor exits 0.
-        string defaultRoot = Path.Combine(_temp.Path, "doctor-option-default-root");
-        Directory.CreateDirectory(defaultRoot);
-        string requestedRoot = Path.Combine(_temp.Path, "doctor-option-requested-root");
+        string defaultRoot = Path.Combine(Work, "doctor-option-default-root");
+        _state.Files.CreateDirectory(defaultRoot);
+        string requestedRoot = Path.Combine(Work, "doctor-option-requested-root");
         WriteUnparsableCanonicalSource(requestedRoot);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-option-user"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -555,15 +546,14 @@ public sealed class SquadPathSafetyTests : IDisposable
         // CoalesceTargetPath(settings.Path, settings.PathOption) like every other squad
         // command, so `squad doctor <root>` diagnoses that root. RED today: the positional
         // is equally unread, and the source-less default root is diagnosed instead.
-        string defaultRoot = Path.Combine(_temp.Path, "doctor-positional-default-root");
-        Directory.CreateDirectory(defaultRoot);
-        string requestedRoot = Path.Combine(_temp.Path, "doctor-positional-requested-root");
+        string defaultRoot = Path.Combine(Work, "doctor-positional-default-root");
+        _state.Files.CreateDirectory(defaultRoot);
+        string requestedRoot = Path.Combine(Work, "doctor-positional-requested-root");
         WriteUnparsableCanonicalSource(requestedRoot);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-positional-user"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -588,15 +578,14 @@ public sealed class SquadPathSafetyTests : IDisposable
         // root with no source at all. Diagnosing the named root finds no source and exits
         // 0; diagnosing the default root reports the default's source. RED today: doctor
         // reports the default root's broken source for a run that named the empty root.
-        string defaultRoot = Path.Combine(_temp.Path, "doctor-inverse-default-root");
+        string defaultRoot = Path.Combine(Work, "doctor-inverse-default-root");
         WriteUnparsableCanonicalSource(defaultRoot);
-        string requestedRoot = Path.Combine(_temp.Path, "doctor-inverse-requested-root");
-        Directory.CreateDirectory(requestedRoot);
+        string requestedRoot = Path.Combine(Work, "doctor-inverse-requested-root");
+        _state.Files.CreateDirectory(requestedRoot);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-inverse-user"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -617,15 +606,14 @@ public sealed class SquadPathSafetyTests : IDisposable
         // ambiguity with the exit-2 client-input convention and a hint naming both forms —
         // not silently prefer one. RED today: doctor reads neither form, so the conflict
         // goes undetected and the command exits 0.
-        string positionalRoot = Path.Combine(_temp.Path, "doctor-conflict-positional-root");
-        string optionRoot = Path.Combine(_temp.Path, "doctor-conflict-option-root");
-        string defaultRoot = Path.Combine(_temp.Path, "doctor-conflict-default-root");
-        Directory.CreateDirectory(defaultRoot);
+        string positionalRoot = Path.Combine(Work, "doctor-conflict-positional-root");
+        string optionRoot = Path.Combine(Work, "doctor-conflict-option-root");
+        string defaultRoot = Path.Combine(Work, "doctor-conflict-default-root");
+        _state.Files.CreateDirectory(defaultRoot);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "doctor-conflict-user"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: defaultRoot);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: defaultRoot);
 
         (int ExitCode, string Output) execution = Capture(() => command.Execute(
             null!,
@@ -647,15 +635,11 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// found at this root and doctor attempts to load it — and the load then fails
     /// validation, which is the only doctor output that names the diagnosed root.
     /// </summary>
-    private static void WriteUnparsableCanonicalSource(string root)
+    private void WriteUnparsableCanonicalSource(string root)
     {
-        Directory.CreateDirectory(Path.Combine(root, "products", "kyber-squad"));
-        File.WriteAllText(
-            Path.Combine(root, "KyberWeave.sln"),
-            "Microsoft Visual Studio Solution File, Format Version 12.00");
-        File.WriteAllText(
-            Path.Combine(root, "products", "kyber-squad", "squad.yml"),
-            "this is not a valid squad manifest\n");
+        _state.Files.CreateDirectory(Path.Combine(root, "products", "kyber-squad"));
+        _state.Files.WriteAllText(Path.Combine(root, "KyberWeave.sln"), "Microsoft Visual Studio Solution File, Format Version 12.00");
+        _state.Files.WriteAllText(Path.Combine(root, "products", "kyber-squad", "squad.yml"), "this is not a valid squad manifest\n");
     }
 
     #endregion
@@ -696,11 +680,14 @@ public sealed class SquadPathSafetyTests : IDisposable
     }
 
     /// <summary>Runs <paramref name="execute"/> once with console output captured.</summary>
-    private static (T Result, string Output) Capture<T>([InstantHandle] Func<T> execute)
+    private static (T Result, string Output) Capture<T>(Func<T> execute)
     {
         CapturedConsoleExecution<T> execution = ProcessConsoleCapture.Run(execute);
         return (execution.Result, execution.Output);
     }
+
+    private string[] Files(string directory) =>
+        [.. _state.Files.EnumerateFiles(directory, "*", recursive: true)];
 
     private static string Normalize(string output) => string.Join(
         ' ',
@@ -712,7 +699,7 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// uninstall wiring tests satisfy the receipt prerequisites that sit before their
     /// confirmation gates.
     /// </summary>
-    private static void SeedDeployment(
+    private void SeedDeployment(
         string targetRoot,
         SquadDeploymentScope scope,
         SquadStateStore stateStore,
@@ -720,15 +707,15 @@ public sealed class SquadPathSafetyTests : IDisposable
     {
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, scope);
         string lockPath = stateStore.ResolveLockPath(targetRoot, scope);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
 
         List<SquadOwnedFile> ownedFiles = [];
         foreach ((string relativePath, string content) in files)
         {
             string fullPath = Path.Combine(targetRoot, relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            _state.Files.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             byte[] bytes = Encoding.UTF8.GetBytes(content);
-            File.WriteAllBytes(fullPath, bytes);
+            _state.Files.WriteAllBytes(fullPath, bytes);
             string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
             ownedFiles.Add(new SquadOwnedFile(relativePath, sha256, "codex", Adopted: false));
         }
@@ -754,8 +741,8 @@ public sealed class SquadPathSafetyTests : IDisposable
             AssetDigest: "b".PadRight(64, '0'),
             Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
-        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+        _state.Files.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt));
+        _state.Files.WriteAllText(lockPath, stateStore.SerializeLock(squadLock));
     }
 
     /// <summary>
@@ -765,14 +752,14 @@ public sealed class SquadPathSafetyTests : IDisposable
     /// files land under the store's global roots directory keyed on the anchor's physical
     /// identity, exactly where a real global deployment's state lives.
     /// </summary>
-    private static void SeedGlobalDeployment(
+    private void SeedGlobalDeployment(
         string anchorRoot,
         SquadStateStore stateStore,
         params (string RelativePath, string Content, string Target)[] files)
     {
         string receiptPath = stateStore.ResolveReceiptPath(anchorRoot, SquadDeploymentScope.Global);
         string lockPath = stateStore.ResolveLockPath(anchorRoot, SquadDeploymentScope.Global);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
 
         List<SquadOwnedFile> ownedFiles = [];
         foreach ((string relativePath, string content, string target) in files)
@@ -805,49 +792,8 @@ public sealed class SquadPathSafetyTests : IDisposable
             AssetDigest: "b".PadRight(64, '0'),
             Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
-        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
-    }
-
-    /// <summary>
-    /// Runs <paramref name="body"/> with the named process environment variables set to
-    /// their given values, restoring every previous value afterwards — a previous null
-    /// removes the variable again.
-    /// </summary>
-    /// <remarks>
-    /// The squad global-root resolver reads its per-target overrides (<c>CODEX_HOME</c>,
-    /// <c>CLAUDE_CONFIG_DIR</c>, …) through <see cref="Environment.GetEnvironmentVariable(string)"/>
-    /// at resolution time, so the environment is the one seam that decides where a real
-    /// <c>--global</c> command run writes; every other test in the suite injects a resolver
-    /// or a getter and never observes the process environment. That makes this the only
-    /// class in the assembly that writes these variables, which is what keeps the mutation
-    /// safe without serializing it against another class: xUnit parallelizes classes, not
-    /// the tests inside one, so the window stays as short as one command execution and is
-    /// restored even when the body fails. A second class that wrote the same variables would
-    /// reintroduce the race, and the fix there is to inject a resolver — not to add this class
-    /// to a disabling collection, which only serializes the classes that join it and so cannot
-    /// guard a writer that does not.
-    /// </remarks>
-    private static T RunWithEnvironment<T>(IReadOnlyDictionary<string, string> variables, [InstantHandle] Func<T> body)
-    {
-        Dictionary<string, string?> previousValues = new(StringComparer.Ordinal);
-        foreach ((string name, string value) in variables)
-        {
-            previousValues.Add(name, Environment.GetEnvironmentVariable(name));
-            Environment.SetEnvironmentVariable(name, value);
-        }
-
-        try
-        {
-            return body();
-        }
-        finally
-        {
-            foreach ((string name, string? previousValue) in previousValues)
-            {
-                Environment.SetEnvironmentVariable(name, previousValue);
-            }
-        }
+        _state.Files.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt));
+        _state.Files.WriteAllText(lockPath, stateStore.SerializeLock(squadLock));
     }
 
     /// <summary>
@@ -953,30 +899,6 @@ public sealed class SquadPathSafetyTests : IDisposable
                 return null;
             }
         }
-    }
-
-    /// <summary>
-    /// Binds the process-global console to the shared render console at assembly load,
-    /// before any test (here or elsewhere) runs the first CommandApp, so the render
-    /// channel is fixed while a live forwarding writer exists. The binder run itself
-    /// renders a parse error that is discarded with its writer.
-    /// </summary>
-    /// <remarks>
-    /// Deliberately ungated. The runtime executes a module initializer exactly once,
-    /// before any other code in the module runs or any of its static state is accessed,
-    /// and blocks every other thread's first access to the module until it completes —
-    /// a strictly stronger serialization than <see cref="ProcessConsoleCapture"/>'s
-    /// gate, which lives in this same module and so could not be reached before this
-    /// method finishes anyway. The gate is also the wrong tool here:
-    /// <see cref="ProcessConsoleCapture.Run{T}(Func{T})"/> restores
-    /// <see cref="AnsiConsole.Console"/> to its entry value on exit, which would write
-    /// the pre-binding default console back over the process-lifetime binding these
-    /// swaps exist to establish.
-    /// </remarks>
-    [ModuleInitializer]
-    internal static void BindSharedRenderConsole()
-    {
-        ProcessConsoleCapture.EnsureInstalled();
     }
 
     #endregion

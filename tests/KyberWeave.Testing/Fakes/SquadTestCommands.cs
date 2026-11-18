@@ -239,7 +239,9 @@ internal static class SquadTestCommands
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
         SquadConsole? output = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        bool isInteractive = false,
+        Func<string, bool>? readAnswer = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadInstallCommand(
@@ -248,7 +250,7 @@ internal static class SquadTestCommands
             state.Migration,
             new SquadTargetResolver(state.Files, state.Semantics, state.Environment),
             globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
-            new SquadConsoleOptions(false, null),
+            new SquadConsoleOptions(isInteractive, readAnswer),
             console,
             new SquadTargetRootConfirmation(console),
             state.Environment,
@@ -264,7 +266,9 @@ internal static class SquadTestCommands
         ISquadRenderer renderer,
         SquadConsole? output = null,
         ISquadGlobalRootResolver? globalRoots = null,
-        ISquadInstanceService? instances = null)
+        ISquadInstanceService? instances = null,
+        bool isInteractive = false,
+        Func<string, bool>? readAnswer = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadUpdateCommand(
@@ -275,7 +279,7 @@ internal static class SquadTestCommands
             new SquadTargetResolver(state.Files, state.Semantics, state.Environment),
             globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory),
             new InMemorySquadFileAccess(state.Files),
-            new SquadConsoleOptions(false, null),
+            new SquadConsoleOptions(isInteractive, readAnswer),
             console,
             new SquadTargetRootConfirmation(console),
             state.Environment,
@@ -345,13 +349,15 @@ internal static class SquadTestCommands
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console));
     }
 
-    /// <summary><c>squad uninstall</c> over the in-memory lifecycle of <paramref name="state"/>, never interactive.</summary>
+    /// <summary><c>squad uninstall</c> over the in-memory lifecycle of <paramref name="state"/>; not interactive unless <paramref name="isInteractive"/> is set.</summary>
     public static SquadUninstallCommand InMemoryUninstall(
         InMemorySquadState state,
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
         ISquadGlobalRootResolver? globalRoots = null,
-        SquadConsole? output = null)
+        SquadConsole? output = null,
+        bool isInteractive = false,
+        Func<string, bool>? readAnswer = null)
     {
         ArgumentNullException.ThrowIfNull(state);
         SquadConsole console = output ?? CapturedSquadConsole();
@@ -361,7 +367,7 @@ internal static class SquadTestCommands
             state.Store,
             state.Migration,
             roots,
-            new SquadConsoleOptions(false, null),
+            new SquadConsoleOptions(isInteractive, readAnswer),
             console,
             new SquadTargetRootConfirmation(console),
             state.Environment,
