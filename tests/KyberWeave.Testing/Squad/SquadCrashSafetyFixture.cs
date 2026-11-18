@@ -193,7 +193,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     /// <inheritdoc />
     public override IReadOnlyList<string> ExecuteClean(SquadCrashFlow flow)
     {
-        RecordingObserver observer = new();
+        RecordingObserver observer = new(Capture);
         new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
         return observer.FaultPoints;
     }
@@ -227,7 +227,7 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     /// <inheritdoc />
     public override string? ExecuteToRollback(SquadCrashFlow flow, string faultPoint)
     {
-        RecordingObserver observer = new(faultPoint);
+        RecordingObserver observer = new(failAt: faultPoint);
         try
         {
             new SquadTransaction(StateStore, observer).Execute(CreatePlan(flow));
@@ -491,34 +491,47 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
     }
 
     /// <summary>
-    /// Records one fault point per callback the transaction makes during a clean run, or stops the
-    /// flow at one named point with a handled failure so the transaction rolls back.
+    /// Records one fault point per crash state the transaction's callbacks expose during a clean
+    /// run, or stops the flow at one named point with a handled failure so the transaction rolls
+    /// back. A callback whose tree an earlier callback already left is not recorded: a bulk
+    /// notification loop fires several callbacks with nothing written between them.
     /// </summary>
-    private sealed class RecordingObserver(string? failAt = null) : ISquadTransactionCheckpointObserver
+    private sealed class RecordingObserver(
+        Func<IReadOnlyDictionary<string, SquadTreeEntry>>? capture = null,
+        string? failAt = null) : ISquadTransactionCheckpointObserver
     {
+        private readonly List<string> _faultPoints = [];
+        private readonly HashSet<string> _states = new(StringComparer.Ordinal);
         private int _steps;
         private int _checkpoints;
 
-        public IReadOnlyList<string> FaultPoints =>
-            [.. Enumerable.Range(1, _steps).Select(number => $"step:{Invariant(number)}"),
-             .. Enumerable.Range(1, _checkpoints).Select(number => $"checkpoint:{Invariant(number)}")];
+        public IReadOnlyList<string> FaultPoints => _faultPoints;
 
         public void AfterStep(SquadTransactionStep transactionStep)
         {
             _steps++;
-            if (string.Equals(failAt, $"step:{Invariant(transactionStep.Sequence)}", StringComparison.Ordinal))
-            {
-                throw new SquadCrashInjectedException($"The flow failed at '{failAt}'.");
-            }
+            Record($"step:{Invariant(transactionStep.Sequence)}");
         }
 
         public void AfterCheckpoint(SquadTransactionCheckpoint checkpoint)
         {
             _checkpoints++;
-            if (string.Equals(failAt, $"checkpoint:{Invariant(checkpoint.Sequence)}", StringComparison.Ordinal))
+            Record($"checkpoint:{Invariant(checkpoint.Sequence)}");
+        }
+
+        private void Record(string point)
+        {
+            if (string.Equals(failAt, point, StringComparison.Ordinal))
             {
                 throw new SquadCrashInjectedException($"The flow failed at '{failAt}'.");
             }
+
+            if (capture is not null && !_states.Add(SquadTreeFingerprint.Of(capture())))
+            {
+                return;
+            }
+
+            _faultPoints.Add(point);
         }
     }
 
