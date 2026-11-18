@@ -5,6 +5,7 @@ using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Mcp;
 using KyberWeave.Application.Review;
 using KyberWeave.Application.RunStart;
@@ -23,6 +24,9 @@ using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
+using KyberWeave.Data.Docs.Mcp;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Review;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -46,6 +50,12 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddWeaveDataServices();
         services.TryAddSingleton(TimeProvider.System);
+        _ = services.AddWeaveRunStartState();
+        services.TryAddSingleton<IUserHostConfigStore>(sp => new FileUserHostConfigStore(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<IRunStartEvidence, RunStartEvidenceService>();
@@ -67,7 +77,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IPlanTaskService>(),
             sp.GetRequiredService<IPacketHostFacts>(),
             sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<ICodeGraphPortsFactory>()));
+            sp.GetRequiredService<ICodeGraphPortsFactory>(),
+            sp.GetRequiredService<IDocumentSourceFactory>()));
         services.TryAddSingleton<IPlanCloseoutService>(sp => new PlanCloseoutService(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
@@ -116,6 +127,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
+        services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(sp.GetRequiredService<IRepositoryFileStore>()));
+        services.TryAddSingleton<IGitWorktreeIdentity>(sp => new GitWorktreeIdentity(sp.GetRequiredService<IProcessRunner>()));
+        services.TryAddSingleton<IGitCheckoutProbe>(sp => new GitCheckoutProbe(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessRunner>()));
         services.TryAddSingleton<ICorpusProvenance>(sp => new CorpusProvenanceService(sp.GetRequiredService<IGitCheckoutProbe>()));
         services.TryAddSingleton(sp => new ReviewBlockWriter(
             sp.GetRequiredService<IRepositoryFileStore>(),
@@ -135,6 +151,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(
             sp.GetRequiredService<IProgramRunner>(), sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
+        services.TryAddSingleton<ISeverityOverrideSource>(sp => new FileSeverityOverrideSource(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IReviewCycleStore>(sp => new FileReviewCycleStore(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();

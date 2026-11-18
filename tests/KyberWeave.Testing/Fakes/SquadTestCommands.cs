@@ -43,7 +43,7 @@ internal static class SquadTestCommands
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
-            configs ?? new FakeKyberWeaveConfigRepository(),
+            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()),
             capturePluginStep);
     }
 
@@ -72,7 +72,7 @@ internal static class SquadTestCommands
             roots,
             new PhysicalSquadFileAccess(),
             new SquadConsoleOptions(isInteractive, readAnswer),
-            configs ?? new FakeKyberWeaveConfigRepository(),
+            configs ?? new FileKyberWeaveConfigRepository(RealRepositoryTreeProbe.Create()),
             picker,
             capturePluginStep);
     }

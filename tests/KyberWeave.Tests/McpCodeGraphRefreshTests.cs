@@ -637,7 +637,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
         DocumentIndexHost host = new(
             root,
             resolverFactory,
-            () => new DocumentLoader(root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

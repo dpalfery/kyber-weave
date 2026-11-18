@@ -196,7 +196,7 @@ public sealed class DocumentIndexHostTests : IDisposable
         return new DocumentIndexHost(
             _fixture.Root,
             () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
-            () => new Core.Docs.Parsing.DocumentLoader(_fixture.Root).Load());
+            () => RealDocumentLoader.Create(_fixture.Root).Load());
     }
 
     [Fact]
@@ -300,7 +300,7 @@ public sealed class DocumentIndexHostTests : IDisposable
             () =>
             {
                 loadCalls++;
-                return new Core.Docs.Parsing.DocumentLoader(_fixture.Root).Load();
+                return RealDocumentLoader.Create(_fixture.Root).Load();
             });
 
         _ = host.Current();
@@ -335,7 +335,7 @@ public sealed class DocumentIndexHostTests : IDisposable
         DocumentIndexHost Host(params string[] roots) => new(
             _fixture.Root,
             () => CodeGraphResolverAdapter.ForRepository(_fixture.Root),
-            () => new Core.Docs.Parsing.DocumentLoader(_fixture.Root).Load(),
+            () => RealDocumentLoader.Create(_fixture.Root).Load(),
             roots,
             "6-Docs/catalog.md");
 

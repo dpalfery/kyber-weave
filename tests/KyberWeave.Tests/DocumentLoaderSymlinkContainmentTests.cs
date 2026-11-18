@@ -86,7 +86,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         Directory.CreateSymbolicLink(outsideLink, _outside.Path);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = new(_repoRoot.Path, config);
+        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
 
         // Act
         DocumentSet result = loader.Load();
@@ -146,7 +146,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         File.CreateSymbolicLink(catalogPath, outsideCatalogPath);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = new(_repoRoot.Path, config);
+        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
 
         // Act
         DocumentSet result = loader.Load();
@@ -221,7 +221,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
             """);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = new(_repoRoot.Path, config);
+        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
 
         // Act
         DocumentSet result = loader.Load();
@@ -263,7 +263,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         OntologyConfig config = OntologyConfig.ProductDefaults
             .WithDocsRoot("docs")
             .Clone(catalogPath: "docs/linked/catalog.md");
-        DocumentSet result = new DocumentLoader(_repoRoot.Path, config).Load();
+        DocumentSet result = RealDocumentLoader.Create(_repoRoot.Path, config).Load();
 
         Assert.Single(result.Documents, doc => doc.Frontmatter.Id == "normal");
         Assert.DoesNotContain(result.Documents, doc => doc.Frontmatter.Id == "catalog");
@@ -282,7 +282,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         Directory.CreateSymbolicLink(Path.Combine(_repoRoot.Path, "docs"), _outside.Path);
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentSet result = new DocumentLoader(_repoRoot.Path, config).Load();
+        DocumentSet result = RealDocumentLoader.Create(_repoRoot.Path, config).Load();
 
         Assert.Single(result.Documents, doc => doc.Frontmatter.Id == "catalog");
         Assert.Contains("OutsideComponent", result.Components);
@@ -313,7 +313,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
         File.CreateSymbolicLink(linkPath, Path.Combine(_outside.Path, "target.md"));
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = new(_repoRoot.Path, config);
+        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
 
         ArchivedEntryRefusalException exception = Assert.Throws<ArchivedEntryRefusalException>(
             () => loader.LoadArchivedDocument("docs/archive/linked.md"));
@@ -328,7 +328,7 @@ public sealed class DocumentLoaderSymlinkContainmentTests : IDisposable
     public void LoadArchivedDocumentOutsideRepoRootIsRefused()
     {
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoot("docs");
-        DocumentLoader loader = new(_repoRoot.Path, config);
+        DocumentLoader loader = RealDocumentLoader.Create(_repoRoot.Path, config);
 
         ArchivedEntryRefusalException exception = Assert.Throws<ArchivedEntryRefusalException>(
             () => loader.LoadArchivedDocument("../outside.md"));

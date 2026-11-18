@@ -65,7 +65,7 @@ public class CodeGraphPortTests
         DocumentSet set = DocumentSetWithCodeRef("ExportTarget");
         using TempDirectory output = new TempDirectory();
 
-        DocGraphExportResult result = new DocGraphExporter(resolver).Export(set, output.Path);
+        DocGraphExportResult result = RealDocGraphExporter.Create(resolver).Export(set, output.Path);
         string[] edges = File.ReadAllLines(result.EdgesPath);
 
         Assert.Contains(edges, e => e.Contains("REFERENCES", StringComparison.Ordinal) && e.Contains("node-export-1", StringComparison.Ordinal));

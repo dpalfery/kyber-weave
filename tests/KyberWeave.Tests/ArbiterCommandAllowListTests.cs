@@ -506,7 +506,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
             $"ontology:\n  docs-root: 6-Docs\n  technologies: [{technology}]\n");
         IServiceProvider provider = DocsTestCommands.Services();
         DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
+            RealDocumentLoader.Create(fixture.Root, config.Ontology).Load(), FakeCodeGraphResolver.WithSymbols());
         TaskPromptService service = new(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),

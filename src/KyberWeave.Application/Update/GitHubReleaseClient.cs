@@ -156,7 +156,7 @@ internal sealed class GitHubReleaseClient : IDisposable
         return GetString(uri, $"SHA256SUMS.txt for {tag}");
     }
 
-    internal void DownloadAsset(string tag, string archiveName, string destinationPath)
+    internal void DownloadAsset(string tag, string archiveName, Stream destination)
     {
         Uri uri = AssetUri(_origin, tag, archiveName);
         using HttpResponseMessage response = Send(uri);
@@ -167,7 +167,6 @@ internal sealed class GitHubReleaseClient : IDisposable
         }
 
         EnsureSuccess(response, $"download failed: {uri}");
-        using FileStream destination = File.Create(destinationPath);
         using Stream stream = response.Content.ReadAsStream();
         stream.CopyTo(destination);
     }

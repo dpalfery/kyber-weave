@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Formats.Tar;
@@ -511,7 +512,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         string stateDirectory = store.ResolveHomeStateDirectory();
         Directory.CreateDirectory(stateDirectory);
         File.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
-        new FileUserHostConfigStore().WriteGlobalTargets(userPaths.HomeDirectory, ["cursor"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(userPaths.HomeDirectory, ["cursor"]);
         string hookPath = WriteLegacyCursorHook(userPaths.HomeDirectory, "/legacy/kyber-weave-arbiter hook");
         using MapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");

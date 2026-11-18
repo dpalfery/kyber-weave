@@ -1019,7 +1019,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         DocumentIndexHost host = new(
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),
-            () => new DocumentLoader(root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
         return DocsToolsComposition.Create(host);
@@ -1042,7 +1042,7 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
         DocumentIndexHost host = new(
             _corpus.Root,
             () => CodeGraphResolverAdapter.ForRepository(_corpus.Root),
-            () => new DocumentLoader(_corpus.Root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(_corpus.Root, config.Ontology).Load(),
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
         return (DocsToolsComposition.Create(host), host);

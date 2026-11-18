@@ -27,7 +27,7 @@ public sealed class GlossaryGraphExportTests
         ManagedGlossaryLoadResult glossary = GlossaryService(repository.Path).Load();
         FakeCodeGraphResolver resolver = Resolver();
         ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(glossary);
-        DocGraphExporter exporter = new DocGraphExporter(resolver);
+        DocGraphExporter exporter = RealDocGraphExporter.Create(resolver);
 
         DocGraphExportResult first = exporter.Export(Documents(), firstOutput.Path, contributors: [contributor]);
         DocGraphExportResult second = exporter.Export(Documents(), secondOutput.Path, contributors: [contributor]);
@@ -71,7 +71,7 @@ public sealed class GlossaryGraphExportTests
         using TempDirectory output = new TempDirectory();
         ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(GlossaryService(repository.Path).Load());
 
-        DocGraphExportResult result = new DocGraphExporter(Resolver()).Export(
+        DocGraphExportResult result = RealDocGraphExporter.Create(Resolver()).Export(
             Documents(),
             output.Path,
             contributors: [contributor]);

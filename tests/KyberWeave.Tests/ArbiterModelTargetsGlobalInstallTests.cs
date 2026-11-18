@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Contracts.Repositories;
@@ -78,7 +79,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         SquadLifecycleResult result = await InstallGlobalAsync(SquadTarget.Copilot);
         Assert.True(result.Success, string.Join("; ", result.Warnings ?? []));
 
-        new FileUserHostConfigStore().WriteGlobalTargets(_home, ["copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home, ["copilot"]);
         WriteProjectConfig();
 
         string output = RunDoctor();
@@ -98,7 +99,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         SquadLifecycleResult install = await InstallGlobalAsync(SquadTarget.Copilot);
         Assert.True(install.Success, string.Join("; ", install.Warnings ?? []));
 
-        new FileUserHostConfigStore().WriteGlobalTargets(_home, ["copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home, ["copilot"]);
         WriteProjectConfig();
 
         string targetsPath = GlobalTargetsPath(SquadTarget.Copilot);
@@ -127,7 +128,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         SquadLifecycleResult install = await InstallGlobalAsync(SquadTarget.Copilot, "fast");
         Assert.True(install.Success, string.Join("; ", install.Warnings ?? []));
 
-        new FileUserHostConfigStore().WriteGlobalTargets(_home, ["copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home, ["copilot"]);
         WriteProjectConfig();
 
         string targetsPath = GlobalTargetsPath(SquadTarget.Copilot);
@@ -155,7 +156,7 @@ public sealed class ArbiterModelTargetsGlobalInstallTests : IDisposable
         SquadLifecycleResult install = await InstallGlobalAsync(SquadTarget.Copilot);
         Assert.True(install.Success, string.Join("; ", install.Warnings ?? []));
 
-        new FileUserHostConfigStore().WriteGlobalTargets(_home, ["copilot"]);
+        RealUserHostConfigStore.Create().WriteGlobalTargets(_home, ["copilot"]);
         WriteProjectConfig();
 
         string targetsPath = GlobalTargetsPath(SquadTarget.Copilot);
