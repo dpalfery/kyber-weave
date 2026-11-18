@@ -238,14 +238,12 @@ contract suites pin which errors each member raises, so the fake raises the same
 | D7 | What does `Domain` hold, and how does it see the seams? | Data only. Its logic moves to `Application`, where the services live; `Domain` needs no seam, so the seams stay in `Contracts`. | Owner, 2026-11-17: "The domain project should house DTOs, property bags. It should not have logic. All logic should be in the application project where the services live." `Contracts` already references `Domain`, so `Domain` referencing `Contracts` would be a cycle. | Owner direction |
 | D8 | Where do integration tests run? | CI only, as their own required job; developer agents and task gates run unit projects. | Owner, 2026-11-17: "the integration tests become a safety net on the CI pipeline." | Owner direction |
 | D9 | The seven crash-safety weaknesses found on 2026-11-17 | Each becomes a contract test in phase 3 and is fixed there. | Independent review of the parked journal-batching branch. | Proposed |
-| D10 | Is a test that reads the shipped content a unit test? | See Q1. | | Open |
+| D10 | Is a test that reads the shipped content a unit test? | Neither unit nor integration: a third kind, content tests, in `KyberWeave.Content.Tests`, reading through the read-only corpus seam. They write nothing and start nothing, so they run locally with the unit projects and count toward the 120 seconds. | 176 test classes and two projects (`PromptContent.Tests`, `RepoPolicy.Tests`) check the shipped content; the content is the subject, so it cannot be faked. Owner, 2026-11-17: "Yes, third kind." | Owner direction |
 | D11 | Enforce "only adapters touch resources" with an architecture test? | No. Written guidance in `AGENTS.md` and the test standard, and reviewers raise direct resource access outside an adapter as a finding. | Owner, 2026-11-17, chose guidance and review over a build check; consistent with the standing rule that test rules are guidance, not guards. | Owner direction |
 
 ## Open questions
 
-| # | Question | Recommendation |
-|---|---|---|
-| Q1 | The 176 test classes (and two whole projects, `PromptContent.Tests` and `RepoPolicy.Tests`) that check the content we ship read the checkout. They cannot be in-memory: the content is the subject. Are they unit tests or integration tests? | Neither: a third kind, content tests, in `KyberWeave.Content.Tests`, reading through one read-only corpus seam. They write nothing, start nothing and are fast (prompt-content: under one second), so they run locally with the unit projects and count toward the 120 seconds. |
+None. Q1 to Q3 are answered in D10, D7 and D11.
 
 ## Design harvest
 

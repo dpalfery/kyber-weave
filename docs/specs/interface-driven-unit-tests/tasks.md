@@ -121,7 +121,7 @@ from this file when it is marked Ready.
   - **Files:** `tests/KyberWeave.Testing/Corpus/**`, the 159 test files
   - **Acceptance criteria:** no test file walks the tree to find the repository root; every content
     test reads through the seam.
-  - **Depends on:** 1.1; Q1 answered
+  - **Depends on:** 1.1
   - _Requirements: 8.1_
 
 - [ ] 1.8 Adapter and exceptions registers
@@ -277,10 +277,10 @@ For every task in phase 4:
   - _Requirements: 6.2, 7.1_
 
 - [ ] 5.4 Content tests through the corpus seam
-  - **Objective:** per the answer to Q1, the tests of shipped content live together and read through
+  - **Objective:** per D10, the tests of shipped content live together in `KyberWeave.Content.Tests` and read through
     the corpus seam.
   - **Depends on:** 1.7
-  - _Requirements: 8.1, 8.2_
+  - _Requirements: 8.1, 8.2, 8.3_
 
 - [ ] 5.5 CI and gates
   - **Objective:** CI runs the unit projects and the integration project as separate required jobs;

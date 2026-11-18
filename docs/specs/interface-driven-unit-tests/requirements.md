@@ -228,6 +228,10 @@ seam, and SHALL NOT walk the directory tree to find the repository root itself.
 8.2. WHEN a product test checks how the product handles content THEN it SHALL use fixture content in
 memory, not the shipped corpus.
 
+8.3. WHEN a test checks shipped content THEN it SHALL be a content test in `KyberWeave.Content.Tests`,
+neither a unit test nor an integration test; it SHALL write nothing and start no program, and it SHALL
+run locally with the unit test projects, inside the 120 seconds of requirement 6.3.
+
 ### Requirement 9: The rules are written where agents read them
 
 **User Story:** As the owner, I want the rules written in the documents agents read, so that new code
