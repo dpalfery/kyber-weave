@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Data.Docs.FileSystem;
@@ -11,6 +12,7 @@ using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Doctor;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.Review;
 using KyberWeave.Data.Skills;
 using KyberWeave.Data.RunStart;
@@ -39,22 +41,16 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
-        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
-            sp.GetRequiredService<IFileSystem>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
-        services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICodeGraphPortsFactory, CodeGraphPortsFactory>();
         services.TryAddSingleton<ICodeGraphIndexWorkspace, FileCodeGraphIndexWorkspace>();
         services.TryAddSingleton<IGitHookFiles, FileGitHookFiles>();
         services.TryAddSingleton<IMcpStdioSessionFactory, StdioMcpSessionFactory>();
         services.TryAddSingleton<IStatusLineFiles, FileStatusLineFiles>();
         services.TryAddSingleton(_ => StatusLineVersionProbeRunner.Create());
-        services.TryAddSingleton<IUserHostConfigStore, FileUserHostConfigStore>();
         services.TryAddSingleton<IMcpConfigFiles>(_ => new PhysicalMcpConfigFiles());
         services.TryAddSingleton<ILaunchCommandResolverFactory>(_ => new KyberWeave.Core.Docs.Mcp.EnvironmentLaunchCommandResolverFactory());
         _ = services.AddWeaveSquadData();
         services.TryAddSingleton<IProgramRunner>(_ => new ProcessProgramRunner());
-        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewCycleStore>(_ => new FileReviewCycleStore());
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
@@ -86,13 +82,12 @@ public static class ServiceCollectionExtensions
     {
         services.TryAddSingleton<IWritableFileSystem>(_ => new PhysicalFileSystem());
         services.TryAddSingleton<IFileSystem>(sp => sp.GetRequiredService<IWritableFileSystem>());
+        services.TryAddSingleton<IPathResolver>(sp => new PhysicalPathResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IProcessEnvironment>(_ => new ProcessEnvironment());
         services.TryAddSingleton<IProcessRunner>(_ => new KernelProcessRunner());
         services.TryAddSingleton<IIdGenerator>(_ => new SystemIdGenerator());
         services.TryAddSingleton<IGitCommandRunner>(_ => new ProcessGitCommandRunner(ProcessGitCommandRunner.DefaultTimeout));
         services.TryAddSingleton<ICheckedOutBranchReader>(sp => new GitCheckedOutBranchReader(sp.GetRequiredService<IGitCommandRunner>()));
-        services.TryAddSingleton<IRunStateStore>(sp => new FileRunStateStore(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<ICheckedOutBranchReader>()));
-        services.TryAddSingleton<IRunCheckout>(sp => new RunCheckoutGuard(sp.GetRequiredService<IWritableFileSystem>(), sp.GetRequiredService<IRunStateStore>()));
         return services;
     }
 }

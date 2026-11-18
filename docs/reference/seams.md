@@ -228,11 +228,13 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ReviewWorkTreeService` (`Review/ReviewWorkTreeService.cs`) | file system, paths | 4.3 |
 | `SuppressionScanService` (`Review/SuppressionScanService.cs`) | paths | 4.3 |
 | `TaskGateResolver` (`Review/TaskGateResolver.cs`) | file system | 4.3 |
+| `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `RunStartRunner` (`RunStart/RunStartRunner.cs`) | paths | 4.8 |
 | `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.8 |
 | `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.8 |
 | `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.8 |
 | `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | 4.8 |
+| `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
 | `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | 4.8 |
 | `SelfUpdater` (`Update/SelfUpdater.cs`) | file system, paths, environment, network | 4.1 |
 | `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | 4.8 |
@@ -300,15 +302,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | file system, paths | 4.4 |
 | `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | file system, paths | 4.4 |
 | `InFlightLedger` (`Arbiter/Ledger/InFlightLedger.cs`) | file system, clock | 4.4 |
-| `PlanFacts` (`Arbiter/Plans/PlanFacts.cs`) | file system | 4.4 |
 | `PlanPathResolver` (`Arbiter/Plans/PlanPathResolver.cs`) | file system, paths | 4.4 |
-| `PlanRootResolver` (`Arbiter/Plans/PlanRootResolver.cs`) | file system, paths | 4.4 |
 | `SystemOneClient` (`Arbiter/Providers/SystemOneClient.cs`) | clock, network | 4.4 |
 | `SocketArbiterHttpHandlers` (`Arbiter/SocketArbiterHttpHandlers.cs`) | network | 4.4 |
 | `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | file system, paths, clock | 4.4 |
 | `SystemOneProviderFactory` (`Arbiter/SystemOneProviderFactory.cs`) | network | 4.4 |
 | `CodeGraphResolverAdapter` (`CodeGraph/CodeGraphResolverAdapter.cs`) | file system, paths | 4.4 |
-| `FileUserHostConfigStore` (`Configuration/FileUserHostConfigStore.cs`) | file system | 4.4 |
 | `OpenAiCompatibleEmbeddingGenerator` (`Docs/Analysis/Embeddings/OpenAiCompatibleEmbeddingGenerator.cs`) | environment, network | 4.4 |
 | `AnalysisCacheSafety` (`Docs/Analysis/Persistence/AnalysisCacheSafety.cs`) | file system, paths | 4.4 |
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
@@ -333,7 +332,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileSeatFolder` (`Review/FileSeatFolder.cs`) | file system | 4.4 |
 | `FileSeverityOverrideSource` (`Review/FileSeverityOverrideSource.cs`) | file system, paths | 4.4 |
 | `FileTestClassSources` (`Review/FileTestClassSources.cs`) | file system, paths | 4.4 |
-| `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `ZipSkillArchiveWriter` (`Skills/ZipSkillArchiveWriter.cs`) | file system | 4.4 |
 | `DevinImportOverlap` (`Squad/Deployment/DevinImportOverlap.cs`) | file system, paths | 3.5 |
 | `FactoryHooksShadowing` (`Squad/Deployment/FactoryHooksShadowing.cs`) | file system | 3.5 |
@@ -369,7 +367,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 | `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
 | `CopilotPromptRefresher` (`Update/CopilotPromptRefresher.cs`) | file system | 4.4 |
-| `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | file system, network | 4.4 |
 | `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
 
 #### KyberWeave.Domain (26 classes)
@@ -458,8 +455,7 @@ does not yet meet that: 19 non-adapter classes open a `FileStream` directly. The
 `SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Packaging/SquadPacker.cs`, `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`, `Data/Squad/Release/GitHubSquadReleaseSource.cs`,
-`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/GitHubReleaseClient.cs` and
-`SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
+`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.
 
 Two more framework members are used directly but are not in the exception list because a seam

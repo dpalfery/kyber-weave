@@ -9,10 +9,11 @@ namespace KyberWeave.Tests;
 /// Paths are absolutized on the way in and out, so a caller that resolves a relative path reads the same entry.
 /// </para>
 /// <para>
-/// It models the real adapter's link rules: a link is never written, read or listed as itself. Existence resolves
-/// the link, <see cref="IsPresentFile"/> answers true for a link to a directory because the adapter's
-/// <c>ResolveLinkTarget</c> does, and <see cref="ListEntries"/> flags the link. The contract suite pins the fake
-/// against the adapter.
+/// It models the real adapter's link rules: a link is never written, read or listed as itself. <see cref="FileExists"/>
+/// answers an entry that is not a directory, so a link with a missing target still counts; <see cref="IsPresentFile"/>
+/// answers true only when the link's final target is a file — the adapter asks a <see cref="FileInfo"/> to resolve the
+/// link, so a directory target is not a present file — and <see cref="ListEntries"/> flags the link. The contract suite
+/// pins the fake against the adapter.
 /// </para>
 /// </remarks>
 internal sealed class FakeDoctorFileSystem : IDoctorFileSystem
@@ -47,7 +48,18 @@ internal sealed class FakeDoctorFileSystem : IDoctorFileSystem
     }
 
     /// <inheritdoc />
-    public bool FileExists(string path) => _files.ContainsKey(Resolve(path));
+    public bool FileExists(string path)
+    {
+        string full = Absolute(path);
+        if (!_links.ContainsKey(full))
+            return _files.ContainsKey(full);
+
+        // The adapter's File.Exists asks for an entry that is not a directory: a link whose target is missing still
+        // answers true, while a link that lands on a directory answers false. FileExists is the doctor's first gate,
+        // so a fake that answered differently would send a test down a path production does not take.
+        string target = Resolve(full);
+        return _files.ContainsKey(target) || !IsDirectory(target);
+    }
 
     /// <inheritdoc />
     public bool IsPresentFile(string path)
@@ -56,10 +68,9 @@ internal sealed class FakeDoctorFileSystem : IDoctorFileSystem
         if (!_links.ContainsKey(full))
             return _files.ContainsKey(full);
 
-        // The adapter resolves a link and asks whether the final target exists as anything, so a link to a directory
-        // answers true here while FileExists answers false.
-        string target = Resolve(full);
-        return _files.ContainsKey(target) || _directories.Contains(target);
+        // The adapter asks a FileInfo to resolve the link and to say whether the final target is a file, so a link
+        // to a directory has nothing to read and answers false.
+        return _files.ContainsKey(Resolve(full));
     }
 
     /// <inheritdoc />
@@ -69,14 +80,14 @@ internal sealed class FakeDoctorFileSystem : IDoctorFileSystem
             : throw new FileNotFoundException("No such file in the fake file system.", path);
 
     /// <inheritdoc />
-    public bool DirectoryExists(string path)
-    {
-        string full = Resolve(path);
-        return _directories.Contains(full)
-            || _files.Keys.Any(child => IsUnder(child, full))
-            || _directories.Any(child => IsUnder(child, full))
-            || _links.Keys.Any(child => IsUnder(child, full));
-    }
+    public bool DirectoryExists(string path) => IsDirectory(Resolve(path));
+
+    /// <summary>Whether <paramref name="full"/> is a directory: recorded as one, or holding a recorded entry.</summary>
+    private bool IsDirectory(string full) =>
+        _directories.Contains(full)
+        || _files.Keys.Any(child => IsUnder(child, full))
+        || _directories.Any(child => IsUnder(child, full))
+        || _links.Keys.Any(child => IsUnder(child, full));
 
     /// <inheritdoc />
     public string ReadAllText(string path) => Encoding.UTF8.GetString(ReadAllBytes(path));

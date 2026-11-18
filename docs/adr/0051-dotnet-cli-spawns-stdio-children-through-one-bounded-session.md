@@ -9,7 +9,7 @@ component: DocGraph
 code-refs:
   - StdioSession
   - ProcessRunner
-  - CodeGraphProvisioner
+  - CodeGraphIndexProvisioner
 ---
 
 # ADR 0051: The .NET CLI Spawns Long-Lived Stdio Children Only Through One Bounded Session

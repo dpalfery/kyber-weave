@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Configuration;
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Cli;
@@ -329,7 +330,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
         Assert.Contains("user-owned read hook", after, StringComparison.Ordinal);
         Assert.Contains("custom", after, StringComparison.Ordinal);
         Assert.Contains("keep me", after, StringComparison.Ordinal);
-        Assert.DoesNotContain(new FileUserHostConfigStore().ReadGlobalTargets(home), target =>
+        Assert.DoesNotContain(RealUserHostConfigStore.Create().ReadGlobalTargets(home), target =>
             string.Equals(target, "claude", StringComparison.OrdinalIgnoreCase));
         Assert.False(File.Exists(receiptPath), "the global receipt must be removed after uninstall");
         Assert.Null(stateStore.ReadReceipt(home, SquadDeploymentScope.Global));
@@ -441,7 +442,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
             new ArbiterUninstallSettings { Path = home, Target = "claude" }));
 
         Assert.Equal(0, execution.ExitCode);
-        IReadOnlyList<string> targets = new FileUserHostConfigStore().ReadGlobalTargets(home);
+        IReadOnlyList<string> targets = RealUserHostConfigStore.Create().ReadGlobalTargets(home);
         Assert.DoesNotContain(targets, target => string.Equals(target, "claude", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(targets, target => string.Equals(target, "codex", StringComparison.OrdinalIgnoreCase));
         Assert.True(File.Exists(Path.Combine(home, ".codex", "hooks.json")));

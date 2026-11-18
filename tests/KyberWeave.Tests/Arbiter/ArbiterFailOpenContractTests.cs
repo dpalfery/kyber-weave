@@ -39,7 +39,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
     private sealed class RealPlanReader(string root) : IArbiterPlanReader
     {
         public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification) =>
-            new KyberWeave.Core.Arbiter.Plans.PlanFacts(new PlanPathResolver()).Enrich(facts, classification, root);
+            RealPlanFacts.Create().Enrich(facts, classification, root);
     }
 
     private ArbiterEvaluator Evaluator(IArbiterProvider provider, IArbiterGitFacts? git = null) => new(

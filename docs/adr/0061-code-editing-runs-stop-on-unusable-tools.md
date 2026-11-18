@@ -9,10 +9,10 @@ component: KyberSquad
 decided-by: []
 supersedes: []
 code-refs:
-  - CodeGraphProvisioner
+  - CodeGraphIndexProvisioner
   - DoctorMode
   - KyberWeaveConfig
-  - RepositoryDoctor
+  - RepositoryDoctorService
 ---
 
 # ADR 0061: Code-editing runs stop on unusable tools
