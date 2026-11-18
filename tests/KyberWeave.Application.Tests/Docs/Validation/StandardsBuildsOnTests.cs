@@ -3,7 +3,9 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
-namespace KyberWeave.Tests;
+using KyberWeave.Tests;
+
+namespace KyberWeave.Application.Tests.Docs.Validation;
 
 /// <summary>
 /// A technology template names at most one parent it builds on — React on TypeScript, Tauri
@@ -71,7 +73,7 @@ public class StandardsBuildsOnTests
     public void ADeclaredParentIsAccepted()
     {
         using DocFixture fixture = Folder(
-            Folder(new DocFixture().WithCatalog(), "typescript"), "react", "typescript");
+            Folder(DocFixture.CreateInMemory().WithCatalog(), "typescript"), "react", "typescript");
 
         Assert.False(fixture.Validate(Declared).HasErrors);
     }
@@ -79,7 +81,7 @@ public class StandardsBuildsOnTests
     [Fact]
     public void AnUndeclaredParentIsAnErrorNamingTheFolder()
     {
-        using DocFixture fixture = Folder(new DocFixture().WithCatalog(), "react", "javascript");
+        using DocFixture fixture = Folder(DocFixture.CreateInMemory().WithCatalog(), "react", "javascript");
 
         DiagnosticReport report = fixture.Validate(Declared);
 
@@ -92,7 +94,7 @@ public class StandardsBuildsOnTests
     [Fact]
     public void ASelfReferenceIsAnError()
     {
-        using DocFixture fixture = Folder(new DocFixture().WithCatalog(), "react", "react");
+        using DocFixture fixture = Folder(DocFixture.CreateInMemory().WithCatalog(), "react", "react");
 
         DiagnosticReport report = fixture.Validate(Declared);
 
@@ -105,7 +107,7 @@ public class StandardsBuildsOnTests
     public void AParentThatItselfNamesAParentIsAnError()
     {
         using DocFixture fixture = Folder(
-            Folder(new DocFixture().WithCatalog(), "typescript", "csharp"),
+            Folder(DocFixture.CreateInMemory().WithCatalog(), "typescript", "csharp"),
             "react",
             "typescript");
 
@@ -124,7 +126,7 @@ public class StandardsBuildsOnTests
     [Fact]
     public void TwoStandardsThatNameOneTechnologyAreEachChecked()
     {
-        using DocFixture fixture = Folder(new DocFixture().WithCatalog(), "react", "typescript")
+        using DocFixture fixture = Folder(DocFixture.CreateInMemory().WithCatalog(), "react", "typescript")
             .Write(
                 "6-Docs/standards/react/react-extra.standards.md",
                 Standard("react", "javascript").Replace(
@@ -170,7 +172,7 @@ public class StandardsBuildsOnTests
 
             ## Done checklist
             """;
-        using DocFixture fixture = new DocFixture().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write("6-Docs/standards/reviewer/reviewer.standards.md", RoleStandard);
         OntologyConfig ontology = new() { Technologies = ["csharp"], Roles = ["reviewer"] };
 
@@ -185,7 +187,7 @@ public class StandardsBuildsOnTests
     [Fact]
     public void BuildsOnOutsideAStandardIsAnError()
     {
-        using DocFixture fixture = Folder(new DocFixture().WithCatalog(), "react")
+        using DocFixture fixture = Folder(DocFixture.CreateInMemory().WithCatalog(), "react")
             .Write("6-Docs/rules/frontend.md", """
                 ---
                 id: rules/frontend

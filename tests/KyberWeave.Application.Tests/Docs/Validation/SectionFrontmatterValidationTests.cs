@@ -5,7 +5,9 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using Xunit;
 
-namespace KyberWeave.Tests;
+using KyberWeave.Tests;
+
+namespace KyberWeave.Application.Tests.Docs.Validation;
 
 /// <summary>
 ///     T13 RED — optional <c>lead</c> and <c>sections</c> frontmatter, roll-up to document
@@ -26,7 +28,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionKeywordsAndCodeRefsRollUpToTheDocumentView()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -83,7 +85,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void LeadNamingMissingSlugIsSPEC008WithNearestSlugHint()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 "lead: almost-detail",
                 """
@@ -106,7 +108,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionsKeyNamingMissingSlugIsSPEC008WithNearestSlugHint()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -135,7 +137,7 @@ public sealed class SectionFrontmatterValidationTests
     public void LeadLeafLongerThan24000CharactersIsSPEC009()
     {
         string huge = Repeat('x', ExploreAnswer.AnswerCharCap + 1);
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 "lead: huge-leaf",
                 $"""
@@ -158,7 +160,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionKeywordWithNoWordsInThatSectionIsSPEC010Warning()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -185,7 +187,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void EmptySectionKeywordEntryIsSPEC002()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -211,7 +213,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void EmptySectionCodeRefEntryIsSPEC002()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -237,7 +239,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void UnresolvedSectionCodeRefIsDRIFT001()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -266,7 +268,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionsDeclaredAsScalarSurfacesInvalidVocabulary()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -292,7 +294,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void NullSectionEntryDoesNotThrowOnLoad()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -313,7 +315,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void SectionValueThatIsASequenceNamesTheMappingRequirement()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 """
                 sections:
@@ -340,7 +342,7 @@ public sealed class SectionFrontmatterValidationTests
     [Fact]
     public void OneBrokenYamlBlockReportsASingleParseError()
     {
-        using DocFixture fixture = DocFixture.Create().WithCatalog()
+        using DocFixture fixture = DocFixture.CreateInMemory().WithCatalog()
             .Write(SubjectPath, ReferenceBody(
                 "sections: [",
                 """
@@ -361,7 +363,7 @@ public sealed class SectionFrontmatterValidationTests
 
     private static DocFixture BuildLeadFixture(string? leadYaml)
     {
-        DocFixture fixture = DocFixture.Create().WithCatalog();
+        DocFixture fixture = DocFixture.CreateInMemory().WithCatalog();
         string extra = leadYaml is null ? string.Empty : leadYaml + Environment.NewLine;
         fixture.Write(SubjectPath, ReferenceBody(extra, $"""
                                                          {PreambleMarker}
