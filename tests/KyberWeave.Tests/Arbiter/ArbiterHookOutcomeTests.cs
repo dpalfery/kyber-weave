@@ -189,7 +189,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public async Task AnEnforcedDuplicateDeniesTheRefuterWithItsDuplicateLine()
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, TimeProvider.System);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
         HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(
@@ -209,7 +209,7 @@ public sealed class ArbiterHookOutcomeTests : IDisposable
     [Fact]
     public async Task AShadowDuplicateLetsTheRefuterRun()
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => DateTimeOffset.UtcNow);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, TimeProvider.System);
         await store.AppendFindingAsync(ReviewRun, "id: nit-1\nfile: src/Widget.cs\nline: 8\nclaim: naming\nstatus: kept");
 
         HookOutcome outcome = Engine(FakeArbiterProvider.Answering(SameDefect, 0.95, threshold: 0.9)).DecidePreDispatch(

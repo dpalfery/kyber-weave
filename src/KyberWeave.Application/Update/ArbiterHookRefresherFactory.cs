@@ -9,7 +9,7 @@ namespace KyberWeave.Cli.Update;
 /// <param name="configs">Reads the project and per-user host configuration.</param>
 /// <param name="lifecycle">Runs the Squad update that re-renders a project's hooks.</param>
 /// <param name="state">Reads and rewrites the global Squad receipt.</param>
-/// <param name="files">Reads the hook files before rewriting them.</param>
+/// <param name="files">Reads the hook files before rewriting them, and writes them atomically.</param>
 /// <param name="wiring">Scans a project for retired MCP server keys.</param>
 internal sealed class ArbiterHookRefresherFactory(
     IProcessEnvironment environment,
@@ -17,7 +17,7 @@ internal sealed class ArbiterHookRefresherFactory(
     IKyberWeaveConfigRepository configs,
     ISquadLifecycleService lifecycle,
     ISquadStateStore state,
-    IFileSystem files,
+    IWritableFileSystem files,
     IMcpWiringService wiring) : IArbiterHookRefresherFactory
 {
     /// <inheritdoc />

@@ -1,6 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
 namespace KyberWeave.Core.Docs.Mcp;
 
 /// <summary>How the repair wrote a file, which is what decides how removal undoes it.</summary>
@@ -68,14 +65,6 @@ public sealed class McpWiringReceipt
     /// <summary>Removal was refused: there is no record, or the file changed since the write.</summary>
     public const string DriftCode = "KW-MCP-WIRE-006";
 
-    private static JsonSerializerOptions SerializerOptions { get; } = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase, allowIntegerValues: false) }
-    };
-
     /// <summary>One record per file the repair wrote, in the order the writes happened.</summary>
     public IReadOnlyList<McpWiringReceiptRecord> Files { get; init; } = [];
 
@@ -90,44 +79,6 @@ public sealed class McpWiringReceipt
             ".kyber-weave",
             "receipts",
             "mcp-wiring.json");
-    }
-
-    /// <summary>Reads the receipt, or answers with an empty one when none can be read.</summary>
-    /// <param name="repositoryRoot">The repository whose receipt is read.</param>
-    public static McpWiringReceipt Load(string repositoryRoot)
-    {
-        string path = PathFor(repositoryRoot);
-
-        if (!File.Exists(path))
-            return new McpWiringReceipt();
-
-        try
-        {
-            McpWiringReceiptDocument? document = JsonSerializer.Deserialize<McpWiringReceiptDocument>(
-                File.ReadAllText(path),
-                SerializerOptions);
-
-            // A receipt written by another schema is not this code's to interpret: reading it as
-            // if it were would put a restore behind a record this code cannot check.
-            if (document is null || document.Version != SchemaVersion)
-                return new McpWiringReceipt();
-
-            return WellFormed(document.Files) is { } records
-                ? new McpWiringReceipt { Files = records }
-                : new McpWiringReceipt();
-        }
-        catch (IOException)
-        {
-            return new McpWiringReceipt();
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return new McpWiringReceipt();
-        }
-        catch (JsonException)
-        {
-            return new McpWiringReceipt();
-        }
     }
 
     /// <summary>
@@ -184,7 +135,7 @@ public sealed class McpWiringReceipt
     /// then enumerated into the removal report and the restore.
     /// </para>
     /// </remarks>
-    private static IReadOnlyList<McpWiringReceiptRecord>? WellFormed(
+    internal static IReadOnlyList<McpWiringReceiptRecord>? WellFormed(
         IReadOnlyList<McpWiringReceiptRecord>? files)
     {
         if (files is null)
@@ -240,42 +191,6 @@ public sealed class McpWiringReceipt
             left.Replace('\\', '/'),
             right.Replace('\\', '/'),
             StringComparison.Ordinal);
-
-    /// <summary>
-    /// Writes the receipt, and reports why it could not be written instead of failing the run: a
-    /// caller may already have restored files by the time it rewrites the record of them, and one that
-    /// threw here would lose the report of the work it did.
-    /// </summary>
-    /// <param name="repositoryRoot">The repository the receipt belongs to.</param>
-    /// <param name="records">Every record the receipt should hold.</param>
-    /// <returns>Null when written, or the reason it was not.</returns>
-    internal static string? Save(string repositoryRoot, IReadOnlyList<McpWiringReceiptRecord> records)
-    {
-        string path = PathFor(repositoryRoot);
-
-        try
-        {
-            string? directory = Path.GetDirectoryName(path);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(
-                path,
-                JsonSerializer.Serialize(
-                    new McpWiringReceiptDocument(SchemaVersion, records),
-                    SerializerOptions));
-
-            return null;
-        }
-        catch (IOException exception)
-        {
-            return exception.Message;
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return exception.Message;
-        }
-    }
 
     /// <summary>The receipt's document, so the schema's own shape is what gets written.</summary>
     /// <param name="Version">The schema version.</param>

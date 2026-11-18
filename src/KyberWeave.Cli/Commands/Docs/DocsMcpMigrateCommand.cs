@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
@@ -32,9 +34,10 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// — <c>.cursor/mcp.json</c> — is the user-scope file ADR 0052 decision 2 says is never read or
 /// written. Containment alone is therefore not the guarantee this paragraph states, and a root that
 /// <em>is</em> the operator's home directory is refused before the first read, with no byte written
-/// and no receipt. The home is resolved through an injected reader — as
-/// <c>IRepositoryDoctor.Run</c> does, defaulting to the process environment — so the refusal is
-/// testable without touching the developer's own home.
+/// and no receipt. Both sides of that comparison come from seams — the home directory from
+/// <see cref="IProcessEnvironment" /> and the canonical spelling from <see cref="IPathResolver" /> —
+/// so the refusal is testable without touching the developer's own home, and a root the path seam
+/// cannot resolve is refused rather than assumed safe.
 /// </para>
 /// </remarks>
 public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
@@ -49,21 +52,25 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
                 .Append(McpServerRenamer.DeclarationTarget));
 
     private readonly IMcpWiringService _wiring;
-    private readonly Func<string?> _home;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
 
     /// <summary>
-    /// Creates the command over the MCP wiring service the container resolves, with an injectable home reader so the
-    /// home-directory refusal can be exercised against a fixture rather than the developer's own profile.
+    /// Creates the command over the MCP wiring service the container resolves, and the path and environment seams
+    /// the home-directory refusal compares through, so the refusal is exercised against a fake rather than the
+    /// developer's own profile.
     /// </summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
-    /// <param name="home">
-    /// Resolves the operator's home directory, or null for
-    /// <see cref="Environment.SpecialFolder.UserProfile"/> under the process environment.
-    /// </param>
-    public DocsMcpMigrateCommand(IMcpWiringService wiring, Func<string?>? home = null)
+    /// <param name="paths">Canonicalizes the root and the operator's home before they are compared.</param>
+    /// <param name="environment">Names the operator's home directory and the platform's case rule.</param>
+    public DocsMcpMigrateCommand(
+        IMcpWiringService wiring,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
-        _home = home ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
     }
 
     /// <inheritdoc />
@@ -83,7 +90,7 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
 
         // Before the first read: a root that is the operator's home directory would make every
         // catalog path a user-scope file, which is the thing this verb promises never to touch.
-        if (IsOperatorHome(root, _home()))
+        if (IsOperatorHome(root))
         {
             CommandHelpers.WriteUnfolded(() => PrintHomeRefusal(root));
             return 1;
@@ -153,38 +160,37 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     /// The comparison is on the resolved directory, never on the spelling: a home reached through a
     /// symbolic link, a relative path, or a <c>..</c> that lands there is the same directory, and a
     /// refusal that let one spelling through would be a refusal an operator could walk around by
-    /// accident. A home this process cannot resolve, or does not have, cannot equal anything.
+    /// accident. It fails closed: a root this process cannot resolve has not been proved to be
+    /// anything other than the home, so it is refused. Where only the link-resolving walk fails, the
+    /// two full paths are compared lexically, which still refuses the home written verbatim. A home
+    /// this process cannot resolve, or does not have, cannot equal anything.
     /// </remarks>
-    private static bool IsOperatorHome(string root, string? home)
+    private bool IsOperatorHome(string root)
     {
+        string home = _environment.HomeDirectory;
+
         if (string.IsNullOrWhiteSpace(home))
             return false;
 
-        string? canonicalRoot = Canonical(root);
-        string? canonicalHome = Canonical(home);
+        string? fullRoot = FullPath(root);
+        if (fullRoot is null)
+            return true;
 
-        return canonicalRoot is not null
-            && canonicalHome is not null
-            && string.Equals(
-                canonicalRoot,
-                canonicalHome,
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        string? fullHome = FullPath(home);
+        if (fullHome is null)
+            return false;
+
+        return Same(Canonical(fullRoot) ?? fullRoot, Canonical(fullHome) ?? fullHome);
     }
 
-    /// <summary>The directory a path names, with its own link resolved and its trailing separator removed.</summary>
-    private static string? Canonical(string path)
+    /// <summary>The full spelling of a path, resolved against the named base, or null when the seam refuses it.</summary>
+    private string? FullPath(string path)
     {
         try
         {
-            string full = Path.GetFullPath(path);
-
-            if (Directory.Exists(full) && Directory.ResolveLinkTarget(full, returnFinalTarget: true) is { } target)
-                full = Path.GetFullPath(target.FullName);
-
-            string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            // A filesystem root trims to nothing, and "" is not a directory name this can compare.
-            return trimmed.Length == 0 ? full : trimmed;
+            // The base is named rather than read from the process: the path seam resolves a relative
+            // spelling against it and never falls back to the working directory.
+            return _paths.GetFullPath(path, _environment.CurrentDirectory);
         }
         catch (Exception exception) when (exception is
             ArgumentException or IOException or NotSupportedException
@@ -193,6 +199,33 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
             return null;
         }
     }
+
+    /// <summary>The directory a full path names, with every link resolved and its trailing separator removed.</summary>
+    private string? Canonical(string fullPath)
+    {
+        try
+        {
+            string trimmed = _paths.Canonicalize(fullPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // A filesystem root trims to nothing, and "" is not a directory name this can compare.
+            return trimmed.Length == 0 ? fullPath : trimmed;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or IOException or NotSupportedException
+            or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private bool Same(string first, string second) =>
+        string.Equals(
+            first,
+            second,
+            _environment.OperatingSystem == OperatingSystemKind.Windows
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
 
     /// <summary>
     /// The whole report for a root that is the home directory: one refusal naming the reason, and no

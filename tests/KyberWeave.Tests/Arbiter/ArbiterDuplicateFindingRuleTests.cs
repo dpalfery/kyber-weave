@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -9,6 +10,7 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -170,6 +172,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
+            new FakeIdGenerator(),
             (_, _) => []);
 
     /// <summary>A stored earlier finding on <paramref name="file"/> at <paramref name="line"/>.</summary>
@@ -178,7 +181,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
     private async Task SeedAsync(string reviewRun, params string[] findings)
     {
-        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now);
+        ArbiterRunStore store = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now));
         foreach (string finding in findings)
         {
             ArbiterStoreStatus status = await store.AppendFindingAsync(reviewRun, finding);
@@ -464,7 +467,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
 
         await evaluator.EvaluateAsync(returned, ConfigWith([Enforced(DuplicateRule)]));
 
-        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFindings(ThisRun);
+        IReadOnlyList<string> stored = RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFindings(ThisRun);
         string item = Assert.Single(stored);
         Assert.Contains(Refuted, item, StringComparison.Ordinal);
     }

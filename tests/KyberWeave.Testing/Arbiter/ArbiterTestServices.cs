@@ -74,6 +74,7 @@ internal static class ArbiterTestServices
             Get<IArbiterHostConfig>(),
             Get<IProcessEnvironment>(),
             Get<IBackgroundDispatchStore>(),
+            Get<IIdGenerator>(),
             providerFactory,
             gitFactsFactory,
             planReaderFactory,
@@ -97,17 +98,20 @@ internal static class ArbiterTestServices
     /// <summary>The hook command over a registry and a project-scope configuration loader.</summary>
     /// <param name="registry">The harness adapters.</param>
     /// <param name="configLoader">Loads the project configuration; a test passes one that counts its calls.</param>
-    /// <param name="newDecisionId">Builds a decision id; a new GUID when null.</param>
+    /// <param name="newDecisionId">Builds a decision id; null uses <paramref name="ids"/>.</param>
+    /// <param name="ids">The identifier seam; the registered one when null.</param>
     internal static HookCommand Command(
         HarnessAdapterRegistry registry,
         Func<string, KyberWeaveConfig> configLoader,
-        Func<string>? newDecisionId = null) =>
+        Func<string>? newDecisionId = null,
+        IIdGenerator? ids = null) =>
         new(
             registry,
             new DelegateHostConfig(configLoader, Get<IArbiterHostConfig>()),
             Get<IDispatchClaimStore>(),
             Get<IClaudeHookCoverage>(),
             Get<IProcessEnvironment>(),
+            ids ?? Get<IIdGenerator>(),
             newDecisionId);
 
     /// <summary>The git facts over the real adapters.</summary>
@@ -128,7 +132,7 @@ internal static class ArbiterTestServices
 
     /// <summary>The serve tools over a serve context and the real file and triage ports.</summary>
     internal static ArbiterTools Tools(ArbiterServeContext context) =>
-        new(new ArbiterServeService(context, Get<IFileTextFacts>(), Get<ICommentTriageFactory>(), Get<IArbiterSectionSelectionService>(), Get<TimeProvider>()));
+        new(new ArbiterServeService(context, Get<IFileTextFacts>(), Get<ICommentTriageFactory>(), Get<IArbiterSectionSelectionService>(), Get<TimeProvider>(), Get<IIdGenerator>()));
 
     /// <summary>The project-scope configuration comes from a test's loader; every other answer is the real one.</summary>
     private sealed class DelegateHostConfig(Func<string, KyberWeaveConfig> loader, IArbiterHostConfig real) : IArbiterHostConfig

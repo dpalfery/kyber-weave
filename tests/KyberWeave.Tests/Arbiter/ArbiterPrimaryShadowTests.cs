@@ -77,7 +77,8 @@ public sealed class ArbiterPrimaryShadowTests : IDisposable
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-            new FixedClock(fixedNow));
+            new FixedClock(fixedNow),
+            new FakeIdGenerator());
     }
 
     private IReadOnlyList<ArbiterDecisionRecord> Records() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();

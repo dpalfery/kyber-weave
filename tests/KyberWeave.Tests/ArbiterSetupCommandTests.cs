@@ -244,7 +244,7 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     {
         const string key = "TS-STATUS-KEY-4b2d8f0a";
         WriteOverride("provider:\n  kind: systemone\n  endpoint: https://api.typesafe.ai/v1\n  model: jev-1.13.0\n");
-        _store.Entries["https://api.typesafe.ai"] = key;
+        _store.Seed("https://api.typesafe.ai", key);
         string host = NewDir("status-found");
 
         CommandExecution execution = Capture(() => _host.Command<ArbiterStatusCommand>().Execute(
@@ -471,27 +471,6 @@ public sealed class ArbiterSetupCommandTests : IDisposable
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);
-
-    private sealed class FakeCredentialStore : ICredentialStore
-    {
-        public Dictionary<string, string> Entries { get; } = new(StringComparer.Ordinal);
-
-        public List<(string Origin, string Key)> Writes { get; } = [];
-
-        public string? Read(string origin)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            return Entries.TryGetValue(origin, out string? key) ? key : null;
-        }
-
-        public void Write(string origin, string key)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            ArgumentException.ThrowIfNullOrEmpty(key);
-            Writes.Add((origin, key));
-            Entries[origin] = key;
-        }
-    }
 
     private sealed class StubOllamaHandler(Func<HttpRequestMessage, HttpResponseMessage> responder)
         : HttpMessageHandler

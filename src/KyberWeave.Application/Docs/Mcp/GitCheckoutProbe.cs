@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Mcp;
 
@@ -11,7 +12,7 @@ namespace KyberWeave.Data.Docs.Mcp;
 /// Every file read goes through the file-system seam and every git call through the process seam. A missing git, a directory that is not a repository, or a failed command all yield <c>rev=unavailable</c> and
 /// <c>dirty=unknown</c>, which are success paths for the header, never an invented value.
 /// </remarks>
-public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process) : IGitCheckoutProbe
+public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process, IPathResolver paths) : IGitCheckoutProbe
 {
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(5);
 
@@ -86,7 +87,7 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process) 
             if (!pointer.StartsWith(GitDirPrefix, StringComparison.Ordinal)) return null;
 
             string target = pointer[GitDirPrefix.Length..].Trim();
-            return target.Length == 0 ? null : Path.GetFullPath(target, root);
+            return target.Length == 0 ? null : paths.GetFullPath(target, root);
         }
         catch (Exception exception) when (exception is IOException
             or UnauthorizedAccessException
@@ -109,7 +110,7 @@ public sealed class GitCheckoutProbe(IFileSystem files, IProcessRunner process) 
         try
         {
             string common = files.ReadAllText(pointer).Trim();
-            return common.Length == 0 ? gitDirectory : Path.GetFullPath(common, gitDirectory);
+            return common.Length == 0 ? gitDirectory : paths.GetFullPath(common, gitDirectory);
         }
         catch (Exception exception) when (exception is IOException
             or UnauthorizedAccessException

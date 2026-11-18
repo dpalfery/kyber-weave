@@ -27,7 +27,9 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 internal sealed class ArbiterInstallCommand(
     IArbiterInstallService installer,
     SquadConsoleOptions squadConsole,
-    IAnsiConsole console) : Command<ArbiterInstallSettings>
+    IAnsiConsole console,
+    SquadConsole output,
+    SquadTargetRootConfirmation confirmation) : Command<ArbiterInstallSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, ArbiterInstallSettings settings,
@@ -86,13 +88,13 @@ internal sealed class ArbiterInstallCommand(
         if (prepared.Plan is not { } plan)
             return prepared.ExitCode;
 
-        if (!plan.DryRun && !SquadTargetRootConfirmation.Confirm(
+        if (!plan.DryRun && !confirmation.Confirm(
                 plan.Root,
                 plan.Scope,
                 "install",
-                squadConsole.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole(),
+                squadConsole.IsInteractive ?? output.IsInteractive,
                 settings.Yes,
-                squadConsole.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer))
+                squadConsole.ReadAnswer))
         {
             console.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
@@ -147,10 +149,10 @@ internal sealed class ArbiterInstallCommand(
                           $"in '[bold]{Markup.Escape(done.Root)}[/]'.[/]"));
                     break;
                 case ArbiterInstallTrustSteps trust:
-                    SquadInstallCommand.WriteArbiterTrustSteps(plan is { } target ? [target] : [], trust.Wiring);
+                    SquadInstallCommand.WriteArbiterTrustSteps(output, plan is { } target ? [target] : [], trust.Wiring);
                     break;
                 case ArbiterInstallWarnings warnings:
-                    SquadCommandComposition.WriteTransactionWarnings(warnings.Warnings);
+                    output.WriteTransactionWarnings(warnings.Warnings);
                     break;
                 case ArbiterInstallScopeTable table:
                     PrintScopeTable(table);

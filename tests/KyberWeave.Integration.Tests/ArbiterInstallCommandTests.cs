@@ -715,33 +715,6 @@ public sealed class ArbiterInstallCommandTests : IClassFixture<InstallCommandTem
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
-    private sealed class FakeCredentialStore : ICredentialStore
-    {
-        public Dictionary<string, string> Entries { get; } = new(StringComparer.Ordinal);
-
-        public List<(string Origin, string Key)> Writes { get; } = [];
-
-        public string? Read(string origin)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            return Entries.TryGetValue(origin, out string? key) ? key : null;
-        }
-
-        public void Write(string origin, string key)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            ArgumentException.ThrowIfNullOrEmpty(key);
-            Writes.Add((origin, key));
-            Entries[origin] = key;
-        }
-
-        public void Delete(string origin)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            Entries.Remove(origin);
-        }
-    }
-
     /// <summary>
     /// Stands in for the real lifecycle in the tests whose subject is the command, not the
     /// deployment: it copies the class template into the root the command selected and reports the

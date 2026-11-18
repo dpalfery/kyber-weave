@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -248,7 +249,7 @@ public sealed class ArbiterParallelDispatchAttributionTests : IDisposable
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-        TimeProvider.System);
+        TimeProvider.System, new FakeIdGenerator());
 
     private Task<ArbiterEvaluationResult> Dispatch(ArbiterEvaluator evaluator, string phase, string task, string callId) =>
         evaluator.EvaluateAsync(

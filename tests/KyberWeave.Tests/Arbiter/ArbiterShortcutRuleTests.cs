@@ -123,7 +123,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
-            SecondaryTriggers.For);
+            new FakeIdGenerator(), SecondaryTriggers.For);
 
     private static string Marked(string body) => "KYBER-ARBITER: true\n\n" + body;
 

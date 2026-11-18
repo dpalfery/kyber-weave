@@ -10,6 +10,7 @@ using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using Microsoft.Extensions.Time.Testing;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -92,6 +93,8 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
         };
 
+    private static readonly FakeIdGenerator Ids = new();
+
     private static ArbiterEvaluator Evaluator(string arbiterDirectory, IArbiterProvider provider) =>
         new(
             provider,
@@ -104,7 +107,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
-            SecondaryTriggers.For);
+            Ids, SecondaryTriggers.For);
 
     /// <summary>A conductor's rework dispatch to a worker, carrying the cluster key and the prior failing output.</summary>
     private static ArbiterEvent Rework(string failureText, string clusterKey = ClusterKey) => new()
@@ -212,7 +215,7 @@ public sealed class ArbiterSameFailureRuleTests : IDisposable
 
         Assert.Equal(0, provider.CallCount);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-        string stored = Assert.Single(RealArbiterState.RunStore(ArbiterDirectory, null, () => Now).ReadFailures(null, null, Session));
+        string stored = Assert.Single(RealArbiterState.RunStore(ArbiterDirectory, null, new FakeTimeProvider(Now)).ReadFailures(null, null, Session));
         Assert.Contains(FirstFailure, stored, StringComparison.Ordinal);
     }
 

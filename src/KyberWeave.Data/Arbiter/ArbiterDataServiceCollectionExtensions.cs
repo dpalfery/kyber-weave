@@ -19,7 +19,8 @@ internal static class ArbiterDataServiceCollectionExtensions
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddWeaveArbiterData(this IServiceCollection services)
     {
-        services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
+        services.TryAddSingleton<ICredentialStore>(sp =>
+            OperatingSystemCredentialStore.Create(sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();
         services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
         services.TryAddSingleton<IFileStatReader, FileStatReader>();

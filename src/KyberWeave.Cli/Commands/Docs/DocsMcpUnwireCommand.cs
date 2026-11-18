@@ -31,11 +31,16 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
     private const string UnwireCommand = "kyber-weave docs mcp-unwire --target";
 
     private readonly IMcpWiringService _wiring;
+    private readonly IMcpWiringReceipts _receipts;
 
-    /// <summary>Creates the command over the MCP wiring service the container resolves.</summary>
+    /// <summary>Creates the command over the MCP wiring service and receipt store the container resolves.</summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
-    public DocsMcpUnwireCommand(IMcpWiringService wiring) =>
+    /// <param name="receipts">Reads the record of what the repair wrote.</param>
+    public DocsMcpUnwireCommand(IMcpWiringService wiring, IMcpWiringReceipts receipts)
+    {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
+        _receipts = receipts ?? throw new ArgumentNullException(nameof(receipts));
+    }
 
     /// <inheritdoc />
     public override int Execute(
@@ -87,9 +92,9 @@ public sealed class DocsMcpUnwireCommand : Command<DocsMcpUnwireSettings>
     /// earlier tool can have written. They go through <see cref="TerminalText"/> for the same reason
     /// a finding's hint does — one sanitiser for everything this branch writes to a terminal.
     /// </remarks>
-    private static void PrintRecord(string root)
+    private void PrintRecord(string root)
     {
-        McpWiringReceipt receipt = McpWiringReceipt.Load(root);
+        McpWiringReceipt receipt = _receipts.Load(root);
 
         CommandHelpers.WriteUnfolded(() =>
         {

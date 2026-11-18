@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Cli.Update;
 
@@ -14,11 +15,26 @@ public static class PlatformRid
         "win-x64"
     ];
 
-    public static string Detect() => Detect(
-        OperatingSystem.IsWindows(),
-        OperatingSystem.IsLinux(),
-        OperatingSystem.IsMacOS(),
-        RuntimeInformation.ProcessArchitecture);
+    /// <summary>Maps the running operating system, as the environment reports it, and the process architecture to a published RID.</summary>
+    /// <param name="environment">Reports the operating system.</param>
+    /// <returns>The RID.</returns>
+    /// <exception cref="SelfUpdateException">The platform has no published RID.</exception>
+    public static string Detect(IProcessEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        return Detect(environment.OperatingSystem, RuntimeInformation.ProcessArchitecture);
+    }
+
+    /// <summary>Maps an operating system kind and a processor architecture to a published RID.</summary>
+    /// <param name="operatingSystem">The operating system.</param>
+    /// <param name="architecture">The processor architecture.</param>
+    /// <returns>The RID.</returns>
+    /// <exception cref="SelfUpdateException">The platform has no published RID.</exception>
+    public static string Detect(OperatingSystemKind operatingSystem, Architecture architecture) => Detect(
+        operatingSystem == OperatingSystemKind.Windows,
+        operatingSystem == OperatingSystemKind.Linux,
+        operatingSystem == OperatingSystemKind.MacOS,
+        architecture);
 
     public static string Detect(bool windows, bool linux, bool macos, Architecture architecture)
     {

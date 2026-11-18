@@ -38,9 +38,16 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// installation itself is broken and names the install repair, not the harness configuration (6.3).
 /// </para>
 /// </remarks>
-public sealed class McpWiringRepairer(IMcpConfigFiles files)
+public sealed class McpWiringRepairer(
+    IMcpConfigFiles files,
+    IMcpWiringReceipts receipts,
+    TimeProvider clock,
+    McpRepositoryPath repositoryPath)
 {
+    private readonly McpRepositoryPath _repositoryPath = repositoryPath ?? throw new ArgumentNullException(nameof(repositoryPath));
     private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
+    private readonly IMcpWiringReceipts _receipts = receipts ?? throw new ArgumentNullException(nameof(receipts));
+    private readonly TimeProvider _clock = clock ?? throw new ArgumentNullException(nameof(clock));
 
     /// <summary>The repair refused a target and wrote nothing to it.</summary>
     public const string RefusalCode = "KW-MCP-WIRE-005";
@@ -101,8 +108,8 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
         if (declared.Count == 0)
             return new McpWiringRepairReport([], dryRun);
 
-        string root = Path.GetFullPath(repositoryRoot);
-        ReceiptJournal journal = new(root, [.. McpWiringReceipt.Load(root).Files]);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
+        ReceiptJournal journal = new(_receipts, root, [.. _receipts.Load(root).Files]);
         List<McpWiringFileChange> changes = [];
 
         foreach (string target in targets)
@@ -130,8 +137,8 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(targets);
 
-        string root = Path.GetFullPath(repositoryRoot);
-        List<McpWiringReceiptRecord> records = [.. McpWiringReceipt.Load(root).Files];
+        string root = _repositoryPath.FullRoot(repositoryRoot);
+        List<McpWiringReceiptRecord> records = [.. _receipts.Load(root).Files];
         List<McpWiringFileChange> changes = [];
         bool changed = false;
 
@@ -143,7 +150,7 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
         }
 
         if (changed)
-            changes = ReportReceiptFailure(changes, McpWiringReceipt.Save(root, records));
+            changes = ReportReceiptFailure(changes, _receipts.Save(root, records));
 
         return new McpWiringRepairReport(changes, DryRun: false);
     }
@@ -569,7 +576,7 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
             written,
             created ? null : Digest(preWrite),
             Digest(planned),
-            DateTimeOffset.UtcNow,
+            _clock.GetUtcNow(),
             created ? null : Convert.ToBase64String(preWrite));
 
         // The record lands before the file does. Written after, a run killed in between leaves a
@@ -1303,8 +1310,8 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
     /// about one file.
     /// </para>
     /// </remarks>
-    internal static string? ContainedPath(string root, string relativePath) =>
-        McpRepositoryPath.Contained(root, relativePath);
+    internal string? ContainedPath(string root, string relativePath) =>
+        _repositoryPath.Contained(root, relativePath);
 
     /// <summary>
     /// Keeps a removal's audit note visible when the receipt could not be rewritten after it. The
@@ -1358,13 +1365,15 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
     /// </remarks>
     internal sealed class ReceiptJournal
     {
+        private readonly IMcpWiringReceipts _receipts;
         private readonly string _root;
         private readonly List<McpWiringReceiptRecord> _records;
         private readonly Dictionary<string, (int Position, McpWiringReceiptRecord? Record)> _displaced =
             new(StringComparer.Ordinal);
 
-        public ReceiptJournal(string root, List<McpWiringReceiptRecord> records)
+        public ReceiptJournal(IMcpWiringReceipts receipts, string root, List<McpWiringReceiptRecord> records)
         {
+            _receipts = receipts;
             _root = root;
             _records = records;
         }
@@ -1384,7 +1393,7 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
             _records.RemoveAll(candidate => McpWiringReceipt.SamePath(candidate.Path, record.Path));
             _records.Insert(Math.Min(position, _records.Count), record);
 
-            string? failure = McpWiringReceipt.Save(_root, _records);
+            string? failure = _receipts.Save(_root, _records);
 
             if (failure is null)
             {
@@ -1437,7 +1446,7 @@ public sealed class McpWiringRepairer(IMcpConfigFiles files)
             if (pending.Record is not null)
                 _records.Insert(Math.Min(pending.Position, _records.Count), pending.Record);
 
-            _ = McpWiringReceipt.Save(_root, _records);
+            _ = _receipts.Save(_root, _records);
         }
 
         /// <summary>

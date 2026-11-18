@@ -13,7 +13,7 @@ public sealed class GitWorktreeIdentityTests
     private readonly ScriptedProcessRunner _git = new();
 
     private bool TryRoots(string directory, out string? topLevel, out string? commonDirectory, out string? failure) =>
-        new GitWorktreeIdentity(_git).TryRoots(directory, out topLevel, out commonDirectory, out failure);
+        new GitWorktreeIdentity(_git, FakePathResolver.OverEmptyFileSystem(), new FakeProcessEnvironment()).TryRoots(directory, out topLevel, out commonDirectory, out failure);
 
     [Fact]
     public void GitsTwoLinesAreTheTopLevelAndTheCommonDirectoryAskedForInTheGivenDirectory()

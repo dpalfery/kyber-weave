@@ -64,7 +64,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
 
     private readonly string _storesDirectory;
     private readonly ArbiterStoreOptions _options;
-    private readonly Func<DateTimeOffset> _clock;
+    private readonly TimeProvider _clock;
     private readonly Func<string, DateTime> _newestItemTime;
     private readonly IArbiterLogStore _log;
     private readonly IFileSystem _files;
@@ -83,7 +83,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         IFileSystem files,
         IWritableFileSystem writes,
         ArbiterStoreOptions? options = null,
-        Func<DateTimeOffset>? clock = null)
+        TimeProvider? clock = null)
         : this(arbiterDirectory, log, files, writes, options, clock, null)
     {
     }
@@ -102,7 +102,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         IFileSystem files,
         IWritableFileSystem writes,
         ArbiterStoreOptions? options,
-        Func<DateTimeOffset>? clock,
+        TimeProvider? clock,
         Func<string, DateTime>? newestItemTime)
     {
         ArgumentNullException.ThrowIfNull(arbiterDirectory);
@@ -115,7 +115,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         _newestItemTime = newestItemTime ?? NewestItemTimeUtc;
         _storesDirectory = Path.Combine(arbiterDirectory, StoresDirectoryName);
         _options = options ?? new ArbiterStoreOptions();
-        _clock = clock ?? (() => DateTimeOffset.UtcNow);
+        _clock = clock ?? TimeProvider.System;
     }
 
     /// <summary>Appends one finding's text to the store of <paramref name="reviewRun"/>.</summary>
@@ -256,7 +256,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
             return ArbiterStoreStatus.TooLarge;
         }
 
-        DateTimeOffset now = _clock();
+        DateTimeOffset now = _clock.GetUtcNow();
         try
         {
             SweepExpired(directory, now);

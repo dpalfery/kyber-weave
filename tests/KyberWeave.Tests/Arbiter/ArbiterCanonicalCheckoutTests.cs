@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -263,7 +264,7 @@ public sealed class ArbiterCanonicalCheckoutTests : IDisposable
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-            TimeProvider.System);
+            TimeProvider.System, new FakeIdGenerator());
         KyberWeaveConfig config = ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfigDefaults.Product.Rules);
 
         await evaluator.EvaluateAsync(Event("pre", "claude", "conductor"), config, null, TestContext.Current.CancellationToken);

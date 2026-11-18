@@ -66,7 +66,7 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-        TimeProvider.System);
+        TimeProvider.System, new FakeIdGenerator());
 
     private ArbiterEvent Dispatch(string? model) => new()
     {

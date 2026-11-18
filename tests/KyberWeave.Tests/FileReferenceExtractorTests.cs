@@ -1,4 +1,6 @@
 using KyberWeave.Core.Parsing;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Markdig;
 using Markdig.Syntax;
 using Xunit;
@@ -7,22 +9,32 @@ namespace KyberWeave.Tests;
 
 public class FileReferenceExtractorTests
 {
+    private static readonly string Root = Path.Combine(OperatingSystem.IsWindows() ? @"C:\" : "/", "work");
+
+    private readonly InMemoryFileSystem files = new();
+
+    public FileReferenceExtractorTests() => files.CreateDirectory(Root);
+
+    private FileReferenceExtractor Extractor => Over(files);
+
+    private static FileReferenceExtractor Over(InMemoryFileSystem fileSystem) =>
+        new(fileSystem, new FakePathResolver(fileSystem));
+
     [Fact]
     public void MarkdownLinkInlineTargetIsExtractedAsReference()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
 
         string markdown = "Check the [documentation](references/guide.md) for details.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guide.md", reference.Reference);
         Assert.True(reference.Exists);
-        Assert.Equal(Path.Combine(tempDir.Path, "references", "guide.md"), reference.ResolvedFullPath);
+        Assert.Equal(Path.Combine(Root, "references", "guide.md"), reference.ResolvedFullPath);
         Assert.False(reference.IsPathTraversal);
         Assert.Null(reference.NearestMatch);
     }
@@ -30,14 +42,13 @@ public class FileReferenceExtractorTests
     [Fact]
     public void CompleteCodeInlineSpanIsExtractedInCodeInlineOnlyMode()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
 
         string markdown = "See `references/guide.md` for guidance.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guide.md", reference.Reference);
@@ -47,11 +58,10 @@ public class FileReferenceExtractorTests
     [Fact]
     public void UnfencedTextPathIsIgnoredInCodeInlineOnlyMode()
     {
-        using TempDirectory tempDir = new();
         string markdown =
             "Plain references/plain.md, `prefix references/partial.md`, and ```\nreferences/block.md\n```";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         Assert.Empty(results);
     }
@@ -59,14 +69,13 @@ public class FileReferenceExtractorTests
     [Fact]
     public void UnfencedTextPathIsExtractedInUnfencedTextMode()
     {
-        using TempDirectory tempDir = new();
-        string scriptsDir = Path.Combine(tempDir.Path, "scripts");
-        Directory.CreateDirectory(scriptsDir);
-        File.WriteAllText(Path.Combine(scriptsDir, "run.py"), "# python script");
+        string scriptsDir = Path.Combine(Root, "scripts");
+        files.CreateDirectory(scriptsDir);
+        files.WriteAllText(Path.Combine(scriptsDir, "run.py"), "# python script");
 
         string markdown = "See scripts/run.py for details.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("scripts/run.py", reference.Reference);
@@ -81,10 +90,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void HttpsLinkDestinationIsNotExtractedInUnfencedTextMode()
     {
-        using TempDirectory tempDir = new();
         string markdown = "See the [docs](https://example.com/references/missing.md) online.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         Assert.DoesNotContain(results, r => r.Reference == "references/missing.md");
     }
@@ -97,10 +105,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void InlineCodeSpanPathIsExtractedInUnfencedTextMode()
     {
-        using TempDirectory tempDir = new();
         string markdown = "LOAD `references/rules.md` before continuing.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/rules.md", reference.Reference);
@@ -114,10 +121,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void FencedCodeBlockPathIsNotExtractedInUnfencedTextMode()
     {
-        using TempDirectory tempDir = new();
         string markdown = "Example usage:\n\n```\nreferences/block.md\n```";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         Assert.DoesNotContain(results, r => r.Reference == "references/block.md");
     }
@@ -130,10 +136,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void BareUrlPathIsNotExtractedInUnfencedTextMode()
     {
-        using TempDirectory tempDir = new();
         string markdown = "Visit https://example.com/references/missing.md for details.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         Assert.DoesNotContain(results, r => r.Reference == "references/missing.md");
     }
@@ -146,10 +151,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void BarePathToMissingFileIsExtractedInUnfencedTextMode()
     {
-        using TempDirectory tempDir = new();
         string markdown = "See references/missing.md for details.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/missing.md", reference.Reference);
@@ -164,10 +168,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void BareUrlInsideCodeSpanIsNotExtractedInUnfencedTextMode()
     {
-        using TempDirectory tempDir = new();
         string markdown = "LOAD `https://example.com/references/block.md` for details.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         Assert.DoesNotContain(results, r => r.Reference == "references/block.md");
     }
@@ -182,10 +185,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void InvalidPathCharacterInLinkDestinationDoesNotAbortExtraction()
     {
-        using TempDirectory tempDir = new();
         string markdown = "[x](refer\"ences/guide.md)";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.SkillDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.SkillDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("refer\"ences/guide.md", reference.Reference);
@@ -195,14 +197,13 @@ public class FileReferenceExtractorTests
     [Fact]
     public void LeadingDotSlashPrefixIsNormalized()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
 
         string markdown = "See [guide](./references/guide.md).";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guide.md", reference.Reference);
@@ -212,14 +213,13 @@ public class FileReferenceExtractorTests
     [Fact]
     public void FragmentAnchorIsStrippedAndTargetFileResolves()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
 
         string markdown = "See [overview](references/guide.md#overview) for details.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guide.md", reference.Reference);
@@ -229,12 +229,11 @@ public class FileReferenceExtractorTests
     [Fact]
     public void UrlsMailtoAndAnchorOnlyLinksAreExcluded()
     {
-        using TempDirectory tempDir = new();
         string markdown =
             "[web](https://example.com/doc) [insecure](http://example.com/doc) [upper](HTTP://example.com) " +
             "[mail](mailto:dev@example.com) [upper mail](MAILTO:dev@example.com) [anchor](#overview)";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         Assert.Empty(results);
     }
@@ -242,10 +241,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void ConfigRegTokensAreExcluded()
     {
-        using TempDirectory tempDir = new();
         string markdown = "Refer to `<docs-root>` and `<plan-index>` or [Docs](<docs-root>).";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         Assert.Empty(results);
     }
@@ -253,11 +251,10 @@ public class FileReferenceExtractorTests
     [Fact]
     public void ForeignAndAbsolutePathsAreExcluded()
     {
-        using TempDirectory tempDir = new();
         string markdown =
             "[drive](C:/foo/bar.md) [posix](/etc/bar.md) [unc](\\\\share\\path\\file.md) [unc-slash](//unc/path/file.md)";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         Assert.Empty(results);
     }
@@ -265,11 +262,10 @@ public class FileReferenceExtractorTests
     [Fact]
     public void PathTraversalIsSkippedWhenSkipPathTraversalIsTrue()
     {
-        using TempDirectory tempDir = new();
         string markdown = "See [parent](../secret.md) and `../../outside.txt`.";
-        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromText(
+        IReadOnlyList<ExtractedFileReference> results = Extractor.ExtractFromText(
             markdown,
-            tempDir.Path,
+            Root,
             new FileReferenceOptions { SkipPathTraversal = true, InlineScanMode = InlinePathScanMode.CodeInlineOnly });
 
         Assert.Empty(results);
@@ -278,11 +274,10 @@ public class FileReferenceExtractorTests
     [Fact]
     public void PathTraversalIsReportedWithFlagWhenSkipPathTraversalIsFalse()
     {
-        using TempDirectory tempDir = new();
         string markdown = "See [parent](../secret.md) and [escape](../../outside.txt).";
-        IReadOnlyList<ExtractedFileReference> results = FileReferenceExtractor.ExtractFromText(
+        IReadOnlyList<ExtractedFileReference> results = Extractor.ExtractFromText(
             markdown,
-            tempDir.Path,
+            Root,
             new FileReferenceOptions { SkipPathTraversal = false });
 
         Assert.Equal(2, results.Count);
@@ -296,14 +291,13 @@ public class FileReferenceExtractorTests
     [Fact]
     public void NearestMatchSuggestsExistingFileWithinEditDistance()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
 
         string markdown = "See `references/guid.md`.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guid.md", reference.Reference);
@@ -314,14 +308,13 @@ public class FileReferenceExtractorTests
     [Fact]
     public void NearestMatchReturnsNullWhenDistanceExceedsThreshold()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
 
         string markdown = "See `references/completely-different-name.md`.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/completely-different-name.md", reference.Reference);
@@ -332,10 +325,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void NearestMatchReturnsNullWhenDirectoryDoesNotExist()
     {
-        using TempDirectory tempDir = new();
         string markdown = "See `nonexistent/file.md`.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("nonexistent/file.md", reference.Reference);
@@ -346,14 +338,13 @@ public class FileReferenceExtractorTests
     [Fact]
     public void NearestMatchNeverEscapesParentDirectory()
     {
-        using TempDirectory tempDir = new();
-        string agentDir = Path.Combine(tempDir.Path, "agent");
-        Directory.CreateDirectory(Path.Combine(agentDir, "references"));
-        File.WriteAllText(Path.Combine(tempDir.Path, "guide.md"), "# Guide outside agent dir");
+        string agentDir = Path.Combine(Root, "agent");
+        files.CreateDirectory(Path.Combine(agentDir, "references"));
+        files.WriteAllText(Path.Combine(Root, "guide.md"), "# Guide outside agent dir");
 
         string markdown = "See `references/guide.md`.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, agentDir, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, agentDir, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guide.md", reference.Reference);
@@ -364,15 +355,14 @@ public class FileReferenceExtractorTests
     [Fact]
     public void ExtractFromTextsAggregatesReferencesAcrossMultipleInputs()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "one.md"), "# One");
-        File.WriteAllText(Path.Combine(referencesDir, "two.md"), "# Two");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "one.md"), "# One");
+        files.WriteAllText(Path.Combine(referencesDir, "two.md"), "# Two");
 
         string[] texts = ["See `references/one.md`.", "See `references/two.md`."];
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromTexts(texts, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromTexts(texts, Root, FileReferenceOptions.AgentDefault);
 
         Assert.Equal(2, results.Count);
         Assert.Contains(results, r => r.Reference == "references/one.md" && r.Exists);
@@ -382,15 +372,14 @@ public class FileReferenceExtractorTests
     [Fact]
     public void ExtractFromDocumentReusesParsedAst()
     {
-        using TempDirectory tempDir = new();
-        string referencesDir = Path.Combine(tempDir.Path, "references");
-        Directory.CreateDirectory(referencesDir);
-        File.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
+        string referencesDir = Path.Combine(Root, "references");
+        files.CreateDirectory(referencesDir);
+        files.WriteAllText(Path.Combine(referencesDir, "guide.md"), "# Guide");
 
         string raw = "See [guide](references/guide.md).";
         MarkdownDocument document = Markdown.Parse(raw);
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromDocument(document, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromDocument(document, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/guide.md", reference.Reference);
@@ -400,10 +389,9 @@ public class FileReferenceExtractorTests
     [Fact]
     public void AngleBracketPathToMissingFileIsExtractedWithExistsFalse()
     {
-        using TempDirectory tempDir = new();
         string markdown = "Check the [Guide](<references/missing guide.md>) for details.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         ExtractedFileReference reference = Assert.Single(results);
         Assert.Equal("references/missing guide.md", reference.Reference);
@@ -413,11 +401,38 @@ public class FileReferenceExtractorTests
     [Fact]
     public void AngleBracketConfigRegTokenIsSkipped()
     {
-        using TempDirectory tempDir = new();
         string markdown = "Refer to [Docs](<docs-root>) for documentation.";
         IReadOnlyList<ExtractedFileReference> results =
-            FileReferenceExtractor.ExtractFromText(markdown, tempDir.Path, FileReferenceOptions.AgentDefault);
+            Extractor.ExtractFromText(markdown, Root, FileReferenceOptions.AgentDefault);
 
         Assert.Empty(results);
+    }
+
+    [Fact]
+    public void WrongCaseReferenceDoesNotResolveOnACaseSensitiveFileSystem()
+    {
+        InMemoryFileSystem sensitive = new(caseSensitive: true);
+        sensitive.CreateDirectory(Path.Combine(Root, "references"));
+        sensitive.WriteAllText(Path.Combine(Root, "references", "Guide.md"), "# Guide");
+
+        IReadOnlyList<ExtractedFileReference> results =
+            Over(sensitive).ExtractFromText("See `references/guide.md`.", Root, FileReferenceOptions.AgentDefault);
+
+        ExtractedFileReference reference = Assert.Single(results);
+        Assert.False(reference.Exists);
+        Assert.Equal("references/Guide.md", reference.NearestMatch);
+    }
+
+    [Fact]
+    public void WrongCaseReferenceResolvesOnACaseInsensitiveFileSystem()
+    {
+        InMemoryFileSystem insensitive = new(caseSensitive: false);
+        insensitive.CreateDirectory(Path.Combine(Root, "references"));
+        insensitive.WriteAllText(Path.Combine(Root, "references", "Guide.md"), "# Guide");
+
+        IReadOnlyList<ExtractedFileReference> results =
+            Over(insensitive).ExtractFromText("See `references/guide.md`.", Root, FileReferenceOptions.AgentDefault);
+
+        Assert.True(Assert.Single(results).Exists);
     }
 }

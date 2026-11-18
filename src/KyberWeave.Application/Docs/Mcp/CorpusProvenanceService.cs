@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Mcp;
@@ -30,7 +31,8 @@ namespace KyberWeave.Mcp;
 /// process-wide, as the header it serves is.
 /// </para>
 /// </remarks>
-public sealed class CorpusProvenanceService(IGitCheckoutProbe probe) : ICorpusProvenance
+public sealed class CorpusProvenanceService(IGitCheckoutProbe probe, IPathResolver paths, IProcessEnvironment environment)
+    : ICorpusProvenance
 {
     private static readonly ConcurrentDictionary<string, CachedIdentity> Cache =
         new(StringComparer.Ordinal);
@@ -40,7 +42,7 @@ public sealed class CorpusProvenanceService(IGitCheckoutProbe probe) : ICorpusPr
     /// <inheritdoc />
     public string Line(string repositoryRoot, int? documentCount, int corpusStamp)
     {
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         CachedIdentity identity = Identity(root, corpusStamp);
         string docs = documentCount is { } count
             ? count.ToString(CultureInfo.InvariantCulture)

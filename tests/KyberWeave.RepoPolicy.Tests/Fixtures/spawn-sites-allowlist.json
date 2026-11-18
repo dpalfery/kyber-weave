@@ -1130,18 +1130,6 @@
       "bound": "ProcessRunner timeout kills the child tree on expiry; 60 s; git argv only, in a temp repository."
     },
     {
-      "file": "src/KyberWeave.Kernel/VersionControl/CodeGraphIndexStaleness.cs",
-      "text": "ProcessStartInfo startInfo = new(\"git\")",
-      "count": 1,
-      "bound": "ProcessRunner timeout kills the child tree on expiry; started by the Run below with GitTimeout; read-only git rev-parse/log argv."
-    },
-    {
-      "file": "src/KyberWeave.Kernel/VersionControl/CodeGraphIndexStaleness.cs",
-      "text": "ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, GitTimeout);",
-      "count": 1,
-      "bound": "ProcessRunner timeout kills the child tree on expiry; GitTimeout; read-only git argv."
-    },
-    {
       "file": "tests/KyberWeave.Integration.Tests/ReviewCycleTests.cs",
       "text": "ProcessStartInfo startInfo = new(\"git\")",
       "count": 1,

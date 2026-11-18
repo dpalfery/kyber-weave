@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Parsing;
@@ -7,14 +9,18 @@ namespace KyberWeave.Core.Agents.Validation;
 /// <summary>
 /// Validates individual Agent definition files against specification rules.
 /// </summary>
-public static class AgentSpecValidator
+/// <param name="files">The file system the file references are looked up in.</param>
+/// <param name="paths">Resolves a reference against the agent's directory.</param>
+public sealed class AgentSpecValidator(IFileSystem files, IPathResolver paths)
 {
+    private readonly FileReferenceExtractor _references = new(files, paths);
+
     public const string RuleMissingName = "KW-AGENT-SPEC-001";
     public const string RuleMissingDescription = "KW-AGENT-SPEC-002";
     public const string RuleMissingInstructions = "KW-AGENT-SPEC-003";
     public const string RuleBrokenFileReference = "KW-AGENT-SPEC-004";
 
-    public static DiagnosticReport Validate(AgentModel agent)
+    public DiagnosticReport Validate(AgentModel agent)
     {
         DiagnosticReport report = new DiagnosticReport();
 
@@ -52,11 +58,11 @@ public static class AgentSpecValidator
     /// Validates that file references in agent description and instructions body resolve to existing files or directories.
     /// </summary>
     /// <remarks>
-    /// Uses <see cref="FileReferenceExtractor"/> with <see cref="FileReferenceOptions.AgentDefault"/> to extract
+    /// Uses the file reference extractor with <see cref="FileReferenceOptions.AgentDefault"/> to extract
     /// markdown links and inline code paths, skipping URLs, anchors, traversal paths, and absolute paths.
     /// If DirectoryPath is null or empty, the check is skipped (cannot resolve relative paths).
     /// </remarks>
-    private static void ValidateBrokenFileReferences(AgentModel agent, DiagnosticReport report)
+    private void ValidateBrokenFileReferences(AgentModel agent, DiagnosticReport report)
     {
         if (string.IsNullOrWhiteSpace(agent.DirectoryPath))
         {
@@ -79,7 +85,7 @@ public static class AgentSpecValidator
             return;
         }
 
-        IReadOnlyList<ExtractedFileReference> references = FileReferenceExtractor.ExtractFromTexts(
+        IReadOnlyList<ExtractedFileReference> references = _references.ExtractFromTexts(
             textsToScan,
             agent.DirectoryPath,
             FileReferenceOptions.AgentDefault);

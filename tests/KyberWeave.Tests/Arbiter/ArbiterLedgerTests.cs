@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using System.Diagnostics;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -21,6 +22,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterLedgerTests : IDisposable
 {
+    private static readonly FakeIdGenerator Ids = new();
+
     private readonly string _root = Path.Combine(
         Path.GetTempPath(), "kw-arbiter-" + Guid.NewGuid().ToString("N"));
 
@@ -52,7 +55,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         string harness = "test-harness",
         string? session = "session-1")
         => new(
-            ArbiterRecordId.New(at), at, ArbiterSources.Hook, harness, session, phase)
+            Ids.NewSortableId(at), at, ArbiterSources.Hook, harness, session, phase)
         {
             CallId = callId,
             PairDigest = pairDigest,
@@ -74,7 +77,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         string? task = "T3",
         string? ledgerId = null)
         => new(
-            ArbiterRecordId.New(at),
+            Ids.NewSortableId(at),
             at,
             ArbiterSources.Hook,
             "test-harness",
@@ -115,7 +118,7 @@ public sealed class ArbiterLedgerTests : IDisposable
         var ledger = RealArbiterState.Ledger(ArbiterDirectory);
         DateTimeOffset at = At(0);
         var ev = new ArbiterLedgerEvent(
-            ArbiterRecordId.New(at), at, ArbiterSources.Hook, "pi", "session-1", ArbiterLedgerPhases.Pre)
+            Ids.NewSortableId(at), at, ArbiterSources.Hook, "pi", "session-1", ArbiterLedgerPhases.Pre)
         {
             CallId = "call-1",
             PairDigest = "pair-digest",
@@ -178,7 +181,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             "model", "https://api.example.com", "jev-1.13.0",
             new ArbiterProviderUsage(512, 64), 812, ArbiterProviderStatuses.Answered);
         var decision = new ArbiterDecisionRecord(
-            ArbiterRecordId.New(at), at, ArbiterSources.Hook, "pi", "session-1",
+            Ids.NewSortableId(at), at, ArbiterSources.Hook, "pi", "session-1",
             "ledger-1", "delegate", "conductor", ArbiterCallerSources.Harness,
             "dev-medium", "docs/plans/plan.md", "plan-digest", "T3",
             "ruleset-sha", [rule], provider, RuleEffects.Escalate, 1, 42);
@@ -229,7 +232,7 @@ public sealed class ArbiterLedgerTests : IDisposable
             $"expected sortable ids but '{events[0].Id}' >= '{events[1].Id}'");
 
         // Same timestamp: the random suffix keeps ids unique.
-        Assert.NotEqual(ArbiterRecordId.New(At(2)), ArbiterRecordId.New(At(2)));
+        Assert.NotEqual(Ids.NewSortableId(At(2)), Ids.NewSortableId(At(2)));
     }
 
     [Fact]

@@ -20,6 +20,6 @@ public sealed class FileArbiterStateFactory(
     public IArbiterDecisionLog OpenDecisionLog(string arbiterDirectory) => new DecisionLog(arbiterDirectory, log);
 
     /// <inheritdoc />
-    public IArbiterRunStore OpenRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, Func<DateTimeOffset>? clock = null) =>
+    public IArbiterRunStore OpenRunStore(string arbiterDirectory, ArbiterStoreOptions? options = null, TimeProvider? clock = null) =>
         new ArbiterRunStore(arbiterDirectory, log, files, writes, options, clock);
 }

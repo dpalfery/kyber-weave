@@ -4,18 +4,18 @@ using KyberWeave.Core.Processes;
 namespace KyberWeave.Data.Doctor;
 
 /// <summary>Starts an MCP server child as a <see cref="StdioSession"/>.</summary>
-public sealed class StdioMcpSessionFactory : IMcpStdioSessionFactory
+public sealed class StdioMcpSessionFactory(TimeProvider time) : IMcpStdioSessionFactory
 {
     /// <inheritdoc />
     public IMcpStdioSession Start(string executable, IReadOnlyList<string> arguments, TimeSpan budget) =>
-        new Session(executable, arguments, budget);
+        new Session(executable, arguments, budget, time);
 
     private sealed class Session : IMcpStdioSession
     {
         private readonly StdioSession inner;
 
-        public Session(string executable, IReadOnlyList<string> arguments, TimeSpan budget) =>
-            inner = new StdioSession(executable, arguments, budget);
+        public Session(string executable, IReadOnlyList<string> arguments, TimeSpan budget, TimeProvider time) =>
+            inner = new StdioSession(executable, arguments, budget, time);
 
         public string? FirstErrorLine => inner.FirstErrorLine;
 

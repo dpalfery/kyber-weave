@@ -596,30 +596,6 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
 
     private sealed record CommandExecution(int ExitCode, string Output);
 
-    private sealed class FakeCredentialStore : ICredentialStore
-    {
-        private readonly Dictionary<string, string> _entries = new(StringComparer.Ordinal);
-
-        public string? Read(string origin)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            return _entries.TryGetValue(origin, out string? key) ? key : null;
-        }
-
-        public void Write(string origin, string key)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            ArgumentException.ThrowIfNullOrEmpty(key);
-            _entries[origin] = key;
-        }
-
-        public void Delete(string origin)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            _entries.Remove(origin);
-        }
-    }
-
     /// <summary>
     /// Probe for the uninstall seam behind <c>ArbiterUninstallCommand</c>: it binds
     /// the <c>IArbiterUninstaller</c> port the command resolves its collaborator through.

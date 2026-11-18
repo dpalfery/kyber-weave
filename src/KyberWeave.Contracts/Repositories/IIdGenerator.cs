@@ -1,6 +1,6 @@
 namespace KyberWeave.Contracts.Repositories;
 
-/// <summary>The identifiers a command needs: a GUID, a random token and a random file name.</summary>
+/// <summary>The identifiers a command needs: a GUID, a random token, a random file name and a sortable record id.</summary>
 /// <remarks>
 /// Code above the data layer asks this instead of calling <see cref="Guid.NewGuid" />, <see cref="Random" /> or
 /// <see cref="System.IO.Path.GetRandomFileName" />, so a test that observes the value supplies a predictable one.
@@ -20,4 +20,12 @@ public interface IIdGenerator
     /// <summary>Creates a random file name, with no directory part.</summary>
     /// <returns>A bare file name that no other call returned.</returns>
     string NewRandomFileName();
+
+    /// <summary>Creates a sortable unique record id for a moment in time.</summary>
+    /// <param name="at">The moment the id is for; only its UTC instant counts, not its offset.</param>
+    /// <returns>
+    /// Sixteen fixed-width lowercase hex digits of the UTC ticks, a hyphen, then eight lowercase hex characters, so
+    /// ordinal order is chronological and two ids made for the same instant still differ.
+    /// </returns>
+    string NewSortableId(DateTimeOffset at);
 }

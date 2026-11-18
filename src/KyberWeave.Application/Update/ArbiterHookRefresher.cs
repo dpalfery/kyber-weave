@@ -26,7 +26,7 @@ internal sealed class ArbiterHookRefresher(
     IKyberWeaveConfigRepository configs,
     ISquadLifecycleService lifecycle,
     ISquadStateStore state,
-    IFileSystem files,
+    IWritableFileSystem files,
     IMcpWiringService wiring,
     Action<string>? log = null) : IArbiterHookRefresher
 {
@@ -173,7 +173,7 @@ internal sealed class ArbiterHookRefresher(
                     };
                     string receiptPath = state.ResolveReceiptPath(home, SquadDeploymentScope.Global);
                     string serialized = state.SerializeReceipt(updatedReceipt);
-                    AtomicFile.WriteAllText(receiptPath, serialized);
+                    files.WriteAllTextAtomic(receiptPath, serialized);
                 }
                 catch (Exception ex) when (FileFailure.Is(ex) || ex is JsonException)
                 {
@@ -325,7 +325,7 @@ internal sealed class ArbiterHookRefresher(
             if (string.Equals(before, rendered, StringComparison.Ordinal))
                 return false;
 
-            AtomicFile.WriteAllText(hookPath, rendered);
+            files.WriteAllTextAtomic(hookPath, rendered);
             newContent = rendered;
             return true;
         }
@@ -346,7 +346,7 @@ internal sealed class ArbiterHookRefresher(
         if (string.Equals(existing, spliced, StringComparison.Ordinal))
             return false;
 
-        AtomicFile.WriteAllText(hookPath, spliced);
+        files.WriteAllTextAtomic(hookPath, spliced);
         newContent = spliced;
         newOwnedEntries = owned;
         return true;

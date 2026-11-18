@@ -30,8 +30,10 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// file the check read and the repair will write.
 /// </para>
 /// </remarks>
-public sealed class McpWiringFixes(IMcpConfigFiles files, McpServerRenamer renamer)
+public sealed class McpWiringFixes(IMcpConfigFiles files, McpServerRenamer renamer, McpRepositoryPath repositoryPath)
 {
+    private readonly McpRepositoryPath _repositoryPath = repositoryPath ?? throw new ArgumentNullException(nameof(repositoryPath));
+
     private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
     private readonly McpServerRenamer _renamer = renamer ?? throw new ArgumentNullException(nameof(renamer));
 
@@ -49,7 +51,7 @@ public sealed class McpWiringFixes(IMcpConfigFiles files, McpServerRenamer renam
         ArgumentNullException.ThrowIfNull(report);
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
         List<string> harnesses = [];
         Dictionary<string, HarnessPlan> plans = new(StringComparer.Ordinal);
         HashSet<string> retired = Leftovers(root);
@@ -69,7 +71,7 @@ public sealed class McpWiringFixes(IMcpConfigFiles files, McpServerRenamer renam
             if (retired.Contains(finding.Harness))
                 continue;
 
-            if (McpRepositoryPath.Contained(root, finding.Path) is not { } absolutePath)
+            if (_repositoryPath.Contained(root, finding.Path) is not { } absolutePath)
                 continue;
 
             if (!plans.TryGetValue(finding.Harness, out HarnessPlan? plan))

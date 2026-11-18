@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
@@ -37,15 +38,21 @@ public sealed class RepositoryDocsAnalysisReader : IDocsAnalysisReader
     /// <param name="codeGraph">Opens the CodeGraph index of the repository.</param>
     /// <param name="glossaries">Opens the managed glossary of the repository.</param>
     /// <param name="documents">Opens the documentation corpus of the repository.</param>
+    /// <param name="paths">Resolves the repository root to an absolute path.</param>
+    /// <param name="environment">Supplies the current directory a relative root resolves against.</param>
     public RepositoryDocsAnalysisReader(
         string repositoryRoot,
         IDocsHostConfiguration hostConfiguration,
         ICodeGraphPortsFactory codeGraph,
         IManagedGlossaryFactory glossaries,
-        IDocumentSourceFactory documents)
+        IDocumentSourceFactory documents,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
-        _repositoryRoot = Path.GetFullPath(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        _repositoryRoot = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         _hostConfiguration = hostConfiguration ?? throw new ArgumentNullException(nameof(hostConfiguration));
         _codeGraph = codeGraph ?? throw new ArgumentNullException(nameof(codeGraph));
         _glossaries = glossaries ?? throw new ArgumentNullException(nameof(glossaries));

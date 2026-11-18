@@ -5,6 +5,7 @@ using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Configuration;
 using Xunit;
 using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -120,6 +121,22 @@ public sealed class ArbiterHookHostTests
 
         Assert.Equal(0, exit);
         Assert.Equal(string.Empty, stdout.ToString());
+    }
+
+    [Fact]
+    public void Hook_FailedHost_NamesTheDecisionIdFromTheIdentifierSeam()
+    {
+        HookCommand command = ArbiterTestServices.Command(
+            ArbiterTestServices.Registry(new ScriptedEngine()),
+            _ => EnabledConfig(),
+            ids: new FakeIdGenerator());
+
+        (int exit, string stdout, string log) = Run(command, "conductor", "{oops");
+
+        // The default decision id is the first GUID the seam yields, as 32 hex digits with no hyphens.
+        Assert.Equal(0, exit);
+        Assert.Equal(string.Empty, stdout);
+        Assert.Contains("(" + new Guid(1, 0, 0, new byte[8]).ToString("N") + ")", log, StringComparison.Ordinal);
     }
 
     [Theory]

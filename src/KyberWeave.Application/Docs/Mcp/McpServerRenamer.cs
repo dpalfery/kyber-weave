@@ -30,10 +30,18 @@ namespace KyberWeave.Core.Docs.Mcp;
 /// paths it will not enter are named in the report so the operator can edit them by hand.
 /// </para>
 /// </remarks>
-public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReader declarations)
+public sealed class McpServerRenamer(
+    IMcpConfigFiles files,
+    IMcpDeclarationReader declarations,
+    IMcpWiringReceipts receipts,
+    TimeProvider clock,
+    McpRepositoryPath repositoryPath)
 {
+    private readonly McpRepositoryPath _repositoryPath = repositoryPath ?? throw new ArgumentNullException(nameof(repositoryPath));
     private readonly IMcpConfigFiles _files = files ?? throw new ArgumentNullException(nameof(files));
     private readonly IMcpDeclarationReader _declarations = declarations ?? throw new ArgumentNullException(nameof(declarations));
+    private readonly IMcpWiringReceipts _receipts = receipts ?? throw new ArgumentNullException(nameof(receipts));
+    private readonly TimeProvider _clock = clock ?? throw new ArgumentNullException(nameof(clock));
 
     /// <summary>A proven old key is present; the remedy is this command.</summary>
     public const string RenameCode = "KW-MCP-WIRE-007";
@@ -138,7 +146,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
         List<McpRenameChange> changes = [];
 
         foreach (HarnessMcpEntry row in Rows(harness))
@@ -170,7 +178,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
         ArgumentException.ThrowIfNullOrWhiteSpace(repositoryRoot);
         ArgumentNullException.ThrowIfNull(targets);
 
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = _repositoryPath.FullRoot(repositoryRoot);
         List<McpRenameChange> changes = [];
         bool declaration = false;
         bool namedDeclaration = false;
@@ -441,7 +449,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
     {
         string relativePath = row.Paths[0];
 
-        if (McpRepositoryPath.Contained(root, relativePath) is not { } fullPath)
+        if (_repositoryPath.Contained(root, relativePath) is not { } fullPath)
         {
             return
             [
@@ -678,7 +686,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
 
         if (configPath is not null)
         {
-            if (McpRepositoryPath.Contained(root, relativePath) is not { } guarded)
+            if (_repositoryPath.Contained(root, relativePath) is not { } guarded)
             {
                 return
                 [
@@ -979,7 +987,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
     /// digest still matches the file so that a removal undoes the original wire rather than the
     /// rename.
     /// </summary>
-    private static string? Record(
+    private string? Record(
         string root,
         string relativePath,
         byte[] preWrite,
@@ -989,7 +997,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
         if (servers.Count == 0)
             return null;
 
-        List<McpWiringReceiptRecord> records = [.. McpWiringReceipt.Load(root).Files];
+        List<McpWiringReceiptRecord> records = [.. _receipts.Load(root).Files];
         string preDigest = Digest(preWrite);
         int at = records.FindIndex(candidate => McpWiringReceipt.SamePath(candidate.Path, relativePath));
         bool rebase = at >= 0 && string.Equals(records[at].PostSha256, preDigest, StringComparison.OrdinalIgnoreCase);
@@ -999,7 +1007,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
             {
                 Servers = servers,
                 PostSha256 = Digest(postWrite),
-                WrittenAtUtc = DateTimeOffset.UtcNow
+                WrittenAtUtc = _clock.GetUtcNow()
             }
             : new McpWiringReceiptRecord(
                 relativePath,
@@ -1007,7 +1015,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
                 servers,
                 preDigest,
                 Digest(postWrite),
-                DateTimeOffset.UtcNow,
+                _clock.GetUtcNow(),
                 Convert.ToBase64String(preWrite));
 
         if (at >= 0)
@@ -1015,7 +1023,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
 
         records.Add(record);
 
-        return McpWiringReceipt.Save(root, records);
+        return _receipts.Save(root, records);
     }
 
     private IReadOnlyList<ConfiguredFile> ConfiguredFiles(string root, HarnessMcpEntry row)
@@ -1024,7 +1032,7 @@ public sealed class McpServerRenamer(IMcpConfigFiles files, IMcpDeclarationReade
 
         foreach (string relativePath in row.Paths)
         {
-            if (McpRepositoryPath.Contained(root, relativePath) is not { } path)
+            if (_repositoryPath.Contained(root, relativePath) is not { } path)
                 continue;
 
             McpLinkProbe probe = McpConfigurationLink.Probe(root, path, _files.InspectLink);

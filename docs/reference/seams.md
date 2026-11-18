@@ -11,8 +11,9 @@ component: CI Pipelines
 # Seams, adapters and the exceptions they keep
 
 Every outside resource the product touches — the disk, a child process, the environment, the
-console, the clock, identifiers, a lease, an embedded resource, configuration and the shipped
-content a test reads — is reached through one interface, called a **seam**. This page is the
+console, the clock, identifiers, a lease, an embedded resource, configuration, the operating
+system's credential store and the shipped content a test reads — is reached through one
+interface, called a **seam**. This page is the
 register the interface-driven unit tests specification requires: the seams, the adapters that
 implement them, the fake and contract suite that prove each adapter, every class still calling a
 resource directly and the task that converts it, and the sealed framework types allowed through
@@ -37,11 +38,12 @@ counted. Counts are lower bounds: one line can hold two calls.
 | Process | `IProcessRunner`; `IProcessExecutor`, `IProgramRunner` and `IBoundedProcessExecutor` stay as role views | Run with arguments, working directory, environment, timeout and input; captured output; is-alive; find on path | `KernelProcessRunner` (`KyberWeave.Data`, `Hooks/KernelProcessRunner.cs`) over `KyberWeave.Kernel/Processes/ProcessRunner.cs` | `ScriptedProcessRunner` (`Fakes/ScriptedProcessRunner.cs`); `ScriptedProcessExecutor` (`Fakes/ScriptedProcessExecutor.cs`) for the role view | `ProcessRunnerContractTests`: fake in `KyberWeave.Tests/Processes/ScriptedProcessRunnerContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/KernelProcessRunnerContractTests.cs` |
 | Environment and platform | `IProcessEnvironment` (`Contracts/Repositories`) | Environment variables; current, home and temporary directories; user and machine name; operating-system kind; case-insensitive file system; input redirected | `ProcessEnvironment` (`KyberWeave.Data`, `Host/ProcessEnvironment.cs`) | `FakeProcessEnvironment` (`Fakes/FakeProcessEnvironment.cs`) | `ProcessEnvironmentContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
 | Time | `TimeProvider` (framework) | Wall clock; monotonic timestamp and elapsed time; timers; `Task.Delay(TimeSpan, TimeProvider)` | `TimeProvider.System`, registered in `Application/ServiceCollectionExtensions.cs` and `Application/Arbiter/ArbiterApplicationServiceCollectionExtensions.cs` | The framework's `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`), used in `KyberWeave.Tests/Composition/TimeProviderRegistrationTests.cs` and `KyberWeave.Tests/FileSystem/InMemoryFileSystemTests.cs` | None, and none is required: the fake is the framework package's, not a product fake, so requirement 5.4's fake-versus-adapter run has no product fake to run. Decision D5 chose the framework type and its tested fake over a new interface and a hand-written fake |
-| Identifiers | `IIdGenerator` (`Contracts/Repositories`) | New GUID; random token; random file name | `SystemIdGenerator` (`KyberWeave.Data`, `Host/SystemIdGenerator.cs`) | `FakeIdGenerator` (`Fakes/FakeIdGenerator.cs`) | `IdGeneratorContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
+| Identifiers | `IIdGenerator` (`Contracts/Repositories`) | New GUID; random token; random file name; sortable record id for an instant | `SystemIdGenerator` (`KyberWeave.Data`, `Host/SystemIdGenerator.cs`) | `FakeIdGenerator` (`Fakes/FakeIdGenerator.cs`) | `IdGeneratorContractTests`: fake in `KyberWeave.Tests/Host/FakeProcessEnvironmentContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/PhysicalProcessEnvironmentContractTests.cs` |
 | Console | `IConsole` (`Contracts/Host`) | Output and error writers; read line; input redirected | `SystemConsole` (`KyberWeave.Data`, `Host/SystemConsole.cs`); the standard-stream transport `DrainingStreamServerTransport` in `KyberWeave.Mcp` and `KyberWeave.Arbiter` | `FakeConsole` (`Fakes/FakeConsole.cs`) | `ConsoleContractTests`: fake in `KyberWeave.Tests/Console/FakeConsoleContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/SystemConsoleContractTests.cs` |
 | Lease | `ILease` (`Contracts/Host`) | Acquire a named cross-process lease with a timeout; release from any thread | `MutexLease` (`KyberWeave.Data`, `Host/MutexLease.cs`); the lock-file variant is `FileCodeGraphIndexWorkspace` (`Data/Doctor/FileCodeGraphIndexWorkspace.cs`) | `InProcessLease` (`Fakes/InProcessLease.cs`) | `LeaseContractTests`: fake in `KyberWeave.Tests/Lease/InProcessLeaseContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/MutexLeaseContractTests.cs` |
 | Embedded resource | `IEmbeddedResources` (`Contracts/Host`) | Read a named manifest resource as a stream or UTF-8 text | `AssemblyEmbeddedResources` (`KyberWeave.Data`, `Host/AssemblyEmbeddedResources.cs`) | `FakeEmbeddedResources` (`Fakes/FakeEmbeddedResources.cs`) | `EmbeddedResourceContractTests`: fake in `KyberWeave.Tests/EmbeddedResources/FakeEmbeddedResourcesContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/AssemblyEmbeddedResourcesContractTests.cs` |
 | Configuration | `IKyberWeaveConfigRepository` (`Contracts/Repositories`) | Load and try-load the repository's and the user's host configuration; find the config path | `FileKyberWeaveConfigRepository` (`KyberWeave.Application`, `Configuration/FileKyberWeaveConfigRepository.cs`) over `IRepositoryTreeProbe` (`KyberWeave.Application`, `Review/FileRepositoryTreeProbe.cs`), `IFileSystem`, `IPathResolver` and `IProcessEnvironment` | `FakeKyberWeaveConfigRepository` (`Fakes/FakeKyberWeaveConfigRepository.cs`) | `KyberWeaveConfigRepositoryContractTests`: fake in `KyberWeave.Tests/Configuration/FakeKyberWeaveConfigRepositoryContractTests.cs`, adapter over the in-memory file system in `KyberWeave.Tests/Configuration/InMemoryFileKyberWeaveConfigRepositoryContractTests.cs`, and over the real disk in `KyberWeave.Integration.Tests/Contracts/FileKyberWeaveConfigRepositoryContractTests.cs` |
+| Credentials | `ICredentialStore` (`KyberWeave.Domain`, `Arbiter/Credentials/ICredentialStore.cs`) | Read, write and delete one named secret per endpoint origin; a missing entry reads as null; deleting an absent entry succeeds; a store may refuse a key it cannot carry, and every key it accepts reads back unchanged; an origin or key with a line break is refused on every store | `OperatingSystemCredentialStore` picks `WindowsCredentialStore`, `MacKeychainCredentialStore` or `SecretServiceCredentialStore` (`KyberWeave.Data`, `Arbiter/Credentials/`) | `FakeCredentialStore` (`Fakes/FakeCredentialStore.cs`) | `CredentialStoreContractTests`: fake in `KyberWeave.Tests/Credentials/FakeCredentialStoreContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/OperatingSystemCredentialStoreContractTests.cs`, which skips where the host has no usable store |
 | Shipped content (tests) | `ICorpusSource` (`tests/KyberWeave.Testing/Corpus/ICorpusSource.cs`) | Read the shipped agents, skills, standards, documents and workflows by relative path, contained in the corpus; host name-case rule | `CheckoutCorpusSource` (`tests/KyberWeave.Testing/Corpus/CheckoutCorpusSource.cs`), a test adapter over this checkout | `InMemoryCorpusSource` (`tests/KyberWeave.Testing/Corpus/InMemoryCorpusSource.cs`) | `CorpusSourceContractTests`: both against the adapter and the fake in `KyberWeave.RepoPolicy.Tests/CorpusSourceContractTests.cs` |
 
 Notes.
@@ -53,6 +55,10 @@ Notes.
   so a content test says what it reads instead of walking the tree for the repository root.
 - The configuration row is the one seam without a shared fake and contract suite. Task 2.3 converts
   its 23 callers and is where both belong.
+- The credential store's integration run skips only when the host has no usable store. A read-only
+  probe turns the typed unavailable failures into a skip, and every other failure fails the run. A
+  probe that wrote would hide an adapter that writes but reads back wrong, because it would look
+  unavailable and every contract test would skip.
 - An adapter is thin: it translates the call and holds no decision the logic should make. Where an
   adapter does hold policy (the file-system adapter's skip list, the process adapter's missing-
   executable mapping), that is noted below rather than hidden.
@@ -75,7 +81,7 @@ task's list.
 | `PhysicalMcpConfigFiles` | File system | `KyberWeave.Data` | `Docs/Mcp/PhysicalMcpConfigFiles.cs` | Reads, attributes and deletes MCP configuration files |
 | `FileGitHookFiles` | File system | `KyberWeave.Data` | `Doctor/FileGitHookFiles.cs` | Hook files and executable bits |
 | `FileStatusLineFiles` | File system | `KyberWeave.Data` | `Utilities/FileStatusLineFiles.cs` | Status-line artifact files |
-| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file. It also reads the clock and sleeps directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
+| `FileCodeGraphIndexWorkspace` | Lease (file-lock variant) | `KyberWeave.Data` | `Doctor/FileCodeGraphIndexWorkspace.cs` | Holds the index lock as an exclusively opened file; its wait and poll run on the injected `TimeProvider` |
 | `ExclusiveFileWriter` | File system | `KyberWeave.Data` | `Docs/Closeout/ExclusiveFileWriter.cs` | Exclusive create |
 | `FileBoundedFileReader` | File system | `KyberWeave.Data` | `Review/FileBoundedFileReader.cs` | Reads up to a byte limit and refuses a file that grew |
 | `FileHookFileWindowReader` | File system | `KyberWeave.Data` | `Hooks/Arbiter/FileHookFileWindowReader.cs` | Reads a line window from a file |
@@ -89,16 +95,17 @@ task's list.
 | `SquadFileSystemPathSemantics` | Paths | `KyberWeave.Data` | `Squad/Deployment/SquadFileSystemPathSemantics.cs` | Instance singleton the deployment code shares; it implements `IPathResolver` and `IFileSystemPathSemantics` |
 | `KernelProcessRunner` | Process | `KyberWeave.Data` | `Hooks/KernelProcessRunner.cs` | The product's one `IProcessRunner` |
 | `ProcessRunner` | Process | `KyberWeave.Kernel` | `Processes/ProcessRunner.cs` | The one place that calls `Process.Start`; `KernelProcessRunner` and the role-view adapters build on it |
-| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session. Its timeout reads `DateTime.UtcNow` directly, which is a second seam; the conversion register below tracks that as `clock: 4.9` |
+| `StdioSession` | Process | `KyberWeave.Kernel` | `Processes/StdioSession.cs` | Interactive stdin/stdout session; its budget and read wait run on the injected `TimeProvider` |
 | `ProcessProgramRunner` | Process | `KyberWeave.Data` | `Review/ProcessProgramRunner.cs` | The `IProgramRunner` role view |
 | `KernelBoundedProcessExecutor` | Process | `KyberWeave.Data` | `Docs/FileSystem/KernelBoundedProcessExecutor.cs` | The `IBoundedProcessExecutor` role view |
 | `ProcessGitCommandRunner` | Process | `KyberWeave.Data` | `RunStart/ProcessGitCommandRunner.cs` | Git with standard output and error kept apart |
 | `ProcessRunnerCredentialProcessRunner` | Process | `KyberWeave.Data` | `Arbiter/Credentials/ProcessRunnerCredentialProcessRunner.cs` | The credential process runner over `IProcessRunner` |
 | `ProcessSquadHarnessLauncher` | Process | `KyberWeave.Data` | `Squad/Instances/ProcessSquadHarnessLauncher.cs` | Starts the interactive harness; builds its start information through the static `SquadHarnessLauncher` |
 | `ProcessExecutor` | Process | `KyberWeave.Cli` | `Commands/Squad/Infrastructure/IProcessExecutor.cs` | The CLI's `IProcessExecutor` role view |
-| `MacKeychainCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security`, through `ICredentialProcessRunner` |
-| `SecretServiceCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool`, through `ICredentialProcessRunner` |
-| `WindowsCredentialStore` | Credentials (`ICredentialStore`) | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; the only code that calls the native credential API; task 4.10 adds its fake and contract suite |
+| `MacKeychainCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security` through `ICredentialProcessRunner`, so it reaches the process seam too. `Write` refuses a non-ASCII key: `security` prints such a password as hex, so it would not read back |
+| `SecretServiceCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool` through `ICredentialProcessRunner`, so it reaches the process seam too |
+| `WindowsCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; the only code that calls the native credential API |
+| `OperatingSystemCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/OperatingSystemCredentialStore.cs` | Picks the store the platform offers from `IProcessEnvironment.OperatingSystem`; calls no credential resource itself |
 | `ProcessEnvironment` | Environment and platform | `KyberWeave.Data` | `Host/ProcessEnvironment.cs` | The environment and platform adapter |
 | `SystemIdGenerator` | Identifiers | `KyberWeave.Data` | `Host/SystemIdGenerator.cs` | GUIDs, random tokens and temp names |
 | `SystemConsole` | Console | `KyberWeave.Data` | `Host/SystemConsole.cs` | Console output, error and input |
@@ -110,10 +117,15 @@ task's list.
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
 
-`ICredentialStore` is a product interface, not one of the eleven seams. Two of its adapters are
-process-backed and reach the process seam through `ICredentialProcessRunner`; the Windows adapter
-calls the native credential API through P/Invoke and no seam covers it. It is listed here so that
-the gap is visible, not to claim a Credentials seam that the design does not define.
+The credential seam's interface is the one seam still outside `Contracts`: it lives in
+`KyberWeave.Domain/Arbiter/Credentials/ICredentialStore.cs`, under the namespace
+`KyberWeave.Core.Arbiter.Credentials`. The domain-move inventory schedules that file for
+`Contracts` with the phase-2 layer work; until then this register names where it actually is.
+The two process-backed stores reach the process seam through `ICredentialProcessRunner`, and the
+Windows store is the only code that calls the native credential API. Every caller takes
+`ICredentialStore`, or a `Func<ICredentialStore>` where building the store at call time is
+deliberate: a host with no keychain absorbs the construction failure there instead of failing
+startup.
 
 The process seam has one sanctioned escape that is not an adapter: a class may build a
 `ProcessStartInfo` and hand it to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a
@@ -134,6 +146,7 @@ they do it. They are not seams and no test fakes them; a smoke test proves the w
 | `SquadServiceCollectionExtensions` | `KyberWeave.Data` | `Squad/SquadServiceCollectionExtensions.cs` |
 | `Program` | `KyberWeave.Cli` | `Program.cs` |
 | `DocsCommandComposition` | `KyberWeave.Cli` | `Commands/Docs/DocsCommandComposition.cs` |
+| `SquadCliServices` | `KyberWeave.Cli` | `Composition/SquadCliServices.cs` |
 | `Program` | `KyberWeave.Mcp` | `Program.cs` |
 | `DocsToolsComposition` | `KyberWeave.Mcp` | `DocsToolsComposition.cs` |
 | `Program` | `KyberWeave.Hooks` | `Program.cs` |
@@ -176,7 +189,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `MarkdownAgentParser` (`Agents/Parsing/MarkdownAgentParser.cs`) | paths | 2.5 |
 | `TomlAgentParser` (`Agents/Parsing/TomlAgentParser.cs`) | paths | 2.5 |
 | `AgentSpecValidator` (`Agents/Validation/AgentSpecValidator.cs`) | paths | 2.5 |
-| `ArbiterEvaluator` (`Arbiter/ArbiterEvaluator.cs`) | clock | 4.3 |
 | `ArbiterRunStore` (`Arbiter/Stores/ArbiterRunStore.cs`) | paths | 4.3 |
 | `ArbiterHarnessGating` (`Arbiter/ArbiterHarnessGating.cs`) | paths | 4.3 |
 | `ArbiterInstallService` (`Arbiter/ArbiterInstallService.cs`) | paths | 4.3 |
@@ -184,15 +196,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `ArbiterRepositoryLocator` (`Arbiter/ArbiterRepositoryLocator.cs`) | file system, paths | 4.3 |
 | `ArbiterSectionSelectionService` (`Arbiter/ArbiterSectionSelectionService.cs`) | file system | 4.3 |
 | `ArbiterUninstaller` (`Arbiter/ArbiterUninstaller.cs`) | paths | 4.3 |
-| `ArbiterRecordId` (`Arbiter/Facts/ArbiterJson.cs`) | identifiers | 2.5 |
 | `FileTextFacts` (`Arbiter/Facts/FileTextFacts.cs`) | paths | 4.3 |
 | `GateReportFacts` (`Arbiter/Facts/GateReportFacts.cs`) | paths | 4.3 |
-| `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths, identifiers | 4.3 |
+| `ArbiterHookDecisionEngine` (`Arbiter/Hooks/ArbiterHookDecisionEngine.cs`) | paths | 4.3 |
 | `ArbiterProvenance` (`Arbiter/Hooks/ArbiterProvenance.cs`) | paths | 2.5 |
 | `ConductorGuard` (`Arbiter/Hooks/ConductorGuard.cs`) | paths | 4.3 |
 | `ConductorGuardRules` (`Arbiter/Hooks/ConductorGuardRules.cs`) | paths | 2.5 |
-| `HookCommand` (`Arbiter/Hooks/HookCommand.cs`) | identifiers | 4.3 |
-| `HookGitFacts` (`Arbiter/Hooks/HookGitFacts.cs`) | clock | 4.3 |
 | `WorkerGuard` (`Arbiter/Hooks/WorkerGuard.cs`) | file system, paths | 4.3 |
 | `ArbiterRootResolver` (`Arbiter/Mcp/ArbiterRootResolver.cs`) | paths | 4.3 |
 | `OllamaProbe` (`Arbiter/OllamaProbe.cs`) | network | 4.3 |
@@ -202,14 +211,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PlanFinalize` (`Docs/Closeout/PlanFinalize.cs`) | paths | 4.2 |
 | `PullRequestDescription` (`Docs/Delivery/PullRequestDescription.cs`) | file system | 4.2 |
 | `RunDelivery` (`Docs/Delivery/RunDelivery.cs`) | paths | 4.2 |
-| `CorpusProvenanceService` (`Docs/Mcp/CorpusProvenanceService.cs`) | paths | 4.2 |
-| `McpServerRenamer` (`Docs/Mcp/McpServerRenamer.cs`) | paths, clock | 4.2 |
-| `McpWiringFixes` (`Docs/Mcp/McpWiringFixes.cs`) | paths | 4.2 |
-| `McpWiringInspector` (`Docs/Mcp/McpWiringInspector.cs`) | paths | 4.2 |
-| `McpWiringRepairer` (`Docs/Mcp/McpWiringRepairer.cs`) | paths, clock | 4.2 |
-| `RepositoryDocsAnalysisReader` (`Docs/Mcp/RepositoryDocsAnalysisReader.cs`) | paths | 4.2 |
-| `McpRepositoryPath` (`Docs/Mcp/McpRepositoryPath.cs`) | paths | 4.2 |
-| `McpWiringReceipt` (`Docs/Mcp/McpWiringReceipt.cs`) | file system | 4.2 |
 | `DocsScaffolder` (`Docs/Scaffolding/DocsScaffolder.cs`) | file system, paths | 4.2 |
 | `StandardsFolderMigration` (`Docs/Scaffolding/StandardsFolderMigration.cs`) | file system, paths, identifiers | 4.2 |
 | `StandardsTemplateDiff` (`Docs/Scaffolding/StandardsTemplateDiff.cs`) | file system, paths | 4.2 |
@@ -226,12 +227,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
-| `GateRunService` (`Review/GateRunService.cs`) | paths, clock | 4.3 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
 | `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
 | `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
 | `ReviewCycleView` (`Review/ReviewCycleView.cs`) | paths | 4.3 |
-| `ReviewDecisionSession` (`Review/ReviewDecisionSession.cs`) | clock | 4.3 |
 | `ReviewDuplicatesService` (`Review/ReviewDuplicatesService.cs`) | paths | 4.3 |
 | `ReviewEvidenceService` (`Review/ReviewEvidenceService.cs`) | paths | 4.3 |
 | `ReviewGatesService` (`Review/ReviewGatesService.cs`) | file system, paths | 4.3 |
@@ -265,7 +264,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
 | `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
 | `DocsInitCommand` (`Commands/Docs/DocsInitCommand.cs`) | file system, paths, environment, console | 4.5 |
-| `DocsMcpMigrateCommand` (`Commands/Docs/DocsMcpMigrateCommand.cs`) | file system, paths, environment | 4.5 |
+| `DocsMcpMigrateCommand` (`Commands/Docs/DocsMcpMigrateCommand.cs`) | console | 4.5 |
 | `DocsMcpWireCommand` (`Commands/Docs/DocsMcpWireCommand.cs`) | file system, paths | 4.5 |
 | `DocsOnboardingCommand` (`Commands/Docs/DocsOnboardingCommand.cs`) | file system, paths | 4.5 |
 | `DocsPacketCommand` (`Commands/Docs/DocsPacketCommand.cs`) | paths, console | 4.5 |
@@ -284,24 +283,15 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `RunStartCommand` (`Commands/Run/RunStartCommand.cs`) | console | 4.5 |
 | `CatalogCommand` (`Commands/Skills/CatalogCommand.cs`) | console | 4.5 |
 | `RouteCommand` (`Commands/Skills/RouteCommand.cs`) | console | 4.5 |
-| `SquadBriefCommand` (`Commands/Squad/Brief/SquadBriefCommand.cs`) | file system, console | 4.5 |
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
 | `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
 | `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |
-| `SquadTargetRootConfirmation` (`Commands/Squad/Infrastructure/SquadTargetRootConfirmation.cs`) | console | 4.5 |
 | `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | file system, paths, console | 4.5 |
 | `SquadDoctorCommand` (`Commands/Squad/SquadDoctorCommand.cs`) | file system, environment | 4.5 |
-| `SquadHostDefaults` (`Commands/Squad/SquadHostDefaults.cs`) | file system, environment | 4.5 |
-| `SquadInstallCommand` (`Commands/Squad/SquadInstallCommand.cs`) | environment, console | 4.5 |
-| `SquadInstanceRemoveCommand` (`Commands/Squad/SquadInstanceRemoveCommand.cs`) | paths | 4.5 |
 | `SquadPresetClearCommand` (`Commands/Squad/SquadPresetClearCommand.cs`) | file system | 4.5 |
 | `SquadPresetListCommand` (`Commands/Squad/SquadPresetListCommand.cs`) | file system | 4.5 |
 | `SquadPresetUseCommand` (`Commands/Squad/SquadPresetUseCommand.cs`) | file system | 4.5 |
-| `SquadRunCommand` (`Commands/Squad/SquadRunCommand.cs`) | paths | 4.5 |
 | `SquadStatusCommand` (`Commands/Squad/SquadStatusCommand.cs`) | file system, environment | 4.5 |
-| `SquadUninstallCommand` (`Commands/Squad/SquadUninstallCommand.cs`) | environment | 4.5 |
-| `SquadUpdateCommand` (`Commands/Squad/SquadUpdateCommand.cs`) | environment | 4.5 |
-| `SquadUserPaths` (`Commands/Squad/SquadUserPaths.cs`) | environment | 4.5 |
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
@@ -319,7 +309,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
-| `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: 4.9 |
 | `DocsRootWalk` (`FileSystem/DocsRootWalk.cs`) | file system | 4.4 |
 | `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileDispatchClaimStore` (`Hooks/Arbiter/FileDispatchClaimStore.cs`) | file system, clock, identifiers | 4.4 |
@@ -381,11 +370,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 #### KyberWeave.Kernel (3 classes)
 
-| Class (file) | Calls directly | Task |
-|---|---|---|
-| `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | 4.9 |
-| `StdioSession` (`Processes/StdioSession.cs`) | process, clock | clock: 4.9 |
-| `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | 4.9 |
+None left. `FileReferenceExtractor` moved to `KyberWeave.Application` (`Parsing/FileReferenceExtractor.cs`) and `CodeGraphIndexStaleness` to `KyberWeave.Data` (`CodeGraph/CodeGraphIndexStaleness.cs`), both over the file-system seam (and the path and process seams); `StdioSession` is the interactive process adapter and runs on `TimeProvider`.
 
 #### KyberWeave.Mcp (4 classes)
 
