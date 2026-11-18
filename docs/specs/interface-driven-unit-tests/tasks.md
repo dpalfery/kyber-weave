@@ -264,10 +264,11 @@ from this file when it is marked Ready.
   - **Depends on:** 3.1, 1.4, 1.6
   - _Requirements: 1.1, 2.1, 10.2_
 
-- [ ] 3.3 `SquadDeploymentPlanner` onto seams
+- [x] 3.3 `SquadDeploymentPlanner` onto seams
   - **Files:** `src/KyberWeave.Data/Squad/Deployment/SquadDeploymentPlanner.cs`
   - **Acceptance criteria:** an instance class behind `ISquadDeploymentPlanner`; no direct resource
     call; unit tests; contract tests pass on both.
+  - **Note:** the crash-safety contract runs on the real disk; its in-memory run lands with 3.4, because `SquadTransaction` still uses the real-disk path rules. Second reviewer: MERGE (2026-11-18).
   - **Depends on:** 3.2
   - _Requirements: 1.4, 2.1, 10.2_
 
