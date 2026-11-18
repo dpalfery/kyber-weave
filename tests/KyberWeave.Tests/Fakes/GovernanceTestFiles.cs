@@ -1,6 +1,8 @@
 using KyberWeave.Application.Agents;
 using KyberWeave.Application.Skills;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 
 namespace KyberWeave.Tests;
 
@@ -14,7 +16,7 @@ internal static class GovernanceTestFiles
     public static IFileSystem Files { get; } = new PhysicalTestFileSystem();
 
     /// <summary>Reads SKILL.md files and the on-disk facts the pure parser needs.</summary>
-    public static SkillFileReader Skills { get; } = new(Files);
+    public static SkillFileReader Skills { get; } = new(Files, new FakePathResolver(new InMemoryFileSystem()));
 
     /// <summary>Discovers and reads agent definitions.</summary>
     public static AgentFileReader Agents { get; } = new(Files);

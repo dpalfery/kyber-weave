@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Skills.Model;
@@ -7,8 +8,10 @@ using Markdig.Syntax;
 namespace KyberWeave.Application.Skills;
 
 /// <summary>Reads SKILL.md files and the on-disk facts the pure parser needs.</summary>
-public sealed class SkillFileReader(IFileSystem files)
+public sealed class SkillFileReader(IFileSystem files, IPathResolver paths)
 {
+    private readonly FileReferenceExtractor _references = new(files, paths);
+
     /// <summary>Loads every skill under a path.</summary>
     /// <param name="rootPath">A skill directory, a tree of skills, or a SKILL.md file.</param>
     /// <returns>One result per SKILL.md found, including the ones that failed to parse.</returns>
@@ -75,7 +78,7 @@ public sealed class SkillFileReader(IFileSystem files)
     {
         MarkdownDocument document = SkillParser.ParseDocument(content);
         IReadOnlyList<ExtractedFileReference> extracted =
-            FileReferenceExtractor.ExtractFromDocument(document, directoryPath, FileReferenceOptions.SkillDefault);
+            _references.ExtractFromDocument(document, directoryPath, FileReferenceOptions.SkillDefault);
 
         List<SkillReferenceLink> links = extracted
             .Select(r => new SkillReferenceLink(r.Reference, r.Exists))

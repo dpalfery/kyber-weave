@@ -395,7 +395,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | 4.9 |
 | `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | 4.9 |
 
 #### KyberWeave.Mcp (4 classes)
