@@ -182,23 +182,22 @@ public abstract class SquadCrashSafetyContractTests
         }
 
         string list = string.Join("\n", failures.Select(failure => Describe(failure.Case, failure.Detail)));
-        List<SquadCrashKnownWeakness> known = failures
-            .Select(failure => KnownWeaknesses.FirstOrDefault(weakness =>
-                weakness.Flow == failure.Case.Flow &&
-                string.Equals(weakness.FaultPoint, failure.Case.FaultPoint, StringComparison.Ordinal)))
-            .OfType<SquadCrashKnownWeakness>()
-            .DistinctBy(weakness => (weakness.Flow, weakness.FaultPoint))
+        List<SquadCrashFailure> recorded = failures
+            .Select(failure => new SquadCrashFailure(failure.Case.Flow, failure.Case.FaultPoint, failure.Detail))
             .ToList();
-        int unknown = failures.Count - known.Count;
+        IReadOnlyList<SquadCrashFailure> unexplained =
+            SquadCrashFailureClassifier.Unexplained(recorded, KnownWeaknesses);
         Assert.True(
-            unknown == 0,
-            $"{flow} has {unknown} crash-safety failure(s) that no known weakness explains:\n{list}");
+            unexplained.Count == 0,
+            $"{flow} has {unexplained.Count} crash-safety failure(s) that no known weakness explains:\n{list}");
 
+        IReadOnlyList<SquadCrashKnownWeakness> matched =
+            SquadCrashFailureClassifier.Matched(recorded, KnownWeaknesses);
         Assert.Skip(
             "Known weakness, fixed by task 3.4: " +
             string.Join(
                 " ",
-                known.Select(weakness =>
+                matched.Select(weakness =>
                     $"[{weakness.Flow} at {weakness.FaultPoint}] {weakness.Reason}")));
     }
 
@@ -262,8 +261,3 @@ public abstract class SquadCrashSafetyContractTests
     private sealed record SquadCrashCase(SquadCrashFlow Flow, string FaultPoint);
 }
 
-/// <summary>One fault point whose behaviour is a known crash-safety weakness.</summary>
-/// <param name="Flow">The flow that fails.</param>
-/// <param name="FaultPoint">The point whose recovery is wrong, as the fixture names it.</param>
-/// <param name="Reason">One line saying what goes wrong and why.</param>
-public sealed record SquadCrashKnownWeakness(SquadCrashFlow Flow, string FaultPoint, string Reason);
