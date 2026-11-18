@@ -213,7 +213,18 @@ public static class PreparedSquadInstalls
                 LazyThreadSafetyMode.ExecutionAndPublication),
             () => build()!);
 
-        return (T)entry.Value;
+        try
+        {
+            return (T)entry.Value;
+        }
+        catch
+        {
+            // A Lazy in ExecutionAndPublication mode caches its exception, so leaving this entry in place
+            // would rethrow the one failure to every later request for the recipe, with no retry. Removing
+            // this exact entry leaves one another thread has already stored in its place untouched.
+            _ = Installs.TryRemove(new KeyValuePair<string, Lazy<PreparedSquadInstall>>(key, entry));
+            throw;
+        }
     }
 
     /// <summary>Removes every prepared install.</summary>

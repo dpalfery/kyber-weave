@@ -140,6 +140,39 @@ public sealed class PreparedSquadInstallsTests : IDisposable
     private static readonly IReadOnlyDictionary<SquadTarget, string> PresetNames =
         new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" };
 
+    /// <summary>
+    /// A build that fails is not an install: the recipe is left unbuilt so the next request tries
+    /// again, rather than every later test in the run rethrowing the one transient failure.
+    /// </summary>
+    [Fact]
+    public void AFailedBuildIsNotCachedSoTheNextRequestBuildsIt()
+    {
+        string key = NewKey("retry");
+        _ = Assert.Throws<InvalidOperationException>(() =>
+            PreparedSquadInstalls.Get<PreparedSquadInstall>(key, () => throw new InvalidOperationException("transient")));
+
+        PreparedSquadInstall install = PreparedSquadInstalls.Get(key, () => new PreparedSquadInstall(key, Seeded(key)));
+
+        Assert.Equal(key, install.Key);
+        Assert.Equal(1, PreparedSquadInstalls.BuildsOf(key));
+    }
+
+    /// <summary>
+    /// Removal runs on process exit and sweeps every recipe, so a recipe whose build failed must not
+    /// throw out of the sweep: there is nothing to dispose, and the sweep continues.
+    /// </summary>
+    [Fact]
+    public void RemovingARecipeWhoseBuildFailedDoesNotThrow()
+    {
+        string key = NewKey("faulted-cleanup");
+        _ = Assert.Throws<InvalidOperationException>(() =>
+            PreparedSquadInstalls.Get<PreparedSquadInstall>(key, () => throw new InvalidOperationException("transient")));
+
+        PreparedSquadInstalls.Remove(key);
+
+        Assert.Equal(0, PreparedSquadInstalls.BuildsOf(key));
+    }
+
     private string NewKey(string purpose)
     {
         string key = $"prepared-installs-tests/{purpose}/{Guid.NewGuid():N}";
