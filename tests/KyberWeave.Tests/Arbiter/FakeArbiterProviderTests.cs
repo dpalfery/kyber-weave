@@ -112,6 +112,87 @@ public sealed class FakeArbiterProviderTests
         Assert.Null(result.Model);
     }
 
+    [Fact]
+    public async Task AnsweringByRuleAnswersTheNamedRuleAndReportsNoScore()
+    {
+        FakeArbiterProvider provider = FakeArbiterProvider.AnsweringByRule((First, "yes"));
+
+        ArbiterStep1BatchResult result = await provider.AskStep1Async([Rule(First), Rule(Second)], Facts());
+
+        Assert.Equal("yes", result.AnswersByRule[First]);
+        Assert.False(result.AnswersByRule.ContainsKey(Second));
+        Assert.Empty(result.ScoresByRule!);
+    }
+
+    [Fact]
+    public async Task AnExplicitScoreWinsOverTheConfidence()
+    {
+        ArbiterStep1Score scored = new([0.1, 0.9], 0.6, 0.85);
+        FakeArbiterProvider provider = new()
+        {
+            Answers = { [First] = "yes" },
+            AnswerAsked = "yes",
+            Scores = { [First] = scored },
+            Confidence = 0.99,
+        };
+
+        ArbiterStep1BatchResult result = await provider.AskStep1Async([Rule(First), Rule(Second)], Facts());
+
+        Assert.Equal(scored, result.ScoresByRule?[First]);
+        Assert.Equal(0.99, result.ScoresByRule?[Second].Confidence);
+    }
+
+    [Fact]
+    public async Task ScoreForAllScoresEveryAnsweredRuleWithoutOneOfItsOwn()
+    {
+        ArbiterStep1Score scored = new([0.9, 0.1], null, 0.8);
+        FakeArbiterProvider provider = new()
+        {
+            AnswerAsked = "yes",
+            ScoreForAll = scored,
+            Confidence = 0.99,
+        };
+
+        ArbiterStep1BatchResult result = await provider.AskStep1Async([Rule(First), Rule(Second)], Facts());
+
+        Assert.Equal(scored, result.ScoresByRule?[First]);
+        Assert.Equal(scored, result.ScoresByRule?[Second]);
+    }
+
+    [Fact]
+    public async Task AnswersWinsOverTheDefaultAnswerAndDefaultsStayScorelessUnlessAsked()
+    {
+        FakeArbiterProvider provider = new()
+        {
+            Answers = { [First] = "yes" },
+            DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            Confidence = 0.95,
+        };
+        FakeArbiterProvider scoring = new()
+        {
+            DefaultAnswer = ArbiterStep1BatchResult.NotEvaluated,
+            Confidence = 0.95,
+            ScoreDefaultAnswer = true,
+        };
+
+        ArbiterStep1BatchResult plain = await provider.AskStep1Async([Rule(First), Rule(Second)], Facts());
+        ArbiterStep1BatchResult opted = await scoring.AskStep1Async([Rule(Second)], Facts());
+
+        Assert.Equal("yes", plain.AnswersByRule[First]);
+        Assert.Equal(ArbiterStep1BatchResult.NotEvaluated, plain.AnswersByRule[Second]);
+        Assert.False(plain.ScoresByRule!.ContainsKey(Second));
+        Assert.Equal(0.95, opted.ScoresByRule?[Second].Confidence);
+    }
+
+    [Fact]
+    public async Task ThrowingRaisesForEveryCall()
+    {
+        FakeArbiterProvider provider = FakeArbiterProvider.Throwing(new InvalidOperationException("provider bug"));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => provider.AskStep1Async([Rule(First)], Facts()));
+        Assert.Equal(1, provider.CallCount);
+    }
+
     private static ArbiterRule Rule(string id, double? floor = null) =>
         new(
             id,
