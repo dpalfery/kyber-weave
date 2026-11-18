@@ -78,7 +78,7 @@ public abstract class SquadCrashSafetyContractTests
         IReadOnlyDictionary<string, SquadTreeEntry> oldTree = fixture.Capture();
         IReadOnlyList<string> faultPoints = fixture.ExecuteClean(flow);
         SquadCrashRunGuard.RequireFaultPoints(flow, faultPoints);
-        SquadCrashRunGuard.RequireCleanRunChangedTheTree(flow, TreeDifference(oldTree, fixture.Capture()));
+        SquadCrashRunGuard.RequireCleanRunChangedTheTree(flow, SquadTreeComparison.Difference(oldTree, fixture.Capture()));
         fixture.Restore(oldTree);
 
         List<(SquadCrashCase Case, string Detail)> failures = [];
@@ -95,7 +95,7 @@ public abstract class SquadCrashSafetyContractTests
             }
 
             IReadOnlyDictionary<string, SquadTreeEntry> rolledBack = fixture.Capture();
-            string? difference = TreeDifference(oldTree, rolledBack);
+            string? difference = SquadTreeComparison.Difference(oldTree, rolledBack);
             if (difference is not null)
             {
                 failures.Add((current, $"rollback did not restore the whole old tree: {difference}"));
@@ -119,7 +119,7 @@ public abstract class SquadCrashSafetyContractTests
         IReadOnlyDictionary<string, SquadTreeEntry> newTree = fixture.Capture();
 
         SquadCrashRunGuard.RequireFaultPoints(flow, faultPoints);
-        SquadCrashRunGuard.RequireCleanRunChangedTheTree(flow, TreeDifference(oldTree, newTree));
+        SquadCrashRunGuard.RequireCleanRunChangedTheTree(flow, SquadTreeComparison.Difference(oldTree, newTree));
 
         List<(SquadCrashCase Case, string Detail)> failures = [];
         foreach (string faultPoint in faultPoints)
@@ -142,8 +142,8 @@ public abstract class SquadCrashSafetyContractTests
             }
 
             IReadOnlyDictionary<string, SquadTreeEntry> recovered = fixture.Capture();
-            string? oldDifference = TreeDifference(oldTree, recovered);
-            string? newDifference = TreeDifference(newTree, recovered);
+            string? oldDifference = SquadTreeComparison.Difference(oldTree, recovered);
+            string? newDifference = SquadTreeComparison.Difference(newTree, recovered);
             if (oldDifference is not null && newDifference is not null)
             {
                 failures.Add((current, $"the tree is neither the whole old tree ({oldDifference}) nor the whole new tree ({newDifference})"));
@@ -161,23 +161,8 @@ public abstract class SquadCrashSafetyContractTests
         SquadCrashSafetyFixture fixture,
         SquadCrashFlow flow,
         IReadOnlyDictionary<string, SquadTreeEntry> oldTree,
-        IReadOnlyDictionary<string, SquadTreeEntry> actualTree)
-    {
-        foreach (string marker in fixture.UntouchedPaths(flow))
-        {
-            if (!actualTree.TryGetValue(marker, out SquadTreeEntry? actual))
-            {
-                yield return $"a file the flow must not touch is missing: '{marker}'";
-                continue;
-            }
-
-            string? problem = EntryDifference(marker, oldTree[marker], actual);
-            if (problem is not null)
-            {
-                yield return $"a file the flow must not touch changed: {problem}";
-            }
-        }
-    }
+        IReadOnlyDictionary<string, SquadTreeEntry> actualTree) =>
+        SquadCrashMarkerCheck.Problems(fixture.UntouchedPaths(flow), oldTree, actualTree);
 
     private void Report(SquadCrashFlow flow, List<(SquadCrashCase Case, string Detail)> failures)
     {
@@ -205,63 +190,6 @@ public abstract class SquadCrashSafetyContractTests
                 matched.Select(weakness =>
                     $"[{weakness.Flow} at {weakness.FaultPoint}] {weakness.Reason}")));
     }
-
-    private static string? TreeDifference(
-        IReadOnlyDictionary<string, SquadTreeEntry> expected,
-        IReadOnlyDictionary<string, SquadTreeEntry> actual)
-    {
-        foreach (string path in expected.Keys.Where(path => !actual.ContainsKey(path)).Order(StringComparer.Ordinal))
-        {
-            return $"'{path}' is missing";
-        }
-
-        foreach (string path in actual.Keys.Where(path => !expected.ContainsKey(path)).Order(StringComparer.Ordinal))
-        {
-            return $"'{path}' is unexpected";
-        }
-
-        foreach ((string path, SquadTreeEntry expectedEntry) in expected.OrderBy(pair => pair.Key, StringComparer.Ordinal))
-        {
-            string? difference = EntryDifference(path, expectedEntry, actual[path]);
-            if (difference is not null)
-            {
-                return difference;
-            }
-        }
-
-        return null;
-    }
-
-    private static string? EntryDifference(string path, SquadTreeEntry expected, SquadTreeEntry actual)
-    {
-        if (expected.Kind != actual.Kind)
-        {
-            return $"'{path}' is a {actual.Kind} where a {expected.Kind} was expected";
-        }
-
-        if (!string.Equals(expected.LinkTarget, actual.LinkTarget, StringComparison.Ordinal))
-        {
-            return $"'{path}' names '{actual.LinkTarget}' where it named '{expected.LinkTarget}'";
-        }
-
-        ReadOnlyMemory<byte>? expectedBytes = expected.Content;
-        ReadOnlyMemory<byte>? actualBytes = actual.Content;
-        if (expectedBytes.HasValue != actualBytes.HasValue)
-        {
-            return $"'{path}' has different content";
-        }
-
-        if (expectedBytes is { } left && actualBytes is { } right && !left.Span.SequenceEqual(right.Span))
-        {
-            return $"'{path}' changed from {Digest(left)} to {Digest(right)}";
-        }
-
-        return null;
-    }
-
-    private static string Digest(ReadOnlyMemory<byte> content) =>
-        Convert.ToHexStringLower(
-            System.Security.Cryptography.SHA256.HashData(content.Span))[..12];
 
     private sealed record SquadCrashCase(SquadCrashFlow Flow, string FaultPoint);
 }

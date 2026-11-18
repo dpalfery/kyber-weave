@@ -317,6 +317,15 @@ public sealed class PhysicalSquadCrashSafetyFixture : SquadCrashSafetyFixture
                 File.CreateSymbolicLink(path, target);
             }
         }
+
+        // Prove the restore before the next case runs on top of it: a snapshot that did not round-trip
+        // (a refused link, a read-only file) would otherwise be blamed on the next fault point.
+        string? difference = SquadTreeComparison.Difference(tree, Capture());
+        if (difference is not null)
+        {
+            throw new InvalidOperationException(
+                $"The kill snapshot did not restore exactly, so the next case would run on a contaminated tree: {difference}");
+        }
     }
 
     /// <inheritdoc />
