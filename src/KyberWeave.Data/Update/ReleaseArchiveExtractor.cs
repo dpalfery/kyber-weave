@@ -38,12 +38,19 @@ internal sealed class ReleaseArchiveExtractor(
         using ZipArchive zip = new(archive, ZipArchiveMode.Read, leaveOpen: true);
         foreach (ZipArchiveEntry entry in zip.Entries)
         {
-            _ = planner.Resolve(destination, entry.FullName);
-            // The planner refused any escaping name; the written path is re-derived here with Path.GetFullPath against the
-            // extraction root and checked by prefix, the containment form code scanners recognise at the sink.
-            string target = Path.GetFullPath(entry.FullName.Replace('/', Path.DirectorySeparatorChar), root);
-            if (!target.StartsWith(prefix, comparison) && !string.Equals(target, root, comparison))
+            // Spelling first (no rooted or '..' name), then lexical containment with Path.GetFullPath and a prefix check
+            // in this loop (the form code scanners recognise), then the planner's link-aware check on the checked path.
+            string name = ArchiveEntryPlanner.ValidateName(entry.FullName);
+            string full = Path.GetFullPath(name.Replace('/', Path.DirectorySeparatorChar), root);
+            if (!full.StartsWith(prefix, comparison))
+            {
+                if (string.Equals(full, root, comparison))
+                    continue;
+
                 throw Escaped(entry.FullName);
+            }
+
+            string target = planner.Resolve(root, Path.GetRelativePath(root, full));
             if (entry.FullName.EndsWith('/') || entry.FullName.EndsWith('\\'))
             {
                 files.CreateDirectory(target);
@@ -65,10 +72,19 @@ internal sealed class ReleaseArchiveExtractor(
             if (entry.EntryType == TarEntryType.GlobalExtendedAttributes)
                 continue;
 
-            _ = planner.Resolve(destination, entry.Name);
-            string target = Path.GetFullPath(entry.Name.Replace('/', Path.DirectorySeparatorChar), root);
-            if (!target.StartsWith(prefix, comparison) && !string.Equals(target, root, comparison))
+            // Spelling first (no rooted or '..' name), then lexical containment with Path.GetFullPath and a prefix check
+            // in this loop (the form code scanners recognise), then the planner's link-aware check on the checked path.
+            string name = ArchiveEntryPlanner.ValidateName(entry.Name);
+            string full = Path.GetFullPath(name.Replace('/', Path.DirectorySeparatorChar), root);
+            if (!full.StartsWith(prefix, comparison))
+            {
+                if (string.Equals(full, root, comparison))
+                    continue;
+
                 throw Escaped(entry.Name);
+            }
+
+            string target = planner.Resolve(root, Path.GetRelativePath(root, full));
             switch (entry.EntryType)
             {
                 case TarEntryType.Directory:

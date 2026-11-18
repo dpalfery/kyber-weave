@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Content tests: checks of the content this repository ships (agents, skills, standards,
+    documents, workflows). They read it through the corpus seam in the shared test library, write
+    nothing and start no program. See AGENTS.md in this directory.
+  -->
+  <PropertyGroup>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Same two suppressions, for the same reasons, as KyberWeave.Tests.csproj. -->
+    <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <OutputType>Exe</OutputType>
+    <!-- The classes keep the namespace they had in KyberWeave.Tests, so a fully-qualified class
+         name (CI filters, scripts/fast-loop-classes.txt) means the same test in either project. -->
+    <RootNamespace>KyberWeave.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Testing.Extensions.TrxReport" Version="2.5.2" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
+    <PackageReference Include="xunit.v3" Version="4.0.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The corpus seam lives in the shared test library, so this project references the one copy
+         rather than compiling a source file from another test project. -->
+    <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

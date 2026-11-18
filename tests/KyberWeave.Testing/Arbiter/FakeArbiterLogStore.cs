@@ -24,6 +24,22 @@ public sealed class FakeArbiterLogStore : IArbiterLogStore
     /// <summary>What an append throws, when a test makes the log unavailable.</summary>
     public Exception? AppendFailure { get; set; }
 
+    /// <summary>The paths an append has named, in first-append order. A test reads this to see which files exist.</summary>
+    /// <remarks>
+    /// The fake holds lines in a dictionary and never touches the file system, so a test asking "was anything stored
+    /// here" must ask this log rather than the file system: a file-system check would answer false for every input.
+    /// </remarks>
+    public IReadOnlyList<string> AppendedPaths
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _lines.Keys];
+            }
+        }
+    }
+
     /// <summary>How many appends this log has taken. A cancelled or refused append is not counted.</summary>
     public int AppendCount
     {

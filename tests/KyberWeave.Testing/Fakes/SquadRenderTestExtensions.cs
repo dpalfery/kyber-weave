@@ -18,3 +18,13 @@ internal static class SquadTestRegistry
     public static SquadRendererRegistry Create(IEnumerable<ISquadRenderer> renderers) =>
         new(renderers, RealSquadServices.RenderInputReader());
 }
+
+/// <summary>Prepares render requests from an <see cref="KyberWeave.Tests.Fixtures.ArbiterSquadFixture"/>'s own file system.</summary>
+internal static class ArbiterSquadFixtureExtensions
+{
+    /// <summary>Reads the render's inputs onto the request from the fixture's file system.</summary>
+    /// <param name="request">The request to prepare.</param>
+    /// <param name="fixture">The fixture whose file system holds the Squad tree.</param>
+    public static SquadRenderRequest Prepared(this SquadRenderRequest request, KyberWeave.Tests.Fixtures.ArbiterSquadFixture fixture) =>
+        fixture.Prepare(request);
+}

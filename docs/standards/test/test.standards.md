@@ -155,9 +155,12 @@ its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinne
 - **No phrase pins, forbidden-phrase pins or hash pins on prose.** A test that asserts a sentence, or a
   word from one, breaks on every rewording and says nothing about whether the rule is still stated.
 
-**Where the remaining wording checks live.** Classes that still assert the text of skills, agents and
-instructions are in [`tests/KyberWeave.PromptContent.Tests`](../../../tests/KyberWeave.PromptContent.Tests/AGENTS.md),
-not in `tests/KyberWeave.Tests`, so the product suite measures behaviour only. They are scheduled to become
+**Where the remaining wording checks live.** Classes that check the shipped content (the text of skills,
+agents and instructions, and the shape of standards and documents) are content tests in
+[`tests/KyberWeave.Content.Tests`](../../../tests/KyberWeave.Content.Tests/AGENTS.md), not unit tests and not
+integration tests: they read the content through the corpus seam (`ICorpusSource`), write nothing and start no
+program, so they run with the unit projects. A test of how product code handles content uses fixture content
+in memory and lives in the unit project of that code. They are scheduled to become
 eval-style checks, so do not add new wording pins there. The repository-policy project
 (`tests/KyberWeave.RepoPolicy.Tests`) keeps the checks on scripts, workflows, gate configuration and docs.
 
