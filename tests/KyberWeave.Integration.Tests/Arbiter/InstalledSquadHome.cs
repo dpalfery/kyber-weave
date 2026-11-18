@@ -1,3 +1,5 @@
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.Configuration;
 using KyberWeave.Application.Squad;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Contracts.Services;
@@ -82,9 +84,9 @@ public sealed class InstalledSquadHome : IDisposable
         {
             seed?.Invoke(directory.Path);
 
-            SquadStateStore store = new(new SquadHostDefaults.CliSquadUserPaths(directory.Path, directory.Path));
+            SquadStateStore store = RealSquadState.Store(new SquadHostDefaults.CliSquadUserPaths(directory.Path, directory.Path));
             ISquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(
-                SquadReleaseSources.LocalCheckout(CheckoutSourceRoot()),
+                SquadReleaseSources.LocalCheckout(CheckoutSourceRoot(), RealSquadServices.CompanionSkills()),
                 SquadHostDefaults.ResolveRenderer(),
                 store,
                 globalRoots: new SquadGlobalRoots(_ => null, directory.Path));
@@ -105,7 +107,7 @@ public sealed class InstalledSquadHome : IDisposable
             {
                 // The install writes the receipt; the user-level target ledger is the Arbiter install
                 // command's own step, and the uninstall command reads it to unregister the target.
-                new FileUserHostConfigStore().WriteGlobalTargets(
+                RealUserHostConfigStore.Create().WriteGlobalTargets(
                     directory.Path,
                     targets.Select(SquadTargetCatalog.GetToken).ToArray());
             }
@@ -173,7 +175,7 @@ public sealed class InstalledSquadHome : IDisposable
     }
 
     private static SquadStateStore Store(string root) =>
-        new(new SquadHostDefaults.CliSquadUserPaths(root, root));
+        RealSquadState.Store(new SquadHostDefaults.CliSquadUserPaths(root, root));
 
     private string ResolveReceiptPath(string root) => ResolveReceiptPath(root, Scope);
 

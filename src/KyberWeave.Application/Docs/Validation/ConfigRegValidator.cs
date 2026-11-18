@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -46,16 +47,23 @@ public sealed partial class ConfigRegValidator
     private static partial Regex PropertyLine();
 
     private readonly string _repoRoot;
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
 
-    public ConfigRegValidator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files)
+    public ConfigRegValidator(
+        string repoRoot,
+        KyberWeaveConfig config,
+        IRepositoryFileStore files,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _files = files;
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
     }
 

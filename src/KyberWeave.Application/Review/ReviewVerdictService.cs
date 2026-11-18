@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -38,6 +39,8 @@ namespace KyberWeave.Application.Review;
 /// <param name="seatFolder">Lists the seat folder's files.</param>
 /// <param name="decisions">Asks the decision model's questions.</param>
 /// <param name="models">Builds the decision model from the repository's Arbiter configuration.</param>
+/// <param name="paths">Resolves the paths the caller spelled, relative ones against the working directory.</param>
+/// <param name="environment">Names the working directory a relative path resolves against.</param>
 /// <param name="clock">Stamps the verdict's date.</param>
 public sealed partial class ReviewVerdictService(
     IConfigLoadService configs,
@@ -51,6 +54,8 @@ public sealed partial class ReviewVerdictService(
     ISeatFolder seatFolder,
     IReviewDecisionSteps decisions,
     IReviewDecisionModelFactory models,
+    IPathResolver paths,
+    IProcessEnvironment environment,
     TimeProvider clock) : IReviewVerdictService
 {
     /// <summary>The drop reason that marks a finding about pre-existing code the change did not touch.</summary>
@@ -93,7 +98,7 @@ public sealed partial class ReviewVerdictService(
         if (RefuseEmptyValues(request, report))
             return Failed(report);
 
-        string root = Path.GetFullPath(request.Path);
+        string root = FullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
             return Failed(report);
@@ -318,11 +323,11 @@ public sealed partial class ReviewVerdictService(
         List<GateCycleDecision> decisions = [.. ReviewCyclePlanning.DecideGates(
             history,
             absent,
-            OperatingSystem.IsWindows() ? "windows" : "unix",
+            environment.OperatingSystem == OperatingSystemKind.Windows ? "windows" : "unix",
             commit => TryChangedSince(trees.Containing(root), commit))];
         string[] outstanding =
             [.. decisions.Where(decision => decision is { Action: GateCycleAction.Rerun, FromCycle: not null }).Select(decision => decision.GateId)];
-        string command = ReviewCycleView.GatesCommand(root, Path.GetFullPath(request.Gates!), request.BaseRef);
+        string command = ReviewCycleView.GatesCommand(root, FullPath(request.Gates!), request.BaseRef);
         foreach (GateCycleDecision decision in decisions)
         {
             if (decision is { Action: GateCycleAction.Carry, Carried: { } carried })
@@ -379,7 +384,7 @@ public sealed partial class ReviewVerdictService(
     {
         foreach (string? path in new[] { request.Out, request.Gates })
         {
-            if (path is not null && Path.GetDirectoryName(Path.GetFullPath(path)) is { } folder && cycles.HasIdentity(folder))
+            if (path is not null && Path.GetDirectoryName(FullPath(path)) is { } folder && cycles.HasIdentity(folder))
                 return folder;
         }
 
@@ -392,10 +397,10 @@ public sealed partial class ReviewVerdictService(
     /// </summary>
     private void RecordCycleIdentity(string root, ReviewVerdictRequest request)
     {
-        if (request.Out is null || !ReviewCycleView.TryFromOutPath(request.Out, out _, out _))
+        if (request.Out is null || !ReviewCycleView.TryFromOutPath(paths, environment, request.Out, out _, out _))
             return;
 
-        string folder = Path.GetDirectoryName(Path.GetFullPath(request.Out))!;
+        string folder = Path.GetDirectoryName(FullPath(request.Out))!;
         if (cycles.HasIdentity(folder) || trees.IdentityOf(trees.Containing(root), request.BaseRef) is not { } identity)
             return;
 
@@ -497,7 +502,7 @@ public sealed partial class ReviewVerdictService(
 
         // The cycle's recorded decisions first; a reason typed on the command line wins over the recorded one.
         Dictionary<string, string> notSeated = new(
-            notSeatedStore.Read(Path.GetDirectoryName(Path.GetFullPath(request.Seats).TrimEnd(Path.DirectorySeparatorChar))!),
+            notSeatedStore.Read(Path.GetDirectoryName(FullPath(request.Seats).TrimEnd(Path.DirectorySeparatorChar))!),
             StringComparer.Ordinal);
         foreach ((string lens, string reason) in ParseNotSeated(request.NotSeated, report))
             notSeated[lens] = reason;
@@ -526,7 +531,7 @@ public sealed partial class ReviewVerdictService(
     private bool TryReadSeats(string folder, DiagnosticReport report, out List<SeatOutput> seats)
     {
         seats = [];
-        string full = Path.GetFullPath(folder);
+        string full = FullPath(folder);
         if (!seatFolder.Exists(full))
         {
             report.Add(new Diagnostic(
@@ -957,7 +962,8 @@ public sealed partial class ReviewVerdictService(
         // The prior is the newest earlier cycle that belongs to this change, by the same test review seats applies, so a
         // folder left by another change is never taken.
         if (request.Prior is null
-            && ReviewCycleView.TryFromOutPath(Path.Combine(cycle, PriorFindingsFile), out string reviewFolder, out int number)
+            && ReviewCycleView.TryFromOutPath(
+                paths, environment, Path.Combine(cycle, PriorFindingsFile), out string reviewFolder, out int number)
             && trees.Prior(tree, request.BaseRef, cycles.ReadFinished(reviewFolder)).Valid
                 .Where(record => record.Number < number && files.FileExists(record.FindingsPath))
                 .MaxBy(record => record.Number) is { } prior)
@@ -969,8 +975,12 @@ public sealed partial class ReviewVerdictService(
     }
 
     /// <summary>The cycle's decision-model answer file, beside the seat folder; none for a hand-built findings file.</summary>
-    private static string? DecisionCachePath(ReviewVerdictRequest request) =>
-        request.Seats is null ? null : Path.Combine(Path.GetDirectoryName(Path.GetFullPath(request.Seats).TrimEnd(Path.DirectorySeparatorChar))!, "decision-model.json");
+    private string? DecisionCachePath(ReviewVerdictRequest request) =>
+        request.Seats is null
+            ? null
+            : Path.Combine(
+                Path.GetDirectoryName(FullPath(request.Seats).TrimEnd(Path.DirectorySeparatorChar))!,
+                "decision-model.json");
 
     /// <summary>
     /// Drops each finding a lens raised as a nitpick when the fix level is below <c>nitpick</c>, with a reported
@@ -1023,7 +1033,7 @@ public sealed partial class ReviewVerdictService(
         (List<ReviewFinding> graded, List<(ReviewFinding Finding, SeverityOverrideRow Row, double? Confidence)> matched) =
             decisions.MatchOverridesAsync(model, overrides, findings, cancellationToken).GetAwaiter().GetResult();
         foreach ((ReviewFinding finding, SeverityOverrideRow row, double? confidence) in matched)
-            report.Add(SeverityOverrides.Note(finding, row, $"matched by decision model, confidence {ReviewDecisionText.Format(confidence)}"));
+            report.Add(SeverityOverrideRules.Note(finding, row, $"matched by decision model, confidence {ReviewDecisionText.Format(confidence)}"));
 
         if (matched.Count > 0)
             effects.Add($"{matched.Count} severity override(s) matched");
@@ -1235,7 +1245,7 @@ public sealed partial class ReviewVerdictService(
             return false;
         }
 
-        string full = Path.GetFullPath(path);
+        string full = FullPath(path);
         if (!files.FileExists(full))
         {
             report.Add(new Diagnostic(
@@ -1272,29 +1282,11 @@ public sealed partial class ReviewVerdictService(
     /// </summary>
     private void TryWriteReport(string? path, string content, DiagnosticReport report)
     {
-        if (path is null)
-            return;
-
-        string full = Path.GetFullPath(path);
-        try
-        {
-            string? directory = Path.GetDirectoryName(full);
-            if (!string.IsNullOrEmpty(directory))
-                files.CreateDirectory(directory);
-
-            files.WriteAllText(full, content);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            report.Add(new Diagnostic(
-                ReportWriteFailed,
-                Severity.Error,
-                $"Could not write the report to '{full}': {ex.Message}",
-                Subject,
-                full,
-                Hint: "Check that the directory is writable, or drop --out."));
-        }
+        ReviewReportWriter.TryWrite(files, paths, environment, path, content, ReportWriteFailed, report);
     }
+
+    /// <summary>Resolves a path the caller spelled, a relative one against the working directory.</summary>
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 
     /// <summary>A lens id as the catalogue writes them: lowercase words joined by single hyphens.</summary>
     [GeneratedRegex("^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.CultureInvariant)]

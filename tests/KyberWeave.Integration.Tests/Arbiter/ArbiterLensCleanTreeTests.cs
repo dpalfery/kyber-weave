@@ -85,7 +85,7 @@ public sealed class ArbiterLensCleanTreeTests : IDisposable
         TriggerClassification classification = TriggerClassifier.ClassifySingle(ev, "review-lens", prompt);
         Assert.Equal("lens.spawn", classification.Trigger);
 
-        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfig.ProductDefaults);
+        ArbiterFactSet facts = TriggerFactBuilder.Build(classification, prompt, KyberWeaveConfigDefaults.Product);
         return ArbiterTestServices.HookGitFacts(_probe.Root).Enrich(facts, classification, ev);
     }
 
@@ -119,7 +119,7 @@ public sealed class ArbiterLensCleanTreeTests : IDisposable
     public void OnACommittedTreeTheLensIsNotSkipped(string lens)
     {
         ArbiterOutcome outcome = RuleEngine.EvaluateStep0(
-            ArbiterConfig.ProductDefaults.Rules,
+            ArbiterConfigDefaults.Product.Rules,
             LensFacts(lens),
             "lens.spawn");
 

@@ -34,7 +34,7 @@ public sealed class ArbiterConfigResolver(
         if (string.IsNullOrWhiteSpace(path))
         {
             report.Add(MapLoadFailure("Repository path must not be empty.", null));
-            config = KyberWeaveConfig.ProductDefaults;
+            config = KyberWeaveConfigDefaults.Product;
             configPath = null;
             return false;
         }
@@ -55,7 +55,7 @@ public sealed class ArbiterConfigResolver(
             }
 
             report.Add(MapLoadFailure(loaded.Error ?? "Failed to load kyber-weave.yml.", loaded.ConfigPath));
-            config = KyberWeaveConfig.ProductDefaults;
+            config = KyberWeaveConfigDefaults.Product;
             configPath = loaded.ConfigPath;
             return false;
         }
@@ -108,7 +108,7 @@ public sealed class ArbiterConfigResolver(
         string? repoConfigPath = ResolveProjectConfigPath(path, configFile);
         if (string.IsNullOrWhiteSpace(repoConfigPath) || !files.FileExists(repoConfigPath))
         {
-            config = KyberWeaveConfig.ProductDefaults;
+            config = KyberWeaveConfigDefaults.Product;
             configPath = repoConfigPath;
             return false;
         }
@@ -119,7 +119,7 @@ public sealed class ArbiterConfigResolver(
             string sanitized = ArbiterCliText.StripProjectGlobalTargets(yaml);
             if (string.Equals(yaml, sanitized, StringComparison.Ordinal))
             {
-                config = KyberWeaveConfig.ProductDefaults;
+                config = KyberWeaveConfigDefaults.Product;
                 configPath = repoConfigPath;
                 return false;
             }
@@ -130,7 +130,7 @@ public sealed class ArbiterConfigResolver(
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is YamlException)
         {
-            config = KyberWeaveConfig.ProductDefaults;
+            config = KyberWeaveConfigDefaults.Product;
             configPath = repoConfigPath;
             return false;
         }

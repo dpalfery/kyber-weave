@@ -3,7 +3,7 @@ using KyberWeave.Core.Arbiter;
 namespace KyberWeave.Core.Configuration;
 
 /// <summary>Combined Kyber-Weave host configuration.</summary>
-public sealed class KyberWeaveConfig : IDocsEngineConfig
+public sealed class KyberWeaveConfig
 {
     public OntologyConfig Ontology { get; init; } = OntologyConfig.ProductDefaults;
 
@@ -17,7 +17,7 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
 
     public ReviewConfig Review { get; init; } = ReviewConfig.ProductDefaults;
 
-    public ArbiterConfig Arbiter { get; init; } = ArbiterConfig.ProductDefaults;
+    public required ArbiterConfig Arbiter { get; init; }
 
     public McpConfig Mcp { get; init; } = McpConfig.ProductDefaults;
 
@@ -59,8 +59,6 @@ public sealed class KyberWeaveConfig : IDocsEngineConfig
 
     /// <summary>The most characters one task prompt may hold; the host may set <c>task-prompt-budget</c>.</summary>
     public int TaskPromptBudget { get; init; } = DefaultTaskPromptBudget;
-
-    public static KyberWeaveConfig ProductDefaults { get; } = new();
 
     public KyberWeaveConfig WithOntology(OntologyConfig ontology)
     {

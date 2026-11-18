@@ -1,0 +1,223 @@
+using System.Globalization;
+using System.Text.RegularExpressions;
+
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Configuration;
+using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Core.Docs.Search;
+using KyberWeave.Mcp;
+using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Retrieval quality, asserted against the shipped documentation corpus.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Ranking is the part of this tool that decides whether every agent in the repository
+/// gets a right answer, and it was the untested part. Unit tests over a synthetic fixture
+/// cannot catch the failure that matters, because the failure is a property of the real
+/// corpus: on a body of documents all about one system, common vocabulary swamps the
+/// discriminating term. Only real documents reproduce that.
+/// </para>
+/// <para>
+/// Cases are written as a plainly-phrased question plus the document that answers it —
+/// the form a person actually asks in, not the vocabulary they would need to already
+/// know. A ranking change that breaks any of these is a regression, and the point of the
+/// suite is that such a change can no longer pass silently.
+/// </para>
+/// <para>
+/// The shipped documents are read through the corpus seam and loaded into an in-memory file
+/// system, so the engine runs over the real content without the disk, a code index or a process.
+/// </para>
+/// </remarks>
+public sealed class RetrievalRegressionTests
+{
+    private const string HostConfig = ".kyber-weave/kyber-weave.yml";
+
+    private const string DocsRoot = "docs";
+
+    private const string IncompletePrefix =
+        "This answer is incomplete. Call docs_answer_question_from_repo_documentation again with the same question and cursor";
+
+    private static readonly Regex ConfidenceLine = new(
+        @"^confidence: (?<value>0\.\d{2}|1\.00)$",
+        RegexOptions.Multiline | RegexOptions.CultureInvariant);
+
+    /// <summary>
+    /// The answer engine over the shipped documentation, built once per test run. Loading the corpus
+    /// costs more than a query, and the corpus is read-only while the run executes, so every theory
+    /// row shares one engine.
+    /// </summary>
+    private static readonly Lazy<DocsTools> Tools = new(CreateTools);
+
+    /// <summary>Question, expected document id, phrase from the answering section, confidence floor.</summary>
+    public static TheoryData<string, string, string, double, string?> AnswerableCases() => new()
+    {
+        {
+            "dashboard dev environment tauri",
+            "dash/architecture",
+            "The tray is a Tauri 2 app: a Rust shell",
+            0.60,
+            null
+        },
+        {
+            "what frontmatter keys does a document need",
+            "documentation-ontology",
+            "Keys are hyphenated and bind",
+            0.60,
+            null
+        },
+        {
+            "multi-harness agent and skill deployment",
+            "squad/architecture",
+            "multi-harness governance and deployment engine",
+            0.60,
+            null
+        },
+        {
+            "parallel code review council specialist lenses",
+            "code-review/architecture",
+            "Specialist lenses reading the diff in parallel",
+            0.60,
+            null
+        },
+        {
+            "diagnostic engine rule ids and sarif",
+            "ci-pipelines/architecture",
+            "comment, a SARIF baseline, and a code-scanning alert all key on",
+            0.60,
+            null
+        },
+        {
+            "how does retrieval scoring work",
+            "docgraph/retrieval",
+            "A document scoring below **0.25** is not returned at all",
+            0.60,
+            null
+        },
+        {
+            "how does the review council choose gates",
+            "code-review/architecture",
+            "`review.gates` entries take `id`, `run`, `blocking` and `timeout-seconds`",
+            0.60,
+            "Configuration"
+        },
+        { "docgraph/architecture", "docgraph/architecture", "rebuilt from the Markdown on demand", 0.60, null },
+        { "dash/architecture", "dash/architecture", "The tray is a Tauri 2 app: a Rust shell", 0.60, null },
+        { "squad/architecture", "squad/architecture", "multi-harness governance and deployment engine", 0.60, null },
+        {
+            "code-review/architecture",
+            "code-review/architecture",
+            "Specialist lenses reading the diff in parallel",
+            0.60,
+            null
+        },
+        { "documentation-ontology", "documentation-ontology", "Keys are hyphenated and bind", 0.60, null },
+    };
+
+    [Theory]
+    [MemberData(nameof(AnswerableCases))]
+    public void APlainlyAskedQuestionReturnsOneAnswerBlob(
+        string query,
+        string expectedId,
+        string phrase,
+        double floor,
+        string? sourceHeading)
+    {
+        DocsTools tools = Tools.Value;
+
+        string response = Explore(tools, query);
+
+        Assert.Contains(phrase, response, StringComparison.Ordinal);
+        Assert.DoesNotContain(IncompletePrefix, response, StringComparison.Ordinal);
+
+        double confidence = ParseConfidence(response);
+        Assert.True(
+            confidence >= floor,
+            $"expected confidence >= {floor:0.00}, got {confidence:0.00} for '{query}'; response excerpt: "
+            + Truncate(response, 400));
+
+        List<string> sources = SourceLines(response).ToList();
+        Assert.Single(sources);
+        Assert.Contains(expectedId, sources[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("plans/2026-10-30-docs-explore-answer", sources[0], StringComparison.Ordinal);
+
+        if (sourceHeading is not null)
+        {
+            Assert.Contains(sourceHeading, sources[0], StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// A question the corpus does not answer must return nothing. Returning the three
+    /// nearest documents to an unanswerable question is worse than returning none: the
+    /// caller is told to use this tool before grepping, so a confident miss becomes a
+    /// confident wrong answer with no signal to fall back.
+    /// </summary>
+    [Theory]
+    [InlineData("how do I make a sandwich")]
+    [InlineData("what is the airspeed velocity of an unladen swallow")]
+    [InlineData("recipe for sourdough starter")]
+    [InlineData("best hiking trails in patagonia")]
+    [InlineData("who won the 1998 world cup")]
+    [InlineData("how do I train for a marathon")]
+    [InlineData("tell me a joke")]
+    public void AnUnanswerableQuestionReturnsNothing(string query)
+    {
+        DocsTools tools = Tools.Value;
+
+        string response = Explore(tools, query);
+
+        Assert.Contains("No document", response, StringComparison.Ordinal);
+        Assert.DoesNotContain("confidence:", response, StringComparison.Ordinal);
+        Assert.Empty(SourceLines(response).ToList());
+    }
+
+    /// <summary>
+    /// Copies the shipped documents and host configuration into an in-memory repository and builds the
+    /// engine over it, with the code index reported unreadable as it is on a runner without one.
+    /// </summary>
+    private static DocsTools CreateTools()
+    {
+        ICorpusSource corpus = CheckoutCorpusSource.Checkout;
+        MemoryDocsHost host = new();
+        host.WriteBytesInRepo(HostConfig, corpus.ReadBytes(HostConfig));
+        foreach (string path in corpus.EnumerateFiles(DocsRoot))
+        {
+            host.WriteBytesInRepo(path, corpus.ReadBytes(path));
+        }
+
+        IServiceProvider services = host.Services();
+        KyberWeaveConfig config = services.GetRequiredService<IKyberWeaveConfigRepository>().Load(host.Repo);
+        DocumentIndexHost index = new(
+            host.Repo,
+            () => new UnavailableCodeGraphResolver(),
+            () => new DocumentLoader(host.Store, host.Repo, host.Paths, host.Environment, config.Ontology).Load(),
+            host.Store,
+            host.Paths,
+            host.Environment,
+            config.Ontology.DocsRoots,
+            config.Ontology.ResolvedCatalogPath);
+        return McpTestServices.Tools(index, services, host.Repo);
+    }
+
+    private static string Explore(DocsTools tools, string query) => tools.Explore(query);
+
+    private static double ParseConfidence(string response)
+    {
+        Match match = ConfidenceLine.Match(response);
+        Assert.True(match.Success, $"expected a confidence line for an answerable query; response was: {Truncate(response, 400)}");
+        return double.Parse(match.Groups["value"].Value, CultureInfo.InvariantCulture);
+    }
+
+    private static IEnumerable<string> SourceLines(string response) =>
+        response.Split('\n').Where(line => line.StartsWith("source:", StringComparison.Ordinal));
+
+    private static string Truncate(string value, int maxLength) =>
+        value.Length <= maxLength ? value : value[..maxLength] + "…";
+}

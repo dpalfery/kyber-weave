@@ -1,0 +1,163 @@
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Data.Arbiter;
+using KyberWeave.Core.Arbiter.Plans;
+using KyberWeave.Core.Arbiter;
+using KyberWeave.Core.Arbiter.Facts;
+using KyberWeave.Core.Arbiter.Providers;
+using KyberWeave.Core.Arbiter.Rules;
+using KyberWeave.Tests.Fakes;
+using Xunit;
+
+namespace KyberWeave.Tests.Arbiter;
+
+/// <summary>
+/// Contract for task 3.13 (bot comment triage): <c>CommentTriageService.ClassifyAsync</c> asks the provider, through
+/// <c>KW-ARB-COMMENT-001</c>, whether a bot review comment is <c>real</c>, a <c>nitpick</c>, or <c>already-fixed</c>
+/// in the code as it is now. Every call records a decision and returns its id. Fail-safe: any answer that is unsure,
+/// below the 0.85 floor, not sent, or failed returns <c>real</c>, so a worker never skips a comment on a shaky answer.
+/// RED: <c>CommentTriageService</c>, <c>CommentTriageRequest</c>, <c>CommentTriageResult</c> do not exist yet.
+/// </summary>
+/// <remarks>
+/// Names (GREEN must match): <c>new CommentTriageService(IArbiterProvider provider, string repoRoot,
+/// string arbiterDirectory, TimeProvider clock)</c>; <c>Task&lt;CommentTriageResult&gt; ClassifyAsync(CommentTriageRequest
+/// request, CancellationToken ct = default)</c>; <c>CommentTriageRequest(string Path, int Line, string Body, string? CommitSha)</c>;
+/// <c>CommentTriageResult(string Class, double? Confidence, string DecisionId)</c>. Classes: <c>real</c>, <c>nitpick</c>,
+/// <c>already-fixed</c>.
+/// </remarks>
+public sealed class CommentTriageServiceTests : IDisposable
+{
+    private const string CommentRule = "KW-ARB-COMMENT-001";
+    private const string Real = "real";
+    private const string Nitpick = "nitpick";
+    private const string AlreadyFixed = "already-fixed";
+    private const string CitedPath = "src/Widget.cs";
+
+    private readonly InMemoryArbiterHost _host = InMemoryArbiterHost.Create();
+
+    public void Dispose() => _host.Dispose();
+
+    private string Root => _host.RepoRoot;
+
+    private string ArbiterDirectory => _host.ArbiterDirectory;
+
+    private static DateTimeOffset Now => new(2026, 11, 11, 12, 0, 0, TimeSpan.Zero);
+
+    private void WriteCitedFile()
+    {
+        _ = _host.Write(Path.Combine(Root, CitedPath), string.Join("\n", Enumerable.Range(1, 30).Select(i => $"var v{i} = {i};")));
+    }
+
+    private CommentTriageService Service(IArbiterProvider provider) =>
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), _host.Get<IFileTextFacts>(), _host.Get<IArbiterStateFactory>());
+
+    private static CommentTriageRequest Request() =>
+        new(CitedPath, 12, "Rename this variable to something clearer.", null);
+
+    private sealed class FixedClock(DateTimeOffset now) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => now;
+    }
+
+    /// <summary>
+    /// A confident nitpick answer is recorded and reported, but the rule ships in shadow, so the class handed back is real
+    /// and the nitpick is named as what the model would have given.
+    /// </summary>
+    [Fact]
+    public async Task AConfidentNitpickAnswerIsRealWhileTheRuleIsInShadow()
+    {
+        WriteCitedFile();
+
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick))
+            .ClassifyAsync(Request());
+
+        Assert.Equal(Real, result.Class);
+        Assert.True(result.Shadow);
+        Assert.Equal(Nitpick, result.WouldClass);
+        Assert.Equal(0.95, result.Confidence);
+        Assert.Single(_host.Decisions, record => record.Id == result.DecisionId);
+    }
+
+    /// <summary>
+    /// When the bot's complaint is already fixed, the shadow rule still hands back real; the would-class names already-fixed.
+    /// </summary>
+    [Fact]
+    public async Task AConfidentAlreadyFixedAnswerIsRealWhileTheRuleIsInShadow()
+    {
+        WriteCitedFile();
+
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, AlreadyFixed))
+            .ClassifyAsync(Request());
+
+        Assert.Equal(Real, result.Class);
+        Assert.Equal(AlreadyFixed, result.WouldClass);
+    }
+
+    /// <summary>A confident real answer is passed through as real.</summary>
+    [Fact]
+    public async Task AConfidentRealAnswerClassifiesTheCommentAsReal()
+    {
+        WriteCitedFile();
+
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Real))
+            .ClassifyAsync(Request());
+
+        Assert.Equal(Real, result.Class);
+    }
+
+    /// <summary>
+    /// A nitpick answer below the 0.85 floor is not trusted, so the comment stays real. Failure this guards: an unsure
+    /// model waves away a genuine defect the bot found.
+    /// </summary>
+    [Fact]
+    public async Task ANitpickBelowTheFloorFailsSafeToReal()
+    {
+        WriteCitedFile();
+
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick, 0.6))
+            .ClassifyAsync(Request());
+
+        Assert.Equal(Real, result.Class);
+    }
+
+    /// <summary>A provider that did not send the request has answered nothing, so the comment stays real.</summary>
+    [Fact]
+    public async Task AProviderThatDidNotSendTheRequestFailsSafeToReal()
+    {
+        WriteCitedFile();
+
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, AlreadyFixed, requestSent: false))
+            .ClassifyAsync(Request());
+
+        Assert.Equal(Real, result.Class);
+    }
+
+    /// <summary>A transport failure during the call leaves the comment real and does not stop the worker.</summary>
+    [Fact]
+    public async Task AProviderFailureFailsSafeToReal()
+    {
+        WriteCitedFile();
+
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, Nitpick, fault: new HttpRequestException("provider unreachable")))
+            .ClassifyAsync(Request());
+
+        Assert.Equal(Real, result.Class);
+    }
+
+    /// <summary>
+    /// A cited file that no longer exists cannot show the comment is already fixed or a nitpick, so the comment stays
+    /// real. Failure this guards: a comment on a deleted file is closed as a nitpick with no code to check it against.
+    /// </summary>
+    [Fact]
+    public async Task AMissingCitedFileFailsSafeToReal()
+    {
+        _host.Files.CreateDirectory(Root);
+
+        CommentTriageResult result = await Service(FakeArbiterProvider.AnsweringRule(CommentRule, AlreadyFixed))
+            .ClassifyAsync(Request());
+
+        Assert.Equal(Real, result.Class);
+        Assert.False(string.IsNullOrEmpty(result.DecisionId));
+    }
+}

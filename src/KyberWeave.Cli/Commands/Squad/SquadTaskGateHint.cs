@@ -1,3 +1,5 @@
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 
@@ -27,29 +29,39 @@ internal static class SquadTaskGateHint
     /// declares no task gates, keyed by agent or by technology. Global scope never calls this, because
     /// there is no project.
     /// </summary>
-    internal static void WriteIfNoTaskGates(string projectRoot)
+    /// <param name="projectRoot">The project root whose host config is read.</param>
+    /// <param name="configs">The repository the host config is read from.</param>
+    /// <param name="output">Where the hint is written.</param>
+    internal static void WriteIfNoTaskGates(string projectRoot, IKyberWeaveConfigRepository configs, SquadConsole output)
     {
-        bool hasTaskGates;
+        if (!HasTaskGates(configs, projectRoot))
+        {
+            output.WriteLine(Message);
+        }
+    }
+
+    /// <summary>Whether the project at <paramref name="projectRoot"/> declares a task gate by agent or by technology.</summary>
+    /// <param name="configs">The repository the host config is read from.</param>
+    /// <param name="projectRoot">The project root whose host config is read.</param>
+    /// <remarks>An unreadable config is the same as no gates: the hint never fails the verb.</remarks>
+    internal static bool HasTaskGates(IKyberWeaveConfigRepository configs, string projectRoot)
+    {
         try
         {
-            KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(projectRoot);
-            hasTaskGates = result.Success
-                           && result.Config is not null
-                           && (result.Config.Review.TaskGates.Count > 0
-                               || result.Config.Review.TechnologyGates.Count > 0);
+            KyberWeaveConfigLoadResult result = configs.TryLoad(projectRoot);
+            return result.Success
+                   && result.Config is not null
+                   && (result.Config.Review.TaskGates.Count > 0
+                       || result.Config.Review.TechnologyGates.Count > 0);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or YamlException
-                                       or InvalidDataException or ArgumentException)
+                                       or InvalidDataException or ArgumentException
+                                       or System.Security.SecurityException or NotSupportedException)
         {
             // TryLoad already turns invalid YAML and I/O failures into a failed result; what
             // reaches here is a path the loader could not even attempt. Unreadable gates are
             // the same as no gates, so the hint prints and the verb keeps its exit code.
-            hasTaskGates = false;
-        }
-
-        if (!hasTaskGates)
-        {
-            SquadCommandComposition.WriteLine(Message);
+            return false;
         }
     }
 }

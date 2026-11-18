@@ -1,4 +1,6 @@
 using JetBrains.Annotations;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Core.Squad.Deployment;
 
@@ -16,9 +18,18 @@ namespace KyberWeave.Core.Squad.Deployment;
 ///         to absolute canonical paths, and verifies that no symbolic links exist for <c>.codegraph</c>.
 ///     </para>
 /// </remarks>
+/// <param name="files">Reads links and attributes along the paths it checks.</param>
+/// <param name="paths">Turns the canonical root and each <c>--path</c> value into full paths.</param>
+/// <param name="environment">Supplies the base directory a relative root resolves against before it is refused as relative.</param>
 [UsedImplicitly(ImplicitUseTargetFlags.WithMembers)]
-public static class SquadWorktreeMcp
+public sealed class SquadWorktreeMcp(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISquadWorktreeMcp
 {
+    /// <summary>The longest link chain followed before a path is reported as unresolvable, as the platform's own limit.</summary>
+    private const int MaxLinkHops = 40;
+
     /// <summary>
     ///     Slices and replaces argument values for <c>--repo-root</c> and <c>--path</c> so that
     ///     relative roots are resolved to absolute canonical paths.
@@ -27,7 +38,7 @@ public static class SquadWorktreeMcp
     /// <param name="canonicalRoot">The canonical repository root path.</param>
     /// <returns>A new argument list with canonical paths spliced into <c>--repo-root</c> and <c>--path</c>.</returns>
     [UsedImplicitly]
-    public static IReadOnlyList<string> SpliceArguments(IReadOnlyList<string> args, string canonicalRoot)
+    public IReadOnlyList<string> SpliceArguments(IReadOnlyList<string> args, string canonicalRoot)
     {
         ArgumentNullException.ThrowIfNull(args);
         ArgumentException.ThrowIfNullOrWhiteSpace(canonicalRoot);
@@ -40,7 +51,7 @@ public static class SquadWorktreeMcp
                 nameof(canonicalRoot));
         }
 
-        string absoluteCanonicalRoot = ResolveRealPath(Path.GetFullPath(canonicalRoot));
+        string absoluteCanonicalRoot = ResolveRealPath(paths.GetFullPath(canonicalRoot, environment.CurrentDirectory));
         List<string> spliced = new(args.Count);
 
         for (int i = 0; i < args.Count; i++)
@@ -117,7 +128,7 @@ public static class SquadWorktreeMcp
         return spliced;
     }
 
-    private static string ResolveAndValidateContainedPath(string pathVal, string absoluteCanonicalRoot)
+    private string ResolveAndValidateContainedPath(string pathVal, string absoluteCanonicalRoot)
     {
         if (string.IsNullOrWhiteSpace(pathVal))
         {
@@ -126,8 +137,8 @@ public static class SquadWorktreeMcp
 
         string resolvedPath = ResolveRealPath(
             Path.IsPathRooted(pathVal)
-                ? Path.GetFullPath(pathVal)
-                : Path.GetFullPath(pathVal, absoluteCanonicalRoot));
+                ? paths.GetFullPath(pathVal, environment.CurrentDirectory)
+                : paths.GetFullPath(pathVal, absoluteCanonicalRoot));
 
         string prefix = absoluteCanonicalRoot.EndsWith(Path.DirectorySeparatorChar)
             ? absoluteCanonicalRoot
@@ -144,52 +155,60 @@ public static class SquadWorktreeMcp
 
     /// <summary>
     ///     Resolves every symbolic link in an absolute path so the containment check sees the path
-    ///     real I/O would reach, not just its lexically normalized spelling.
+    ///     real I/O would reach, not just its lexically normalized spelling. A link's target is resolved
+    ///     the same way, so links among the target's own parent folders are followed too.
     /// </summary>
-    private static string ResolveRealPath(string absolutePath)
+    private string ResolveRealPath(string absolutePath)
     {
-        string root = Path.GetPathRoot(absolutePath)
-                      ?? throw new ArgumentException("The path must be absolute.", nameof(absolutePath));
+        int hops = 0;
+        return ResolveRealPath(absolutePath, absolutePath, ref hops);
+    }
+
+    private string ResolveRealPath(string path, string originalPath, ref int hops)
+    {
+        string root = Path.GetPathRoot(path)
+                      ?? throw new ArgumentException("The path must be absolute.", nameof(originalPath));
         string current = root;
 
-        foreach (string segment in absolutePath[root.Length..].Split(
+        foreach (string segment in path[root.Length..].Split(
                      [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
                      StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
 
-            FileSystemInfo info = Directory.Exists(current)
-                ? new DirectoryInfo(current)
-                : new FileInfo(current);
-
-            if (info.LinkTarget is not null)
+            string? target = ReadLinkTarget(current, originalPath);
+            if (target is not null)
             {
-                FileSystemInfo? target;
-                try
+                if (++hops > MaxLinkHops)
                 {
-                    target = info.ResolveLinkTarget(returnFinalTarget: true);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    throw new ArgumentException($"Symbolic link '{current}' cannot be resolved.", nameof(absolutePath), ex);
+                    throw new ArgumentException($"Symbolic link '{current}' cannot be resolved.", nameof(originalPath));
                 }
 
-                if (target is null)
-                {
-                    throw new ArgumentException($"Symbolic link '{current}' cannot be resolved.", nameof(absolutePath));
-                }
-
-                current = target.FullName;
+                string directory = Path.GetDirectoryName(current) ?? current;
+                current = ResolveRealPath(paths.GetFullPath(target, directory), originalPath, ref hops);
             }
-            else if (info.Exists && info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+            else if ((files.DirectoryExists(current) || files.FileExists(current)) &&
+                     files.GetAttributes(current).HasFlag(FileAttributes.ReparsePoint))
             {
                 throw new ArgumentException(
                     $"Reparse point '{current}' cannot be resolved safely.",
-                    nameof(absolutePath));
+                    nameof(originalPath));
             }
         }
 
         return current;
+    }
+
+    private string? ReadLinkTarget(string link, string originalPath)
+    {
+        try
+        {
+            return files.GetLinkTarget(link);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new ArgumentException($"Symbolic link '{link}' cannot be resolved.", nameof(originalPath), ex);
+        }
     }
 
     /// <summary>
@@ -206,31 +225,24 @@ public static class SquadWorktreeMcp
     ///     the canonical root instead.
     /// </remarks>
     [UsedImplicitly]
-    public static void EnsureNoCodegraphSymlink(string worktreeDirectory)
+    public void EnsureNoCodegraphSymlink(string worktreeDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(worktreeDirectory);
 
-        if (!Directory.Exists(worktreeDirectory))
+        if (!files.DirectoryExists(worktreeDirectory))
         {
             throw new DirectoryNotFoundException($"Worktree directory '{worktreeDirectory}' does not exist.");
         }
 
         string codegraphPath = Path.Combine(worktreeDirectory, ".codegraph");
 
-        DirectoryInfo dirInfo = new(codegraphPath);
-        FileInfo fileInfo = new(codegraphPath);
-
-        if (dirInfo.LinkTarget is not null || fileInfo.LinkTarget is not null)
+        if (files.GetLinkTarget(codegraphPath) is not null)
             throw new InvalidOperationException(
                 $"Worktree directory '{worktreeDirectory}' contains a symbolic link at '{codegraphPath}'. " +
                 "Worktrees must not symlink .codegraph; access CodeGraph through the canonical root binding.");
 
-        if (dirInfo.Exists && dirInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
-            throw new InvalidOperationException(
-                $"Worktree directory '{worktreeDirectory}' contains a reparse point at '{codegraphPath}'. " +
-                "Worktrees must not symlink .codegraph; access CodeGraph through the canonical root binding.");
-
-        if (fileInfo.Exists && fileInfo.Attributes.HasFlag(FileAttributes.ReparsePoint))
+        if ((files.DirectoryExists(codegraphPath) || files.FileExists(codegraphPath)) &&
+            files.GetAttributes(codegraphPath).HasFlag(FileAttributes.ReparsePoint))
             throw new InvalidOperationException(
                 $"Worktree directory '{worktreeDirectory}' contains a reparse point at '{codegraphPath}'. " +
                 "Worktrees must not symlink .codegraph; access CodeGraph through the canonical root binding.");

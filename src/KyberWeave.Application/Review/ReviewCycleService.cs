@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -20,11 +21,15 @@ namespace KyberWeave.Application.Review;
 /// <param name="cycles">Reads the recorded review cycle folders.</param>
 /// <param name="selector">Finds the review folder and the prior cycle's findings.</param>
 /// <param name="configs">Loads the host's configuration.</param>
+/// <param name="paths">Resolves the path the command was run against.</param>
+/// <param name="environment">Reports the operating-system family a gate's <c>os</c> filter is matched against.</param>
 public sealed class ReviewCycleService(
     IReviewWorkTreeService trees,
     IReviewCycleStore cycles,
     IReviewCycleSelector selector,
-    IConfigLoadService configs) : IReviewCycleService
+    IConfigLoadService configs,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewCycleService
 {
     private const string UnreadableInput = "KW-REVIEW-023";
 
@@ -37,10 +42,10 @@ public sealed class ReviewCycleService(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(output);
 
-        string root = Path.GetFullPath(request.Path);
+        string root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         DiagnosticReport report = new();
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // The review folder belongs to the git work tree that contains the path the command was run against: a linked
         // worktree has its own .agent_scratchpad, and the canonical checkout's is never read on its behalf.
@@ -48,7 +53,7 @@ public sealed class ReviewCycleService(
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, request.Task);
         if (!choice.Chosen)
-            return ReviewCommandResult.Refused(choice.Error!);
+            return ReviewCommandResultFactory.Refused(choice.Error!);
 
         string task = choice.Task;
         if (choice.Note is { } chosen && !request.Json)
@@ -63,7 +68,7 @@ public sealed class ReviewCycleService(
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
             prior.Valid,
             config.Review.Gates,
-            ReviewGateReporting.CurrentOs(),
+            ReviewGateReporting.CurrentOs(environment),
             commit => selector.ChangedSince(tree, commit));
 
         IReadOnlyList<ReviewFinding> recheck = [];
@@ -72,7 +77,7 @@ public sealed class ReviewCycleService(
             (bool ok, IReadOnlyList<ReviewFinding> found) = selector.ReadRecheck(
                 priorCycle, config.Review.Policy, report, UnreadableInput, Severity.Error, "review cycle");
             if (!ok)
-                return ReviewCommandResult.Reported(1, report);
+                return ReviewCommandResultFactory.Reported(1, report);
 
             recheck = found;
         }

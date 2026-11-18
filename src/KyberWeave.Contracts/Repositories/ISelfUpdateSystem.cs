@@ -39,16 +39,23 @@ public interface ISelfUpdateSystem
     /// <param name="windows">Whether the archive is a Windows <c>.zip</c> rather than a <c>.tar.gz</c>.</param>
     void ExtractArchive(string archivePath, string destinationDirectory, bool windows);
 
+    /// <summary>Copies a file, so a binary can be backed up before replacement and restored when a later commit fails.</summary>
+    /// <param name="sourcePath">The file to copy.</param>
+    /// <param name="destinationPath">Where the copy goes.</param>
+    /// <param name="overwrite">True to replace an existing destination; false to fail when one is there.</param>
+    /// <remarks>
+    /// The physical adapter carries the source's permissions, so a restored binary is still executable. An in-memory
+    /// fake models content only; the executable bit is proven against the real adapter.
+    /// </remarks>
+    /// <exception cref="FileNotFoundException">The source does not exist.</exception>
+    /// <exception cref="IOException">The copy could not be made.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the source or write the destination.</exception>
+    void CopyFile(string sourcePath, string destinationPath, bool overwrite);
+
     /// <summary>Replaces an installed binary with an extracted one, keeping the old image until the new one is in place on Windows.</summary>
     /// <param name="extractedBinaryPath">The new binary.</param>
     /// <param name="destinationPath">The installed binary to replace.</param>
     /// <param name="windows">Whether the platform is Windows.</param>
     /// <param name="macOs">Whether the platform is macOS, which clears the quarantine attribute first.</param>
     void ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs);
-
-    /// <summary>Rewrites the installed Copilot system-prompt file to the text this binary ships, when it is installed.</summary>
-    /// <param name="homeDirectory">The user's home directory.</param>
-    /// <param name="log">Receives one line per warning.</param>
-    /// <returns>True when a file was rewritten.</returns>
-    bool RefreshCopilotPrompt(string homeDirectory, Action<string> log);
 }

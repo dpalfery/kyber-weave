@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -24,6 +26,8 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
     private readonly ISquadHarnessLauncher _launcher;
     private readonly IProcessEnvironment _environment;
     private readonly SquadRunOptions _options;
+    private readonly SquadConsole _output;
+    private readonly IPathResolver _paths;
     private readonly Func<ProcessStartInfo, int>? _runner;
 
     /// <summary>Creates the run command over the Squad services the host registers.</summary>
@@ -33,13 +37,17 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
     /// <param name="launcher">Builds the harness start information and starts it on the console.</param>
     /// <param name="environment">Reads the process environment and working directory.</param>
     /// <param name="options">How the harness process is found and started; the defaults use the real process.</param>
+    /// <param name="output">Where the command writes.</param>
+    /// <param name="paths">Resolves the project root to an absolute path.</param>
     public SquadRunCommand(
         ISquadInstanceService instances,
         ISquadModelPresetSelectionStore selectionStore,
         ISquadModelPresetStore presetStore,
         ISquadHarnessLauncher launcher,
         IProcessEnvironment environment,
-        SquadRunOptions options)
+        SquadRunOptions options,
+        SquadConsole output,
+        IPathResolver paths)
     {
         ArgumentNullException.ThrowIfNull(instances);
         ArgumentNullException.ThrowIfNull(selectionStore);
@@ -47,12 +55,16 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
         ArgumentNullException.ThrowIfNull(launcher);
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(paths);
         _instances = instances;
         _selectionStore = selectionStore;
         _presetStore = presetStore;
         _launcher = launcher;
         _environment = environment;
         _options = options;
+        _output = output;
+        _paths = paths;
         _runner = options.Runner;
     }
 
@@ -64,12 +76,12 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
 
         if (string.IsNullOrWhiteSpace(settings.Harness))
         {
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 "No target harness specified. Specify a harness target (e.g. claude, codex).");
             return 2;
         }
 
-        string projectRoot = Path.GetFullPath(_options.WorkingDirectory ?? _environment.CurrentDirectory);
+        string projectRoot = _paths.GetFullPath(_options.WorkingDirectory ?? _environment.CurrentDirectory, _environment.CurrentDirectory);
 
         SquadTarget target;
         try
@@ -77,7 +89,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
             IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse([settings.Harness]);
             if (targets.Count != 1)
             {
-                SquadCommandComposition.WriteClientInputError(
+                _output.WriteClientInputError(
                     $"Specify exactly one harness target. Received: '{settings.Harness}'.");
                 return 2;
             }
@@ -86,7 +98,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
         }
         catch (ArgumentException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 
@@ -94,7 +106,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
         if (selection is null || !selection.ModelPresets.TryGetValue(target, out string? presetName) ||
             string.IsNullOrWhiteSpace(presetName))
         {
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 $"No preset selected for {settings.Harness} in this project. Run `kyber-weave squad preset use <name> --target {settings.Harness}`.");
             return 2;
         }
@@ -105,7 +117,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
             string reason = !string.IsNullOrWhiteSpace(row.Reason)
                 ? row.Reason
                 : $"Support for {settings.Harness} is pending investigation.";
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 $"{settings.Harness} cannot run on a preset instance: '{reason}'.");
             return 2;
         }
@@ -125,7 +137,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
             if (preset is null)
             {
                 string targetToken = SquadTargetCatalog.GetToken(target);
-                SquadCommandComposition.WriteLine(
+                _output.WriteLine(
                     $"[red]error:[/] Model preset '{Markup.Escape(presetName)}' for target '{Markup.Escape(targetToken)}' not found.");
                 return 1;
             }
@@ -135,17 +147,17 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
         }
         catch (SquadLinkException ex)
         {
-            SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+            _output.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
             return 1;
         }
         catch (SquadDeploymentConflictException ex)
         {
-            SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+            _output.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
             return 1;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
         {
-            SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+            _output.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
             return 1;
         }
 
@@ -158,16 +170,16 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
                 settings.Args,
                 _options.GetEnv ?? _environment.GetVariable,
                 _options.FindOnPath ?? (name => _launcher.FindOnPath(name, _options.GetEnv)),
-                OperatingSystem.IsWindows());
+                _environment.OperatingSystem == OperatingSystemKind.Windows);
         }
         catch (FileNotFoundException ex)
         {
-            SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+            _output.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
             return 1;
         }
         catch (ArgumentException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 

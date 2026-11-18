@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Utilities;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Processes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -593,7 +594,11 @@ public sealed class UtilitiesCliCommandTests : IDisposable
             [PiCodingAgentDirectoryVariable] = Path.Combine(_home, ".pi", "agent"),
             ["PATH"] = pathVariable
         };
-        IsolatedEnvironment environment = new(workingDirectory, _home, variables);
+        FakeProcessEnvironment environment = new(
+            currentDirectory: workingDirectory,
+            homeDirectory: _home,
+            tempDirectory: Path.GetTempPath(),
+            readVariable: name => variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name));
         UtilitiesStatusLineProcessRunner versionProbe = (startInfo, _) =>
         {
             // A child resolves its program against this process's PATH, so the stub on the case's PATH is named in full.
@@ -984,19 +989,4 @@ public sealed class UtilitiesCliCommandTests : IDisposable
 
     /// <summary>One CLI invocation: its exit code, and stdout and stderr as one rendered transcript.</summary>
     private readonly record struct CliResult(int ExitCode, string Output);
-}
-
-/// <summary>Gives the commands the case's working directory, home and variables instead of this test host's.</summary>
-internal sealed class IsolatedEnvironment(string current, string home, Dictionary<string, string> variables) : IProcessEnvironment
-{
-    public string CurrentDirectory => current;
-
-    public string HomeDirectory => home;
-
-    public string TempDirectory => Path.GetTempPath();
-
-    public bool IsInputRedirected => true;
-
-    public string? GetVariable(string name) =>
-        variables.TryGetValue(name, out string? value) ? value : Environment.GetEnvironmentVariable(name);
 }

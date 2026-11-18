@@ -1,0 +1,762 @@
+using KyberWeave.Tests.FileSystem;
+using KyberWeave.Testing.Squad;
+using System.Text;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Fixtures;
+using Xunit;
+using YamlDotNet.RepresentationModel;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
+using KyberWeave.Tests.Corpus;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Renders the real canonical Squad source (<c>products/kyber-squad</c>) through
+/// <see cref="SquadRendererRegistry"/> with <see cref="OpenCodeRenderer"/> and validates the result
+/// against OpenCode's documented subagent and skill contracts.
+/// </summary>
+/// <remarks>
+/// Validates that canonical agents lower to OpenCode subagents at <c>.opencode/agents/&lt;name&gt;.md</c>
+/// and skills lower to <c>.opencode/skills/&lt;name&gt;/SKILL.md</c>. Verifies profile-declared
+/// shared-identity suppression, explicit tool allowlist lowering to OpenCode's tool taxonomy,
+/// model resolution from <c>models.yml</c>, deterministic output, and structured degradation accounting
+/// for <c>safety-narrowed</c>, <c>permission-not-expressible</c>, and <c>resource-links-rewritten</c>
+/// (discovery guard) codes.
+/// </remarks>
+public sealed class OpenCodeRendererContractTests : IDisposable
+{
+
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
+
+    /// <summary>
+    /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent
+    /// configurations and schema validation. A permission outside this vocabulary would be
+    /// rejected or unhandled by the harness.
+    /// </summary>
+    /// <remarks>
+    /// <c>question</c>, <c>lsp</c>, <c>external_directory</c> and <c>doom_loop</c> were added
+    /// 2026-09-21 from opencode.ai/docs/permissions' "Available Permissions" list, corroborated
+    /// by a live OpenCode deployment on this machine that emitted all four. They matter because
+    /// an omitted key is not a withheld one: agent permissions merge with the global config,
+    /// where most permissions default to <c>allow</c>, so any key the renderer fails to pin is
+    /// granted ambiently.
+    /// <para>
+    /// <c>codegraph_*</c> is a per-server MCP entry rather than a member of OpenCode's own closed
+    /// permission list, exactly like <c>kw-docs_*</c>: the renderer pins a whole configured MCP
+    /// server under a <c>{server}_*</c> key. It is listed so the vocabulary check accepts the key
+    /// on the agents the code-graph predicate entitles, and so a key the renderer invents without
+    /// a configured server behind it still fails here.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] DocumentedOpenCodePermissions =
+    [
+        "todowrite",
+        "skill",
+        "question",
+        "read",
+        "lsp",
+        "grep",
+        "glob",
+        "list",
+        "edit",
+        "bash",
+        "webfetch",
+        "websearch",
+        "external_directory",
+        "doom_loop",
+        "codegraph_*",
+        "kw-docs_*",
+        "task"
+    ];
+
+    /// <summary>
+    /// Capability-to-permission lowering contract pinned for OpenCode subagents.
+    /// Declared independently of the renderer so a change to either side must be made
+    /// deliberately in both. <c>network.publish</c> is absent because OpenCode has no built-in
+    /// publish permission (recorded as <c>permission-not-expressible</c>). <c>delegate</c> is handled
+    /// separately to emit pattern-based <c>task</c> rules.
+    /// </summary>
+    private static readonly (string Capability, string[] Permissions)[] CapabilityPermissionContract =
+    [
+        ("filesystem.read", ["read"]),
+        ("filesystem.search", ["grep", "glob", "list"]),
+        ("filesystem.write", ["edit"]),
+        ("process.execute", ["bash"]),
+        ("network.read", ["webfetch", "websearch"])
+    ];
+
+    /// <summary>
+    /// Emission order of permissions in OpenCode agent frontmatter, strictly deterministic.
+    /// </summary>
+    /// <remarks>
+    /// The code-graph key precedes <c>kw-docs_*</c> because the renderer emits the per-server MCP
+    /// keys beside the universal one, code graph first. The list is a total order over every key
+    /// the renderer may emit, not over the keys one agent receives: an agent the code-graph
+    /// predicate withholds simply has no entry, and the order it would occupy stays free.
+    /// </remarks>
+    private static readonly string[] PermissionOrder =
+    [
+        "todowrite",
+        "skill",
+        "question",
+        "read",
+        "lsp",
+        "grep",
+        "glob",
+        "list",
+        "edit",
+        "bash",
+        "webfetch",
+        "websearch",
+        "external_directory",
+        "doom_loop",
+        "codegraph_*",
+        "kw-docs_*",
+        "task"
+    ];
+
+    /// <summary>Nothing to release: the suite only reads the checked-in corpus.</summary>
+    public void Dispose()
+    {
+        // No disposable state: suite reads canonical checked-in corpus.
+        // Implements IDisposable per repository test coding standard.
+    }
+
+    [Fact]
+    public async Task RenderAsync_OpenCode_RendersTheRealCanonicalCorpus()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        HashSet<string> suppressedSkillIdentities = SuppressedSkillIdentities(source);
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.Contains("role-", StringComparison.OrdinalIgnoreCase));
+
+        // 4. Agent frontmatter: verify YAML frontmatter contains name, description, optional model
+        // resolved from models.yml, and explicit tools allowlist / permissions.
+        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".opencode/agents/{agent.Name}.md");
+
+            (YamlMappingNode frontmatter, string body) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                agent.Name);
+
+            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
+            Assert.True(
+                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name),
+                    StringComparison.Ordinal),
+                $"Agent '{agent.Name}' description mismatch.");
+
+            string expectedMode = agent.Invocation == SquadInvocation.Primary ? "primary" : "subagent";
+            Assert.Equal(expectedMode, RequireScalar(frontmatter, "mode", agent.Name));
+
+            // Model resolution: verify against loaded ModelProfiles for target opencode. The
+            // conductor names no profile and runs on the session's model, so its file has no key.
+            SquadModelProfile? modelProfile = string.IsNullOrWhiteSpace(agent.ModelProfile)
+                ? null
+                : source.ModelProfiles.Profiles[agent.ModelProfile];
+            if (modelProfile is null)
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' names no model profile and must omit 'model'.");
+            }
+            else if (modelProfile.HarnessModels.TryGetValue("opencode", out string? opencodeHarnessModel))
+            {
+                if (string.Equals(opencodeHarnessModel, "inherit", StringComparison.Ordinal))
+                {
+                    Assert.False(
+                        frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                        $"Agent '{agent.Name}' should omit 'model' (opencode harness override is inherit).");
+                }
+                else
+                {
+                    Assert.True(
+                        string.Equals(opencodeHarnessModel, RequireScalar(frontmatter, "model", agent.Name),
+                            StringComparison.Ordinal),
+                        $"Agent '{agent.Name}' model mismatch: expected '{opencodeHarnessModel}'.");
+                }
+            }
+            else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
+            {
+                Assert.True(
+                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name),
+                        StringComparison.Ordinal),
+                    $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
+            }
+            else
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
+            }
+
+            // OpenCode agents emit 'permission' map instead of 'tools' sequence
+            Assert.False(
+                frontmatter.Children.ContainsKey(new YamlScalarNode("tools")),
+                $"Agent '{agent.Name}' should not emit 'tools'.");
+
+            SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            YamlMappingNode permissionMap = RequireMapping(frontmatter, "permission", agent.Name);
+
+            // Verify all permission keys belong to documented vocabulary
+            foreach (YamlNode keyNode in permissionMap.Children.Keys)
+            {
+                string permKey = Assert.IsType<YamlScalarNode>(keyNode).Value!;
+                Assert.True(
+                    IsOpenCodePermission(permKey),
+                    $"Agent '{agent.Name}' permission '{permKey}' is not in the documented OpenCode vocabulary.");
+            }
+
+            // Ungoverned base permissions
+            Assert.Equal("allow", RequireScalar(permissionMap, "todowrite", agent.Name));
+            Assert.Equal("allow", RequireScalar(permissionMap, "skill", agent.Name));
+
+            // Governed capabilities lowering
+            foreach ((string capability, string[] mapped) in CapabilityPermissionContract)
+            {
+                bool allowed = capProfile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                               decision == SquadPermissionDecision.Allow;
+                foreach (string perm in mapped)
+                {
+                    // Presence is not the signal: an absent key inherits the global default,
+                    // which is allow. Every key must be pinned, and the value carries the
+                    // decision.
+                    Assert.True(
+                        permissionMap.Children.ContainsKey(new YamlScalarNode(perm)),
+                        $"Agent '{agent.Name}' leaves permission '{perm}' unpinned, so OpenCode's " +
+                        "default-allow would grant it.");
+                    Assert.Equal(
+                        allowed ? "allow" : "deny",
+                        RequireScalar(permissionMap, perm, agent.Name));
+                }
+            }
+
+            // D8 MCP mapping: kw-docs_* granted to agents with filesystem.read: allow,
+            // excluding suppressed (subagent) shared identities, whose canonical skill is the only
+            // projection emitted. A primary shared identity keeps the grant: it edits files and
+            // runs commands. The pure orchestrator is not excluded any more: kw-docs carries
+            // docs_get_coding_standard_for_technology, which the conductor needs to point its delegates at the
+            // standards they are held to.
+            bool readAllowed = SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.OpenCode);
+            bool expectedKwMcp = !suppressedSkillIdentities.Contains(agent.Name) && readAllowed;
+            Assert.True(
+                permissionMap.Children.ContainsKey(new YamlScalarNode("kw-docs_*")),
+                $"Agent '{agent.Name}' leaves 'kw-docs_*' unpinned.");
+            Assert.Equal(
+                expectedKwMcp ? "allow" : "deny",
+                RequireScalar(permissionMap, "kw-docs_*", agent.Name));
+
+            // Delegation lowering
+            bool delegateAllowed =
+                capProfile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                delegateDecision == SquadPermissionDecision.Allow;
+            if (delegateAllowed)
+            {
+                Assert.True(
+                    permissionMap.Children.TryGetValue(new YamlScalarNode("task"), out YamlNode? taskNode),
+                    $"Agent '{agent.Name}' missing 'task' permission.");
+                if (agent.DelegatesTo.Count > 0)
+                {
+                    YamlMappingNode taskMap = Assert.IsType<YamlMappingNode>(taskNode);
+                    string[] sortedDelegates = agent.DelegatesTo.OrderBy(x => x, StringComparer.Ordinal).ToArray();
+                    string[] taskKeys = taskMap.Children.Keys
+                        .OfType<YamlScalarNode>()
+                        .Select(k => k.Value!)
+                        .ToArray();
+                    Assert.Equal(sortedDelegates, taskKeys);
+                    foreach (string target in sortedDelegates)
+                    {
+                        Assert.Equal("allow", RequireScalar(taskMap, target, agent.Name));
+                    }
+                }
+                else
+                {
+                    YamlScalarNode taskScalar = Assert.IsType<YamlScalarNode>(taskNode);
+                    Assert.Equal("allow", taskScalar.Value);
+                }
+            }
+            else
+            {
+                Assert.Equal("deny", RequireScalar(permissionMap, "task", agent.Name));
+            }
+
+            // Ordering: permission map keys must be deterministically ordered
+            int lastOrderIndex = -1;
+            foreach (YamlNode keyNode in permissionMap.Children.Keys)
+            {
+                string permKey = Assert.IsType<YamlScalarNode>(keyNode).Value!;
+                int orderIndex = Array.IndexOf(PermissionOrder, permKey);
+                Assert.True(orderIndex >= 0,
+                    $"Agent '{agent.Name}' permission '{permKey}' not found in PermissionOrder.");
+                Assert.True(orderIndex > lastOrderIndex,
+                    $"Agent '{agent.Name}' permission '{permKey}' is out of order.");
+                lastOrderIndex = orderIndex;
+            }
+        }
+
+        // Concrete lowering snapshots
+        SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
+        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["process.execute"]);
+        AssertPermissions(
+            result,
+            "architect",
+            new Dictionary<string, object>
+            {
+                ["todowrite"] = "allow",
+                ["skill"] = "allow",
+                ["question"] = "allow",
+                ["read"] = "allow",
+                ["lsp"] = "allow",
+                ["grep"] = "allow",
+                ["glob"] = "allow",
+                ["list"] = "allow",
+                ["edit"] = "allow",
+                ["bash"] = "allow",
+                ["webfetch"] = "allow",
+                ["websearch"] = "allow",
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
+                ["codegraph_*"] = "allow",
+                ["kw-docs_*"] = "allow",
+                ["task"] = new Dictionary<string, string>
+                {
+                    ["platform-researcher"] = "allow",
+                    ["research-agent"] = "allow"
+                }
+            });
+
+        SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
+        AssertPermissions(
+            result,
+            "docs-dev",
+            new Dictionary<string, object>
+            {
+                ["todowrite"] = "allow",
+                ["skill"] = "allow",
+                ["question"] = "allow",
+                ["read"] = "allow",
+                ["lsp"] = "allow",
+                ["grep"] = "allow",
+                ["glob"] = "allow",
+                ["list"] = "allow",
+                ["edit"] = "allow",
+                ["bash"] = "allow",
+                ["webfetch"] = "deny",
+                ["websearch"] = "deny",
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
+                ["codegraph_*"] = "allow",
+                ["kw-docs_*"] = "allow",
+                ["task"] = "deny"
+            });
+
+        SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
+        Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
+        AssertPermissions(
+            result,
+            "bug-crusher-investigator",
+            new Dictionary<string, object>
+            {
+                ["todowrite"] = "allow",
+                ["skill"] = "allow",
+                ["question"] = "allow",
+                ["read"] = "allow",
+                ["lsp"] = "allow",
+                ["grep"] = "allow",
+                ["glob"] = "allow",
+                ["list"] = "allow",
+                ["edit"] = "deny",
+                ["bash"] = "allow",
+                ["webfetch"] = "allow",
+                ["websearch"] = "allow",
+                ["external_directory"] = "deny",
+                ["doom_loop"] = "deny",
+                ["codegraph_*"] = "allow",
+                ["kw-docs_*"] = "allow",
+                ["task"] = "deny"
+            });
+
+        // 5. Degradation records: verify agents with network.publish != Deny (e.g., github-devops) emit
+        // a SquadDegradationRecord with code permission-not-expressible and InstructionDigest matching agent.BodyDigest
+        string[] expectedPublishDegraded = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                return prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision decision) &&
+                       decision != SquadPermissionDecision.Deny;
+            })
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(expectedPublishDegraded);
+        Assert.Contains("devops", expectedPublishDegraded);
+
+        foreach (string agentName in expectedPublishDegraded)
+        {
+            SquadDegradationRecord degradation = Assert.Single(
+                result.Degradations,
+                d => d.CanonicalIdentity == agentName &&
+                     d.Code == "permission-not-expressible" &&
+                     d.Details != null && d.Details.Contains("network.publish", StringComparison.Ordinal));
+
+            Assert.Equal("opencode", degradation.Target);
+            Assert.Equal(agentName, degradation.OutputIdentity);
+            SquadAgent agent = agentsByName[agentName];
+            Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
+        }
+
+        // Safety-narrowed: 'ask' decisions cannot be confirmed per-capability in OpenCode subagents,
+        // so they narrow to withhold the tool and emit safety-narrowed.
+        string[] expectedSafetyNarrowed = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                return prof.Permissions.Values.Any(decision => decision == SquadPermissionDecision.Ask);
+            })
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(expectedSafetyNarrowed);
+        Assert.DoesNotContain("architect", expectedSafetyNarrowed);
+
+        IReadOnlyList<SquadDegradationRecord> safetyNarrowed = result.Degradations
+            .Where(d => string.Equals(d.Code, "safety-narrowed", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(
+            expectedSafetyNarrowed,
+            safetyNarrowed.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+
+        // Permission-not-expressible: network.publish != Deny and delegate-allow with non-empty DelegatesTo roster
+        string[] expectedPermissionNotExpressible = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool publishNotDeny =
+                    prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                    publishDecision != SquadPermissionDecision.Deny;
+                bool rosterLimited =
+                    prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                    delegateDecision == SquadPermissionDecision.Allow &&
+                    a.DelegatesTo.Count > 0;
+                return publishNotDeny || rosterLimited;
+            })
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        IReadOnlyList<SquadDegradationRecord> permissionNotExpressible = result.Degradations
+            .Where(d => string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(
+            expectedPermissionNotExpressible,
+            permissionNotExpressible.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+
+        // Discovery-guard degradations: every agent that owns resources records one
+        // resource-links-rewritten degradation quoting the harness scanner glob.
+        string[] expectedGuardDegraded = source.Agents
+            .Where(a => a.Resources.Count > 0)
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(expectedGuardDegraded);
+        Assert.Equal(
+            expectedGuardDegraded,
+            result.Degradations
+                .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal))
+                .Select(d => d.CanonicalIdentity)
+                .OrderBy(name => name, StringComparer.Ordinal));
+
+        foreach (SquadDegradationRecord degradation in result.Degradations
+                     .Where(d => string.Equals(d.Code, "resource-links-rewritten", StringComparison.Ordinal)))
+        {
+            Assert.Equal("opencode", degradation.Target);
+            Assert.Equal(degradation.CanonicalIdentity, degradation.OutputIdentity);
+            Assert.Equal(agentsByName[degradation.CanonicalIdentity].BodyDigest, degradation.InstructionDigest);
+            Assert.Contains(".markdown", degradation.Details, StringComparison.Ordinal);
+            Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
+        }
+
+        Assert.All(result.Degradations, degradation => Assert.True(
+            degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable"
+                or "resource-links-rewritten",
+            $"Degradation for '{degradation.CanonicalIdentity}' has unexpected code '{degradation.Code}'."));
+
+        // Anti-widening check
+        Assert.DoesNotContain(
+            result.Degradations,
+            d => d.Code.Contains("widen", StringComparison.OrdinalIgnoreCase) ||
+                 (d.Details is not null && d.Details.Contains("widening", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>
+    /// The extension guard maps <c>references/x.md</c> to <c>references/x.markdown</c>; an agent
+    /// whose closure holds both spellings would overwrite one file with the other, so the
+    /// render fails closed instead of merging them.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_ExtensionGuardFailsClosedOnMdAndMarkdownAlias()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.Create();
+        fixture.WriteAgentResource("references/x.md", "X markdown.\n");
+        fixture.WriteAgentResource("references/x.markdown", "X markdown alias.\n");
+        fixture.AppendAgentLink("[X md](bug-crusher-investigator/references/x.md)");
+        fixture.AppendAgentLink("[X markdown](bug-crusher-investigator/references/x.markdown)");
+        SquadRendererRegistry registry = fixture.Tree.Registry([new OpenCodeRenderer()]);
+
+        SquadRenderValidationException exception = await Assert.ThrowsAsync<SquadRenderValidationException>(() =>
+            registry.RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.OpenCode],
+                SquadDeploymentScope.Project).Prepared(fixture.Tree)));
+
+        Assert.Contains(ResourceBearingSquadFixture.AgentName, exception.Message, StringComparison.Ordinal);
+        Assert.Contains("references/x.md", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("references/x.markdown", exception.Message, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// An agent whose only resources are non-markdown is invisible to agent discovery as
+    /// projected, so the guard leaves its files and links byte-identical to the native layout.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_TextOnlyAgentResourcesProjectVerbatim()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithTextOnlyAgentResources();
+        SquadRendererRegistry registry = fixture.Tree.Registry([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile payload = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".opencode/agents/bug-crusher-investigator/assets/agent-payload.txt");
+        Assert.True(
+            Encoding.UTF8.GetBytes(ResourceBearingSquadFixture.AgentPayload).AsSpan()
+                .SequenceEqual(payload.Content.Span),
+            "The text-only agent resource did not preserve its exact UTF-8 bytes.");
+
+        SquadDeploymentFile principal = Assert.Single(
+            result.Files,
+            file => file.RelativePath == ".opencode/agents/bug-crusher-investigator.md");
+        string body = Encoding.UTF8.GetString(principal.Content.Span);
+        Assert.Contains(
+            $"[Payload](.opencode/agents/{ResourceBearingSquadFixture.AgentName}/assets/agent-payload.txt)",
+            body,
+            StringComparison.Ordinal);
+
+        SquadSource source = fixture.Tree.Load();
+        SquadAgent agent = Assert.Single(
+            source.Agents,
+            a => string.Equals(a.Name, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+        Assert.Equal("opencode", degradation.Target);
+        Assert.Equal(ResourceBearingSquadFixture.AgentName, degradation.OutputIdentity);
+        Assert.Equal(agent.BodyDigest, degradation.InstructionDigest);
+        Assert.False(
+            string.IsNullOrWhiteSpace(degradation.Details),
+            "The resource-links-rewritten degradation must explain the discovery guard.");
+        Assert.Contains("project verbatim", degradation.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("{agent,agents}/**/*.md", degradation.Details, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A <c>.md</c> resource reached only transitively through a <c>.markdown</c> resource is
+    /// renamed on disk, but the body never links to it, so the degradation must report the
+    /// renamed file without claiming an authored link was rewritten.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OpenCode_UnlinkedMarkdownResourceReportsRenameWithoutLinkRewrite()
+    {
+        using ResourceBearingSquadFixture fixture = ResourceBearingSquadFixture.CreateWithUnlinkedMarkdownResource();
+        SquadRendererRegistry registry = fixture.Tree.Registry([new OpenCodeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            fixture.ProductRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project).Prepared(fixture.Tree);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // The .md resource is renamed beside its principal, invisible to discovery.
+        Assert.Contains(
+            result.Files,
+            file => file.RelativePath ==
+                $".opencode/agents/{ResourceBearingSquadFixture.AgentName}/references/notes.markdown");
+
+        SquadDegradationRecord degradation = Assert.Single(
+            result.Degradations,
+            record => string.Equals(record.Code, "resource-links-rewritten", StringComparison.Ordinal) &&
+                string.Equals(record.CanonicalIdentity, ResourceBearingSquadFixture.AgentName, StringComparison.Ordinal));
+        // The file was renamed, so the receipt says so…
+        Assert.Contains("projected with a '.markdown' extension", degradation.Details, StringComparison.Ordinal);
+        // …but no authored link was rewritten, so it must not claim one was.
+        Assert.DoesNotContain("authored links were rewritten", degradation.Details, StringComparison.Ordinal);
+        Assert.Contains("no authored link required rewriting", degradation.Details, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsync_NativeSingleProjectionRule_SharedIdentityEmitsAgentAndSuppressesSkill()
+    {
+        InMemoryFileSystem files = new();
+        string sourceRoot = Path.Combine(files.Root, "shared-identity-squad");
+        InMemorySquadSourceTree.Write(files, sourceRoot);
+        SquadRendererRegistry registry = new(
+            [new OpenCodeRenderer()],
+            new InMemorySquadServices(files).RenderInputReader());
+        SquadRenderRequest request = new SquadRenderRequest(
+            sourceRoot,
+            [SquadTarget.OpenCode],
+            SquadDeploymentScope.Project).Prepared(files);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.Contains(
+            result.Files,
+            file => file.RelativePath == $".opencode/agents/{InMemorySquadSourceTree.Identity}.md");
+        Assert.DoesNotContain(
+            result.Files,
+            file => file.RelativePath == $".opencode/skills/{InMemorySquadSourceTree.Identity}/SKILL.md");
+    }
+
+    /// <summary>
+    /// The pure orchestrator's rendered permission map allows <c>kw-docs_*</c>.
+    /// </summary>
+    /// <remarks>
+    /// OpenCode merges an agent's permission map with the global config, where most keys default
+    /// to <c>allow</c>, so the key is pinned with an explicit value rather than checked for
+    /// presence. The expectation comes from <see cref="SquadMcpGrantProjection"/>, never from the
+    /// renderer, so a re-added exclusion fails here instead of agreeing with itself.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_OpenCode_GrantsKyberWeaveToThePureOrchestrator()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            SquadMcpGrantProjection.PureOrchestratorProfile,
+            conductor.CapabilityProfile);
+        Assert.True(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.OpenCode),
+            "The source's own profile denies 'filesystem.read' to the orchestrator, so this suite "
+            + "cannot state the conductor is entitled to kw-docs.");
+
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.OpenCode);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".opencode/agents/{conductor.Name}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            conductor.Name);
+        YamlMappingNode permissionMap = RequireMapping(frontmatter, "permission", conductor.Name);
+
+        Assert.Equal("allow", RequireScalar(permissionMap, "kw-docs_*", conductor.Name));
+    }
+
+    private static void AssertPermissions(
+        SquadRenderResult result,
+        string agentName,
+        IReadOnlyDictionary<string, object> expectedPermissions)
+    {
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".opencode/agents/{agentName}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agentName);
+
+        YamlMappingNode actualPermissions = RequireMapping(frontmatter, "permission", agentName);
+
+        string[] expectedKeys = expectedPermissions.Keys.ToArray();
+        string[] actualKeys = actualPermissions.Children.Keys
+            .OfType<YamlScalarNode>()
+            .Select(k => k.Value!)
+            .ToArray();
+        Assert.Equal(expectedKeys, actualKeys);
+
+        foreach ((string key, object expectedVal) in expectedPermissions)
+        {
+            YamlNode actualValNode = actualPermissions.Children[new YamlScalarNode(key)];
+            if (expectedVal is string expectedScalar)
+            {
+                YamlScalarNode actualScalar = Assert.IsType<YamlScalarNode>(actualValNode);
+                Assert.Equal(expectedScalar, actualScalar.Value);
+            }
+            else if (expectedVal is IReadOnlyDictionary<string, string> expectedMap)
+            {
+                YamlMappingNode actualMap = Assert.IsType<YamlMappingNode>(actualValNode);
+                string[] expectedSubKeys = expectedMap.Keys.ToArray();
+                string[] actualSubKeys = actualMap.Children.Keys
+                    .OfType<YamlScalarNode>()
+                    .Select(k => k.Value!)
+                    .ToArray();
+                Assert.Equal(expectedSubKeys, actualSubKeys);
+                foreach ((string subKey, string expectedSubVal) in expectedMap)
+                {
+                    Assert.Equal(expectedSubVal, RequireScalar(actualMap, subKey, agentName));
+                }
+            }
+            else
+            {
+                throw new InvalidOperationException($"Unexpected expectedVal type {expectedVal?.GetType()}");
+            }
+        }
+    }
+
+    private static bool IsOpenCodePermission(string permission)
+    {
+        return DocumentedOpenCodePermissions.Contains(permission, StringComparer.Ordinal);
+    }
+
+    private static YamlMappingNode RequireMapping(YamlMappingNode node, string key, string identity)
+    {
+        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
+        {
+            string presentKeys = string.Join(", ", node.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(existing => existing.Value ?? "<null>"));
+            throw new InvalidOperationException(
+                $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
+        }
+
+        return Assert.IsType<YamlMappingNode>(value);
+    }
+}

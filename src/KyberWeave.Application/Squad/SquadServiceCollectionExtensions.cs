@@ -2,12 +2,19 @@ using KyberWeave.Application.Squad.Packaging;
 using KyberWeave.Application.Update;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Packaging;
+using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Host;
+using KyberWeave.Domain.CopilotPrompt;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -30,20 +37,53 @@ public static class SquadServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
 
         services.TryAddSingleton<ISquadReleaseSource>(sp => new GitHubSquadReleaseSource(
-            ReleaseOrigin.Resolve(sp.GetRequiredService<IProcessEnvironment>().GetVariable).ApiRoot));
+            sp.GetRequiredService<ISquadReleaseHttpHandlers>().Create(),
+            ReleaseOrigin.Resolve(sp.GetRequiredService<IProcessEnvironment>().GetVariable).ApiRoot,
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadInstanceReleaseSource>(sp => new InstanceReleaseSource(
             FindLocalProductSquadRoot(sp.GetRequiredService<ISquadFileAccess>()) is { } local
-                ? new LocalCheckoutSquadReleaseSource(local)
+                ? new LocalCheckoutSquadReleaseSource(local, sp.GetRequiredService<ISquadCompanionSkills>())
                 : sp.GetRequiredService<ISquadReleaseSource>()));
+        services.TryAddSingleton<ISquadStateStore>(sp => new SquadStateStore(
+            sp.GetRequiredService<ISquadUserPaths>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<ILease>()));
+        services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
+            sp.GetRequiredService<ISquadStateStore>(),
+            sp.GetRequiredService<ISquadUserPaths>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<ILease>(),
+            sp.GetRequiredService<TimeProvider>()));
+        services.TryAddSingleton<ISquadModelPresetSelectionStore>(sp => new SquadModelPresetSelectionStore(
+            sp.GetRequiredService<ISquadUserPaths>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>()));
         services.TryAddSingleton<ISquadPackService, SquadPackService>();
+        services.TryAddSingleton<ISquadArchiveWriter>(sp => new SquadPacker(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<ISquadCompanionSkills>()));
         services.TryAddSingleton<IArbiterRefreshTargets, CliArbiterRefreshTargets>();
         services.TryAddSingleton<IArbiterHookRefresherFactory, ArbiterHookRefresherFactory>();
+        services.TryAddSingleton<IEmbeddedResources>(_ => new AssemblyEmbeddedResources(typeof(CopilotPromptFile).Assembly));
+        services.TryAddSingleton<CopilotPromptRefresher>(sp => new CopilotPromptRefresher(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<ISelfUpdateService>(sp => new SelfUpdateService(
             sp.GetRequiredService<Func<SelfUpdateHost>>(),
             sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<ISelfUpdateSystem>(),
             sp.GetRequiredService<IArbiterHookRefresherFactory>(),
             sp.GetRequiredService<IArbiterRefreshTargets>(),
+            sp.GetRequiredService<CopilotPromptRefresher>(),
             sp.GetService<HttpMessageHandler>()));
         services.TryAddSingleton<ISquadLifecycleService>(sp => CreateLifecycle(sp, sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadInstanceService>(sp => new SquadInstanceService(
@@ -53,7 +93,62 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<ISquadGlobalRootResolver>(),
             sp.GetRequiredService<ISquadInstanceLinkSync>(),
             sp.GetRequiredService<ISquadFileAccess>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISquadStateStore>()));
+        services.TryAddSingleton<ISquadGlobalRootResolver>(sp => EnvironmentSquadGlobalRoots.Create(
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<ISquadFileAccess>()));
+        services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>(), sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<ISquadSourceLoader>(sp => new SquadSourceLoader(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ICopilotMcpServerProbe>(sp => new CopilotMcpServerProbe(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ISquadOperatorChannelOverlayFile>(sp => new SquadOperatorChannelOverlayFile(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ISquadWorkerBaselineFile>(sp => new SquadWorkerBaselineFile(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadRenderInputReader>(sp => new FileSquadRenderInputReader(
+            sp.GetRequiredService<ISquadSourceLoader>(),
+            sp.GetRequiredService<ICopilotMcpServerProbe>(),
+            sp.GetRequiredService<ISquadOperatorChannelOverlayFile>(),
+            sp.GetRequiredService<ISquadWorkerBaselineFile>(),
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadModelPresetValidator>(sp => new SquadModelPresetValidator(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ISquadDeploymentPlanner>(sp => new SquadDeploymentPlanner(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IPathResolver>()));
+        services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(
+            sp.GetRequiredService<ISquadStateStore>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<ILease>(),
+            sp.GetRequiredService<IIdGenerator>()));
+        services.TryAddSingleton<ISquadResponseGuidanceStore>(sp => new SquadResponseGuidanceReader(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IIdGenerator>()));
+        services.TryAddSingleton<ISquadInstanceLinkSync>(sp => new SquadInstanceLinkSync(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<ILease>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadSkillShadowing>(sp => new SquadSkillShadowing(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadHookJsonFile>(sp => new SquadHookJsonFile(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ISquadTargetResolver>(sp => new SquadTargetResolver(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         return services;
     }
 
@@ -98,4 +193,35 @@ public static class SquadServiceCollectionExtensions
             sp.GetService<ISquadTransactionObserver>(),
             sp.GetRequiredService<ISquadGlobalRootResolver>(),
             sp.GetRequiredService<IProcessEnvironment>().GetVariable);
+}
+
+/// <summary>Resolves each target's global root from the process environment.</summary>
+internal static class EnvironmentSquadGlobalRoots
+{
+    /// <summary>Builds the resolver over the environment and the file probes.</summary>
+    /// <param name="environment">The process environment.</param>
+    /// <param name="files">Reads the one config file a global root can be set in.</param>
+    /// <returns>The resolver.</returns>
+    public static ISquadGlobalRootResolver Create(IProcessEnvironment environment, ISquadFileAccess files)
+    {
+        string? home = environment.GetVariable("HOME");
+        if (string.IsNullOrWhiteSpace(home)) home = environment.GetVariable("USERPROFILE");
+        if (string.IsNullOrWhiteSpace(home)) home = environment.HomeDirectory;
+        if (string.IsNullOrWhiteSpace(home)) home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+
+        return new SquadGlobalRoots(
+            environment.GetVariable,
+            home ?? string.Empty,
+            path =>
+            {
+                try
+                {
+                    return files.FileExists(path) ? files.ReadAllText(path) : null;
+                }
+                catch (Exception ex) when (FileFailure.Is(ex))
+                {
+                    return null;
+                }
+            });
+    }
 }

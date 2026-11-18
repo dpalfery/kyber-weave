@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using Xunit.Sdk;
 
@@ -30,6 +31,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class PrNamingScriptTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>
     ///     Branch shape, row T7: the optional <c>owner.agent.</c> prefix, then the harness token, a
     ///     conventional-commit type, and a slug — <c>commandcode/fix/arbiter-global-block-identity</c>.
@@ -221,9 +224,9 @@ public sealed class PrNamingScriptTests
     [Fact]
     public void TheCheckScriptIsCheckedIn()
     {
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, ScriptPath);
+        string path = Path.Combine(Corpus.Root, ScriptPath);
 
-        Assert.True(File.Exists(path), $"The pull request naming check is missing at '{path}'.");
+        Assert.True(Corpus.Exists(ScriptPath), $"The pull request naming check is missing at '{path}'.");
     }
 
     /// <summary>
@@ -235,7 +238,7 @@ public sealed class PrNamingScriptTests
 
         ProcessStartInfo startInfo = new("/bin/bash")
         {
-            WorkingDirectory = KyberWeaveTestPaths.ToolRoot,
+            WorkingDirectory = Corpus.Root,
             UseShellExecute = false,
             RedirectStandardInput = true,
             RedirectStandardOutput = true,

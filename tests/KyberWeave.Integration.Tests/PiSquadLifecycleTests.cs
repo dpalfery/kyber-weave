@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -5,6 +6,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -26,8 +28,10 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class PiSquadLifecycleTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private readonly TempDirectory _temp = new();
 
@@ -112,7 +116,7 @@ public sealed class PiSquadLifecycleTests : IDisposable
 
         string userData = Path.Combine(_temp.Path, "pi-real-install-user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -144,7 +148,7 @@ public sealed class PiSquadLifecycleTests : IDisposable
     {
         string userData = targetRoot + "-user-data";
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -169,7 +173,7 @@ public sealed class PiSquadLifecycleTests : IDisposable
     /// </summary>
     private static int ExpectedRenderedFileCount()
     {
-        SquadSource source = SquadSourceLoader.Load(ProductRoot);
+        SquadSource source = RealSquadServices.Load(ProductRoot);
         HashSet<string> sharedIdentities = source.FallbackProfiles.Profiles.Values
             .SelectMany(profile => profile.SharedIdentities)
             .ToHashSet(StringComparer.Ordinal);

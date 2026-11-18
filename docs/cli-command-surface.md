@@ -534,7 +534,7 @@ the failing gate's id; after a passing verification run, the completion digest w
 `FILES` and the `TASK_GATE:` line filled in and `TESTS`, `COMMIT`, `REMOTE_HEAD` and `runs` left
 as placeholders:
 
-`review gates --agent <NAME> --red` judges a test-first task's failing run, after the worker writes its tests and before it implements, and its report is the one `KW-ARB-MODE-002` looks for beside the later passing report. It passes (`KW-REVIEW-051`) when tests ran and at least one failed, or when every failed gate failed only on missing-symbol compiler errors located in the files the task changed (`--paths`); it fails (`KW-REVIEW-052`, exit `1`) when a gate breaks for any other reason, when a missing symbol is in a file the task did not change, or when every test passed. The missing-symbol codes are data in `RedLanguages` (`src/KyberWeave.Domain/Review/RedEvidence.cs`): C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`, `CS0400`, `CS0426`; TypeScript `TS2304`, `TS2305`, `TS2307`, `TS2339`. Another language is one more record there (diagnostic line pattern, code-to-symbol patterns, test-summary reader). Without `--red`, a gate that fails only on missing symbols in files the task did not change adds `KW-REVIEW-053`, the line `NOT VERIFIED: <command> — sibling RED tests reference symbols no task has created yet: <symbols>` for a worker to report.
+`review gates --agent <NAME> --red` judges a test-first task's failing run, after the worker writes its tests and before it implements, and its report is the one `KW-ARB-MODE-002` looks for beside the later passing report. It passes (`KW-REVIEW-051`) when tests ran and at least one failed, or when every failed gate failed only on missing-symbol compiler errors located in the files the task changed (`--paths`); it fails (`KW-REVIEW-052`, exit `1`) when a gate breaks for any other reason, when a missing symbol is in a file the task did not change, or when every test passed. The missing-symbol codes are data in `RedLanguages` (`src/KyberWeave.Application/Review/RedEvidence.cs`): C# `CS0103`, `CS0117`, `CS0234`, `CS0246`, `CS1061`, `CS0400`, `CS0426`; TypeScript `TS2304`, `TS2305`, `TS2307`, `TS2339`. Another language is one more record there (diagnostic line pattern, code-to-symbol patterns, test-summary reader). Without `--red`, a gate that fails only on missing symbols in files the task did not change adds `KW-REVIEW-053`, the line `NOT VERIFIED: <command> — sibling RED tests reference symbols no task has created yet: <symbols>` for a worker to report.
 
 - `--all` runs all declared repository gates for the current OS unconditionally without
   include path filtering. Combining `--all` with `--agent`, `--base`, `--paths` or `--gate`
@@ -744,7 +744,7 @@ The full-suite refusal now lives in the commands a run goes through, because the
   is refused unless `--council` is given or stdin is a terminal. A refused gate is reported as a
   blocking failure `KW-REVIEW-033` with exit `1`, and starts nothing. Under `--all`, the run stops at
   once; a scoped run still runs the other gates.
-- **`scripts/fast-loop.sh --full`, `--scoped` and `--regenerate`.** Exit `89` before any build when
+- **`scripts/fast-loop.sh --full` and `--scoped`.** Exit `89` before any build when
   stdin is not a terminal, and print the targeted alternatives. `--class` and `--method` are the
   targeted, unchanged modes.
 

@@ -2,12 +2,13 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Arbiter;
 
 /// <summary>Validates the <c>arbiter:</c> section, the user override and the shipped rules.</summary>
-public sealed class ArbiterValidateCommand(IArbiterConfigResolver configs) : Command<ArbiterSettings>
+public sealed class ArbiterValidateCommand(IArbiterConfigResolver configs, IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>
     /// Validates the effective Arbiter configuration. Exits 0 when no error
@@ -20,12 +21,12 @@ public sealed class ArbiterValidateCommand(IArbiterConfigResolver configs) : Com
         DiagnosticReport report = new();
         if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out string? configPath))
         {
-            CommandHelpers.Finish(report, settings, "arbiter validate", "Rule");
+            CommandHelpers.Finish(console, report, settings, "arbiter validate", "Rule");
             return 1;
         }
 
         report.AddRange(RuleValidator.Validate(config.Arbiter, configPath));
-        CommandHelpers.Finish(report, settings, "arbiter validate", "Rule");
+        CommandHelpers.Finish(console, report, settings, "arbiter validate", "Rule");
         return report.HasErrors ? 1 : 0;
     }
 

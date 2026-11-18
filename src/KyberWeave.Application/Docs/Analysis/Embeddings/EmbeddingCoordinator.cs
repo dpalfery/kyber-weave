@@ -31,7 +31,7 @@ public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysi
             return Empty();
         if (!_persistence.IsAvailable)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode,
+            return EmbeddingResolutionResults.Unavailable(config.Mode,
                 "Embedding generation was skipped because the analysis cache is not safely ignored.");
         }
 
@@ -41,41 +41,41 @@ public sealed class EmbeddingCoordinator(IEmbeddingGenerator generator, IAnalysi
         }
         catch (HttpRequestException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (IOException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (InvalidDataException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (InvalidOperationException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (ArgumentException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (OperationCanceledException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (JsonException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (OverflowException ex)
         {
-            return EmbeddingResolutionResult.Unavailable(config.Mode, ex.Message);
+            return EmbeddingResolutionResults.Unavailable(config.Mode, ex.Message);
         }
         catch (FormatException)
         {
             // Header parsing is the only provider-boundary FormatException expected here.
             // Use a fixed reason so malformed secret text can never reach diagnostics.
-            return EmbeddingResolutionResult.Unavailable(config.Mode,
+            return EmbeddingResolutionResults.Unavailable(config.Mode,
                 "The configured embedding credential is not a valid HTTP bearer token.");
         }
     }

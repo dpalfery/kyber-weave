@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -6,6 +7,7 @@ using KyberWeave.Core.Squad.Release;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Squad;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -27,6 +29,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadOperatorChannelCliTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string InstallVersion = "1.2.3";
     private const string InvalidServerName = "bad name zz1";
 
@@ -319,7 +323,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
         return SquadTestCommands.Doctor(
             new FakeProcessExecutor().WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n"),
             h.UserPaths,
-            KyberWeaveTestPaths.ToolRoot,
+            Corpus.Root,
             h.GlobalRoots,
             SquadHostDefaults.ResolveRenderer(),
             h.Store,
@@ -479,7 +483,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
             Anchor = anchor;
             CopilotHome = copilotHome;
             UserPaths = new FakeSquadUserPaths(userHome);
-            Store = new SquadStateStore(UserPaths);
+            Store = RealSquadState.Store(UserPaths);
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
         }
 

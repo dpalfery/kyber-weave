@@ -5,6 +5,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using KyberWeave.Core.Processes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -31,7 +32,7 @@ namespace KyberWeave.Integration.Tests;
 /// any script at all.
 /// </para>
 /// <para>
-/// Fixtures under <c>tests/KyberWeave.Tests/Fixtures/statusline/</c> are hand-written from
+/// Fixtures under <c>tests/KyberWeave.Integration.Tests/Fixtures/statusline/</c> are hand-written from
 /// published payload schemas and contain no real paths, conversation ids, or account data (C3).
 /// The Claude and <c>agy</c> variants are run under their declared interpreters inside a temp
 /// sandbox: a temp <c>HOME</c>, a <c>PATH</c> limited to stub directories and the directories of
@@ -62,6 +63,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string StatusLineRootRelativePath = "products/kyber-utilities/statusline";
     private const string ClaudeArtifactRelativePath = StatusLineRootRelativePath + "/claude/statusline.sh";
     private const string AgyArtifactRelativePath = StatusLineRootRelativePath + "/antigravity/statusline.py";
@@ -70,7 +73,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         StatusLineRootRelativePath + "/commandcode/statusbar.ts";
     private const string CommandCodeHarnessFileName = "commandcode-harness.mjs";
 
-    private const string FixtureRootRelativePath = "tests/KyberWeave.Tests/Fixtures/statusline";
+    private const string FixtureRootRelativePath = "tests/KyberWeave.Integration.Tests/Fixtures/statusline";
     private const string ClaudeFixture = "claude-statusline.json";
     private const string ClaudeZeroContextFixture = "claude-statusline-zero-context.json";
     private const string ClaudeWithoutContextFixture = "claude-statusline-without-context.json";
@@ -883,7 +886,7 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
         if (OperatingSystem.IsWindows())
             Assert.Skip("Kyber Utilities status-line artifacts are macOS and Linux only (D4).");
 
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, ToNative(relativePath));
+        string path = Path.Combine(Corpus.Root, ToNative(relativePath));
         Assert.True(
             File.Exists(path),
             $"The Kyber-owned artifact '{path}' does not exist yet. T4 is the RED suite for T5's " +
@@ -916,17 +919,17 @@ public sealed class UtilitiesStatusLineArtifactTests : IDisposable
 
     private static string FixtureText(string fixtureFileName)
     {
-        string path = FixturePath(fixtureFileName);
+        string relativePath = $"{FixtureRootRelativePath}/{fixtureFileName}";
         Assert.True(
-            File.Exists(path),
-            $"The synthetic fixture '{path}' is missing; the fixture set is part of this suite, so its " +
+            Corpus.Exists(relativePath),
+            $"The synthetic fixture '{relativePath}' is missing; the fixture set is part of this suite, so its " +
             "absence is a test fault, not the artifact under test.");
-        return File.ReadAllText(path);
+        return Corpus.ReadText(relativePath);
     }
 
     private static string FixturePath(string fixtureFileName)
     {
-        return Path.Combine(KyberWeaveTestPaths.ToolRoot, ToNative(FixtureRootRelativePath), fixtureFileName);
+        return Path.Combine(Corpus.Root, ToNative(FixtureRootRelativePath), fixtureFileName);
     }
 
     private static string[] PiExtensionModules(string artifact)

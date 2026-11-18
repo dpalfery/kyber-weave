@@ -15,26 +15,44 @@
   <!-- The helpers keep the KyberWeave.Tests.* namespaces they had, so the test classes that
        use them need no new usings. Each test assembly that references this one can read its
        internal members. -->
+  <!-- The Factory hook payloads and transcript are compiled in, so a unit test reads them without touching the disk. -->
   <ItemGroup>
-    <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <EmbeddedResource Include="Fixtures\arbiter-hooks\factory\*" Exclude="Fixtures\arbiter-hooks\factory\README.md" LogicalName="arbiter-hooks/factory/%(Filename)%(Extension)" />
+    <!-- The receipt the shipped 0.1.8-rc.20 binary wrote, read by the upgrade tests in memory. -->
+    <EmbeddedResource Include="Fixtures\squad-rc20-global\*.json" LogicalName="fixtures/squad-rc20-global/%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Kernel.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Mcp.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Arbiter.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Cli.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Data.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.RepoPolicy.Tests" />
-    <InternalsVisibleTo Include="KyberWeave.PromptContent.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Content.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Architecture.Tests" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
+    <PackageReference Include="Spectre.Console.Testing" Version="0.57.2" />
     <PackageReference Include="xunit.v3.assert" Version="4.0.3" />
     <PackageReference Include="xunit.v3.extensibility.core" Version="4.0.3" />
+  </ItemGroup>
+
+  <!-- A nested project, so its sources must not also compile into this library. -->
+  <ItemGroup>
+    <Compile Remove="ProcessProbe/**" />
+    <None Remove="ProcessProbe/**" />
+    <ProjectReference Include="ProcessProbe\KyberWeave.Testing.ProcessProbe.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\KyberWeave.Arbiter\KyberWeave.Arbiter.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Cli\KyberWeave.Cli.csproj" />
-    <ProjectReference Include="..\..\src\KyberWeave.Core\KyberWeave.Core.csproj" />
-    <ProjectReference Include="..\..\src\KyberWeave.Core.Docs\KyberWeave.Core.Docs.csproj" />
-    <ProjectReference Include="..\..\src\KyberWeave.Core.Squad\KyberWeave.Core.Squad.csproj" />
     <ProjectReference Include="..\..\src\KyberWeave.Mcp\KyberWeave.Mcp.csproj" />
   </ItemGroup>
 

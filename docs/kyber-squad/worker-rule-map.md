@@ -83,7 +83,7 @@ flowchart LR
 
 Read every "Enforced by" cell as the answer to one question: if this sentence were deleted and
 nobody noticed, what fails? "catalog rule `X`" means entry `X` in the prose rule catalog,
-[`tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml`](../../tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml).
+[`tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml`](../../tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml).
 Each entry states the rule once, lists the files that must state it and control files that must
 not, and may carry a retired opposite that must stay absent. `ProseRuleCatalogTests` checks offline
 that every listed file and section exists, and checks a home marked `anchor:` by token.

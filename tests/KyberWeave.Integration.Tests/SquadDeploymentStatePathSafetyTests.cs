@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output) : SquadDeploymentStateTestBase
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     [SuppressMessage(
         "Globalization",
         "CA1308:Normalize strings to uppercase",
@@ -71,7 +74,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         using TempDirectory fixture = new();
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -100,7 +103,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             new SquadOwnedFile(aliasPath, Digest("second"), "codex", false));
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 receipt));
@@ -117,7 +120,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         using TempDirectory fixture = new();
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -140,7 +143,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         Directory.CreateSymbolicLink(Path.Combine(codex, "agents"), outside.Path);
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -172,7 +175,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false));
 
         SquadPathContainmentException exception = Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixture.Path,
                 SquadDeploymentScope.Project,
                 receipt));
@@ -194,7 +197,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         SquadReceipt receipt = Receipt(owned);
 
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -203,7 +206,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUpdate(
+            RealSquadDeployment.Planner.CreateUpdate(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -213,7 +216,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 receipt)));
@@ -234,7 +237,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             new SquadOwnedFile(aliasPath, Digest("alias"), "codex", false));
 
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -243,7 +246,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUpdate(
+            RealSquadDeployment.Planner.CreateUpdate(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 Lock("1.2.4"),
@@ -253,7 +256,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 false,
                 new FixedTimeProvider(InstalledAt.AddDays(1)))));
         Assert.IsAssignableFrom<InvalidOperationException>(Record.Exception(() =>
-            SquadDeploymentPlanner.CreateUninstall(
+            RealSquadDeployment.Planner.CreateUninstall(
                 fixturePath,
                 SquadDeploymentScope.Project,
                 receipt)));
@@ -287,7 +290,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             fixture.Path,
             SquadTransactionCheckpointKind.Prepared);
         Assert.Throws<InjectedSquadTransactionFailure>(() =>
-            new SquadTransaction(store, observer).Execute(plan));
+            RealSquadDeployment.Transaction(store, observer).Execute(plan));
         RestoreTree(
             fixture.Path,
             Assert.IsType<SortedDictionary<string, TreeEntry>>(
@@ -305,7 +308,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         WriteJsonObject(intentPath, intent);
         SortedDictionary<string, TreeEntry> beforeRecovery = CaptureTree(fixture.Path);
 
-        Exception? exception = Record.Exception(() => new SquadTransaction(store).Recover(
+        Exception? exception = Record.Exception(() => RealSquadDeployment.Transaction(store).Recover(
             targetRoot,
             SquadDeploymentScope.Global));
 
@@ -329,7 +332,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
                 directory.Name,
                 "ActualSpelling",
                 StringComparison.Ordinal));
-        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentity.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentities.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
 
         Assert.Equal(
             actualEntry.Name,
@@ -338,12 +341,12 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         {
             Assert.Equal(
                 actualIdentity,
-                SquadPhysicalRootIdentity.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance));
+                SquadPhysicalRootIdentities.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance));
             return;
         }
 
         Directory.CreateDirectory(caseVariant);
-        SquadPhysicalRootIdentity distinctIdentity = SquadPhysicalRootIdentity.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity distinctIdentity = SquadPhysicalRootIdentities.Resolve(caseVariant, SquadFileSystemPathSemantics.Instance);
         Assert.NotEqual(actualIdentity.PhysicalPath, distinctIdentity.PhysicalPath);
         Assert.NotEqual(actualIdentity.Key, distinctIdentity.Key);
     }
@@ -351,20 +354,10 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     [Fact]
     public void ResolvePhysicalRootComparisonPolicyIsNotOperatingSystemWideCaseFolding()
     {
-        string identitySource = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Domain",
-            "Squad",
-            "Deployment",
-            "SquadPhysicalRootIdentity.cs"), Encoding.UTF8);
-        string transactionSource = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadTransaction.cs"), Encoding.UTF8);
+        string identitySource = Corpus.ReadText(
+            "src/KyberWeave.Application/Squad/Deployment/SquadPhysicalRootIdentities.cs");
+        string transactionSource = Corpus.ReadText(
+            "src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
 
         Assert.DoesNotContain("physicalPath.ToUpperInvariant()", identitySource, StringComparison.Ordinal);
         Assert.DoesNotContain(
@@ -399,8 +392,8 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
         string lowerRoot = Path.Combine(caseSensitiveParent, "root");
         Directory.CreateDirectory(upperRoot);
         Directory.CreateDirectory(lowerRoot);
-        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentity.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
-        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentity.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentities.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentities.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
         SquadStateStore store = Store(Path.Combine(fixturePath, "application-data"));
 
         Assert.NotEqual(upperIdentity.PhysicalPath, lowerIdentity.PhysicalPath);
@@ -412,8 +405,8 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             store.ResolveReceiptPath(lowerRoot, SquadDeploymentScope.Global));
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = new(store, blocker);
-        SquadDeploymentPlan upperPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
+        SquadDeploymentPlan upperPlan = RealSquadDeployment.Planner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -421,15 +414,16 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        Task active = Task.Run(() => activeTransaction.Execute(upperPlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task active = BlockedTransaction.Start(() => activeTransaction.Execute(upperPlan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            active,
             "The first Windows case-sensitive sibling did not acquire its lease.");
         Exception? siblingFailure;
         try
         {
-            SquadTransaction siblingTransaction = new(store);
-            SquadDeploymentPlan lowerPlan = SquadDeploymentPlanner.CreateInstall(
+            SquadTransaction siblingTransaction = RealSquadDeployment.Transaction(store);
+            SquadDeploymentPlan lowerPlan = RealSquadDeployment.Planner.CreateInstall(
                 lowerRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -486,7 +480,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
             SquadPathPolicy.ResolveFile(upperRoot, $"escape/{canaryRelativePath}", SquadFileSystemPathSemantics.Instance));
 
         Assert.Throws<SquadPathContainmentException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 upperRoot,
                 SquadDeploymentScope.Project,
                 Lock(),
@@ -497,7 +491,7 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
 
         Directory.Delete(directAlias);
         Directory.CreateDirectory(Path.Combine(upperRoot, ".kyber-weave"));
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -525,33 +519,26 @@ public sealed class SquadDeploymentStatePathSafetyTests(ITestOutputHelper output
     [Fact]
     public void AllContainmentHelpersUseCanonicalFileSystemSemantics()
     {
-        string sourceRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src");
-        string[] deploymentRoots =
+        string[] deploymentSources =
         [
-            .. Directory.EnumerateDirectories(sourceRoot, "Deployment", SearchOption.AllDirectories)
+            .. Corpus.EnumerateFiles("src", "*.cs")
                 .Where(path => path.Contains("Squad", StringComparison.Ordinal)
-                               && !path.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
-                               && !path.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                               && path.Split('/').Contains("Deployment", StringComparer.Ordinal))
+                .Order(StringComparer.Ordinal)
         ];
-        string semanticsPath = Path.Combine(
-            sourceRoot,
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadFileSystemPathSemantics.cs");
+        const string semanticsPath = "src/KyberWeave.Data/Squad/Deployment/SquadFileSystemPathSemantics.cs";
 
         Assert.True(
-            File.Exists(semanticsPath),
+            Corpus.Exists(semanticsPath),
             "Containment must be centralized in SquadFileSystemPathSemantics.");
 
         List<string> offenders = new();
-        foreach (string sourcePath in deploymentRoots
-                     .SelectMany(root => Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)))
+        foreach (string sourcePath in deploymentSources)
         {
             if (string.Equals(sourcePath, semanticsPath, StringComparison.Ordinal))
                 continue;
 
-            string source = File.ReadAllText(sourcePath, Encoding.UTF8);
+            string source = Corpus.ReadText(sourcePath);
             if (source.Contains("private static StringComparison PathComparison", StringComparison.Ordinal) ||
                 source.Contains("private static bool IsWithin(", StringComparison.Ordinal) ||
                 source.Contains("private static bool PathsEqual(", StringComparison.Ordinal) ||

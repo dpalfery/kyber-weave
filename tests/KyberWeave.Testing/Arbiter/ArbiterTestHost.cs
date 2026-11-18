@@ -47,27 +47,6 @@ internal sealed class ArbiterTestHost : IDisposable
     public void Dispose() => _provider.Dispose();
 }
 
-/// <summary>A process environment with a fixed home directory and variables read through a delegate.</summary>
-/// <param name="home">Gets the home directory.</param>
-/// <param name="variables">Reads an environment variable; null reads nothing.</param>
-internal sealed class FakeProcessEnvironment(Func<string> home, Func<string, string?>? variables = null) : IProcessEnvironment
-{
-    /// <inheritdoc />
-    public string CurrentDirectory => Directory.GetCurrentDirectory();
-
-    /// <inheritdoc />
-    public bool IsInputRedirected => true;
-
-    /// <inheritdoc />
-    public string HomeDirectory => home();
-
-    /// <inheritdoc />
-    public string TempDirectory => Path.GetTempPath();
-
-    /// <inheritdoc />
-    public string? GetVariable(string name) => variables?.Invoke(name);
-}
-
 /// <summary>The key input a test scripts: what stdin yields and what the masked prompt yields.</summary>
 /// <param name="stdin">Gets the stdin line.</param>
 /// <param name="prompt">Gets the prompted key.</param>

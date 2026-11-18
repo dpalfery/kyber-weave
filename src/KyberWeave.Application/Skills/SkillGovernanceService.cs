@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
@@ -11,11 +12,15 @@ using KyberWeave.Core.Skills.Validation;
 namespace KyberWeave.Application.Skills;
 
 /// <summary>Runs the skill governance library over a path and writes what the authoring commands produce.</summary>
-public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArchiveWriter archive) : ISkillGovernanceService
+public sealed class SkillGovernanceService(
+    IWritableFileSystem files,
+    ISkillArchiveWriter archive,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISkillGovernanceService
 {
     private const string ParseErrorCode = "KW-PARSE-000";
 
-    private readonly SkillFileReader _reader = new(files);
+    private readonly SkillFileReader _reader = new(files, paths, environment);
 
     /// <inheritdoc />
     public DiagnosticReport Validate(string path)
@@ -69,7 +74,7 @@ public sealed class SkillGovernanceService(IWritableFileSystem files, ISkillArch
         if (!files.FileExists(evalFile))
             return null;
 
-        RoutingEvalFile loaded = RoutingEvalFile.Parse(files.ReadAllText(evalFile));
+        RoutingEvalFile loaded = RoutingEvalFileParser.Parse(files.ReadAllText(evalFile));
         return new RoutingEvaluator(strategy).Evaluate(loaded, skills);
     }
 

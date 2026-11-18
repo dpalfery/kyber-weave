@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Routing;
@@ -44,7 +45,7 @@ public sealed class RouteSettings : CommandSettings
     public bool Json { get; set; }
 }
 
-public sealed class RouteCommand(ISkillGovernanceService skills) : Command<RouteSettings>
+public sealed class RouteCommand(ISkillGovernanceService skills, IAnsiConsole ansi, IConsole standard) : Command<RouteSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, RouteSettings settings, CancellationToken cancellationToken)
@@ -52,7 +53,7 @@ public sealed class RouteCommand(ISkillGovernanceService skills) : Command<Route
         SkillSet set = skills.LoadSet(settings.SkillsPath);
         if (set.Count == 0)
         {
-            AnsiConsole.MarkupLine($"[red]No skills found under '{Markup.Escape(settings.SkillsPath)}'.[/]");
+            ansi.MarkupLine($"[red]No skills found under '{Markup.Escape(settings.SkillsPath)}'.[/]");
             return 2;
         }
 
@@ -68,11 +69,11 @@ public sealed class RouteCommand(ISkillGovernanceService skills) : Command<Route
     }
 
     /// <summary>Routes the one prompt given on the command line and prints the ranked skills.</summary>
-    private static int RunSingle(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
+    private int RunSingle(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
         if (string.IsNullOrWhiteSpace(settings.Prompt))
         {
-            AnsiConsole.MarkupLine("[red]Provide a prompt, or use --eval <file>.[/]");
+            ansi.MarkupLine("[red]Provide a prompt, or use --eval <file>.[/]");
             return 2;
         }
 
@@ -93,12 +94,12 @@ public sealed class RouteCommand(ISkillGovernanceService skills) : Command<Route
                         ["score"] = Math.Round(c.Score, 4)
                     }).ToArray())
             };
-            Console.WriteLine(obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            standard.Out.WriteLine(obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
             return 0;
         }
 
-        AnsiConsole.MarkupLine($"Prompt: [italic]\"{Markup.Escape(settings.Prompt!)}\"[/]");
-        AnsiConsole.MarkupLine(result.Fired
+        ansi.MarkupLine($"Prompt: [italic]\"{Markup.Escape(settings.Prompt!)}\"[/]");
+        ansi.MarkupLine(result.Fired
             ? $"Would fire: [green bold]{Markup.Escape(result.SelectedSkill!)}[/] (margin over runner-up: {result.Margin:F3})"
             : $"[yellow]No skill clears the fire threshold ({strategy.Name} @ {settings.Threshold}).[/]");
 
@@ -111,16 +112,26 @@ public sealed class RouteCommand(ISkillGovernanceService skills) : Command<Route
             table.AddRow($"{mark}{rank}", Markup.Escape(c.SkillName), $"{c.Score:F3}");
             rank++;
         }
-        AnsiConsole.Write(table);
+        ansi.Write(table);
         return 0;
     }
 
     private int RunEval(RouteSettings settings, SkillSet set, IRoutingStrategy strategy)
     {
-        RoutingEvalSummary? evaluated = skills.Evaluate(settings.EvalFile!, strategy, set);
+        RoutingEvalSummary? evaluated;
+        try
+        {
+            evaluated = skills.Evaluate(settings.EvalFile!, strategy, set);
+        }
+        catch (RoutingEvalParseException error)
+        {
+            ansi.MarkupLine($"[red]{Markup.Escape(error.Message)}[/]");
+            return 2;
+        }
+
         if (evaluated is null)
         {
-            AnsiConsole.MarkupLine($"[red]Eval file not found: {Markup.Escape(settings.EvalFile!)}[/]");
+            ansi.MarkupLine($"[red]Eval file not found: {Markup.Escape(settings.EvalFile!)}[/]");
             return 2;
         }
 
@@ -143,7 +154,7 @@ public sealed class RouteCommand(ISkillGovernanceService skills) : Command<Route
                         ["passed"] = r.Passed
                     }).ToArray())
             };
-            Console.WriteLine(obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            standard.Out.WriteLine(obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
         }
         else
         {
@@ -154,9 +165,9 @@ public sealed class RouteCommand(ISkillGovernanceService skills) : Command<Route
                 string glyph = r.Passed ? "[green]✔[/]" : "[red]✘[/]";
                 table.AddRow(glyph, Markup.Escape(Trunc(r.Case.Prompt, 50)), Markup.Escape(r.ExpectedLabel), Markup.Escape(r.ActualLabel));
             }
-            AnsiConsole.Write(table);
+            ansi.Write(table);
             string color = summary.Accuracy >= settings.MinAccuracy ? "green" : "red";
-            AnsiConsole.MarkupLine($"Routing accuracy: [{color}]{summary.Accuracy:P0}[/] ({summary.Passed}/{summary.Total}), threshold {settings.MinAccuracy:P0}.");
+            ansi.MarkupLine($"Routing accuracy: [{color}]{summary.Accuracy:P0}[/] ({summary.Passed}/{summary.Total}), threshold {settings.MinAccuracy:P0}.");
         }
 
         return summary.Accuracy >= settings.MinAccuracy ? 0 : 1;

@@ -1,5 +1,5 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
-using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -50,6 +50,7 @@ internal sealed class HookGitFacts(
     IRunCheckout checkouts,
     IRunStateStore runStates,
     IProcessEnvironment process,
+    IPathResolver paths,
     TimeProvider clock,
     string workingDirectory,
     string? homeDirectory = null,
@@ -66,12 +67,12 @@ internal sealed class HookGitFacts(
         }
 
         // The newest record wins: a run that reuses a directory replaces the run that worked there before.
-        string wanted = KyberWeave.Core.RunStart.RunBaseStateFormat.NormalizeDirectory(cwd);
+        string wanted = KyberWeave.Core.RunStart.RunBaseStateFormat.NormalizeDirectory(cwd, paths, process);
         KyberWeave.Core.RunStart.RunRecord? record = runStates.ReadRecords(home)?
             .Where(candidate => string.Equals(
-                KyberWeave.Core.RunStart.RunBaseStateFormat.NormalizeDirectory(candidate.Worktree),
+                KyberWeave.Core.RunStart.RunBaseStateFormat.NormalizeDirectory(candidate.Worktree, paths, process),
                 wanted,
-                KyberWeave.Core.RunStart.RunBaseStateFormat.PathComparison))
+                KyberWeave.Core.RunStart.RunBaseStateFormat.PathComparison(process)))
             .OrderBy(candidate => candidate.StartedAt ?? DateTimeOffset.MinValue)
             .LastOrDefault();
         return record is null ? null : new ArbiterRunScope(cwd, record.StartedAt);
@@ -97,6 +98,7 @@ internal sealed class HookGitFacts(
     private const int SurroundingLines = 20;
     private const long MaxSurroundingsFileBytes = 1L << 24;
     private static readonly TimeSpan PeekRetryBudget = TimeSpan.FromMilliseconds(100);
+    private static readonly TimeSpan PeekPause = TimeSpan.FromMilliseconds(20);
 
     /// <inheritdoc/>
     public ArbiterFactSet Enrich(ArbiterFactSet facts, TriggerClassification classification, ArbiterEvent ev)
@@ -489,6 +491,7 @@ internal sealed class HookGitFacts(
         }
 
         StoredSnapshot? entry = PeekUntilSettled(
+            clock,
             () => snapshots.ReadText(directory, fileName),
             text =>
             {
@@ -505,17 +508,17 @@ internal sealed class HookGitFacts(
                 entry.Statuses ?? new Dictionary<string, string>(StringComparer.Ordinal));
     }
 
-    internal static T? PeekUntilSettled<T>(Func<string> read, Func<string, T?> find, TimeSpan budget)
+    internal static T? PeekUntilSettled<T>(TimeProvider clock, Func<string> read, Func<string, T?> find, TimeSpan budget)
         where T : class
     {
         // Contents, not timestamps: a save inside one timestamp tick of a coarse
         // filesystem still counts as a change, so it still pairs.
-        Stopwatch elapsed = Stopwatch.StartNew();
+        long started = clock.GetTimestamp();
         string seen = read();
         while (true)
         {
             T? match = find(seen);
-            if (match is not null || elapsed.Elapsed >= budget)
+            if (match is not null || clock.GetElapsedTime(started) >= budget)
             {
                 return match;
             }
@@ -527,7 +530,7 @@ internal sealed class HookGitFacts(
             }
 
             seen = next;
-            Thread.Sleep(TimeSpan.FromMilliseconds(20));
+            Task.Delay(PeekPause, clock).GetAwaiter().GetResult();
         }
     }
 

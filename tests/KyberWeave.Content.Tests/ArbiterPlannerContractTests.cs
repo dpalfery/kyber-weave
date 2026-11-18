@@ -1,0 +1,72 @@
+using KyberWeave.Tests.Corpus;
+using Xunit;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Pins the planner Arbiter contract's tokens and structure (packet 7.2): the architect
+/// escalation route, the escalation return statuses, attestation only after
+/// <c>NEEDS_DECISION</c>, and investigator-dispatch markers on both planners. What the three
+/// escalation outcomes mean is graded from the prose rule catalog.
+/// </summary>
+public sealed class ArbiterPlannerContractTests
+{
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static string ArchitectPrincipal =>
+        Corpus.ReadText("products/kyber-squad/agents/architect.md");
+
+    private static string EscalationReference =>
+        Corpus.ReadText("products/kyber-squad/agents/architect/references/arbiter-escalation.md");
+
+    private static string ProductOwnerContract =>
+        Corpus.ReadText("products/kyber-squad/agents/product-owner.md");
+
+    private static string ArchitectContract =>
+        ArchitectPrincipal + "\n" + EscalationReference;
+
+    [Fact]
+    public void Architect_RoutesArbiterEscalationToReference()
+    {
+        Assert.Contains("STATUS: ARBITER_ESCALATION", ArchitectPrincipal, StringComparison.Ordinal);
+        Assert.Contains("arbiter-escalation.md", ArchitectPrincipal, StringComparison.Ordinal);
+        Assert.Contains("STATUS: ESCALATION_RESOLVED", ArchitectPrincipal, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void EscalationReference_NamesBothReturnStatuses()
+    {
+        string reference = EscalationReference;
+
+        Assert.Contains("STATUS: ESCALATION_RESOLVED", reference, StringComparison.Ordinal);
+        Assert.Contains("STATUS: NEEDS_DECISION", reference, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Attestation_FollowsNeedsDecisionAfterLedgerLoss()
+    {
+        string reference = EscalationReference;
+
+        Assert.Contains("STATUS: NEEDS_DECISION", reference, StringComparison.Ordinal);
+        Assert.Contains("ATTESTED:", reference, StringComparison.Ordinal);
+        Assert.Contains("=complete", reference, StringComparison.Ordinal);
+
+        int decisionIndex = reference.IndexOf("STATUS: NEEDS_DECISION", StringComparison.Ordinal);
+        int attestedIndex = reference.IndexOf("ATTESTED:", StringComparison.Ordinal);
+        Assert.True(
+            decisionIndex >= 0 && attestedIndex > decisionIndex,
+            "ATTESTED must follow NEEDS_DECISION: attestation is returned only after the user confirms.");
+    }
+
+    [Fact]
+    public void Architect_MarksInvestigatorDispatches()
+    {
+        Assert.Contains("KYBER-ARBITER: true", ArchitectContract, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProductOwner_MarksInvestigatorDispatches()
+    {
+        Assert.Contains("KYBER-ARBITER: true", ProductOwnerContract, StringComparison.Ordinal);
+    }
+}

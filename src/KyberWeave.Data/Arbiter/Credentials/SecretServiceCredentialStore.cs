@@ -32,6 +32,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     public string? Read(string origin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        RejectLineBreak(origin, nameof(origin));
         ProcessStartInfo startInfo = new("secret-tool")
         {
             UseShellExecute = false,
@@ -71,6 +72,8 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
+        RejectLineBreak(origin, nameof(origin));
+        RejectLineBreak(key, nameof(key));
         ProcessStartInfo startInfo = new("secret-tool")
         {
             UseShellExecute = false,
@@ -99,6 +102,7 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     public void Delete(string origin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        RejectLineBreak(origin, nameof(origin));
         ProcessStartInfo startInfo = new("secret-tool")
         {
             UseShellExecute = false,
@@ -143,6 +147,14 @@ public sealed class SecretServiceCredentialStore : ICredentialStore
     {
         return string.Join(' ',
             value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+    }
+
+    private static void RejectLineBreak(string value, string parameterName)
+    {
+        if (value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("A credential origin or key cannot contain a line break.", parameterName);
+        }
     }
 
     private ProcessResult RunSecretTool(ProcessStartInfo startInfo, string standardInput)

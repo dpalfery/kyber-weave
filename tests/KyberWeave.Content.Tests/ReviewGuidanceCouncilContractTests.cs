@@ -1,0 +1,418 @@
+using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
+using Xunit;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Pins the council review-guidance contract for the code-review skill and its agents under
+/// <c>products/kyber-squad/</c>: the four language checklists exist as pointers to their declared
+/// coding standard, every council entry point loads <c>REVIEW.md</c>, the review lens reports a
+/// guidance attribute per finding and lists the guidance sections it checked on a
+/// <c>NO FINDINGS</c> report, the test-adequacy lens names the file types it covers, the
+/// test-infrastructure and documentation-accuracy lenses exist and are mapped, and the
+/// <c>REVIEW.md</c> lens map names only lenses that exist. The prose rules (the no-standard
+/// fallback, the missing-attestation coverage gap, the correctness lens's input technique,
+/// strictness to every seat) are graded from the prose rule catalog.
+/// </summary>
+/// <remarks>
+/// This is the RED half of a test-first task. Each assertion names the missing token or file it
+/// is looking for, so a failure reads as the missing behaviour rather than a compile or harness
+/// fault. Assertions match stable tokens, not full prose, so wording can change without breaking them.
+/// </remarks>
+public sealed class ReviewGuidanceCouncilContractTests
+{
+    private const string GuidanceFileName = "REVIEW.md";
+    private const string LensMapHeading = "## Lens map";
+    private const string EveryOtherLensRow = "every other lens";
+    private const string LensColumnHeader = "Lens";
+
+    private static readonly Regex TypeScriptFileToken = new(@"\.ts\b", RegexOptions.CultureInvariant);
+    private static readonly Regex CSharpFileToken = new(@"\.cs\b", RegexOptions.CultureInvariant);
+
+    private const string ProductRoot = "products/kyber-squad";
+    private const string ChecklistRoot = ProductRoot + "/skills/code-review/references";
+    private const string LensesRoot = ChecklistRoot + "/lenses";
+
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    /// <summary>
+    /// Prevents a language or framework the council meets from being reviewed with no checklist at
+    /// all. Each new checklist is a pointer to its declared coding standard, never a rule of its own.
+    /// What a checklist says when no standard is declared is graded from the prose rule catalog.
+    /// </summary>
+    [Theory]
+    [InlineData("typescript.md")]
+    [InlineData("rust.md")]
+    [InlineData("tauri.md")]
+    [InlineData("go.md")]
+    public void ALanguageChecklistExistsAndPointsAtItsDeclaredStandard(string fileName)
+    {
+        string path = $"{ChecklistRoot}/{fileName}";
+        Assert.True(Corpus.Exists(path), $"Review checklist '{path}' is missing.");
+
+        string text = Corpus.ReadText(path);
+        Assert.True(
+            text.Contains("coding-standard>", StringComparison.Ordinal),
+            $"'{fileName}' must point at a declared <...-coding-standard> rather than state its own rules.");
+    }
+
+    /// <summary>
+    /// Prevents a language the council reviews from having a checklist that points at a standard the
+    /// repository never declared. A checklist resolves <c>&lt;...-coding-standard&gt;</c> through the
+    /// Config Reg block in <c>AGENTS.md</c>, so each technology needs that declaration, a standard file
+    /// whose front matter is current, and a checklist file. The shipped checklist must not name this
+    /// repository's path, because host repositories copy it. Without them the
+    /// "standard declared" fallback is the only thing that answers, and it answers every time.
+    /// </summary>
+    [Theory]
+    [InlineData("typescript")]
+    [InlineData("rust")]
+    [InlineData("tauri")]
+    [InlineData("go")]
+    public void ATechnologyDeclaresItsCodingStandardInTheRegistryAndItsChecklistExists(string technology)
+    {
+        string agentsText = ConfigRegBlock(Corpus.ReadText("AGENTS.md"));
+        string declaration = $"- **<{technology}-coding-standard>**: `docs/standards/{technology}/{technology}.standards.md`";
+        string standardPath = $"docs/standards/{technology}/{technology}.standards.md";
+        string checklistPath = $"{ChecklistRoot}/{technology}.md";
+
+        List<string> gaps = [];
+
+        if (!agentsText.Contains(declaration, StringComparison.Ordinal))
+        {
+            gaps.Add($"'AGENTS.md' Config Reg block does not declare '{declaration}'.");
+        }
+
+        if (!Corpus.Exists(standardPath))
+        {
+            gaps.Add($"Coding standard '{standardPath}' is missing.");
+        }
+        else
+        {
+            string[] frontMatter = FrontMatterLines(Corpus.ReadText(standardPath));
+            foreach (string expected in new[]
+                         { "doc-type: coding-standard", $"technology: {technology}", "status: current" })
+            {
+                if (!frontMatter.Any(line => string.Equals(line, expected, StringComparison.Ordinal)))
+                {
+                    gaps.Add($"'{standardPath}' front matter does not state '{expected}'.");
+                }
+            }
+        }
+
+        if (!Corpus.Exists(checklistPath))
+        {
+            gaps.Add($"Review checklist '{checklistPath}' is missing.");
+        }
+        else if (!Corpus.ReadText(checklistPath).Contains($"<{technology}-coding-standard>", StringComparison.Ordinal))
+        {
+            gaps.Add($"'{technology}.md' does not name its own '<{technology}-coding-standard>' token.");
+        }
+
+        Assert.True(
+            gaps.Count == 0,
+            $"Technology '{technology}' is not fully wired to a declared coding standard: " + string.Join(" ", gaps));
+    }
+
+    /// <summary>
+    /// Prevents a council entry point from naming the review guidance without applying it. A bare
+    /// mention of <c>REVIEW.md</c> or the <c>&lt;review-guidance&gt;</c> path was already present in
+    /// code-reviewer.md before the change, so each entry point must carry the token that proves it
+    /// applies the guidance: the attestation line, or the skill's guidance-file token. The refuter,
+    /// in-process and apply-the-guidance sentences are graded from the prose rule catalog.
+    /// </summary>
+    [Theory]
+    [InlineData("skills/code-review/SKILL.md", "REVIEW.md sections checked: [<ids>]")]
+    [InlineData("skills/code-review/SKILL.md", "(`REVIEW.md`)")]
+    [InlineData("agents/code-reviewer.md", "REVIEW.md sections checked: [<ids>]")]
+    [InlineData("agents/review-lens.md", "REVIEW.md sections checked: [<rule ids")]
+    [InlineData("agents/review-triage.md", "REVIEW.md sections checked: [Ground rules]")]
+    public void EveryCouncilEntryPointAppliesTheReviewGuidance(string relativePath, string token)
+    {
+        string text = ReadProduct(relativePath);
+
+        Assert.True(
+            text.Contains(token, StringComparison.Ordinal),
+            $"'{relativePath}' must carry '{token}' to show it applies the review guidance, not merely names it.");
+    }
+
+    /// <summary>
+    /// Prevents a finding from reaching the reviewer without the rule it applied. The
+    /// <c>guidance:</c> field lets the adjudicator check each finding against the host's own rules
+    /// rather than trusting that the lens read them.
+    /// </summary>
+    [Fact]
+    public void ReviewLensRequiresAGuidanceAttributeOnEachFinding()
+    {
+        string text = ReadProduct("agents/review-lens.md");
+
+        AssertContainsAll(text, "agents/review-lens.md", "guidance:", GuidanceFileName);
+    }
+
+    /// <summary>
+    /// Prevents a clean <c>NO FINDINGS</c> report from passing without proof the guidance was read.
+    /// The discovery line and then the attestation must sit on the two lines directly after the
+    /// report-form <c>NO FINDINGS</c> line, so a stray mention elsewhere in the file cannot satisfy
+    /// it. Without the discovery line in the example, a seat copying the example omits it and the
+    /// verdict engine flags the report (KW-REVIEW-044).
+    /// </summary>
+    [Fact]
+    public void ReviewLensNoFindingsReportCarriesTheAttestationLine()
+    {
+        string text = ReadProduct("agents/review-lens.md");
+
+        AssertClosingLinesFollow(
+            text,
+            "agents/review-lens.md",
+            "NO FINDINGS:",
+            "Discovery: codegraph N, docs N, direct reads N",
+            "REVIEW.md sections checked: [");
+    }
+
+    /// <summary>
+    /// Prevents a findings-form lens output from omitting the attestation. That it is the last line is
+    /// graded from the prose rule catalog.
+    /// </summary>
+    [Fact]
+    public void ReviewLensFindingsFormCarriesTheAttestationLine()
+    {
+        string text = ReadProduct("agents/review-lens.md");
+
+        Assert.True(
+            text.Contains("REVIEW.md sections checked: [<rule ids", StringComparison.Ordinal),
+            "'agents/review-lens.md' findings form must carry the 'REVIEW.md sections checked: [' attestation line.");
+    }
+
+    /// <summary>
+    /// Prevents a triage seat's clean report from passing without its attestation. Triage seats apply
+    /// the ground rules only, so the discovery line must sit directly after the report-form
+    /// <c>NO FINDINGS</c> line, and the attestation must name <c>[Ground rules]</c> directly after it.
+    /// </summary>
+    [Fact]
+    public void ReviewTriageNoFindingsReportAttestsItsGroundRules()
+    {
+        string text = ReadProduct("agents/review-triage.md");
+
+        AssertClosingLinesFollow(
+            text,
+            "agents/review-triage.md",
+            "NO FINDINGS:",
+            "Discovery: codegraph N, docs N, direct reads N",
+            "REVIEW.md sections checked: [Ground rules]");
+    }
+
+    /// <summary>
+    /// Prevents the per-finding <c>guidance:</c> field from losing its template slot.
+    /// </summary>
+    [Fact]
+    public void ReviewLensGuidanceFieldKeepsItsTemplateSlot()
+    {
+        string text = ReadProduct("agents/review-lens.md");
+
+        AssertContainsAll(text, "agents/review-lens.md", "guidance: <optional");
+    }
+
+    /// <summary>
+    /// Prevents a changed <c>.ts</c> or <c>.cs</c> file from passing the test-adequacy lens without
+    /// the lens asking whether its behaviour has a test. The lens must name both file types.
+    /// </summary>
+    [Fact]
+    public void TestAdequacyLensCoversChangedTypeScriptAndCSharpFiles()
+    {
+        string text = ReadProduct("skills/code-review/references/lenses/test-adequacy.md");
+
+        Assert.True(
+            TypeScriptFileToken.IsMatch(text),
+            "'test-adequacy.md' must cover changed .ts files.");
+        Assert.True(
+            CSharpFileToken.IsMatch(text),
+            "'test-adequacy.md' must cover changed .cs files.");
+    }
+
+    /// <summary>
+    /// Prevents the council strictness setting from reaching the verdict engine but not the lenses:
+    /// the code-review skill names <c>review.policy.strictness</c> and the review lens names each level.
+    /// That the skill passes it to every seat is graded from the prose rule catalog.
+    /// </summary>
+    [Fact]
+    public void TheCodeReviewSkillAndLensNameTheStrictnessSettingAndLevels()
+    {
+        string skill = Corpus.ReadText($"{ProductRoot}/skills/code-review/SKILL.md");
+        Assert.True(
+            skill.Contains("review.policy.strictness", StringComparison.Ordinal),
+            "The code-review skill must document review.policy.strictness.");
+
+        string lens = Corpus.ReadText($"{ProductRoot}/agents/review-lens.md");
+        Assert.True(
+            lens.Contains("`lenient`", StringComparison.Ordinal) &&
+            lens.Contains("`balanced`", StringComparison.Ordinal) &&
+            lens.Contains("`strict`", StringComparison.Ordinal),
+            "The review-lens agent must say how it applies each strictness level it is given.");
+    }
+
+    /// <summary>
+    /// Prevents shared test machinery (fakes, fixtures, caches, capture helpers) from going
+    /// unreviewed: the council must carry a lens for it, the catalogue must list it, and the lens
+    /// map must give it the test-infrastructure guidance section.
+    /// </summary>
+    [Fact]
+    public void ATestInfrastructureLensExistsIsCataloguedAndMapped()
+    {
+        string lensPath = $"{LensesRoot}/test-infrastructure.md";
+        Assert.True(Corpus.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+
+        // The lens catalogue lives in the first-review reference, beside the lens files it links.
+        string catalogue = Corpus.ReadText($"{ProductRoot}/skills/code-review/references/first-review.md");
+        Assert.True(
+            catalogue.Contains("(lenses/test-infrastructure.md)", StringComparison.Ordinal),
+            "The code-review skill catalogue must list the test-infrastructure lens.");
+
+        string guidance = Corpus.ReadText(GuidanceFileName);
+        Assert.True(
+            Regex.IsMatch(guidance, @"^\| test-infrastructure \| 4, 10, 14 \|$", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must route the test-infrastructure lens to sections 4, 10, 14.");
+        Assert.True(
+            guidance.Contains("### 14. Test infrastructure", StringComparison.Ordinal),
+            $"{GuidanceFileName} must carry the test-infrastructure guidance section.");
+    }
+
+    /// <summary>
+    /// Prevents documentation claims (counts, enumerations, procedures, absolutes) from going
+    /// unchecked against the code: the council must carry a documentation-accuracy lens that
+    /// verifies against the code, catalogued and mapped to the docs guidance section.
+    /// </summary>
+    [Fact]
+    public void ADocumentationAccuracyLensExistsIsCataloguedAndMapped()
+    {
+        string lensPath = $"{LensesRoot}/documentation-accuracy.md";
+        Assert.True(Corpus.Exists(lensPath), $"Council lens '{lensPath}' is missing.");
+
+        // The lens catalogue lives in the first-review reference, beside the lens files it links.
+        string catalogue = Corpus.ReadText($"{ProductRoot}/skills/code-review/references/first-review.md");
+        Assert.True(
+            catalogue.Contains("(lenses/documentation-accuracy.md)", StringComparison.Ordinal),
+            "The code-review skill catalogue must list the documentation-accuracy lens.");
+
+        string guidance = Corpus.ReadText(GuidanceFileName);
+        Assert.True(
+            Regex.IsMatch(guidance, @"^\| documentation-accuracy \| 11, Scope discipline \|$", RegexOptions.Multiline),
+            $"{GuidanceFileName} lens map must route the documentation-accuracy lens to section 11 and Scope discipline.");
+        Assert.True(
+            guidance.Contains("### 11. Docs, plans, and agent files", StringComparison.Ordinal),
+            $"{GuidanceFileName} must keep the section 11 the documentation-accuracy lens is routed to.");
+    }
+
+    /// <summary>
+    /// Prevents the <c>REVIEW.md</c> lens map from routing guidance to lens names that do not exist.
+    /// A row naming a missing lens falls into the catch-all and its guidance is never applied, so
+    /// every named lens must match a file under <c>references/lenses/</c>.
+    /// </summary>
+    [Fact]
+    public void ReviewGuidanceLensMapNamesOnlyLensesThatExist()
+    {
+        HashSet<string> lensNames = new(StringComparer.Ordinal);
+        foreach (string file in Corpus.EnumerateFiles(LensesRoot, "*.md", recursive: false))
+        {
+            lensNames.Add(Path.GetFileNameWithoutExtension(file) ?? string.Empty);
+        }
+
+        string[] lines = Corpus.ReadText(GuidanceFileName).ReplaceLineEndings("\n").Split('\n');
+        int start = Array.FindIndex(lines, line => line.Trim() == LensMapHeading);
+        Assert.True(start >= 0, $"{GuidanceFileName} must keep its '{LensMapHeading}' section.");
+
+        char[] separators = ['/', ','];
+        List<string> unknown = [];
+        int rowCount = 0;
+        for (int i = start + 1; i < lines.Length && !lines[i].StartsWith("## ", StringComparison.Ordinal); i++)
+        {
+            string line = lines[i].Trim();
+            if (!line.StartsWith('|'))
+            {
+                continue;
+            }
+
+            string lensColumn = line.Trim('|').Split('|')[0].Trim();
+            if (lensColumn == LensColumnHeader ||
+                lensColumn.StartsWith("---", StringComparison.Ordinal) ||
+                lensColumn.Equals(EveryOtherLensRow, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            rowCount++;
+            foreach (string name in lensColumn.Split(
+                separators, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            {
+                if (!lensNames.Contains(name))
+                {
+                    unknown.Add($"'{lensColumn}' names '{name}'");
+                }
+            }
+        }
+
+        Assert.True(rowCount > 0, $"{GuidanceFileName} lens map has no lens rows to check.");
+        Assert.True(
+            unknown.Count == 0,
+            $"{GuidanceFileName} lens map names lenses that do not exist under references/lenses/: " +
+            string.Join("; ", unknown) + ".");
+    }
+
+    /// <summary>Returns the text between the Config Reg markers, or empty when either is missing.</summary>
+    private static string ConfigRegBlock(string text)
+    {
+        const string start = "<!-- KYBER_WEAVE_CONFIG_REG_START -->";
+        const string end = "<!-- KYBER_WEAVE_CONFIG_REG_END -->";
+        int from = text.IndexOf(start, StringComparison.Ordinal);
+        int to = text.IndexOf(end, StringComparison.Ordinal);
+        return from < 0 || to < from ? string.Empty : text[from..to];
+    }
+
+    /// <summary>Returns the trimmed lines between the opening and closing <c>---</c> of a document's front matter.</summary>
+    private static string[] FrontMatterLines(string text)
+    {
+        string[] lines = text.Split('\n');
+        if (lines.Length == 0 || lines[0].Trim() != "---")
+        {
+            return [];
+        }
+
+        List<string> block = [];
+        for (int i = 1; i < lines.Length; i++)
+        {
+            if (lines[i].Trim() == "---")
+            {
+                return block.ToArray();
+            }
+
+            block.Add(lines[i].Trim());
+        }
+
+        return [];
+    }
+
+    private static string ReadProduct(string relativePath) => Corpus.ReadText($"{ProductRoot}/{relativePath}");
+
+    private static void AssertClosingLinesFollow(string text, string source, string anchor, string discovery, string attestation)
+    {
+        string[] lines = text.Split('\n');
+        int index = Array.FindIndex(lines, line => line.TrimEnd('\r').StartsWith(anchor, StringComparison.Ordinal));
+        Assert.True(index >= 0, $"'{source}' must keep its report line starting '{anchor}'.");
+        Assert.True(
+            index + 2 < lines.Length
+                && lines[index + 1].Trim().StartsWith(discovery, StringComparison.Ordinal)
+                && lines[index + 2].Trim().StartsWith(attestation, StringComparison.Ordinal),
+            $"'{source}' must put '{discovery}' on the line directly after '{anchor}' and '{attestation}' on the line directly after that.");
+    }
+
+    private static void AssertContainsAll(string text, string source, params string[] tokens)
+    {
+        string[] missing = tokens
+            .Where(token => !text.Contains(token, StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.True(
+            missing.Length == 0,
+            $"'{source}' is missing required token(s): {string.Join(", ", missing)}.");
+    }
+}

@@ -1,6 +1,7 @@
 using KyberWeave.Application.Hooks;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Domain.Hooks;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Application.Tests.Hooks;
@@ -19,11 +20,12 @@ public sealed class EditHookServiceTests
     private HooksConfig config = HooksDefaults.Config;
     private TestClassResolution tests = new(["App.Tests.FooTests"], "tests/App.Tests/App.Tests.csproj");
 
-    private (EditHookService Service, FakeProcessRunner Runner, FakeTestClassResolver Resolver) Build(Exception? configFailure = null)
+    private (EditHookService Service, FakeProcessRunner Runner, FakeTestClassResolver Resolver) Build(Exception? configFailure = null, string? workingDirectory = null)
     {
+        FakePathResolver paths = FakePathResolver.OverEmptyFileSystem();
         FakeProcessRunner runner = new(clock);
         FakeTestClassResolver resolver = new(tests);
-        return (new EditHookService(fileSystem, new FakeConfigSource(config, configFailure), resolver, runner, clock), runner, resolver);
+        return (new EditHookService(fileSystem, new FakeConfigSource(config, configFailure), resolver, runner, clock, paths, new FakeProcessEnvironment(currentDirectory: workingDirectory ?? FakeFileSystem.Root)), runner, resolver);
     }
 
     private static HooksConfig Enable(HooksConfig source, string id) =>
@@ -59,6 +61,28 @@ public sealed class EditHookServiceTests
 
         Assert.All(runner.Calls, c => Assert.Equal(FakeFileSystem.Root, c.Cwd));
         Assert.Equal(2, runner.Calls.Count);
+    }
+
+    [Fact]
+    public async Task ABlankCwdMakesARelativeFilePathReadAgainstTheEnvironmentsWorkingDirectory()
+    {
+        (EditHookService service, FakeProcessRunner runner, _) = Build(workingDirectory: FakeFileSystem.Root);
+
+        _ = await service.RunAsync(new HookEditEvent("src/App/Foo.cs", string.Empty), CancellationToken.None);
+
+        Assert.Equal(2, runner.Calls.Count);
+        Assert.All(runner.Calls, c => Assert.Equal(FakeFileSystem.Root, c.Cwd));
+    }
+
+    [Fact]
+    public async Task AFileOutsideTheSessionDirectoryRunsNothing()
+    {
+        (EditHookService service, FakeProcessRunner runner, _) = Build(workingDirectory: FakeFileSystem.Abs("elsewhere"));
+
+        HookResult result = await service.RunAsync(new HookEditEvent("../src/App/Foo.cs", string.Empty), CancellationToken.None);
+
+        Assert.Equal(HookResult.Silent, result);
+        Assert.Empty(runner.Calls);
     }
 
     [Fact]

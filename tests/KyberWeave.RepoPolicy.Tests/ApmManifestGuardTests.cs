@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -18,8 +19,7 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ApmManifestGuardTests
 {
-    private static readonly string ApmManifestPath =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "apm.yml");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     /// <summary>
     /// Matches this repository's owner/name in every form APM accepts for a GitHub package:
@@ -41,7 +41,7 @@ public sealed class ApmManifestGuardTests
     [Fact]
     public void TheRepositoryManifestDeclaresNoApmSelfDependency()
     {
-        YamlMappingNode root = ParseManifest(File.ReadAllText(ApmManifestPath));
+        YamlMappingNode root = ParseManifest(Corpus.ReadText("apm.yml"));
 
         IReadOnlyList<string> offenders = FindSelfDependencies(root);
 
@@ -117,7 +117,7 @@ public sealed class ApmManifestGuardTests
     [Fact]
     public void TheRepositoryManifestPinsAgentSkillsTargets()
     {
-        YamlMappingNode root = ParseManifest(File.ReadAllText(ApmManifestPath));
+        YamlMappingNode root = ParseManifest(Corpus.ReadText("apm.yml"));
 
         Assert.True(
             root.Children.TryGetValue(new YamlScalarNode("targets"), out YamlNode? targetsNode),

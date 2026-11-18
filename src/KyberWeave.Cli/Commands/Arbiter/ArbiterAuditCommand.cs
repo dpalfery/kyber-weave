@@ -1,5 +1,7 @@
 using System.Globalization;
 using KyberWeave.Application.Arbiter;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
@@ -14,7 +16,11 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 public sealed class ArbiterAuditCommand(
     IArbiterConfigResolver configs,
     IArbiterRepositoryLocator locator,
-    IArbiterAuditService audits) : Command<ArbiterSettings>
+    IArbiterAuditService audits,
+    IRepositoryFileStore files,
+    IPathResolver paths,
+    IAnsiConsole console,
+    PlanArguments plans) : Command<ArbiterSettings>
 {
     /// <summary>A ledger event with no decision: the hook was killed, timed out or crashed after recording the event.</summary>
     public const string MissingDecision = ArbiterAuditService.MissingDecision;
@@ -56,7 +62,7 @@ public sealed class ArbiterAuditCommand(
         DiagnosticReport report = new();
         if (!configs.TryResolve(settings.Path, settings.Config, report, out KyberWeaveConfig config, out _))
         {
-            CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+            CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
             return 1;
         }
 
@@ -75,7 +81,7 @@ public sealed class ArbiterAuditCommand(
                     $"--since '{settings.Since}' is not an ISO-8601 timestamp.",
                     "--since",
                     Hint: "Pass an ISO-8601 timestamp, for example '2026-10-01T00:00:00Z'."));
-                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
                 return 1;
             }
 
@@ -88,31 +94,31 @@ public sealed class ArbiterAuditCommand(
         {
             // --plan takes the spellings the plan commands accept, so an agent that types a slug or a bare file name
             // still matches the repository-relative path the dispatch header carried.
-            if (!PlanArguments.TryResolve(repositoryRoot, config, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
+            if (!plans.TryResolve(repositoryRoot, config, files, settings.Plan, settings.WorkingDirectory, "arbiter audit", report, out string relative))
             {
-                CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+                CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
                 return 1;
             }
 
-            matchesPlan = new PlanFilter(repositoryRoot, config, relative).Matches;
+            matchesPlan = new PlanFilter(repositoryRoot, plans.ResolverFor(repositoryRoot, config, files), relative, paths).Matches;
         }
 
         if (audits.Audit(repositoryRoot, config, since, settings.Session, matchesPlan, report) is not { } audited)
         {
-            CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+            CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
             return 1;
         }
 
         foreach (string attestation in audited.Attestations)
         {
-            AnsiConsole.MarkupLine($"[grey]{Markup.Escape(attestation)}.[/]");
+            console.MarkupLine($"[grey]{Markup.Escape(attestation)}.[/]");
         }
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[grey]{audited.ModelEvaluations} decision-model evaluation(s) over {audited.ImplementationDispatches} dispatch(es) to implementation agents.[/]");
-        AnsiConsole.MarkupLine($"[grey]{audited.Findings} finding(s) over {audited.EventCount} ledger event(s).[/]");
+        console.MarkupLine($"[grey]{audited.Findings} finding(s) over {audited.EventCount} ledger event(s).[/]");
 
-        CommandHelpers.Finish(report, settings, "arbiter audit", "Event");
+        CommandHelpers.Finish(console, report, settings, "arbiter audit", "Event");
         return report.HasErrors ? 1 : 0;
     }
 
@@ -121,9 +127,9 @@ public sealed class ArbiterAuditCommand(
         Execute(context, settings, CancellationToken.None);
 
     /// <summary>The plan <c>--plan</c> named, resolved to its repository-relative path, and the same resolution of a ledger event's plan file.</summary>
-    private sealed class PlanFilter(string root, KyberWeaveConfig config, string relative)
+    private sealed class PlanFilter(string root, PlanFileResolver resolver, string relative, IPathResolver paths)
     {
-        private readonly PlanPathResolver _resolver = new(root, config);
+        private readonly PlanFileResolver _resolver = resolver;
         private readonly Dictionary<string, string> _seen = new(StringComparer.Ordinal);
 
         public bool Matches(string? eventPlan)
@@ -136,7 +142,7 @@ public sealed class ArbiterAuditCommand(
                 PlanPathResolution resolution = _resolver.Resolve(eventPlan, root);
                 canonical = resolution.Found
                     ? resolution.Path!
-                    : Path.GetRelativePath(root, Path.GetFullPath(eventPlan, root)).Replace('\\', '/');
+                    : Path.GetRelativePath(root, paths.GetFullPath(eventPlan, root)).Replace('\\', '/');
                 _seen[eventPlan] = canonical;
             }
 

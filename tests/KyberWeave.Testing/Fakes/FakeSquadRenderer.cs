@@ -7,9 +7,18 @@ using KyberWeave.Core.Squad.Rendering;
 namespace KyberWeave.Tests.Fakes;
 
 /// <summary>
-/// Deterministic in-memory fake implementing <see cref="ISquadRenderer"/> for testing
-/// lifecycle orchestration, lowering, structured degradation, and packaging contracts.
+/// The one fake for <see cref="ISquadRenderer"/>: it records every render request and answer, and
+/// produces the result the test configured — a canonical catalog by default, or the scripted
+/// content, failure, blocks or inner renderer a factory names.
 /// </summary>
+/// <remarks>
+/// The parameterless fake renders the canonical agent and skill catalog, which lifecycle,
+/// lowering and packaging tests expect. A test that only needs a specific answer configures one
+/// through a factory (<see cref="Empty"/>, <see cref="Failing"/>, <see cref="ScriptedAgents"/>,
+/// <see cref="Emitting"/>, <see cref="WithBlocks"/>, <see cref="Wrapping"/>) or scripts it with
+/// <see cref="Responding"/>, so it stays a configuration of this fake rather than another local
+/// double.
+/// </remarks>
 public sealed class FakeSquadRenderer : ISquadRenderer
 {
     private static readonly IReadOnlyList<string> CanonicalAgents =
@@ -72,25 +81,154 @@ public sealed class FakeSquadRenderer : ISquadRenderer
         "python-dev"
     ];
 
+    private readonly Lock _gate = new();
     private readonly List<SquadRenderRequest> _renderRequests = [];
+    private readonly List<SquadRenderResult> _results = [];
 
+    /// <summary>A fake that renders nothing and succeeds, advertising every target or the ones named.</summary>
+    internal static FakeSquadRenderer Empty(params SquadTarget[] targets) =>
+        Responding(static _ => new SquadRenderResult(true, [], [], [], []), targets);
 
-    public IReadOnlyList<SquadRenderRequest> RenderRequests => _renderRequests;
+    /// <summary>A fake whose every render reports failure with <paramref name="errors"/>.</summary>
+    internal static FakeSquadRenderer Failing(params string[] errors) =>
+        Responding(_ => new SquadRenderResult(false, [], [], [], errors));
+
+    /// <summary>
+    /// A fake that renders one file per named agent per requested target, at <c>agents/{name}.md</c>
+    /// with the bytes <c>canonical {name}</c>, so a release can drop or add an agent.
+    /// </summary>
+    internal static FakeSquadRenderer ScriptedAgents(params string[] agentNames)
+    {
+        ArgumentNullException.ThrowIfNull(agentNames);
+        return Responding(request =>
+        {
+            List<SquadDeploymentFile> files = [];
+            foreach (SquadTarget target in request.Targets)
+            {
+                foreach (string agent in agentNames)
+                {
+                    files.Add(AgentFile(target, agent));
+                }
+            }
+
+            return new SquadRenderResult(true, files, [], [], []);
+        });
+    }
+
+    /// <summary>A fake that returns <paramref name="files"/> unchanged, advertising the named targets.</summary>
+    internal static FakeSquadRenderer Emitting(
+        IReadOnlyList<SquadDeploymentFile> files,
+        params SquadTarget[] targets) =>
+        Responding(_ => new SquadRenderResult(true, files, [], [], []), targets);
+
+    /// <summary>A fake that returns <paramref name="blocks"/> and no files, advertising <paramref name="target"/>.</summary>
+    internal static FakeSquadRenderer WithBlocks(SquadTarget target, params SquadRenderedBlock[] blocks) =>
+        Responding(_ => new SquadRenderResult(true, [], [], [], [], blocks), [target]);
+
+    /// <summary>A fake that renders through <paramref name="inner"/> and records what it answered.</summary>
+    internal static FakeSquadRenderer Wrapping(ISquadRenderer inner)
+    {
+        ArgumentNullException.ThrowIfNull(inner);
+        return new FakeSquadRenderer { Inner = inner };
+    }
+
+    /// <summary>A fake whose answer is whatever <paramref name="respond"/> returns for the request.</summary>
+    internal static FakeSquadRenderer Responding(
+        Func<SquadRenderRequest, SquadRenderResult> respond,
+        params SquadTarget[] targets)
+    {
+        ArgumentNullException.ThrowIfNull(respond);
+        return new FakeSquadRenderer
+        {
+            Respond = respond,
+            NamedTargets = targets.Length == 0 ? null : targets,
+        };
+    }
+
+    /// <summary>Every render request received, in call order.</summary>
+    public IReadOnlyList<SquadRenderRequest> RenderRequests
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _renderRequests];
+            }
+        }
+    }
+
+    /// <summary>How many renders the fake ran.</summary>
+    internal int RenderCount => RenderRequests.Count;
+
+    /// <summary>Every answer the fake returned, in call order.</summary>
+    internal IReadOnlyList<SquadRenderResult> Results
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return [.. _results];
+            }
+        }
+    }
+
+    /// <summary>Every warning code the renders emitted, in call order, keeping repeats.</summary>
+    internal IReadOnlyList<string> WarningCodes =>
+        [.. Results.SelectMany(static result => result.Warnings).Select(static warning => warning.Code)];
 
     /// <summary>
     /// The fake renders whatever targets it is asked for — unlike the real registry, it
     /// carries no coverage gate, so existing lifecycle tests that exercise the full
     /// catalog roster keep working unchanged.
     /// </summary>
-    public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = SquadTargetCatalog.All;
+    public IReadOnlyCollection<SquadTarget> SupportedTargets => NamedTargets ?? Inner?.SupportedTargets ?? SquadTargetCatalog.All;
 
-    public Task<SquadRenderResult> RenderAsync(
+    private IReadOnlyCollection<SquadTarget>? NamedTargets { get; init; }
+
+    /// <summary>Builds the answer; when null the catalog render below answers.</summary>
+    private Func<SquadRenderRequest, SquadRenderResult>? Respond { get; init; }
+
+    /// <summary>The renderer to delegate to; when set it wins over <see cref="Respond"/> and the catalog.</summary>
+    private ISquadRenderer? Inner { get; init; }
+
+    /// <summary>Raised for every request instead of answering.</summary>
+    internal Exception? Fault { get; init; }
+
+    public async Task<SquadRenderResult> RenderAsync(
         SquadRenderRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        _renderRequests.Add(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            _renderRequests.Add(request);
+        }
 
+        if (Fault is not null)
+        {
+            throw Fault;
+        }
+
+        SquadRenderResult result = Inner is not null
+            ? await Inner.RenderAsync(request, cancellationToken).ConfigureAwait(false)
+            : Respond is not null ? Respond(request) : RenderCatalog(request);
+
+        lock (_gate)
+        {
+            _results.Add(result);
+        }
+
+        return result;
+    }
+
+    private static SquadDeploymentFile AgentFile(SquadTarget target, string agent) => new(
+        $"agents/{agent}.md",
+        Encoding.UTF8.GetBytes($"canonical {agent}\n"),
+        SquadTargetCatalog.GetToken(target));
+
+    private static SquadRenderResult RenderCatalog(SquadRenderRequest request)
+    {
         List<SquadDeploymentFile> files = [];
         List<SquadDegradationRecord> degradations = [];
         List<string> errors = [];
@@ -163,12 +301,12 @@ public sealed class FakeSquadRenderer : ISquadRenderer
             }
         }
 
-        return Task.FromResult(new SquadRenderResult(
+        return new SquadRenderResult(
             Success: errors.Count == 0,
             Files: files,
             Degradations: degradations,
             Warnings: [],
-            Errors: errors));
+            Errors: errors);
     }
 
     [SuppressMessage(

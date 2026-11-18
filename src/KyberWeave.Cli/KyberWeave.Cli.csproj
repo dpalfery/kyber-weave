@@ -20,7 +20,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Compile-time only; see the note in KyberWeave.Core.csproj. -->
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.14" />
     <PackageReference Include="Spectre.Console" Version="0.57.2" />
@@ -28,13 +27,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Cli.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
     <ProjectReference Include="..\KyberWeave.Application\KyberWeave.Application.csproj" />
-    <ProjectReference Include="..\KyberWeave.Core\KyberWeave.Core.csproj" />
-    <ProjectReference Include="..\KyberWeave.Core.Docs\KyberWeave.Core.Docs.csproj" />
-    <ProjectReference Include="..\KyberWeave.Core.Squad\KyberWeave.Core.Squad.csproj" />
   </ItemGroup>
 
 </Project>

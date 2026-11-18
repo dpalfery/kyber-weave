@@ -13,8 +13,8 @@ code-refs:
   - PostCheckoutHookText
   - CodeGraphRestore
   - IWorktreeIndexGuard
-  - CodeGraphProvisioner
-  - RepositoryDoctor
+  - CodeGraphIndexProvisioner
+  - RepositoryDoctorService
 ---
 
 # ADR 0068: doctor --ensure owns a marked block in the clone's shared post-checkout hook to index new worktrees

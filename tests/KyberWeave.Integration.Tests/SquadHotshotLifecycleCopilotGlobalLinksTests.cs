@@ -1,15 +1,18 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
 /// <summary>
 /// Pins the Copilot global-scope resource-link contract end to end through the real renderer,
 /// the lifecycle service, the receipt, and <c>squad doctor --global</c>.
+/// Unit twin: <c>SquadCopilotGlobalLinksUnitTests</c>.
 /// </summary>
 /// <remarks>
 /// A global Copilot install has no workspace, so a relative agent link such as
@@ -20,6 +23,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ConductorPath = "agents/conductor.agent.md";
 
     private static readonly string[] ReferenceFiles =
@@ -58,7 +63,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         Assert.DoesNotContain("](conductor/references/", content, StringComparison.Ordinal);
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
-            install.StateStore.ReadReceipt(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global));
+            install.StateStore.ReadReceipt(Corpus.Root, SquadDeploymentScope.Global));
         SquadOwnedFile owned = Assert.Single(
             receipt.Files,
             file => string.Equals(file.RelativePath, ConductorPath, StringComparison.Ordinal)
@@ -92,7 +97,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         SquadDoctorCommand command = SquadTestCommands.Doctor(
             executor,
             install.UserPaths,
-            KyberWeaveTestPaths.ToolRoot,
+            Corpus.Root,
             install.GlobalRoots,
             SquadTestRegistry.Create([new CopilotRenderer()]));
 
@@ -100,7 +105,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
             null!,
             new SquadDoctorSettings
             {
-                Path = KyberWeaveTestPaths.ToolRoot,
+                Path = Corpus.Root,
                 Global = true
             }));
 
@@ -119,12 +124,12 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         PreparedCopilotGlobal prepared = PreparedSquadInstalls.Get(RecipeKey, () => BuildTemplate(RecipeKey));
         string home = Path.Combine(_temp.Path, name + "-home");
         Directory.CreateDirectory(home);
-        FakeUserPaths userPaths = new(Path.Combine(_temp.Path, name + "-user"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, name + "-user"));
         SquadGlobalRoots globalRoots = new(_ => null, home);
         string root = globalRoots.ResolveGlobalRoot(SquadTarget.Copilot);
         prepared.CopyInto(home, root, userPaths);
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         string conductorFile = Path.Combine(root, "agents", "conductor.agent.md");
         return new GlobalInstall(
             userPaths,
@@ -147,9 +152,9 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         {
             string home = Path.Combine(directory.Path, "home");
             Directory.CreateDirectory(home);
-            FakeUserPaths userPaths = new(Path.Combine(directory.Path, "user"));
+            FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user"));
             SquadGlobalRoots globalRoots = new(_ => null, home);
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             using CorpusSquadReleaseSource releaseSource = new();
             SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
                 releaseSource,
@@ -158,7 +163,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
                 globalRoots: globalRoots);
 
             SquadLifecycleResult result = service.InstallAsync(new SquadInstallRequest(
-                    KyberWeaveTestPaths.ToolRoot,
+                    Corpus.Root,
                     SquadDeploymentScope.Global,
                     [SquadTarget.Copilot],
                     Version: "1.2.3"))
@@ -206,14 +211,14 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
 
             string templateRoot = SquadInstallCopy.Canonical(home);
             string copyRoot = SquadInstallCopy.Canonical(destinationHome);
-            SquadStateStore store = new(userPaths);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             SquadInstallCopy.ReRoot(
                 Path.Combine(userPaths.ApplicationDataDirectory, ".kyber-weave", "squad"),
                 templateRoot,
                 copyRoot);
             _ = SquadInstallCopy.ReRootDeployed(
                 destinationTargetRoot,
-                store.ResolveReceiptPath(KyberWeaveTestPaths.ToolRoot, SquadDeploymentScope.Global),
+                store.ResolveReceiptPath(Corpus.Root, SquadDeploymentScope.Global),
                 store,
                 home,
                 destinationHome);
@@ -226,11 +231,4 @@ public sealed class SquadHotshotLifecycleCopilotGlobalLinksTests : IDisposable
         SquadStateStore StateStore,
         string RootForwardSlashed,
         string ConductorFile);
-
-    private sealed class FakeUserPaths(string appDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = appDataDirectory;
-
-        public string HomeDirectory => Path.Combine(ApplicationDataDirectory, "home");
-    }
 }

@@ -2,7 +2,7 @@ using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Core.Squad.Deployment;
-using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Data.Hooks;
 using YamlDotNet.Core;
 using YamlDotNet.RepresentationModel;
 
@@ -11,7 +11,7 @@ namespace KyberWeave.Core.Squad.Model;
 /// <summary>Persists one canonical profile snapshot per Squad release version under the home Squad state.</summary>
 /// <remarks>
 /// Snapshots live at <c>&lt;home&gt;/.kyber-weave/squad/profiles/&lt;version&gt;.yml</c>, derived from
-/// <see cref="ISquadUserPaths.HomeDirectory"/> the same way <see cref="SquadModelPresetStore"/>
+/// <see cref="ISquadUserPaths.HomeDirectory"/> the same way <c>SquadModelPresetStore</c>
 /// derives its presets directory, so both stay colocated under the home Squad root the state store owns.
 /// Writes go through a temporary file beside the target and rename it into place, the
 /// SquadStateMigration.WriteAtomically pattern, so a crash never leaves a half-written snapshot behind.
@@ -40,14 +40,18 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
     private static readonly UTF8Encoding PlainUtf8 = new(false);
 
     private readonly string _profilesDirectory;
+    private readonly IWritableFileSystem _files;
 
-    /// <summary>Creates a snapshot store over the given user paths.</summary>
+    /// <summary>Creates a snapshot store over the given user paths and file system.</summary>
     /// <param name="userPaths">The user paths provider.</param>
-    /// <exception cref="ArgumentNullException">Thrown when <paramref name="userPaths"/> is null.</exception>
+    /// <param name="files">The file system the snapshots are read from and written to.</param>
+    /// <exception cref="ArgumentNullException">Thrown when an argument is null.</exception>
     /// <exception cref="ArgumentException">Thrown when the home directory is empty.</exception>
-    public SquadCanonicalProfileStore(ISquadUserPaths userPaths)
+    public SquadCanonicalProfileStore(ISquadUserPaths userPaths, IWritableFileSystem files)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
+        ArgumentNullException.ThrowIfNull(files);
+        _files = files;
         ArgumentException.ThrowIfNullOrWhiteSpace(userPaths.HomeDirectory);
         _profilesDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "profiles");
     }
@@ -77,9 +81,9 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
         string path = SnapshotPath(validated);
         try
         {
-            if (!File.Exists(path))
+            if (!_files.FileExists(path))
                 return null;
-            string content = StrictUtf8.GetString(File.ReadAllBytes(path));
+            string content = StrictUtf8.GetString(_files.ReadAllBytes(path));
             if (content.Length > 0 && content[0] == '\uFEFF')
                 content = content[1..];
             return ParseSnapshot(content, validated, path);
@@ -117,7 +121,7 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
                 candidate = TryRead(stem);
                 if (candidate is null)
                     continue;
-                write = File.GetLastWriteTimeUtc(SnapshotPath(stem));
+                write = _files.GetLastWriteTimeUtc(SnapshotPath(stem));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
@@ -266,7 +270,7 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
         foreach (KeyValuePair<YamlNode, YamlNode> pair in mapping.Children)
         {
             string key = RequireKey(pair.Key, $"profiles.{category}", path);
-            if (!SquadSourceLoader.ModelProfileFields.Contains(key))
+            if (!SquadModelProfileFields.Names.Contains(key))
                 throw new InvalidDataException(
                     $"Squad snapshot '{path}' profile category '{category}' uses unknown harness '{key}'. " +
                     "Align the snapshot with the models.yml harness vocabulary.");
@@ -478,20 +482,16 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
         List<string> stems = new();
         try
         {
-            if (!Directory.Exists(_profilesDirectory))
-                return [];
-            DirectoryInfo directory = new(_profilesDirectory);
-            foreach (FileSystemInfo entry in directory.EnumerateFileSystemInfos(
-                         "*.yml",
-                         new EnumerationOptions { RecurseSubdirectories = false, AttributesToSkip = 0 }))
+            foreach (FileSystemEntry entry in _files.EnumerateEntries(_profilesDirectory))
             {
                 // A symlink inside the profiles directory is never followed: only real files
                 // written by Write are candidates, mirroring SquadModelPresetStore.List.
-                if (entry is FileInfo &&
-                    entry.LinkTarget is null &&
-                    string.Equals(Path.GetExtension(entry.Name), ".yml", StringComparison.OrdinalIgnoreCase))
+                string name = Path.GetFileName(entry.Path);
+                if (!entry.IsDirectory &&
+                    !entry.IsLink &&
+                    string.Equals(Path.GetExtension(name), ".yml", StringComparison.OrdinalIgnoreCase))
                 {
-                    string stem = Path.GetFileNameWithoutExtension(entry.Name);
+                    string stem = Path.GetFileNameWithoutExtension(name);
                     if (IsSnapshotVersion(stem))
                         stems.Add(stem);
                 }
@@ -506,28 +506,12 @@ public sealed class SquadCanonicalProfileStore : ISquadCanonicalProfileStore
         return stems;
     }
 
-    private static void WriteAtomically(string path, byte[] bytes)
+    private void WriteAtomically(string path, byte[] bytes)
     {
         string? directory = Path.GetDirectoryName(path);
         if (string.IsNullOrEmpty(directory))
             throw new InvalidOperationException($"Squad snapshot path '{path}' has no directory.");
-        Directory.CreateDirectory(directory);
-
-        string temporaryPath = Path.Combine(directory, $"{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            using (FileStream stream = new(temporaryPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                stream.Write(bytes);
-                stream.Flush();
-            }
-
-            File.Move(temporaryPath, path, true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
+        _files.CreateDirectory(directory);
+        _files.WriteAllBytesAtomic(path, bytes, flushToDisk: false);
     }
 }

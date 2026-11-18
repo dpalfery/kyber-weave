@@ -1,6 +1,3 @@
-using System.Globalization;
-using System.Security.Cryptography;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace KyberWeave.Core.Arbiter.Facts;
@@ -47,62 +44,6 @@ public static class ArbiterCallerSources
     public const string None = "none";
 }
 
-/// <summary>
-/// Sortable unique record ids: sixteen fixed-width hex digits of UTC ticks
-/// followed by eight random hex characters, so lexicographic order is
-/// chronological and ids generated in the same tick stay unique.
-/// </summary>
-public static class ArbiterRecordId
-{
-    /// <summary>Creates a new sortable unique id for the given time.</summary>
-    public static string New(DateTimeOffset at) =>
-        $"{at.ToUniversalTime().UtcTicks.ToString("x16", CultureInfo.InvariantCulture)}-"
-        + RandomNumberGenerator.GetHexString(8, lowercase: true);
-}
-
-/// <summary>Serializer settings shared by both append-only files.</summary>
-internal static class ArbiterJson
-{
-    /// <summary>
-    /// Null optional fields are omitted rather than written: a record's
-    /// observable field set is exactly the fields it populated, which keeps
-    /// both files free of fields the design does not define (Req 18.4).
-    /// </summary>
-    internal static readonly JsonSerializerOptions Options = CreateOptions();
-
-    private static JsonSerializerOptions CreateOptions()
-    {
-        JsonSerializerOptions options = new()
-        {
-            DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        };
-        options.Converters.Add(new ArbiterUtcTimestampConverter());
-        return options;
-    }
-
-    /// <summary>Serializes a record to one compact JSON line.</summary>
-    internal static string Serialize<T>(T record)
-        where T : notnull =>
-        JsonSerializer.Serialize(record, Options);
-}
-
-/// <summary>
-/// Writes timestamps as UTC in the round-trip <c>o</c> format with a <c>Z</c>
-/// suffix, so the ledger's <c>at</c> field is unambiguously UTC; the default
-/// serializer would spell a zero offset <c>+00:00</c>.
-/// </summary>
-internal sealed class ArbiterUtcTimestampConverter : JsonConverter<DateTimeOffset>
-{
-    public override DateTimeOffset Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) =>
-        DateTimeOffset.Parse(
-            reader.GetString() ?? throw new JsonException("expected a timestamp string"),
-            CultureInfo.InvariantCulture,
-            DateTimeStyles.RoundtripKind);
-
-    public override void Write(Utf8JsonWriter writer, DateTimeOffset value, JsonSerializerOptions options) =>
-        writer.WriteStringValue(value.ToUniversalTime().UtcDateTime.ToString("o", CultureInfo.InvariantCulture));
-}
-
 /// <summary>The dispatch headers carried on a ledger event.</summary>
 /// <param name="PlanFile">The <c>plan-file</c> header, when present.</param>
 /// <param name="Task">The <c>task</c> header, when present.</param>
@@ -133,23 +74,7 @@ public sealed record ArbiterSnapshot(
 /// </summary>
 /// <param name="Root">The directory the run works in: its worktree, or the checkout it branched in place.</param>
 /// <param name="StartedAt">When <c>run start</c> recorded the run; null when the record carries no time.</param>
-public sealed record ArbiterRunScope(string Root, DateTimeOffset? StartedAt)
-{
-    /// <summary>
-    /// Whether a pre event belongs to this run: it was recorded after the run started and names this run's
-    /// directory. An event that names no run (written before the field existed, or evaluated outside any run)
-    /// is placed by its time alone.
-    /// </summary>
-    /// <param name="pre">The pre event.</param>
-    public bool Includes(ArbiterLedgerEvent pre)
-    {
-        ArgumentNullException.ThrowIfNull(pre);
-        return (StartedAt is null || pre.At >= StartedAt)
-            && (pre.Run is null || string.Equals(Normalize(pre.Run), Normalize(Root), StringComparison.Ordinal));
-    }
-
-    private static string Normalize(string path) => path.Replace('\\', '/').TrimEnd('/');
-}
+public sealed record ArbiterRunScope(string Root, DateTimeOffset? StartedAt);
 
 /// <summary>The markers a hook read from a dispatch output.</summary>
 /// <param name="TaskReview">The <c>task-review</c> marker: <c>PASS</c> or <c>FAIL</c> from <c>^RESULT:\s+(PASS|FAIL)\b</c>.</param>

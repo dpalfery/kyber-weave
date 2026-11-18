@@ -3,6 +3,7 @@ using System.Text;
 using KyberWeave.Cli;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.RunStart;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,17 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class RunStartPlannerTests : IDisposable
 {
+    private static readonly KyberWeave.Contracts.Services.IRunStartEvidence Evidence =
+        new KyberWeave.Application.RunStart.RunStartEvidenceService(
+            RealGitFacts.Create(),
+            new KyberWeave.Data.RunStart.FileRunStateStore(
+                new KyberWeave.Data.Hooks.PhysicalFileSystem(),
+                new KyberWeave.Data.RunStart.GitCheckedOutBranchReader(
+                    new KyberWeave.Data.RunStart.ProcessGitCommandRunner(
+                        KyberWeave.Data.RunStart.ProcessGitCommandRunner.DefaultTimeout)),
+                new KyberWeave.Data.Paths.PhysicalPathResolver(new KyberWeave.Data.Hooks.PhysicalFileSystem()),
+                new KyberWeave.Data.Host.ProcessEnvironment()));
+
     private readonly RunStartProbe _probe = RunStartProbe.Create();
 
     public void Dispose()
@@ -163,13 +175,13 @@ public sealed class RunStartPlannerTests : IDisposable
     {
         if (busy)
             _probe.AddLinkedWorktree("spare");
-        Assert.False(RunStartEvidence.Started(_probe.Root, _probe.Home));
+        Assert.False(Evidence.Started(_probe.Root, _probe.Home));
 
         ProbeResult result = _probe.RunStart("--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate");
 
         Assert.True(result.ExitCode == 0, $"run start must exit 0. {result.Output}");
         Assert.True(
-            RunStartEvidence.Started(_probe.Root, _probe.Home),
+            Evidence.Started(_probe.Root, _probe.Home),
             $"run start must leave a record the guard reads as a live run. {result.Output}");
     }
 
@@ -696,7 +708,17 @@ internal sealed class RunStartProbe : IDisposable
     private ProbeResult RunStartOn(string path, params string[] arguments)
     {
         List<string> argv = ["run", "start", .. arguments];
-        ProbeEnvironment environment = new(Root, _home, _tmp, path);
+        FakeProcessEnvironment environment = new(
+            currentDirectory: Root,
+            homeDirectory: _home,
+            tempDirectory: _tmp,
+            readVariable: name => name switch
+            {
+                "PATH" => path,
+                "HOME" or "USERPROFILE" => _home,
+                "TMPDIR" or "TEMP" or "TMP" => _tmp,
+                _ => Environment.GetEnvironmentVariable(name)
+            });
         ProbeGit git = new(this, path);
         ProbeExecutor executor = new(this, path);
 
@@ -886,26 +908,6 @@ internal sealed class RunStartProbe : IDisposable
             UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
             UnixFileMode.GroupRead | UnixFileMode.GroupExecute |
             UnixFileMode.OtherRead | UnixFileMode.OtherExecute);
-    }
-
-    /// <summary>Gives the command the probe's directories and PATH instead of this test host's.</summary>
-    private sealed class ProbeEnvironment(string current, string home, string temp, string path) : IProcessEnvironment
-    {
-        public string CurrentDirectory => current;
-
-        public string HomeDirectory => home;
-
-        public string TempDirectory => temp;
-
-        public bool IsInputRedirected => true;
-
-        public string? GetVariable(string name) => name switch
-        {
-            "PATH" => path,
-            "HOME" or "USERPROFILE" => home,
-            "TMPDIR" or "TEMP" or "TMP" => temp,
-            _ => Environment.GetEnvironmentVariable(name)
-        };
     }
 
     /// <summary>Runs git against the probe's PATH, home and temp directory, the way the child process would have.</summary>

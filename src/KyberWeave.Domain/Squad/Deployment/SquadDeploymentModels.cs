@@ -88,23 +88,6 @@ public sealed record SquadUninstallRequest(
     bool DryRun = false,
     SquadTarget? Target = null);
 
-/// <summary>The result of executing a Kyber-Squad lifecycle operation.</summary>
-/// <remarks>
-///     <see cref="Warnings" /> carries what a committed transaction could not finish, such as a registry
-///     write that failed after the deployment itself committed. The deployment is never rolled back for
-///     them, so a caller that prints only success has hidden the problem.
-/// </remarks>
-public sealed record SquadLifecycleResult(
-    bool Success,
-    SquadDeploymentPlan? Plan = null,
-    SquadReceipt? Receipt = null,
-    SquadLock? Lock = null,
-    IReadOnlyList<SquadDegradation>? Degradations = null,
-    IReadOnlyList<string>? Errors = null,
-    bool DryRun = false,
-    IReadOnlyList<string>? Warnings = null,
-    IReadOnlyList<SquadModelDiffItem>? ModelChanges = null);
-
 /// <summary>A documented loss of native harness behavior in a rendered deployment.</summary>
 public sealed record SquadDegradation(
     string Target,
@@ -226,19 +209,6 @@ public sealed record SquadDeploymentFile
     public ReadOnlyMemory<byte> Content { get; }
 
     public string Target { get; }
-}
-
-/// <summary>Supplies the per-user locations used by Squad state.</summary>
-public interface ISquadUserPaths
-{
-    /// <summary>The per-user application data directory that holds legacy global Squad state.</summary>
-    string ApplicationDataDirectory { get; }
-
-    /// <summary>
-    ///     The user's home directory. Home-level Squad state lives beneath it at
-    ///     <c>.kyber-weave/squad</c>, so it does not depend on the platform application data folder.
-    /// </summary>
-    string HomeDirectory { get; }
 }
 
 /// <summary>One project that has registered itself in the home-level Squad registry.</summary>

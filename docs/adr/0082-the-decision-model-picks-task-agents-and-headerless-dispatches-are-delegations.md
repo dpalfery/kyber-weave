@@ -12,7 +12,7 @@ code-refs:
   - TriggerClassifier
   - PlanFacts
   - PlanTaskAgentPick
-  - ConfiguredProvider
+  - ConfiguredArbiterProviderFactory
   - PlanTaskFileGenerator
   - ArbiterAuditCommand
 ---

@@ -10,6 +10,10 @@ namespace KyberWeave.Core.Arbiter.Credentials;
 /// key travels on stdin only and never appears in argv. Reads use
 /// <c>security find-generic-password -s kyber-weave-arbiter -a &lt;origin&gt; -w</c>.
 /// A missing entry is an absent key (null), not a failure.
+/// <para>
+/// A key must be ASCII, and <c>Write</c> refuses a non-ASCII one. <c>security</c> prints a password holding a
+/// character it cannot represent as hex, so such a key would not read back; every Arbiter key is ASCII.
+/// </para>
 /// </remarks>
 public sealed class MacKeychainCredentialStore : ICredentialStore
 {
@@ -34,6 +38,11 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
     public string? Read(string origin)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        if (HasNewline(origin))
+        {
+            throw new ArgumentException(
+                "The macOS keychain origin cannot contain newline characters.", nameof(origin));
+        }
         ProcessStartInfo startInfo = new("security")
         {
             UseShellExecute = false,
@@ -83,6 +92,15 @@ public sealed class MacKeychainCredentialStore : ICredentialStore
         {
             throw new ArgumentException(
                 "The macOS keychain key cannot contain newline characters: a newline would split the 'security -i' command.", nameof(key));
+        }
+
+        if (key.Any(static character => !char.IsAscii(character)))
+        {
+            // `security` prints a password holding a non-ASCII character as hex, so it would read back
+            // as a different string. Refusing the write is the only way to keep an absent key absent
+            // instead of silently authenticating with the wrong secret.
+            throw new ArgumentException(
+                "The macOS keychain key must be ASCII: security prints a non-ASCII password as hex, so it would not read back.", nameof(key));
         }
 
         ProcessStartInfo startInfo = new("security")

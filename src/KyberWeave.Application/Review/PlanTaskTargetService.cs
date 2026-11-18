@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
@@ -16,10 +17,16 @@ namespace KyberWeave.Application.Review;
 /// <param name="tasks">Reads the active plans and their task files.</param>
 /// <param name="taskGates">Checks a path the way the task gate will take it.</param>
 /// <param name="git">Lists the repository's worktrees, so the run's plan is found from a worker's checkout.</param>
+/// <param name="files">Reads a plan and tells a worktree directory that exists from one that does not.</param>
+/// <param name="paths">Resolves a worktree's spelling to the full path compared against the checkout.</param>
+/// <param name="environment">Names the directory a relative path is resolved against.</param>
 public sealed partial class PlanTaskTargetService(
     IPlanTaskService tasks,
     ITaskGateSelectionService taskGates,
-    IGitRepositoryFacts git) : IPlanTaskTargetService
+    IGitRepositoryFacts git,
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IPlanTaskTargetService
 {
     /// <inheritdoc />
     public PlanTaskTargetMatch? Find(string root, KyberWeaveConfig config, string typedTask, out string? reason)
@@ -67,12 +74,12 @@ public sealed partial class PlanTaskTargetService(
     /// </summary>
     private PlanTaskTargetMatch? FindInOtherWorktree(string root, KyberWeaveConfig config, string typedTask)
     {
-        string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        string here = Path.TrimEndingDirectorySeparator(paths.GetFullPath(root, environment.CurrentDirectory));
         List<PlanTaskTargetMatch> matches = [];
         foreach (string worktree in git.ListWorktrees(root))
         {
-            string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
-            if (string.Equals(other, here, StringComparison.Ordinal) || !Directory.Exists(other))
+            string other = Path.TrimEndingDirectorySeparator(paths.GetFullPath(worktree, environment.CurrentDirectory));
+            if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))
                 continue;
 
             IReadOnlyList<string> active = tasks.ActivePlans(other, config);
@@ -97,7 +104,8 @@ public sealed partial class PlanTaskTargetService(
         ArgumentException.ThrowIfNullOrWhiteSpace(plan);
         try
         {
-            string markdown = BoundedFile.ReadAllText(Path.Combine(root, plan.Replace('/', Path.DirectorySeparatorChar)));
+            using Stream stream = files.OpenRead(Path.Combine(root, plan.Replace('/', Path.DirectorySeparatorChar)));
+            string markdown = BoundedFileReader.ReadAllText(stream, BoundedFile.MaxBytes);
             return PlanDocumentParser.Parse(markdown).ContractRows
                 .FirstOrDefault(row => string.Equals(row.TaskId, taskId, StringComparison.Ordinal));
         }

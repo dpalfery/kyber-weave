@@ -1,0 +1,370 @@
+using KyberWeave.Testing.Squad;
+using System.Security.Cryptography;
+using KyberWeave.Tests.Fakes;
+using System.Text;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
+using Xunit;
+
+namespace KyberWeave.Application.Tests.Squad.Instances;
+
+/// <summary>
+/// Pins the instance deployment scope contract and root resolution rules.
+/// </summary>
+/// <remarks>
+/// Acceptance Criteria 7.3 specifies that Squad SHALL give each harness and preset pair its own
+/// instance folder under ~/.kyber-weave/. An instance deployment is isolated from both project
+/// repositories and the machine-wide global harness configurations. Its state lives under
+/// <c>~/.kyber-weave/squad/instance-state/&lt;target&gt;/&lt;preset&gt;/</c>, it is never registered in
+/// <c>registry.json</c>, migration ignores it, and rendering lowers paths under the instance root
+/// via <see cref="SquadInstanceRootResolver" />.
+/// </remarks>
+public sealed class SquadInstanceScopeTests
+{
+    private static readonly DateTimeOffset InstalledAt =
+        new(2026, 8, 14, 12, 34, 56, TimeSpan.Zero);
+
+    private readonly InMemorySquadState _state = new();
+
+    /// <summary>
+    /// Verifies that SquadDeploymentScope declares the Instance enum member as distinct from Project and Global.
+    /// </summary>
+    [Fact]
+    public void SquadDeploymentScopeInstanceEnumIsDefinedAndDistinct()
+    {
+        Assert.True(Enum.IsDefined(typeof(SquadDeploymentScope), "Instance"));
+        Assert.NotEqual(SquadDeploymentScope.Project, SquadDeploymentScope.Instance);
+        Assert.NotEqual(SquadDeploymentScope.Global, SquadDeploymentScope.Instance);
+    }
+
+    /// <summary>
+    /// Verifies that a valid instance root under ~/.kyber-weave/squad/instances/target/preset/
+    /// resolves state, lock, receipt, and transaction journal paths into the corresponding
+    /// instance-state directory.
+    /// </summary>
+    [Fact]
+    public void ValidInstanceRootResolvesStateLockAndReceiptUnderInstanceState()
+    {
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = RealSquadState.Store(userPaths);
+
+        string instanceRoot = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instances",
+            "claude",
+            "default");
+        _state.Files.CreateDirectory(instanceRoot);
+
+        string expectedStateDir = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instance-state",
+            "claude",
+            "default");
+
+        string stateDirectory = store.ResolveStateDirectory(instanceRoot, SquadDeploymentScope.Instance);
+        string lockPath = store.ResolveLockPath(instanceRoot, SquadDeploymentScope.Instance);
+        string receiptPath = store.ResolveReceiptPath(instanceRoot, SquadDeploymentScope.Instance);
+        string transactionDir = store.ResolveTransactionDirectory(instanceRoot, SquadDeploymentScope.Instance);
+
+        Assert.Equal(expectedStateDir, stateDirectory);
+        Assert.Equal(Path.Combine(expectedStateDir, "squad.lock.yml"), lockPath);
+        Assert.Equal(Path.Combine(expectedStateDir, "squad.receipt.json"), receiptPath);
+        Assert.Equal(Path.Combine(expectedStateDir, ".squad-transaction"), transactionDir);
+    }
+
+    /// <summary>
+    /// An instance root must strictly adhere to &lt;home&gt;/.kyber-weave/squad/instances/&lt;target&gt;/&lt;preset&gt;/.
+    /// Any other root must be rejected with ArgumentException to prevent state misplacement.
+    /// </summary>
+    [Theory]
+    [InlineData("outside-home")]
+    [InlineData("missing-preset")]
+    [InlineData("instances-base-only")]
+    [InlineData("relative-path")]
+    public void InvalidInstanceRootThrowsArgumentException(string scenario)
+    {
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = RealSquadState.Store(userPaths);
+
+        string invalidRoot = scenario switch
+        {
+            "outside-home" => Path.Combine(_state.Files.Root, "custom-location"),
+            "missing-preset" => Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", "claude"),
+            "instances-base-only" => Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances"),
+            "relative-path" => Path.Combine(".kyber-weave", "squad", "instances", "claude", "default"),
+            _ => throw new ArgumentOutOfRangeException(nameof(scenario), scenario, null)
+        };
+
+        Assert.Throws<ArgumentException>(() => store.ResolveStateDirectory(invalidRoot, SquadDeploymentScope.Instance));
+        Assert.Throws<ArgumentException>(() => store.ResolveLockPath(invalidRoot, SquadDeploymentScope.Instance));
+        Assert.Throws<ArgumentException>(() => store.ResolveReceiptPath(invalidRoot, SquadDeploymentScope.Instance));
+        Assert.Throws<ArgumentException>(() => store.ResolveTransactionDirectory(invalidRoot, SquadDeploymentScope.Instance));
+    }
+
+    /// <summary>
+    /// Executing an instance deployment plan deploys native harness files to the instance root
+    /// and places state files under instance-state, keeping the instance directory free of transaction journals.
+    /// </summary>
+    [Fact]
+    public void ExecuteInstanceTransactionDeploysToInstanceRootAndStoresStateUnderInstanceState()
+    {
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = RealSquadState.Store(userPaths);
+
+        string instanceRoot = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instances",
+            "claude",
+            "default");
+        _state.Files.CreateDirectory(instanceRoot);
+
+        SquadLock squadLock = CreateLock();
+        SquadDeploymentFile renderedAgent = new(
+            "agents/conductor.md",
+            Encoding.UTF8.GetBytes("# Conductor Agent Content"),
+            "claude");
+
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            instanceRoot,
+            SquadDeploymentScope.Instance,
+            squadLock,
+            [renderedAgent],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt));
+
+        SquadTransaction transaction = _state.Transaction();
+        transaction.Execute(plan);
+
+        string deployedFile = Path.Combine(instanceRoot, "agents", "conductor.md");
+        Assert.True(_state.Files.FileExists(deployedFile));
+        Assert.Equal("# Conductor Agent Content", _state.Files.ReadAllText(deployedFile));
+
+        string expectedStateDir = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instance-state",
+            "claude",
+            "default");
+        Assert.True(_state.Files.FileExists(Path.Combine(expectedStateDir, "squad.lock.yml")));
+        Assert.True(_state.Files.FileExists(Path.Combine(expectedStateDir, "squad.receipt.json")));
+
+        Assert.False(_state.Files.DirectoryExists(Path.Combine(instanceRoot, ".squad-transaction")));
+        Assert.False(_state.Files.DirectoryExists(Path.Combine(instanceRoot, ".kyber-weave")));
+    }
+
+    /// <summary>
+    /// Instance deployments are personal ephemeral configurations and must never be registered
+    /// in the shared ~/.kyber-weave/squad/registry.json file.
+    /// </summary>
+    [Fact]
+    public void ExecuteInstanceTransactionNeverRegistersInProjectRegistry()
+    {
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = RealSquadState.Store(userPaths);
+
+        string instanceRoot = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instances",
+            "claude",
+            "default");
+        _state.Files.CreateDirectory(instanceRoot);
+
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            instanceRoot,
+            SquadDeploymentScope.Instance,
+            CreateLock(),
+            [new SquadDeploymentFile("agents/conductor.md", Encoding.UTF8.GetBytes("# Body"), "claude")],
+            [],
+            adopt: false,
+            new FixedTimeProvider(InstalledAt));
+
+        SquadTransaction transaction = _state.Transaction();
+        transaction.Execute(plan);
+
+        IReadOnlyList<SquadProjectRegistryEntry> projects = store.ListProjects();
+        Assert.DoesNotContain(projects, project => string.Equals(project.Path, instanceRoot, StringComparison.Ordinal));
+
+        string registryPath = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "registry.json");
+        if (_state.Files.FileExists(registryPath))
+        {
+            string registryContent = _state.Files.ReadAllText(registryPath);
+            Assert.DoesNotContain("instances", registryContent, StringComparison.Ordinal);
+            Assert.DoesNotContain("claude/default", registryContent, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// State migration operates only across legacy global state and project state; it must ignore
+    /// instance-state directories entirely.
+    /// </summary>
+    [Fact]
+    public void SquadStateMigrationIgnoresInstanceStateDirectory()
+    {
+        ISquadUserPaths userPaths = _state.UserPaths;
+        _state.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = RealSquadState.Store(userPaths);
+
+        string instanceStateDir = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instance-state",
+            "claude",
+            "default");
+        _state.Files.CreateDirectory(instanceStateDir);
+        string lockFile = Path.Combine(instanceStateDir, "squad.lock.yml");
+        string receiptFile = Path.Combine(instanceStateDir, "squad.receipt.json");
+        _state.Files.WriteAllText(lockFile, store.SerializeLock(CreateLock()));
+        _state.Files.WriteAllText(receiptFile, store.SerializeReceipt(new SquadReceipt(
+            "kyber-squad.receipt/v1",
+            SquadDeploymentScope.Instance,
+            Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "instances", "claude", "default"),
+            InstalledAt,
+            [],
+            [])));
+
+        SquadStateMigration migration = _state.Migration;
+        SquadMigrationReport report = migration.MigrateGlobal(userPaths.HomeDirectory);
+
+        Assert.True(_state.Files.FileExists(lockFile));
+        Assert.True(_state.Files.FileExists(receiptFile));
+        Assert.Empty(report.MigratedItems);
+        Assert.Empty(report.UnmigratedLegacyRoots);
+        Assert.Empty(report.ImportedProjects);
+    }
+
+    /// <summary>
+    /// SquadInstanceRootResolver implements ISquadGlobalRootResolver for an instance deployment:
+    /// it resolves the configured instance root for the matching target, and throws for any other target.
+    /// </summary>
+    [Fact]
+    public void SquadInstanceRootResolverResolvesTargetAndThrowsForOtherTargets()
+    {
+        string instanceRoot = Path.Combine(_state.Files.Root, "instance-root");
+        SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Claude);
+
+        Assert.Equal(instanceRoot, resolver.ResolveGlobalRoot(SquadTarget.Claude));
+        Action codexAction = () => resolver.ResolveGlobalRoot(SquadTarget.Codex);
+        Action copilotAction = () => resolver.ResolveGlobalRoot(SquadTarget.Copilot);
+        Assert.Throws<ArgumentException>(codexAction);
+        Assert.Throws<ArgumentException>(copilotAction);
+    }
+
+    /// <summary>
+    /// Rendering with Scope = Global using SquadInstanceRootResolver produces bare agents/ paths
+    /// (e.g. agents/conductor.md) rather than project-scoped prefixed paths (.claude/agents/conductor.md),
+    /// which deploy directly into the instance directory.
+    /// </summary>
+    [Fact]
+    public async Task ClaudeInstanceRendersAgentsUnderInstanceRoot()
+    {
+        ISquadUserPaths userPaths = _state.UserPaths;
+        string instanceRoot = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instances",
+            "claude",
+            "default");
+        _state.Files.CreateDirectory(instanceRoot);
+
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
+        ISquadRenderer renderer = tree.Registry(SquadHostDefaults.CreateRenderers());
+        SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Claude);
+
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: tree.ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Global,
+            UserScopeDirectory: userPaths.ApplicationDataDirectory,
+            GlobalRoots: resolver).Prepared(tree);
+
+        SquadRenderResult result = await renderer.RenderAsync(request);
+
+        Assert.Contains(result.Files, file =>
+            string.Equals(file.RelativePath, "agents/conductor.md", StringComparison.Ordinal) &&
+            string.Equals(file.Target, "claude", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Files, file => file.RelativePath.StartsWith(".claude/", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// For harness renderers that generate absolute reference links (such as Copilot), rendering with
+    /// SquadInstanceRootResolver must ensure that absolute links point inside the instance root rather
+    /// than the machine-wide global directory.
+    /// </summary>
+    [Fact]
+    public async Task CopilotInstanceAbsoluteLinksPointInsideInstanceRoot()
+    {
+        ISquadUserPaths userPaths = _state.UserPaths;
+        string instanceRoot = Path.Combine(
+            userPaths.HomeDirectory,
+            ".kyber-weave",
+            "squad",
+            "instances",
+            "copilot",
+            "default");
+        _state.Files.CreateDirectory(instanceRoot);
+
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
+        ISquadRenderer renderer = tree.Registry(SquadHostDefaults.CreateRenderers());
+        SquadInstanceRootResolver resolver = new(instanceRoot, SquadTarget.Copilot);
+
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: tree.ProductRoot,
+            Targets: [SquadTarget.Copilot],
+            Scope: SquadDeploymentScope.Global,
+            UserScopeDirectory: userPaths.ApplicationDataDirectory,
+            GlobalRoots: resolver).Prepared(tree);
+
+        SquadRenderResult result = await renderer.RenderAsync(request);
+
+        SquadDeploymentFile conductorFile = Assert.Single(
+            result.Files,
+            file => string.Equals(file.RelativePath, "agents/conductor.agent.md", StringComparison.Ordinal));
+
+        string content = Encoding.UTF8.GetString(conductorFile.Content.Span);
+        string normalizedInstanceRoot = instanceRoot.Replace('\\', '/').TrimEnd('/');
+        string expectedLink = $"]({normalizedInstanceRoot}/agents/conductor/references/intake-path.md)";
+
+        Assert.Contains(expectedLink, content, StringComparison.Ordinal);
+        Assert.DoesNotContain(".copilot", content, StringComparison.Ordinal);
+    }
+
+    private static SquadLock CreateLock(string version = "1.2.3") =>
+        new(
+            "kyber-squad.lock/v1",
+            version,
+            version,
+            version,
+            "full",
+            ["claude"],
+            [],
+            "best-effort",
+            Digest("bundle"),
+            Digest("asset"),
+            new SquadApmIdentity(version, "0123456789abcdef", Digest("apm")));
+
+    private static string Digest(string content) =>
+        Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
+
+    private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => value;
+    }
+}

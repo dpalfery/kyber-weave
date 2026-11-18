@@ -21,7 +21,7 @@ repository has made and would otherwise have to re-argue in review.
 
 ### Dependencies
 
-`KyberWeave.Core` takes Markdig and YamlDotNet, and adding a third needs a justification you
+`KyberWeave.Application` takes few packages, and adding one needs a justification you
 can state. The reasoning is in [`AGENTS.md`](../../../AGENTS.md): every dependency this
 library takes is one every host repository takes with it.
 
@@ -164,7 +164,7 @@ cross-cutting change is no exception. Run these `dotnet` commands directly from 
 
 ```bash
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+dotnet test tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
@@ -180,8 +180,8 @@ dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minima
   blocking gates (`format-whitespace` and `format-style`). Either one failing is a finding no test
   catches.
 - **A faster loop after one build** runs the compiled assembly directly:
-  `dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "KyberWeave.Tests.<Class>"`.
-  With `--artifacts-path <dir>` the same assembly is at `<dir>/bin/KyberWeave.Tests/release/`
+  `dotnet tests/KyberWeave.<Project>.Tests/bin/Release/net10.0/KyberWeave.<Project>.Tests.dll -class "<namespace>.<Class>"`.
+  With `--artifacts-path <dir>` the same assembly is at `<dir>/bin/KyberWeave.<Project>.Tests/release/`
   (the configuration is lowercase in that path). The
   [test standard](../test/README.md#completion) gives the full runner contract.
 - **Dev agents never run the full suite.** `kyber-weave review gates` refuses `full-suite: true`

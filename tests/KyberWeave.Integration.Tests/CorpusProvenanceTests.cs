@@ -1,3 +1,5 @@
+using KyberWeave.Tests.Configuration;
+
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Parsing;
@@ -191,11 +193,14 @@ public sealed class CorpusProvenanceTests : IDisposable
     /// <summary>The provenance block as the docs status tool returns it, which is the caller-visible contract.</summary>
     private static string Status(string root)
     {
-        KyberWeaveConfig config = KyberWeaveConfigLoader.Load(root);
+        KyberWeaveConfig config = ConfigFileReader.Load(root);
         DocumentIndexHost host = new(
             root,
             () => FakeCodeGraphResolver.WithSymbols(),
-            () => new DocumentLoader(root, config.Ontology).Load(),
+            () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
 

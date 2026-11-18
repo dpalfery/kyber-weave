@@ -265,11 +265,7 @@ public static class SquadInstallCopy
 {
     private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
 
-    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ".json", ".toml", ".yaml", ".yml", ".md", ".txt", ".sh", ".ps1",
-        ".cmd", ".bat", ".cfg", ".conf", ".ini", ".xml", ".env", ".gitignore",
-    };
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
 
     /// <summary>
     /// Copies a directory tree with <see cref="File.Copy"/>, preserving symbolic links and Unix file modes.
@@ -429,14 +425,59 @@ public static class SquadInstallCopy
 
     private static void ReRootTextFiles(string directory, string from, string to)
     {
-        foreach (FileInfo entry in new DirectoryInfo(directory).EnumerateFiles("*", SearchOption.AllDirectories))
+        foreach (string file in EnumerateOwnFiles(directory))
         {
-            if (entry.LinkTarget is not null || !TextExtensions.Contains(entry.Extension))
+            byte[] bytes = File.ReadAllBytes(file);
+            if (!IsText(bytes, out string text))
                 continue;
 
-            string text = File.ReadAllText(entry.FullName);
             if (TryReplaceRoot(text, from, to, out string updated))
-                WriteTextAtomically(entry.FullName, updated);
+                WriteTextAtomically(file, updated);
+        }
+    }
+
+    /// <summary>
+    /// Lists the files the directory owns: links, file and directory, are not its content, so neither is
+    /// returned nor descended into. A copy keeps the template's links, and following one would rewrite a
+    /// file outside the copy, visit one inode twice through the linked path, or never finish on a cycle.
+    /// </summary>
+    private static IEnumerable<string> EnumerateOwnFiles(string directory)
+    {
+        foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos("*", SearchOption.TopDirectoryOnly))
+        {
+            if (entry.LinkTarget is not null)
+                continue;
+
+            if (entry is DirectoryInfo nested)
+            {
+                foreach (string file in EnumerateOwnFiles(nested.FullName))
+                    yield return file;
+
+                continue;
+            }
+
+            yield return entry.FullName;
+        }
+    }
+
+    /// <summary>
+    /// Answers whether the bytes are text: no NUL byte and valid UTF-8. A binary file can happen to hold
+    /// the root's bytes, and rewriting it would corrupt what the receipt's digest names.
+    /// </summary>
+    private static bool IsText(byte[] bytes, out string text)
+    {
+        text = string.Empty;
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
+            return false;
+
+        try
+        {
+            text = StrictUtf8.GetString(bytes);
+            return true;
+        }
+        catch (DecoderFallbackException)
+        {
+            return false;
         }
     }
 
@@ -507,6 +548,6 @@ public static class SquadInstallCopy
     public static string Canonical(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return SquadPhysicalRootIdentity.CanonicalizeAllowingMissing(path, Semantics);
+        return SquadPhysicalRootIdentities.CanonicalizeAllowingMissing(path, Semantics);
     }
 }

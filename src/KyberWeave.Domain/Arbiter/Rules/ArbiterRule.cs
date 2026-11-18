@@ -81,6 +81,9 @@ public static class RuleEffects
 
     /// <summary>A refutation duplicates an earlier finding and is not spawned.</summary>
     public const string Duplicate = "duplicate";
+
+    /// <summary>The answer a rule gives when it cannot decide; each trigger family maps it to its own effect.</summary>
+    public const string Undecidable = "undecidable";
 }
 
 /// <summary>
@@ -111,16 +114,4 @@ public sealed record ArbiterRule(
     RuleAsk? Ask = null,
     bool Enabled = true,
     bool Shadow = false,
-    string? Technology = null)
-{
-    /// <summary>Whether the rule asks its step-1 question for this step-0 answer.</summary>
-    /// <remarks>
-    /// A rule that has both <c>decide</c> and <c>ask</c> asks only when
-    /// <c>decide</c> answers undecidable.
-    /// </remarks>
-    public bool ShouldAsk(string decideAnswer)
-    {
-        ArgumentNullException.ThrowIfNull(decideAnswer);
-        return Ask is not null && string.Equals(decideAnswer, "undecidable", StringComparison.Ordinal);
-    }
-}
+    string? Technology = null);

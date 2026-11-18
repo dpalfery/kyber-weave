@@ -1,5 +1,6 @@
-using KyberWeave.Contracts.Services;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -20,7 +21,10 @@ public sealed class ArbiterCommentCommand(
     IFileTextFacts fileText,
     ICommentTriageFactory triageFactory,
     IArbiterConfigResolver configs,
-    IArbiterDryRunService dryRun) : Command<ArbiterCommentSettings>
+    IArbiterDryRunService dryRun,
+    IPathResolver paths,
+    IProcessEnvironment environment,
+    IAnsiConsole console) : Command<ArbiterCommentSettings>
 {
     /// <summary>
     /// Builds the provider for a repository root. The command uses the root's configuration; a test substitutes one that
@@ -40,7 +44,7 @@ public sealed class ArbiterCommentCommand(
         // The same size limit the MCP tool applies, checked before any read, provider call or ledger append.
         if (settings.Body.Length > ArbiterTextLimits.MaxTextChars)
         {
-            AnsiConsole.MarkupLine($"[red]The comment is larger than {ArbiterTextLimits.MaxTextChars} characters.[/]");
+            console.MarkupLine($"[red]The comment is larger than {ArbiterTextLimits.MaxTextChars} characters.[/]");
             return 1;
         }
 
@@ -50,12 +54,12 @@ public sealed class ArbiterCommentCommand(
             return UsageError("--path is required.");
         }
 
-        string root = System.IO.Path.GetFullPath(settings.Root);
+        string root = paths.GetFullPath(settings.Root, environment.CurrentDirectory);
         // The same containment the served tool applies: a cited path that leaves the root is refused, not read. The check
         // and the triage read use one root, the --root the settings name, so a path cannot pass one and fail the other.
         if (!settings.Summary && fileText.ResolveWithinRoot(root, settings.Path) is null)
         {
-            AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
+            console.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
             return 1;
         }
 
@@ -65,7 +69,7 @@ public sealed class ArbiterCommentCommand(
         {
             foreach (Diagnostic diagnostic in report.Items)
             {
-                AnsiConsole.MarkupLine($"[red]{Markup.Escape(diagnostic.Message)}[/]");
+                console.MarkupLine($"[red]{Markup.Escape(diagnostic.Message)}[/]");
             }
 
             return 1;
@@ -89,7 +93,7 @@ public sealed class ArbiterCommentCommand(
                 string shadowNote = item.Shadow
                     ? $" ({Markup.Escape(ShadowNote(item.WouldClass))})"
                     : NotAnsweredNote(item.Status);
-                AnsiConsole.MarkupLine(
+                console.MarkupLine(
                     $"{Markup.Escape(item.Path)}:{item.Line} [bold]{Markup.Escape(item.Class)}[/] {Markup.Escape(item.Issue)}{shadowNote}");
             }
 
@@ -104,25 +108,25 @@ public sealed class ArbiterCommentCommand(
             .ClassifyAsync(new CommentTriageRequest(settings.Path, settings.Line, settings.Body, settings.CommitSha), cancellationToken)
             .GetAwaiter()
             .GetResult();
-        AnsiConsole.MarkupLine($"class [bold]{Markup.Escape(result.Class)}[/]");
+        console.MarkupLine($"class [bold]{Markup.Escape(result.Class)}[/]");
         if (result.Shadow)
         {
-            AnsiConsole.MarkupLine(Markup.Escape(ShadowNote(result.WouldClass)));
+            console.MarkupLine(Markup.Escape(ShadowNote(result.WouldClass)));
         }
         else if (result.Status != ArbiterProviderStatuses.Answered)
         {
-            AnsiConsole.MarkupLine($"status {Markup.Escape(result.Status)}");
+            console.MarkupLine($"status {Markup.Escape(result.Status)}");
         }
 
-        AnsiConsole.MarkupLine($"decision {Markup.Escape(result.DecisionId)}");
+        console.MarkupLine($"decision {Markup.Escape(result.DecisionId)}");
         return 0;
     }
 
     /// <summary>Prints a usage error on one line, as the other Arbiter commands do, and returns the usage exit code, 2.</summary>
-    private static int UsageError(string message)
+    private int UsageError(string message)
     {
-        CommandHelpers.WriteUnfolded(() =>
-            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
+        CommandHelpers.WriteUnfolded(console, () =>
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
         return 2;
     }
 
@@ -142,7 +146,7 @@ public sealed class ArbiterCommentCommand(
     /// configuration uses the shipped rules, so the comment rule's shipped shadow state applies.
     /// </summary>
     private static IReadOnlyList<ArbiterRule> RulesFor(IArbiterConfigResolver configs, string root) =>
-        configs.TryLoadRepository(root) is { } config ? config.Arbiter.Rules : ArbiterConfig.ProductDefaults.Rules;
+        configs.TryLoadRepository(root) is { } config ? config.Arbiter.Rules : ArbiterConfigDefaults.Product.Rules;
 
     /// <summary>Runs the command without cancellation; the entry point tests use.</summary>
     public int Execute(CommandContext context, ArbiterCommentSettings settings) =>

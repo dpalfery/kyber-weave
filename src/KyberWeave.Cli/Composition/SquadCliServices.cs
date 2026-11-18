@@ -1,13 +1,18 @@
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Composition;
 
@@ -19,15 +24,33 @@ internal static class SquadCliServices
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddSquadCliServices(this IServiceCollection services)
     {
+        _ = services.AddCliConsole();
+        services.TryAddSingleton(sp => new SquadConsole(sp.GetRequiredService<IAnsiConsole>(), sp.GetRequiredService<IConsole>()));
+        services.TryAddSingleton(sp => new SquadCommandRoots(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<SquadConsole>()));
+        services.TryAddSingleton(sp => new SquadTargetRootConfirmation(sp.GetRequiredService<SquadConsole>()));
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
             sp.GetRequiredService<ISquadRenderInputReader>()));
-        services.TryAddSingleton<Func<SelfUpdateHost>>(_ => SelfUpdateHostFactory.FromCurrentProcess);
+        services.TryAddSingleton<Func<SelfUpdateHost>>(sp =>
+        {
+            IProcessEnvironment environment = sp.GetRequiredService<IProcessEnvironment>();
+            return () => SelfUpdateHostFactory.FromCurrentProcess(environment);
+        });
         services.TryAddSingleton(new SquadConsoleOptions());
         services.TryAddSingleton(new SquadRunOptions());
         services.TryAddSingleton(new SquadDoctorOptions());
         services.TryAddSingleton<ISquadProjectPicker, SpectreSquadProjectPicker>();
-        services.TryAddSingleton(_ => KyberDashCapturePluginStep.CreateDefault());
+        services.TryAddSingleton(sp => new KyberDashLocator(
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IFileSystem>(),
+            () => Environment.ProcessPath));
+        services.TryAddSingleton(sp => KyberDashCapturePluginStep.Create(
+            sp.GetRequiredService<KyberDashLocator>(),
+            sp.GetRequiredService<SquadConsole>()));
         return services;
     }
 }

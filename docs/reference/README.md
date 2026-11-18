@@ -19,6 +19,7 @@ the closed vocabulary fits — inventing a doc-type is not.
 |---|---|
 | [Autonomous gates inventory](autonomous-gates.md) | Every gate reachable in autonomous mode, with disposition and irreversible-action justifications (issue #386 item A) |
 | [How the CLI gets its dependencies](cli-composition.md) | The container behind the commands, the contracts a command asks for, and how a test replaces them |
+| [Seams, adapters and the exceptions they keep](seams.md) | Every seam with its adapter, fake and contract suite; every class that still calls a resource directly and the task that converts it; the sealed framework types allowed through with a reason |
 
 Kyber-Weave's reference material predates the folder and sits at the root of the corpus:
 [`configuration.md`](../configuration.md), [`install.md`](../install.md),

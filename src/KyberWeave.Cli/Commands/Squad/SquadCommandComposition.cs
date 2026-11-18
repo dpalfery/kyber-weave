@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Composition;
 using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
@@ -46,25 +47,6 @@ internal static class SquadCommandComposition
 {
     private const string ProjectKeywordAll = "all";
     private const string ProjectKeywordNone = "none";
-    private const string InRepoStateDirectoryName = ".kyber-weave";
-    private const string ReceiptFileName = "squad.receipt.json";
-
-    /// <summary>Indicates whether the console environment supports interactive input.</summary>
-    public static bool IsInteractiveConsole()
-    {
-        return !Console.IsInputRedirected && AnsiConsole.Profile.Capabilities.Interactive;
-    }
-
-    /// <summary>
-    ///     Writes the exit-2 client-input error line without console folding. The hint names
-    ///     the operator's paths verbatim, and a redirected console folds at 80 columns,
-    ///     splitting a long path across lines — corrupting the one thing the hint exists
-    ///     for: a copy-pastable name for each of the conflicting forms.
-    /// </summary>
-    public static void WriteClientInputError(string message)
-    {
-        CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(message)}[/]"));
-    }
 
     /// <summary>
     ///     Resolves each selected target's physical global root — the directory a
@@ -148,7 +130,7 @@ internal static class SquadCommandComposition
         if (onlyTarget is { } chosen)
             targets = [.. targets.Where(target => target == chosen)];
 
-        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
+        if (SquadDeploymentPlanRules.IsLegacySingleRootReceipt(receipt))
             return [.. targets.Select(target => (target, targetRoot))];
 
         return ResolveGlobalTargetRoots(targets, injectedGlobalRoots);
@@ -181,42 +163,15 @@ internal static class SquadCommandComposition
                && (receipt.Files.Any(file => file.Target == token) || receipt.Blocks.Any(block => block.Target == token));
     }
 
-    /// <summary>
-    ///     The file-reading port <see cref="SquadGlobalRoots" /> uses for the one target whose
-    ///     global root can be set in a config file rather than an environment variable. Absent or
-    ///     unreadable is not an error: the resolver falls back to that target's default, matching
-    ///     what the harness itself does with the same file.
-    /// </summary>
-    internal static string? ReadFileTextOrNull(string path)
-    {
-        try
-        {
-            return File.Exists(path) ? File.ReadAllText(path) : null;
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            return null;
-        }
-    }
-
     /// <summary>Resolves the Kyber-Weave MCP process probe using the specified process executor.</summary>
-    public static McpProcessProbe ResolveProbe(IProcessExecutor? executor)
+    public static McpProcessProbe ResolveProbe(IProcessExecutor? executor, IProcessEnvironment environment)
     {
-        return new McpProcessProbe(executor ?? ProcessExecutor.Instance);
-    }
-
-    /// <summary>Resolves the Kyber-Weave MCP process probe using the default process executor.</summary>
-    public static McpProcessProbe ResolveProbe()
-    {
-        return ResolveProbe(null);
+        return new McpProcessProbe(executor ?? ProcessExecutor.Instance, environment);
     }
 
     /// <summary>Resolves the Kyber-Weave Arbiter process probe using the specified process executor.</summary>
-    public static ArbiterProcessProbe ResolveArbiterProbe(IProcessExecutor? executor) =>
-        new(executor ?? ProcessExecutor.Instance);
-
-    /// <summary>Resolves the Kyber-Weave Arbiter process probe using the default process executor.</summary>
-    public static ArbiterProcessProbe ResolveArbiterProbe() => ResolveArbiterProbe(null);
+    public static ArbiterProcessProbe ResolveArbiterProbe(IProcessExecutor? executor, IProcessEnvironment environment) =>
+        new(executor ?? ProcessExecutor.Instance, environment);
 
     /// <summary>
     /// Carries the host's Arbiter settings into a render: the enabled flag verbatim and the
@@ -231,23 +186,6 @@ internal static class SquadCommandComposition
     {
         ArgumentNullException.ThrowIfNull(arbiter);
         return new SquadArbiterWiring(arbiter.Enabled, Core.Arbiter.ArbiterHookTimeout.SecondsFor(arbiter.Provider.TimeoutMs));
-    }
-
-    /// <summary>
-    ///     Writes the shared exit-1 operational error the preset verbs report when canonical model
-    ///     profiles resolve from neither a checkout nor the home snapshot store.
-    /// </summary>
-    /// <remarks>
-    ///     One message shape across use, clear, and show, so the remedy the operator learns from
-    ///     one verb holds for the others: a <c>squad update</c> re-renders from the active
-    ///     release and persists the snapshot the verbs read back.
-    /// </remarks>
-    public static void WriteCanonicalProfilesUnresolvedError()
-    {
-        WriteClientInputError(
-            "Could not resolve Squad model profiles from canonical source. " +
-            "Run `kyber-weave squad update` to refresh the profile snapshot; " +
-            "running from a kyber-weave checkout also works.");
     }
 
     /// <summary>
@@ -382,171 +320,6 @@ internal static class SquadCommandComposition
                 $"Got '{version}'.");
     }
 
-    /// <summary>Writes one line of console output without folding, so a path in it stays copy-pastable.</summary>
-    public static void WriteLine(string markup)
-    {
-        CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine(markup));
-    }
-
-    /// <summary>
-    ///     Surfaces the warnings a committed transaction raised after its commit point. The deployment itself
-    ///     succeeded, so the command still exits 0, but the operator must learn that the registry is behind.
-    /// </summary>
-    /// <remarks>
-    ///     Each warning already names the command that rebuilds the registry, so it is printed as written rather
-    ///     than with a second instruction appended to it.
-    /// </remarks>
-    public static void WriteTransactionWarnings(IReadOnlyList<string>? warnings)
-    {
-        foreach (string warning in warnings ?? []) WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
-    }
-
-    /// <summary>
-    ///     Anchors a <c>--global</c> run. Global state is one home-level record, so where the operator launched
-    ///     from does not change where it lives; a path supplied with the run is named and ignored rather than
-    ///     silently honoured. A pre-#91 legacy single-root receipt is the exception: its files live beneath the
-    ///     one root it was bound to, so that recorded root is the anchor.
-    /// </summary>
-    /// <remarks>
-    ///     The anchor reads the home receipt, so it must be chosen after <see cref="EnsureStateMigrated" />. Before the
-    ///     migration a legacy receipt is not yet in the home, and the home would be chosen for it, which is the wrong
-    ///     root. Once the migration has copied the receipt, its target root is the absolute binding root the copy
-    ///     recorded. Every later run then anchors on that same root, whatever directory it starts from. Anchoring on
-    ///     the launch directory instead would verify, and could remove, files beneath the wrong root.
-    /// </remarks>
-    /// <param name="stateStore">The store the global receipt is read from. Its user paths name the home.</param>
-    /// <param name="suppliedPath">The path the operator gave, or null when none was given.</param>
-    /// <param name="dryRun">Whether the run only plans, so the home directory is not created.</param>
-    public static string ResolveGlobalAnchorRoot(ISquadStateStore stateStore, string? suppliedPath, bool dryRun)
-    {
-        ArgumentNullException.ThrowIfNull(stateStore);
-
-        string home = Path.GetFullPath(stateStore.UserPaths.HomeDirectory);
-        SquadReceipt? legacy = TryReadLegacySingleRootHomeReceipt(stateStore, home);
-        if (legacy is not null)
-        {
-            if (Path.IsPathFullyQualified(legacy.TargetRoot))
-            {
-                if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
-                    WriteLine(
-                        $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
-                        $"this legacy single-root deployment is anchored at its recorded root '{Markup.Escape(legacy.TargetRoot)}'.");
-
-                return legacy.TargetRoot;
-            }
-
-            // A legacy receipt that records no absolute root names no root of its own, so the operator's path, or
-            // the process directory when none is given, stays the anchor, as it was before the migration recorded one.
-            return ResolveTargetRoot(suppliedPath);
-        }
-
-        // The home directory exists on every real profile; creating it here only matters for a fake home,
-        // and a dry run writes nothing, so it is left alone there.
-        if (!dryRun && !Directory.Exists(home)) Directory.CreateDirectory(home);
-
-        if (suppliedPath is not null && !string.Equals(suppliedPath, ".", StringComparison.Ordinal))
-            WriteLine(
-                $"[yellow]warning:[/] the path '{Markup.Escape(suppliedPath)}' is ignored under --global; " +
-                $"global state lives beneath the home directory '{Markup.Escape(home)}'.");
-
-        return home;
-    }
-
-    /// <summary>
-    ///     Loads the host configuration a Squad verb reads. A global run always reads the home directory's
-    ///     <c>.kyber-weave/kyber-weave.yml</c> as the user-level file that records <c>arbiter.global.targets</c>,
-    ///     whatever root its receipt anchors at; reading it as a project config would reject that block as
-    ///     <c>KW-ARB-CONFIG-011</c>. Only a project-scope run loads <paramref name="targetRoot" /> as a project.
-    /// </summary>
-    /// <param name="targetRoot">The root the run is anchored at.</param>
-    /// <param name="scope">Whether the run is global or project scope.</param>
-    /// <param name="homeDirectory">The home directory the run's user paths name.</param>
-    public static KyberWeaveConfigLoadResult TryLoadScopeConfig(
-        string targetRoot,
-        SquadDeploymentScope scope,
-        string homeDirectory)
-    {
-        if (string.IsNullOrWhiteSpace(targetRoot))
-            return KyberWeaveConfigLoadResult.Fail("The target root must not be empty.", null);
-        if (string.IsNullOrWhiteSpace(homeDirectory))
-            return KyberWeaveConfigLoadResult.Fail("The home directory must not be empty.", null);
-
-        try
-        {
-            if (scope != SquadDeploymentScope.Global)
-                return KyberWeaveConfigLoader.TryLoad(targetRoot);
-
-            // A global run always reads the home user-level config, whatever root its receipt anchors at (home, or
-            // the root a legacy single-root receipt records), so the answer does not depend on how the path is spelled.
-            string home = Path.GetFullPath(homeDirectory);
-            KyberWeaveConfigLoadResult user = KyberWeaveConfigLoader.TryLoadUserConfig(home);
-
-            // Only a home with no user-level file falls back, and only to the explicit legacy root-level file, so a
-            // user file created meanwhile is never re-probed and read as a project config.
-            if (user.ConfigPath is not null && File.Exists(user.ConfigPath))
-                return user;
-
-            string legacy = Path.Combine(home, "kyber-weave.yml");
-            return File.Exists(legacy) ? KyberWeaveConfigLoader.TryLoad(home, legacy) : user;
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return KyberWeaveConfigLoadResult.Fail(ex.Message, null);
-        }
-    }
-
-    /// <summary>
-    ///     The home global receipt when it is a pre-#91 single-root receipt, whose files resolve beneath the one
-    ///     root it records rather than beneath each target's own global root. Null when there is no such receipt.
-    /// </summary>
-    private static SquadReceipt? TryReadLegacySingleRootHomeReceipt(ISquadStateStore stateStore, string home)
-    {
-        try
-        {
-            SquadReceipt? receipt = stateStore.ReadReceipt(home, SquadDeploymentScope.Global);
-            return receipt is not null && SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt) ? receipt : null;
-        }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException)
-        {
-            // A corrupt or blank receipt is reported by the command that reads it; it does not pick an anchor here.
-            return null;
-        }
-    }
-
-    /// <summary>
-    ///     Brings legacy Squad state into the home-level layout before a verb reads it: the single legacy
-    ///     global receipt and, when a project root is given, that project's in-repo state.
-    /// </summary>
-    /// <remarks>
-    ///     Shared by every squad verb so no read ever sees the pre-home layout. Under a dry run the migration
-    ///     writes nothing and only reports what the next non-dry-run invocation will move. The project root is
-    ///     optional because global verbs have no project to import.
-    /// </remarks>
-    public static SquadMigrationReport EnsureStateMigrated(
-        ISquadStateMigration migration,
-        string? invokingCwd,
-        string? projectRoot,
-        bool dryRun)
-    {
-        ArgumentNullException.ThrowIfNull(migration);
-
-        SquadMigrationReport global = migration.MigrateGlobal(invokingCwd, dryRun);
-
-        List<string> imported = [];
-        List<string> warnings = [.. global.Warnings];
-        if (projectRoot is not null && Directory.Exists(projectRoot))
-        {
-            SquadMigrationReport project = migration.ImportProject(projectRoot, dryRun);
-            imported.AddRange(project.ImportedProjects);
-            // Both steps read the migration ledger, so an unreadable ledger would otherwise be reported twice.
-            foreach (string warning in project.Warnings)
-                if (!warnings.Contains(warning))
-                    warnings.Add(warning);
-        }
-
-        return new SquadMigrationReport(global.MigratedItems, global.UnmigratedLegacyRoots, imported, warnings);
-    }
-
     /// <summary>
     ///     True when a dry run found legacy state that a real run would migrate. The verb reports that and
     ///     stops, so it never reads a deployment the migration has not yet moved.
@@ -554,30 +327,6 @@ internal static class SquadCommandComposition
     public static bool IsPendingDryRunMigration(SquadMigrationReport report, bool dryRun)
     {
         return dryRun && (report.MigratedItems.Count > 0 || report.ImportedProjects.Count > 0);
-    }
-
-    /// <summary>
-    ///     Prints what the migration did and warns about, each line unfolded. Legacy roots that remain on disk
-    ///     are printed only when <paramref name="includeRetainedLegacyRoots" /> is set: after every successful
-    ///     migration they remain, so printing them from each verb would warn on every run. Doctor, which reports
-    ///     what was left behind, is the one caller that asks for them.
-    /// </summary>
-    public static void WriteMigrationNotes(SquadMigrationReport report, bool includeRetainedLegacyRoots = false)
-    {
-        ArgumentNullException.ThrowIfNull(report);
-
-        foreach (string item in report.MigratedItems) WriteLine($"[grey]info[/] {Markup.Escape(item)}");
-
-        foreach (string item in report.ImportedProjects) WriteLine($"[grey]info[/] {Markup.Escape(item)}");
-
-        foreach (string warning in report.Warnings) WriteLine($"[yellow]warning:[/] {Markup.Escape(warning)}");
-
-        if (!includeRetainedLegacyRoots) return;
-
-        foreach (SquadUnmigratedLegacyRoot root in report.UnmigratedLegacyRoots)
-            WriteLine(
-                $"[yellow]warning:[/] legacy global root '{Markup.Escape(root.Root)}' was not migrated: " +
-                $"{Markup.Escape(root.Reason)} {Markup.Escape(root.Guidance)}");
     }
 
     /// <summary>
@@ -652,67 +401,13 @@ internal static class SquadCommandComposition
             tokens.Distinct(StringComparer.Ordinal).ToArray());
     }
 
-    /// <summary>
-    ///     Resolves each named project path to a registered project, or to an unregistered path that holds
-    ///     in-repo state to import. Any other path is refused with the nearest registered path as a hint.
-    /// </summary>
-    /// <remarks>
-    ///     Runs before any global work, so a typo fails the run with nothing written. The registry is matched
-    ///     by canonical identity, so the operator can name a project through an alias or a link.
-    /// </remarks>
-    /// <exception cref="ArgumentException">A path is neither registered nor importable.</exception>
-    internal static IReadOnlyList<string> ResolveNamedProjects(IReadOnlyList<string> paths, ISquadStateStore stateStore)
-    {
-        ArgumentNullException.ThrowIfNull(paths);
-        ArgumentNullException.ThrowIfNull(stateStore);
-
-        List<string> resolved = [];
-        foreach (string path in paths)
-        {
-            string full = Path.GetFullPath(path);
-            SquadProjectRegistryEntry? entry = stateStore.FindProject(full);
-            string chosen;
-            if (entry is not null)
-                chosen = entry.Path;
-            else if (Directory.Exists(full) &&
-                     File.Exists(Path.Combine(full, InRepoStateDirectoryName, ReceiptFileName)))
-                chosen = full;
-            else
-                throw new ArgumentException(UnknownProjectMessage(full, stateStore.ListProjects()));
-
-            if (!resolved.Contains(chosen, StringComparer.Ordinal)) resolved.Add(chosen);
-        }
-
-        return resolved;
-    }
-
-    /// <summary>Offers the operator a project to pick, through the injected picker or the Spectre picker.</summary>
+    /// <summary>Offers the operator a project to pick, through the injected picker or the Spectre picker on the console.</summary>
     public static IReadOnlyList<string> RunProjectPicker(
         ISquadProjectPicker? picker,
-        IReadOnlyList<SquadProjectRegistryEntry> projects)
+        IReadOnlyList<SquadProjectRegistryEntry> projects,
+        IAnsiConsole console)
     {
-        return (picker ?? new SpectreSquadProjectPicker()).Pick(projects);
-    }
-
-    /// <summary>
-    ///     The refusal for an unknown project path. Names the nearest registered path so a typo is one
-    ///     copy-paste from being fixed, and says plainly when nothing is registered at all.
-    /// </summary>
-    private static string UnknownProjectMessage(string full, IReadOnlyList<SquadProjectRegistryEntry> registered)
-    {
-        string message =
-            $"'{full}' is not a registered Squad project, and it holds no in-repo Squad state to import.";
-        if (registered.Count == 0) return message + " No projects are registered.";
-
-        SquadProjectRegistryEntry nearest = registered.MinBy(entry =>
-            StringDistance.Levenshtein(full, entry.Path, true))!;
-        return message + $" Did you mean '{nearest.Path}'?";
-    }
-
-    /// <summary>Resolves the target root directory path.</summary>
-    public static string ResolveTargetRoot(string? path)
-    {
-        return Path.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path);
+        return (picker ?? new SpectreSquadProjectPicker(console)).Pick(projects);
     }
 
     /// <summary>Resolves the deployment scope from the global flag.</summary>

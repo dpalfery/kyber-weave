@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
@@ -7,6 +8,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -34,6 +36,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private readonly TempDirectory _temp = new();
     private readonly SquadCorpusTemplate _corpus;
 
@@ -679,7 +683,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
 
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
@@ -818,7 +822,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
 
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
@@ -860,7 +864,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
         string project = Path.Combine(_temp.Path, name + "-project");
         Directory.CreateDirectory(project);
         SquadGlobalRoots roots = new(_ => null, home);
-        SquadStateStore store = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, name + "-user-data")));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(Path.Combine(_temp.Path, name + "-user-data")));
         SyntheticValidSquadReleaseSource source = new();
         return (SquadHostDefaults.CreateLifecycleService(source, SquadHostDefaults.ResolveRenderer(), store, globalRoots: roots), store, project, roots, source);
     }
@@ -883,8 +887,8 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
             Assert.Equal(["claude", "opencode"], targets);
             SquadOwnedFile openCodeFile = receipt.Files.First(file => file.Target == "opencode");
             Assert.True(File.Exists(added.Plan!.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
-            Assert.True(File.Exists(added.Plan.ResolvePhysicalPath(receipt.Files.First(file => file.Target == "claude"), SquadFileSystemPathSemantics.Instance)));
-            Assert.True(SquadFileSystemPathSemantics.Instance.IsWithin(roots.ResolveGlobalRoot(SquadTarget.OpenCode), added.Plan.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
+            Assert.True(File.Exists(added.Plan!.ResolvePhysicalPath(receipt.Files.First(file => file.Target == "claude"), SquadFileSystemPathSemantics.Instance)));
+            Assert.True(SquadFileSystemPathSemantics.Instance.IsWithin(roots.ResolveGlobalRoot(SquadTarget.OpenCode), added.Plan!.ResolvePhysicalPath(openCodeFile, SquadFileSystemPathSemantics.Instance)));
         }
     }
 
@@ -939,7 +943,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
             ]);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateInstall(
+            RealSquadDeployment.Planner.CreateInstall(
                 projectRoot,
                 SquadDeploymentScope.Global,
                 GlobalLock(["pi"]),
@@ -979,7 +983,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
             [owned]);
         SquadReceipt sibling = receipt;
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUninstall(
             projectRoot,
             SquadDeploymentScope.Global,
             receipt,
@@ -1006,7 +1010,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
 
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
@@ -1068,7 +1072,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
         string userData = Path.Combine(_temp.Path, "user-data-project-factory");
 
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -1114,7 +1118,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
         string userData = Path.Combine(_temp.Path, $"user-data-project-{target}");
 
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using SyntheticValidSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -1177,7 +1181,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
 
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore, globalRoots: globalRoots);
@@ -1263,7 +1267,7 @@ public sealed class SquadGlobalRootTests : IClassFixture<SquadCorpusTemplate>, I
         // Guard: verify that every registered renderer's global output contains no path starting with
         // the target's legacy prefix. This ensures the layout classification cannot mistake per-target
         // renders for legacy single-root paths.
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
 
         // Map of target to its legacy prefix from the investigation findings.
         Dictionary<SquadTarget, string> legacyPrefixes = new()

@@ -8,6 +8,7 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.Processes;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -355,7 +356,7 @@ public sealed class CopilotBackgroundReturnHookProcessTests : IDisposable
     private string ArbiterDirectory =>
         Assert.Single(Directory.GetDirectories(Path.Combine(_home.Path, ".kyber-weave", "arbiter", "projects")));
 
-    private IReadOnlyList<ArbiterLedgerEvent> Ledger() => new InFlightLedger(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterLedgerEvent> Ledger() => RealArbiterState.Ledger(ArbiterDirectory).ReadAll();
 
-    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => new DecisionLog(ArbiterDirectory).ReadAll();
+    private IReadOnlyList<ArbiterDecisionRecord> Decisions() => RealArbiterState.Decisions(ArbiterDirectory).ReadAll();
 }

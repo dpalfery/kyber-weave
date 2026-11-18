@@ -34,13 +34,90 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     public void WriteAllText(string path, string contents) => _inner.WriteAllText(path, contents);
 
     /// <inheritdoc />
+    public void WriteAllBytes(string path, byte[] bytes) => _inner.WriteAllBytes(path, bytes);
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] bytes) => _inner.WriteAllBytesAtomic(path, bytes);
+
+    /// <inheritdoc />
+    public void WriteAllTextAtomic(string path, string contents, bool flushToDisk) =>
+        _inner.WriteAllTextAtomic(path, contents, flushToDisk);
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] bytes, bool flushToDisk) =>
+        _inner.WriteAllBytesAtomic(path, bytes, flushToDisk);
+
+    /// <inheritdoc />
+    public void MoveFile(string sourcePath, string destinationPath) => _inner.MoveFile(sourcePath, destinationPath);
+
+    /// <inheritdoc />
+    public void MoveFile(string sourcePath, string destinationPath, bool overwrite) =>
+        _inner.MoveFile(sourcePath, destinationPath, overwrite);
+
+    /// <inheritdoc />
     public void CreateNewFile(string path) => _inner.CreateNewFile(path);
+
+    /// <inheritdoc />
+    public bool TryCreateNewFile(string path) => _inner.TryCreateNewFile(path);
+
+    /// <inheritdoc />
+    public Stream OpenWriteNew(string path) => _inner.OpenWriteNew(path);
+
+    /// <inheritdoc />
+    public void FlushToStableStorage(Stream stream) => _inner.FlushToStableStorage(stream);
+
+    /// <inheritdoc />
+    public void MoveDirectory(string sourcePath, string destinationPath) => _inner.MoveDirectory(sourcePath, destinationPath);
 
     /// <inheritdoc />
     public void DeleteFile(string path) => _inner.DeleteFile(path);
 
     /// <inheritdoc />
+    public void DeleteTreeNoFollow(string directoryPath) => _inner.DeleteTreeNoFollow(directoryPath);
+
+    /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) => _inner.DeleteEmptyDirectory(directoryPath);
+
+    /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) => _inner.FlushDirectory(directoryPath);
+
+    /// <inheritdoc />
+    public void CreateFileLink(string linkPath, string targetPath) => _inner.CreateFileLink(linkPath, targetPath);
+
+    /// <inheritdoc />
+    public void CreateDirectoryLink(string linkPath, string targetPath) =>
+        _inner.CreateDirectoryLink(linkPath, targetPath);
+
+    /// <inheritdoc />
+    public string CreateTemporaryDirectory(string prefix) => _inner.CreateTemporaryDirectory(prefix);
+
+    /// <inheritdoc />
+    public long GetLength(string path) => _inner.GetLength(path);
+
+    /// <inheritdoc />
+    public FileAttributes GetAttributes(string path) => _inner.GetAttributes(path);
+
+    /// <inheritdoc />
+    public string? GetFinalLinkTarget(string path) => _inner.GetFinalLinkTarget(path);
+
+    /// <inheritdoc />
+    IEnumerable<FileSystemEntry> IFileSystem.EnumerateEntries(string directory) => _inner.EnumerateEntries(directory);
+
+    /// <inheritdoc />
+    public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, bool recursive, bool followLinks) =>
+        _inner.EnumerateFiles(directory, searchPattern, recursive, followLinks);
+
+    /// <inheritdoc />
     public string? GetLinkTarget(string path) => _inner.GetLinkTarget(path);
+
+    /// <inheritdoc />
+    public Stream OpenExclusive(string path) => _inner.OpenExclusive(path);
+
+    /// <inheritdoc />
+    public Stream OpenGuarded(string path) => _inner.OpenGuarded(path);
+
+    /// <inheritdoc />
+    public Stream OpenAppendShared(string path) => _inner.OpenAppendShared(path);
 
     /// <inheritdoc />
     public byte[] ReadAllBytes(string path) => File.ReadAllBytes(path);
@@ -75,11 +152,9 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     /// <inheritdoc />
     public IEnumerable<RepositoryEntry> EnumerateEntries(string directory)
     {
-        foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos(
-                     "*",
-                     new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 }))
+        foreach (FileSystemEntry entry in _inner.EnumerateEntries(directory))
         {
-            yield return new RepositoryEntry(entry.FullName, (entry.Attributes & FileAttributes.Directory) != 0, entry.LinkTarget is not null);
+            yield return new RepositoryEntry(entry.Path, entry.IsDirectory, entry.IsLink);
         }
     }
 
@@ -91,11 +166,11 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
 
     /// <inheritdoc />
     public IEnumerable<string> EnumerateContainedFiles(string root, string searchPattern) =>
-        DocsRootPath.EnumerateContainedFiles(root, searchPattern);
+        DocsRootWalk.EnumerateContainedFiles(root, searchPattern);
 
     /// <inheritdoc />
     public bool IsContainedFile(string repoRoot, string relativePath, IEnumerable<string> relativeRoots) =>
-        DocsRootPath.IsContainedFile(repoRoot, relativePath, relativeRoots);
+        DocsRootWalk.IsContainedFile(repoRoot, relativePath, relativeRoots);
 
     /// <inheritdoc />
     public bool IsReparsePoint(string path) => (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0;

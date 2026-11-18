@@ -1,0 +1,1127 @@
+using System.Text;
+using System.Text.RegularExpressions;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
+using Xunit;
+
+namespace KyberWeave.Tests.Squad;
+
+/// <summary>
+/// Unit tests pinning GitHub Copilot agent rendering in <see cref="CopilotRenderer"/>,
+/// specifically verifying YAML flow sequence formatting for the <c>tools</c> frontmatter field,
+/// explicit single-quoting of MCP server wildcards, exact canonical source membership, and
+/// deterministic tool ordering.
+/// </summary>
+public sealed class CopilotRendererTests
+{
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static readonly string ProductRoot = CanonicalSquadTree.Shared.ProductRoot;
+
+    private readonly InMemoryFileSystem _files = new();
+
+    private static readonly Regex ToolsFlowSequenceRegex =
+        new(@"^tools:\s*\[(?<items>.*)\]$", RegexOptions.Compiled | RegexOptions.Multiline);
+
+    private static readonly string[] McpServerTools =
+        ["'codegraph/*'", "'kw-docs/*'", "context7/resolve-library-id", "context7/query-docs"];
+
+    [Fact]
+    public void CopilotToolCatalogHasExactApprovedOrder()
+    {
+        Assert.Equal(
+            [
+                "vscode/runCommand",
+                "vscode/toolSearch",
+                "vscode/askQuestions",
+                "read/problems",
+                "read/readFile",
+                "read/viewImage",
+                "read/terminalSelection",
+                "read/terminalLastCommand",
+                "read/getTaskOutput",
+                "todo",
+                "codegraph/*",
+                "kw-docs/*",
+                "context7/resolve-library-id",
+                "context7/query-docs",
+                "search",
+                "execute/getTerminalOutput",
+                "execute/killTerminal",
+                "execute/sendToTerminal",
+                "execute/runTask",
+                "execute/createAndRunTask",
+                "execute/runInTerminal",
+                "execute/testFailure",
+                "edit/createDirectory",
+                "edit/createFile",
+                "edit/editFiles",
+                "edit/rename",
+                "web",
+                "agent",
+                "vscode",
+                "tool_search",
+                "read",
+                "context7/*",
+                "execute",
+                "edit"
+            ],
+            CopilotToolCatalog.OrderedTools);
+    }
+
+    /// <summary>
+    /// <c>architect-copilot</c> is the Copilot-only envelope. It must stay equal to the shared
+    /// <c>architect</c> profile, which now grants the shell (<c>allow</c>) on every target.
+    /// </summary>
+    [Theory]
+    [InlineData("architect")]
+    public void ArchitectCopilotMatchesSharedShellGrant(string agentName)
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent agent = Assert.Single(source.Agents, candidate => candidate.Name == agentName);
+
+        Assert.Equal("architect", agent.CapabilityProfile);
+        Assert.Equal("architect-copilot", agent.CopilotCapabilityProfile);
+        Assert.Equal(
+            SquadPermissionDecision.Allow,
+            source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["filesystem.write"]);
+        Assert.Equal(
+            SquadPermissionDecision.Allow,
+            source.CapabilityProfiles.Profiles[agent.CapabilityProfile].Permissions["process.execute"]);
+        Assert.Equal(
+            SquadPermissionDecision.Allow,
+            source.CapabilityProfiles.Profiles[agent.CopilotCapabilityProfile!].Permissions["filesystem.write"]);
+        Assert.Equal(
+            SquadPermissionDecision.Allow,
+            source.CapabilityProfiles.Profiles[agent.CopilotCapabilityProfile!].Permissions["process.execute"]);
+    }
+
+    [Theory]
+    [InlineData("architect")]
+    public async Task ArchitectRenderedMetadataKeepsSharedCapabilityProfile(string agentName)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        Assert.Contains("capability-profile: architect", frontmatter, StringComparison.Ordinal);
+        Assert.DoesNotContain("architect-copilot", frontmatter, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsync_EmitsToolsAsYamlFlowSequence_AcrossAllRenderedAgents()
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile[] agentFiles = result.Files
+            .Where(f => f.RelativePath.StartsWith(".github/agents/", StringComparison.Ordinal) &&
+                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.NotEmpty(agentFiles);
+
+        foreach (SquadDeploymentFile file in agentFiles)
+        {
+            string content = Encoding.UTF8.GetString(file.Content.Span);
+            string frontmatter = ExtractFrontmatterText(content);
+
+            Match match = ToolsFlowSequenceRegex.Match(frontmatter);
+            Assert.True(
+                match.Success,
+                $"Agent file '{file.RelativePath}' frontmatter does not contain a flow-style 'tools: [...]' line.\nFrontmatter:\n{frontmatter}");
+
+            // Verify tools is not rendered as a YAML block list (e.g. "tools:\n  - " or "tools:\n- ")
+            Assert.DoesNotMatch(@"tools:\s*\n\s*-", frontmatter);
+        }
+    }
+
+    [Fact]
+    public async Task RenderAsync_SingleQuotesAllMcpServerWildcardsInRawYamlText()
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Find worker / analytical agents that have filesystem.read enabled (e.g. architect, csharp-dev)
+        SquadDeploymentFile architectFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/architect.agent.md");
+
+        string architectContent = Encoding.UTF8.GetString(architectFile.Content.Span);
+        string architectFrontmatter = ExtractFrontmatterText(architectContent);
+        string architectToolsLine = ExtractToolsLine(architectFrontmatter);
+
+        foreach (string wildcard in McpServerTools)
+        {
+            Assert.Contains(wildcard, architectToolsLine, StringComparison.Ordinal);
+        }
+
+        // Verify wildcards are never unquoted (e.g. "codegraph/*" without quotes) or double-quoted
+        Assert.DoesNotContain("codegraph/*,",
+            architectToolsLine.Replace("'codegraph/*'", string.Empty, StringComparison.Ordinal),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("\"codegraph/*\"", architectToolsLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"kw-docs/*\"", architectToolsLine, StringComparison.Ordinal);
+
+        // context7 is granted as explicit tools; the coarse wildcard must never render alongside them.
+        Assert.DoesNotContain("context7/*", architectToolsLine, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The pure orchestrator's rendered tools name the <c>kw-docs</c> server, and no other
+    /// agent's rendered tools change.
+    /// </summary>
+    /// <remarks>
+    /// Copilot derives no MCP membership of its own: an agent reaches exactly the tools its own
+    /// <c>copilot-tools</c> frontmatter names, validated against the effective profile's
+    /// <c>filesystem.read</c>. So the widening lands in the canonical source, and this test pins
+    /// both halves — the renderer echoes the declaration in catalog order, and that declaration
+    /// follows the source-computed entitlement, which grants <c>kw-docs</c> to the orchestrator
+    /// while leaving <c>codegraph</c> and <c>context7</c> withheld from it.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_ConductorIsGrantedKyberWeaveAndEveryOtherAgentKeepsItsTools()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        foreach (SquadAgent agent in source.Agents)
+        {
+            IReadOnlyList<string> tools = RenderedTools(result, agent.Name);
+
+            // The renderer adds nothing the agent did not declare: the rendered list is the
+            // agent's own membership in the catalog's approved order.
+            Assert.Equal(CopilotToolCatalog.Normalize(agent.CopilotTools), tools);
+
+            if (SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Copilot))
+            {
+                Assert.True(
+                    tools.Contains("kw-docs/*", StringComparer.Ordinal),
+                    $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') is "
+                    + "entitled to kw-docs by the source rule but declares no 'kw-docs/*' "
+                    + "tool: " + string.Join(", ", tools));
+            }
+        }
+
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
+        Assert.Contains("kw-docs/*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("codegraph/*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain(
+            conductorTools,
+            tool => tool.StartsWith("context7/", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RenderAsync_AlwaysIncludesVscodeAndTodo_AcrossAllAgents()
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile[] agentFiles = result.Files
+            .Where(f => f.RelativePath.StartsWith(".github/agents/", StringComparison.Ordinal) &&
+                        f.RelativePath.EndsWith(".agent.md", StringComparison.Ordinal))
+            .ToArray();
+
+        foreach (SquadDeploymentFile file in agentFiles)
+        {
+            string content = Encoding.UTF8.GetString(file.Content.Span);
+            string toolsLine = ExtractToolsLine(ExtractFrontmatterText(content));
+
+            Assert.Contains("vscode", toolsLine, StringComparison.Ordinal);
+            Assert.Contains("todo", toolsLine, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Each canonical agent's rendered <c>tools</c> line is byte-exact: the catalog's approved
+    /// order, carrying exactly the membership its own <c>copilot-tools</c> frontmatter declares.
+    /// </summary>
+    /// <remarks>
+    /// The expected lines are literal on purpose. This test pins the emission order and the
+    /// rendering of declared membership — not the entitlement rule, which
+    /// <see cref="SquadUniversalMcpGrantContractTests"/> derives from the source — so a literal
+    /// row is what makes a reordered catalog or a lost entry fail rather than re-derive itself.
+    ///
+    /// Every <c>*</c>-bearing entry is single-quoted here and double-quoted in the canonical
+    /// <c>products/kyber-squad/agents/*.md</c> frontmatter. That asymmetry is real and must not be
+    /// reconciled: the source is YAML the loader reads, while this line is what
+    /// <c>CopilotRenderer</c> emits, and its converter writes every wildcard with
+    /// <c>ScalarStyle.SingleQuoted</c> so Copilot does not read <c>*</c> as an alias marker.
+    /// </remarks>
+    [Theory]
+    [InlineData("architect",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
+    [InlineData("bug-crusher",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, agent]")]
+    [InlineData("bug-crusher-investigator",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web]")]
+    [InlineData("code-reviewer",
+        "tools: [vscode/runCommand, vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, web, agent]")]
+    [InlineData("conductor",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, todo, 'kw-docs/*', agent]")]
+    [InlineData("docs-dev",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, execute/getTerminalOutput, execute/killTerminal, execute/sendToTerminal, execute/runTask, execute/createAndRunTask, execute/runInTerminal, execute/testFailure, edit/createFile, edit/editFiles, edit/rename, execute]")]
+    [InlineData("product-owner",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, edit/createFile, edit/editFiles, edit/rename, web, agent]")]
+    [InlineData("research-agent",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("review-lens",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    [InlineData("review-triage",
+        "tools: [vscode/toolSearch, vscode/askQuestions, read/problems, read/readFile, read/viewImage, read/terminalSelection, read/terminalLastCommand, read/getTaskOutput, todo, 'codegraph/*', 'kw-docs/*', context7/resolve-library-id, context7/query-docs, search, web]")]
+    public async Task RenderAsync_EmitsDeterministicCanonicalToolOrdering(string agentName, string expectedToolsLine)
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".github/agents/{agentName}.agent.md");
+
+        string content = Encoding.UTF8.GetString(file.Content.Span);
+        string actualToolsLine = ExtractToolsLine(ExtractFrontmatterText(content));
+
+        Assert.Equal(expectedToolsLine, actualToolsLine);
+    }
+
+    /// <summary>
+    /// Both review-lens and review-triage resolve to the `reviewer` model profile as of 2026-09-14.
+    /// The redesigned assertion verifies they both resolve to the same Copilot model value via
+    /// that shared profile, rather than assuming different tier assignments (plan section 7, T16).
+    /// </summary>
+    [Theory]
+    [InlineData("review-lens")]
+    [InlineData("review-triage")]
+    public async Task RenderAsync_ReviewerProfileAgentsResolveToTheirSharedReviewerCopilotModel(string agentName)
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Both agents should declare model-profile: reviewer
+        SquadAgent agent = Assert.Single(
+            source.Agents,
+            candidate => candidate.Name == agentName);
+        Assert.Equal("reviewer", agent.ModelProfile);
+
+        // The reviewer profile's Copilot value is the expected model
+        string expectedModel = source.ModelProfiles.Profiles["reviewer"].HarnessModels["copilot"];
+        Assert.Equal("Gemini 3.8 Flash (copilot)", expectedModel);
+
+        // Verify the rendered file contains that model
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".github/agents/{agentName}.agent.md");
+
+        Assert.Contains(
+            $"model: {expectedModel}",
+            Encoding.UTF8.GetString(file.Content.Span),
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("review-triage", "reviewer", "Gemini 3.8 Flash (copilot)")]
+    [InlineData("dev-easy", "fast", "Claude Haiku 5.5 (copilot)")]
+    [InlineData("dev-medium", "general", "GPT-6.1 Terra (copilot)")]
+    [InlineData("dev-hard", "dev-hard", "Gemini 4 Hydrogen (copilot)")]
+    public async Task RenderAsync_ReviewerAndFastAgentsResolveToTheirProfileCopilotModels(
+        string agentName,
+        string expectedProfile,
+        string expectedModel)
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        // Verify the agent declares the correct profile
+        SquadAgent agent = Assert.Single(
+            source.Agents,
+            candidate => candidate.Name == agentName);
+        Assert.Equal(expectedProfile, agent.ModelProfile);
+
+        // Verify that profile's Copilot value matches expected
+        Assert.Equal(
+            expectedModel,
+            source.ModelProfiles.Profiles[expectedProfile].HarnessModels["copilot"]);
+
+        // Verify the frontmatter contains the expected model
+        Assert.Contains(
+            $"model: {expectedModel}",
+            frontmatter,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RenderAsyncUsesExactSyntheticSourceMembershipWithoutInferringTools()
+    {
+        string syntheticRoot = SyntheticRoot();
+        WriteSyntheticSquad(syntheticRoot, """
+                                       schema: kyber-squad.capability-profiles/v1
+                                       capabilities:
+                                         - filesystem.read
+                                         - filesystem.search
+                                         - filesystem.write
+                                         - process.execute
+                                         - network.read
+                                         - network.publish
+                                         - delegate
+                                       profiles:
+                                         exec-only:
+                                           permissions:
+                                             filesystem.read: deny
+                                             filesystem.search: deny
+                                             filesystem.write: deny
+                                             process.execute: allow
+                                             network.read: deny
+                                             network.publish: deny
+                                             delegate: deny
+                                         read-only-custom:
+                                           permissions:
+                                             filesystem.read: allow
+                                             filesystem.search: deny
+                                             filesystem.write: deny
+                                             process.execute: deny
+                                             network.read: deny
+                                             network.publish: deny
+                                             delegate: deny
+                                         all-denied:
+                                           permissions:
+                                             filesystem.read: deny
+                                             filesystem.search: deny
+                                             filesystem.write: deny
+                                             process.execute: deny
+                                             network.read: deny
+                                             network.publish: deny
+                                             delegate: deny
+                                       """);
+
+        CopilotRenderer renderer = new();
+        SquadRenderRequest request = new SquadRenderRequest(
+            syntheticRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project).Prepared(_files);
+
+        SquadRenderResult result = await renderer.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile execAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/exec-bot.agent.md");
+        Assert.Equal(
+            "tools: [todo, vscode, execute]",
+            ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(execAgent.Content.Span))));
+
+        SquadDeploymentFile readAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/read-bot.agent.md");
+        Assert.Equal(
+            "tools: [todo, vscode, read, 'context7/*']",
+            ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(readAgent.Content.Span))));
+
+        SquadDeploymentFile lockedAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/locked-bot.agent.md");
+        Assert.Equal(
+            "tools: [todo, vscode]",
+            ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(lockedAgent.Content.Span))));
+
+        SquadDeploymentFile conductorAgent =
+            Assert.Single(result.Files, f => f.RelativePath == ".github/agents/conductor.agent.md");
+        Assert.Equal(
+            "tools: [todo, vscode, read]",
+            ExtractToolsLine(ExtractFrontmatterText(Encoding.UTF8.GetString(conductorAgent.Content.Span))));
+    }
+
+    private void WriteSyntheticSquad(string root, string capabilitiesYaml)
+    {
+        _files.CreateDirectory(Path.Combine(root, "bundles"));
+        _files.CreateDirectory(Path.Combine(root, "profiles"));
+        _files.CreateDirectory(Path.Combine(root, "agents"));
+        _files.CreateDirectory(Path.Combine(root, "schemas"));
+
+        foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
+        {
+            _files.WriteAllBytes(
+                Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
+                Corpus.ReadBytes(schemaFile));
+        }
+
+        _files.WriteAllText(Path.Combine(root, "squad.yml"), """
+                                                           schema: kyber-squad.squad/v1
+                                                           name: test-squad
+                                                           version-source: kyber-weave-assembly
+                                                           default-bundle: full
+                                                           bundles:
+                                                             full: bundles/full.yml
+                                                           profiles:
+                                                             models: profiles/models.yml
+                                                             capabilities: profiles/capabilities.yml
+                                                             fallbacks: profiles/fallbacks.yml
+                                                           toolchain: toolchain.yml
+                                                           mcp: mcp.json
+                                                           """);
+
+        _files.WriteAllText(Path.Combine(root, "toolchain.yml"), """
+                                                               schema: kyber-squad.toolchain/v1
+                                                               required-features:
+                                                                 - agent-ir/v1
+                                                               validated-release: null
+                                                               """);
+
+        _files.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
+
+        _files.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
+                                                                     schema: kyber-squad.bundle/v1
+                                                                     name: full
+                                                                     agents:
+                                                                       - exec-bot
+                                                                       - read-bot
+                                                                       - locked-bot
+                                                                       - conductor
+                                                                     skills: []
+                                                                     """);
+
+        _files.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
+                                                                        schema: kyber-squad.model-profiles/v1
+                                                                        profiles:
+                                                                          default:
+                                                                            default: inherit
+                                                                        """);
+
+        _files.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), capabilitiesYaml);
+
+        _files.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
+                                                                           schema: kyber-squad.fallback-profiles/v1
+                                                                           profiles:
+                                                                             none:
+                                                                               no-primary-agent: skill
+                                                                               no-agent-primitive: skill
+                                                                           """);
+
+        WriteAgent(root, "exec-bot", "exec-only", "[execute, todo, vscode]");
+        WriteAgent(root, "read-bot", "read-only-custom", "[context7/*, todo, read, vscode]");
+        WriteAgent(root, "locked-bot", "all-denied", "[todo, vscode]");
+        WriteAgent(root, "conductor", "read-only-custom", "[todo, read, vscode]");
+    }
+
+    private void WriteAgent(
+        string root,
+        string name,
+        string capabilityProfile,
+        string copilotTools,
+        string invocation = "subagent",
+        string delegatesTo = "[]")
+    {
+        _files.WriteAllText(Path.Combine(root, "agents", $"{name}.md"), $"""
+                                                                       ---
+                                                                       schema: kyber-squad.agent/v1
+                                                                       name: {name}
+                                                                       description: Test agent {name}
+                                                                       invocation: {invocation}
+                                                                       model-profile: default
+                                                                       capability-profile: {capabilityProfile}
+                                                                       copilot-tools: {copilotTools}
+                                                                       delegates-to: {delegatesTo}
+                                                                       fallback: none
+                                                                       aliases: []
+                                                                       ---
+                                                                       Instruction body for {name}.
+                                                                       """);
+    }
+
+    private void WritePrimaryDelegationSquad(string root)
+    {
+        _files.CreateDirectory(Path.Combine(root, "bundles"));
+        _files.CreateDirectory(Path.Combine(root, "profiles"));
+        _files.CreateDirectory(Path.Combine(root, "agents"));
+        _files.CreateDirectory(Path.Combine(root, "schemas"));
+
+        foreach (string schemaFile in Corpus.EnumerateFiles("products/kyber-squad/schemas", "*.json", recursive: false))
+        {
+            _files.WriteAllBytes(
+                Path.Combine(root, "schemas", Path.GetFileName(schemaFile)),
+                Corpus.ReadBytes(schemaFile));
+        }
+
+        _files.WriteAllText(Path.Combine(root, "squad.yml"), """
+                                                           schema: kyber-squad.squad/v1
+                                                           name: test-squad
+                                                           version-source: kyber-weave-assembly
+                                                           default-bundle: full
+                                                           bundles:
+                                                             full: bundles/full.yml
+                                                           profiles:
+                                                             models: profiles/models.yml
+                                                             capabilities: profiles/capabilities.yml
+                                                             fallbacks: profiles/fallbacks.yml
+                                                           toolchain: toolchain.yml
+                                                           mcp: mcp.json
+                                                           """);
+
+        _files.WriteAllText(Path.Combine(root, "toolchain.yml"), """
+                                                               schema: kyber-squad.toolchain/v1
+                                                               required-features:
+                                                                 - agent-ir/v1
+                                                               validated-release: null
+                                                               """);
+
+        _files.WriteAllText(Path.Combine(root, "mcp.json"), """{ "mcpServers": {} }""");
+
+        _files.WriteAllText(Path.Combine(root, "bundles", "full.yml"), """
+                                                                     schema: kyber-squad.bundle/v1
+                                                                     name: full
+                                                                     agents:
+                                                                       - primary-boss
+                                                                       - primary-lonely
+                                                                       - delegating-sub
+                                                                       - worker-a
+                                                                     skills: []
+                                                                     """);
+
+        _files.WriteAllText(Path.Combine(root, "profiles", "models.yml"), """
+                                                                        schema: kyber-squad.model-profiles/v1
+                                                                        profiles:
+                                                                          default:
+                                                                            default: inherit
+                                                                        """);
+
+        _files.WriteAllText(Path.Combine(root, "profiles", "capabilities.yml"), """
+                                                                              schema: kyber-squad.capability-profiles/v1
+                                                                              capabilities:
+                                                                                - filesystem.read
+                                                                                - filesystem.search
+                                                                                - filesystem.write
+                                                                                - process.execute
+                                                                                - network.read
+                                                                                - network.publish
+                                                                                - delegate
+                                                                              profiles:
+                                                                                orchestrator:
+                                                                                  permissions:
+                                                                                    filesystem.read: deny
+                                                                                    filesystem.search: deny
+                                                                                    filesystem.write: deny
+                                                                                    process.execute: deny
+                                                                                    network.read: deny
+                                                                                    network.publish: deny
+                                                                                    delegate: allow
+                                                                                plain:
+                                                                                  permissions:
+                                                                                    filesystem.read: deny
+                                                                                    filesystem.search: deny
+                                                                                    filesystem.write: deny
+                                                                                    process.execute: deny
+                                                                                    network.read: deny
+                                                                                    network.publish: deny
+                                                                                    delegate: deny
+                                                                              """);
+
+        _files.WriteAllText(Path.Combine(root, "profiles", "fallbacks.yml"), """
+                                                                           schema: kyber-squad.fallback-profiles/v1
+                                                                           profiles:
+                                                                             none:
+                                                                               no-primary-agent: skill
+                                                                               no-agent-primitive: skill
+                                                                           """);
+
+        WriteAgent(root, "primary-boss", "orchestrator", "[todo, vscode, agent]", "primary", "[worker-a]");
+        WriteAgent(root, "primary-lonely", "plain", "[todo, vscode]", "primary");
+        WriteAgent(root, "delegating-sub", "orchestrator", "[todo, vscode, agent]", "subagent", "[worker-a]");
+        WriteAgent(root, "worker-a", "plain", "[todo, vscode]");
+    }
+
+    private static string ExtractFrontmatterText(string markdown)
+    {
+        const string delimiter = "---\n";
+        Assert.StartsWith(delimiter, markdown, StringComparison.Ordinal);
+        int end = markdown.IndexOf("\n---\n", delimiter.Length, StringComparison.Ordinal);
+        Assert.True(end > 0, "Expected closing frontmatter delimiter.");
+        return markdown[delimiter.Length..end];
+    }
+
+    /// <summary>
+    /// The "agent" tool grants an agent the mechanism to delegate; "agents" names who it
+    /// may reach. Emitting only the first leaves a delegating agent holding a tool
+    /// with an empty roster — delegation that looks configured and silently does nothing.
+    /// This holds for primary agents too: GitHub Copilot does not grant a primary agent
+    /// the full roster automatically, so a delegating primary declares its roster exactly
+    /// like a subagent does — but stays user-invocable (asserted separately).
+    /// </summary>
+    [Theory]
+    [InlineData("architect", "agents: ['platform-researcher', 'research-agent']")]
+    [InlineData("code-reviewer", "agents: ['platform-researcher', 'review-lens', 'review-triage']")]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingSubagents(
+        string agentName,
+        string expectedAgentsLine)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        string? actual = frontmatter
+            .Split('\n')
+            .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+            ?.Trim();
+
+        Assert.Equal(expectedAgentsLine, actual);
+        Assert.Contains("user-invocable: false", frontmatter, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The real product conductor is a primary agent with a delegation roster. GitHub
+    /// Copilot does not grant it the full roster automatically, so it declares its roster
+    /// exactly like a subagent does — but stays user-invocable, since it is the default
+    /// entry point a human chooses directly. The two root wrappers follow the same rule.
+    /// </summary>
+    [Theory]
+    [InlineData(
+        "conductor",
+        "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', " +
+        "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
+        "'platform-researcher', 'product-owner', " +
+        "'research-agent', 'review-lens', 'review-triage']")]
+    [InlineData("product-owner", "agents: ['research-agent']")]
+    [InlineData(
+        "bug-crusher",
+        "agents: ['architect', 'bug-crusher-investigator', 'code-reviewer', " +
+        "'dev-easy', 'dev-hard', 'dev-medium', 'devops', 'docs-dev', " +
+        "'review-lens', 'review-triage']")]
+    public async Task RenderAsync_DeclaresDelegationRosterForDelegatingPrimaryAgents(
+        string agentName,
+        string expectedAgentsLine)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        string? actual = frontmatter
+            .Split('\n')
+            .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+            ?.Trim();
+
+        Assert.Equal(expectedAgentsLine, actual);
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// The per-task reviewer was retired; a Copilot render that still emits any path naming it would
+    /// hand the harness an agent the conductor can no longer route to by contract.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_DoesNotEmitAnyPathNamingTheRetiredTaskReviewer()
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        string[] offenders = result.Files
+            .Select(file => file.RelativePath)
+            .Where(path => path.Contains("task-reviewer", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Empty(offenders);
+    }
+
+    /// <summary>
+    /// A primary agent that delegates to nothing, like a non-delegating subagent, carries
+    /// no roster: an empty "agents" key is a permission statement nobody meant to make.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_OmitsDelegationRosterForPrimaryAgentWithoutDelegates()
+    {
+        string syntheticRoot = SyntheticRoot();
+        WritePrimaryDelegationSquad(syntheticRoot);
+        CopilotRenderer renderer = new();
+        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
+            syntheticRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project).Prepared(_files));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/primary-lonely.agent.md");
+
+        string frontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("agents:", StringComparison.Ordinal));
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// A delegating primary agent declares its roster without becoming non-invocable, and a
+    /// delegating subagent keeps both its roster and "user-invocable: false".
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_PrimaryDelegationRosterDoesNotImplyNonInvocable()
+    {
+        string syntheticRoot = SyntheticRoot();
+        WritePrimaryDelegationSquad(syntheticRoot);
+        CopilotRenderer renderer = new();
+        SquadRenderResult result = await renderer.RenderAsync(new SquadRenderRequest(
+            syntheticRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Project).Prepared(_files));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile primary = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/primary-boss.agent.md");
+        string primaryFrontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(primary.Content.Span));
+        Assert.Equal(
+            "agents: ['worker-a']",
+            primaryFrontmatter.Split('\n')
+                .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+                ?.Trim());
+        Assert.DoesNotContain(
+            primaryFrontmatter.Split('\n'),
+            l => l.StartsWith("user-invocable:", StringComparison.Ordinal));
+
+        SquadDeploymentFile subagent = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".github/agents/delegating-sub.agent.md");
+        string subagentFrontmatter = ExtractFrontmatterText(Encoding.UTF8.GetString(subagent.Content.Span));
+        Assert.Equal(
+            "agents: ['worker-a']",
+            subagentFrontmatter.Split('\n')
+                .FirstOrDefault(l => l.StartsWith("agents:", StringComparison.Ordinal))
+                ?.Trim());
+        Assert.Contains("user-invocable: false", subagentFrontmatter, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// A subagent that delegates to nothing must carry no roster: an empty "agents" key
+    /// is a permission statement nobody meant to make. (Primary agents are covered
+    /// separately: the conductor declares its roster, and a primary without delegates is
+    /// exercised through a synthetic source below.)
+    /// </summary>
+    [Theory]
+    [InlineData("dev-easy")]
+    [InlineData("review-lens")]
+    [InlineData("platform-researcher")]
+    public async Task RenderAsync_OmitsDelegationRosterWhereNoneIsDeclared(string agentName)
+    {
+        string frontmatter = await RenderFrontmatterAsync(agentName);
+
+        Assert.DoesNotContain(
+            frontmatter.Split('\n'),
+            l => l.StartsWith("agents:", StringComparison.Ordinal));
+    }
+
+    private static readonly string[] ConductorReferenceFiles =
+        ["plan-path.md", "spec-path.md", "intake-path.md", "autonomy.md"];
+
+    /// <summary>
+    /// Regression for the global-install report where <c>conductor</c> could not find
+    /// <c>intake-path.md</c>: Copilot does not reliably anchor a relative link to the agent file
+    /// for user-level agents, so every declared-resource link must be absolute under the
+    /// resolved Copilot root.
+    /// </summary>
+    [Fact]
+    public async Task GlobalRenderRewritesEveryDeclaredResourceLinkToAbsolutePathUnderResolvedRoot()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                $"](/home/u/.copilot/agents/conductor/references/{file})",
+                content,
+                StringComparison.Ordinal);
+        }
+
+        Assert.DoesNotContain("](conductor/references/", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GlobalRenderKeepsFragmentSuffixAndLeavesLinksOutsideTheResourceClosureUnchanged()
+    {
+        string syntheticRoot = SyntheticRoot();
+        WriteSyntheticSquad(syntheticRoot, MinimalCapabilitiesYaml);
+        _files.CreateDirectory(Path.Combine(syntheticRoot, "agents", "conductor", "references"));
+        _files.WriteAllText(
+            Path.Combine(syntheticRoot, "agents", "conductor", "references", "intake-path.md"),
+            "# Intake\n");
+        _files.WriteAllText(Path.Combine(syntheticRoot, "agents", "conductor.md"), """
+            ---
+            schema: kyber-squad.agent/v1
+            name: conductor
+            description: Test agent conductor
+            invocation: subagent
+            model-profile: default
+            capability-profile: read-only-custom
+            copilot-tools: [todo, read, vscode]
+            delegates-to: []
+            fallback: none
+            aliases: []
+            ---
+            Read [intake](conductor/references/intake-path.md#steps) first.
+            See [external](https://example.com/conductor/references/intake-path.md) and [local](#top).
+            """);
+
+        SquadRenderResult result = await RenderGloballyAsync(syntheticRoot, "/home/u/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        Assert.Contains(
+            "](/home/u/.copilot/agents/conductor/references/intake-path.md#steps)",
+            content,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "](https://example.com/conductor/references/intake-path.md)",
+            content,
+            StringComparison.Ordinal);
+        Assert.Contains("[local](#top)", content, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task GlobalRenderNormalizesWindowsRootToForwardSlashes()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync(@"C:\Users\u\.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        Assert.Contains(
+            "](C:/Users/u/.copilot/agents/conductor/references/intake-path.md)",
+            content,
+            StringComparison.Ordinal);
+        string[] targets = content
+            .Split("](", StringSplitOptions.None)
+            .Skip(1)
+            .Select(segment => segment[..segment.IndexOf(')', StringComparison.Ordinal)])
+            .Where(target => target.Contains("/agents/conductor/references/", StringComparison.Ordinal))
+            .ToArray();
+        // Four reference files the conductor links, plus the three cross-links the reference files
+        // carry between themselves.
+        Assert.Equal(7, targets.Length);
+        Assert.All(targets, target => Assert.DoesNotContain("\\", target, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task GlobalRenderWrapsLinkTargetInAngleBracketsWhenRootContainsASpace()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/my user/.copilot");
+
+        string content = ConductorAgentContent(result, "agents/conductor.agent.md");
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                $"](</home/my user/.copilot/agents/conductor/references/{file}>)",
+                content,
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task GlobalRenderRecordsResourceLinksRewrittenDegradationForConductor()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        Assert.Contains(
+            result.Degradations,
+            d => d.Target == "copilot" &&
+                 d.CanonicalIdentity == "conductor" &&
+                 d.Code == "resource-links-rewritten");
+    }
+
+    [Fact]
+    public async Task GlobalRenderStillEmitsResourceFilesBesideThePrincipalAtUnchangedPaths()
+    {
+        SquadRenderResult result = await RenderConductorGloballyAsync("/home/u/.copilot");
+
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains(
+                result.Files,
+                f => f.RelativePath == $"agents/conductor/references/{file}");
+        }
+    }
+
+    [Fact]
+    public async Task ProjectRenderKeepsRelativeLinksAndIgnoresAnySuppliedGlobalRootResolver()
+    {
+        SquadRenderResult withoutResolver = await RenderAsync(ProductRoot, SquadDeploymentScope.Project, null);
+        SquadRenderResult withResolver = await RenderAsync(
+            ProductRoot,
+            SquadDeploymentScope.Project,
+            new FixedGlobalRootResolver("/home/u/.copilot"));
+
+        SquadDeploymentFile baseline = Assert.Single(
+            withoutResolver.Files,
+            f => f.RelativePath == ".github/agents/conductor.agent.md");
+        SquadDeploymentFile supplied = Assert.Single(
+            withResolver.Files,
+            f => f.RelativePath == ".github/agents/conductor.agent.md");
+
+        string content = Encoding.UTF8.GetString(baseline.Content.Span);
+        foreach (string file in ConductorReferenceFiles)
+        {
+            Assert.Contains($"](conductor/references/{file})", content, StringComparison.Ordinal);
+        }
+
+        Assert.Equal(baseline.Content.ToArray(), supplied.Content.ToArray());
+        Assert.DoesNotContain(withResolver.Degradations, d => d.Code == "resource-links-rewritten");
+    }
+
+    [Fact]
+    public async Task GlobalRenderWithoutAGlobalRootResolverFailsClosedNamingTheMissingInput()
+    {
+        CanonicalSquadTree tree = CanonicalSquadTree.Shared;
+        SquadRendererRegistry registry = tree.Registry([new CopilotRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            ProductRoot,
+            [SquadTarget.Copilot],
+            SquadDeploymentScope.Global,
+            PreloadedSource: TestSquadCorpus.CanonicalSource).Prepared(tree);
+
+        SquadRenderValidationException exception =
+            await Assert.ThrowsAsync<SquadRenderValidationException>(() => registry.RenderAsync(request));
+
+        Assert.Contains("GlobalRoots", exception.Message, StringComparison.Ordinal);
+    }
+
+    private const string MinimalCapabilitiesYaml = """
+                                                   schema: kyber-squad.capability-profiles/v1
+                                                   capabilities:
+                                                     - filesystem.read
+                                                     - filesystem.search
+                                                     - filesystem.write
+                                                     - process.execute
+                                                     - network.read
+                                                     - network.publish
+                                                     - delegate
+                                                   profiles:
+                                                     exec-only:
+                                                       permissions:
+                                                         filesystem.read: deny
+                                                         filesystem.search: deny
+                                                         filesystem.write: deny
+                                                         process.execute: allow
+                                                         network.read: deny
+                                                         network.publish: deny
+                                                         delegate: deny
+                                                     read-only-custom:
+                                                       permissions:
+                                                         filesystem.read: allow
+                                                         filesystem.search: deny
+                                                         filesystem.write: deny
+                                                         process.execute: deny
+                                                         network.read: deny
+                                                         network.publish: deny
+                                                         delegate: deny
+                                                     all-denied:
+                                                       permissions:
+                                                         filesystem.read: deny
+                                                         filesystem.search: deny
+                                                         filesystem.write: deny
+                                                         process.execute: deny
+                                                         network.read: deny
+                                                         network.publish: deny
+                                                         delegate: deny
+                                                   """;
+
+    private string SyntheticRoot()
+    {
+        string root = Path.Combine(_files.Root, "synthetic-squad");
+        _files.CreateDirectory(root);
+        return root;
+    }
+
+    private Task<SquadRenderResult> RenderConductorGloballyAsync(string copilotRoot)
+    {
+        return RenderGloballyAsync(ProductRoot, copilotRoot);
+    }
+
+    private Task<SquadRenderResult> RenderGloballyAsync(string sourceDirectory, string copilotRoot)
+    {
+        return RenderAsync(sourceDirectory, SquadDeploymentScope.Global, new FixedGlobalRootResolver(copilotRoot));
+    }
+
+    private async Task<SquadRenderResult> RenderAsync(
+        string sourceDirectory,
+        SquadDeploymentScope scope,
+        ISquadGlobalRootResolver? globalRoots)
+    {
+        bool shipped = string.Equals(sourceDirectory, ProductRoot, StringComparison.Ordinal);
+        InMemorySquadServices services = new(shipped ? CanonicalSquadTree.Shared.Files : _files);
+        SquadRendererRegistry registry = new([new CopilotRenderer()], services.RenderInputReader());
+        SquadRenderRequest request = services.RenderInputReader().Prepare(new SquadRenderRequest(
+            sourceDirectory,
+            [SquadTarget.Copilot],
+            scope,
+            GlobalRoots: globalRoots,
+            PreloadedSource: shipped ? TestSquadCorpus.CanonicalSource : null));
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        return result;
+    }
+
+    private static string ConductorAgentContent(SquadRenderResult result, string relativePath)
+    {
+        SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == relativePath);
+        return Encoding.UTF8.GetString(file.Content.Span);
+    }
+
+    private sealed class FixedGlobalRootResolver(string root) : ISquadGlobalRootResolver
+    {
+        public string ResolveGlobalRoot(SquadTarget target)
+        {
+            return root;
+        }
+    }
+
+    private static async Task<string> RenderFrontmatterAsync(string agentName)
+    {
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Copilot);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".github/agents/{agentName}.agent.md");
+
+        return ExtractFrontmatterText(Encoding.UTF8.GetString(file.Content.Span));
+    }
+
+    private static string ExtractToolsLine(string frontmatter)
+    {
+        string[] lines = frontmatter.Split('\n');
+        string? toolsLine = lines.FirstOrDefault(l => l.StartsWith("tools:", StringComparison.Ordinal));
+        Assert.NotNull(toolsLine);
+        return toolsLine.Trim();
+    }
+
+    /// <summary>
+    /// The entries of a rendered agent's <c>tools</c> flow sequence, unquoted. Copilot's
+    /// single-quoted wildcards are the only quoting the converter emits, so stripping the quotes
+    /// recovers the tool identifier the harness matches on.
+    /// </summary>
+    private static IReadOnlyList<string> RenderedTools(SquadRenderResult result, string agentName)
+    {
+        string content = ConductorAgentContent(result, $".github/agents/{agentName}.agent.md");
+        string toolsLine = ExtractToolsLine(ExtractFrontmatterText(content));
+
+        Match match = ToolsFlowSequenceRegex.Match(toolsLine);
+        Assert.True(
+            match.Success,
+            $"Agent '{agentName}' frontmatter carries no flow-style 'tools: [...]' line: {toolsLine}");
+
+        string items = match.Groups["items"].Value.Trim();
+        if (items.Length == 0)
+        {
+            return [];
+        }
+
+        return
+        [
+            .. items
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Select(item => item.Trim('\'', '"'))
+        ];
+    }
+}

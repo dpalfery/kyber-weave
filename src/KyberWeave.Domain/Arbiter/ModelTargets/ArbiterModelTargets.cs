@@ -26,17 +26,6 @@ public sealed record ArbiterModelTargets(
 {
     /// <summary>The schema id a model targets file must declare.</summary>
     public const string SchemaName = "kyber-arbiter.model-targets/v1";
-
-    /// <summary>Gets whether this table is a complete v1 table written for <paramref name="harness"/>.</summary>
-    /// <param name="harness">The harness the caller asked for.</param>
-    /// <returns>True when the schema, harness and every section match.</returns>
-    public bool IsCompleteFor(string harness) =>
-        Schema == SchemaName
-        && Harness == harness
-        && Preset is not null
-        && BundleDigest is not null
-        && Profiles is not null
-        && Agents is not null;
 }
 
 /// <summary>The preset a model targets table was resolved from.</summary>

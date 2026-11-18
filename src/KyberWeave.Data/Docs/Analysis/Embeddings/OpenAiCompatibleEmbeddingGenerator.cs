@@ -2,6 +2,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
+using KyberWeave.Contracts.Repositories;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -18,34 +19,48 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
     private readonly Func<string, IReadOnlyList<IPAddress>> _resolveHost;
     private readonly Func<string, string?> _readEnvironment;
 
-    /// <summary>Creates a generator whose connections are resolved and pinned to loopback.</summary>
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "HttpClient owns and disposes the handler supplied by CreateLocalOnlyHandler.")]
-    public OpenAiCompatibleEmbeddingGenerator()
-        : this(CreateLocalOnlyHandler(), ResolveHost, Environment.GetEnvironmentVariable)
+    private readonly TimeProvider _clock;
+
+    /// <summary>Creates a generator over a transport that pins its connections to loopback.</summary>
+    /// <param name="transport">The HTTP transport and name resolution the generator calls the endpoint through.</param>
+    /// <param name="environment">Reads the variable that holds the endpoint's bearer token.</param>
+    /// <param name="clock">Times the per-call limit.</param>
+    public OpenAiCompatibleEmbeddingGenerator(IEmbeddingTransport transport, IProcessEnvironment environment, TimeProvider clock)
+        : this(HandlerOf(transport), transport.ResolveHost, EnvironmentOf(environment).GetVariable, clock)
     {
     }
 
     /// <remarks>
-    /// The injectable handler and resolvers keep the transport boundary deterministic in tests.
-    /// Production callers should use the parameterless constructor, whose socket callback repeats
-    /// loopback validation at connection time to avoid a DNS rebinding window.
+    /// The handler and resolver come from <see cref="IEmbeddingTransport"/> in production and from a script in tests,
+    /// so the transport boundary stays deterministic.
     /// </remarks>
     internal OpenAiCompatibleEmbeddingGenerator(
         HttpMessageHandler handler,
         Func<string, IReadOnlyList<IPAddress>> resolveHost,
-        Func<string, string?> readEnvironment)
+        Func<string, string?> readEnvironment,
+        TimeProvider? clock = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         _resolveHost = resolveHost ?? throw new ArgumentNullException(nameof(resolveHost));
         _readEnvironment = readEnvironment ?? throw new ArgumentNullException(nameof(readEnvironment));
+        _clock = clock ?? TimeProvider.System;
         _client = new HttpClient(handler, disposeHandler: true)
         {
             // HttpClient's default 100s timeout would silently clamp config.TimeoutSeconds.
             Timeout = Timeout.InfiniteTimeSpan
         };
+    }
+
+    private static HttpMessageHandler HandlerOf(IEmbeddingTransport transport)
+    {
+        ArgumentNullException.ThrowIfNull(transport);
+        return transport.CreateHandler();
+    }
+
+    private static IProcessEnvironment EnvironmentOf(IProcessEnvironment environment)
+    {
+        ArgumentNullException.ThrowIfNull(environment);
+        return environment;
     }
 
     public string GetProviderFingerprint(DocsAnalysisEmbeddingConfig config)
@@ -86,7 +101,8 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
             : _readEnvironment(config.ApiKeyEnv);
 
         List<StoredEmbedding> result = new List<StoredEmbedding>(orderedKeys.Length);
-        EmbeddingUsage usage = EmbeddingUsage.None;
+        int promptTokens = 0;
+        int totalTokens = 0;
         for (int offset = 0; offset < orderedInputs.Length; offset += config.BatchSize)
         {
             int count = Math.Min(config.BatchSize, orderedInputs.Length - offset);
@@ -102,10 +118,11 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
                 .GetResult();
             for (int index = 0; index < parsed.Vectors.Count; index++)
                 result.Add(new StoredEmbedding(orderedKeys[offset + index], parsed.Vectors[index]));
-            usage = usage.Add(parsed.Usage);
+            promptTokens = checked(promptTokens + parsed.Usage.PromptTokens);
+            totalTokens = checked(totalTokens + parsed.Usage.TotalTokens);
         }
 
-        return new EmbeddingGenerationResult(result, usage);
+        return new EmbeddingGenerationResult(result, new EmbeddingUsage(promptTokens, totalTokens));
     }
 
     private async Task<ParsedBatch> SendBatchAsync(
@@ -117,7 +134,7 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
         int timeoutSeconds)
     {
         using HttpRequestMessage request = CreateRequest(endpoint, model, dimensions, inputs, bearerToken);
-        using CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds));
+        using CancellationTokenSource cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSeconds), _clock);
         using HttpResponseMessage response = await _client.SendAsync(
             request,
             HttpCompletionOption.ResponseHeadersRead,
@@ -276,49 +293,6 @@ public sealed class OpenAiCompatibleEmbeddingGenerator : IEmbeddingGenerator, ID
 
     private static bool IsRedirect(HttpStatusCode statusCode) =>
         (int)statusCode is >= 300 and <= 399;
-
-    private static IReadOnlyList<IPAddress> ResolveHost(string host) => Dns.GetHostAddresses(host);
-
-    private static SocketsHttpHandler CreateLocalOnlyHandler() => new()
-    {
-        AllowAutoRedirect = false,
-        ConnectCallback = ConnectLoopback
-    };
-
-    [SuppressMessage(
-        "Reliability",
-        "CA2000:Dispose objects before losing scope",
-        Justification = "A successful NetworkStream takes socket ownership; every failed socket is disposed in the catch block.")]
-    private static async ValueTask<Stream> ConnectLoopback(
-        SocketsHttpConnectionContext context,
-        CancellationToken cancellationToken)
-    {
-        IPAddress[] addresses = await Dns.GetHostAddressesAsync(
-            context.DnsEndPoint.Host,
-            cancellationToken).ConfigureAwait(false);
-        if (addresses.Length == 0 || addresses.Any(address => !LoopbackAddress.IsLoopback(address)))
-            throw new HttpRequestException("The embedding endpoint must resolve only to loopback addresses.");
-
-        Exception? lastFailure = null;
-        foreach (IPAddress address in addresses)
-        {
-            Socket socket = new Socket(address.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
-            try
-            {
-                await socket.ConnectAsync(
-                    new IPEndPoint(address, context.DnsEndPoint.Port),
-                    cancellationToken).ConfigureAwait(false);
-                return new NetworkStream(socket, ownsSocket: true);
-            }
-            catch (SocketException ex)
-            {
-                socket.Dispose();
-                lastFailure = ex;
-            }
-        }
-
-        throw new HttpRequestException("No loopback address accepted the embedding connection.", lastFailure);
-    }
 
     private sealed record ParsedBatch(
         IReadOnlyList<IReadOnlyList<float>> Vectors,

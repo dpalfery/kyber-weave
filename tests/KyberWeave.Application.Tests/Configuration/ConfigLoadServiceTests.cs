@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Xunit;
+using KyberWeave.Core.Arbiter;
 
 namespace KyberWeave.Application.Tests.Configuration;
 
@@ -17,6 +18,7 @@ public sealed class ConfigLoadServiceTests
     {
         KyberWeaveConfig configured = new KyberWeaveConfig
         {
+            Arbiter = ArbiterConfigDefaults.Product,
             StopsOnToolFailure = false,
             WorktreeIndexHook = false,
         }.WithConfigReg(ConfigRegConfig.ProductDefaults);
@@ -45,13 +47,13 @@ public sealed class ConfigLoadServiceTests
         public KyberWeaveConfig Load(string repoRoot, string? configPath = null) => config;
 
         public KyberWeaveConfigLoadResult TryLoad(string repoRoot, string? configPath = null) =>
-            KyberWeaveConfigLoadResult.Ok(config, configPath);
+            KyberWeaveConfigLoadResultFactory.Ok(config, configPath);
 
         public string? FindConfigPath(string repoRoot) => null;
 
         public KyberWeaveConfig LoadUserConfig(string homeDirectory, string? configPath = null) => config;
 
         public KyberWeaveConfigLoadResult TryLoadUserConfig(string homeDirectory, string? configPath = null) =>
-            KyberWeaveConfigLoadResult.Ok(config, configPath);
+            KyberWeaveConfigLoadResultFactory.Ok(config, configPath);
     }
 }

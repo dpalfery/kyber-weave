@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -10,6 +11,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class RunStartBriefTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string[] Common = ["--harness", "claude", "--type", "fix", "--slug", "tighten-the-gate"];
 
     private readonly RunStartProbe _probe = RunStartProbe.Create();
@@ -19,7 +22,7 @@ public sealed class RunStartBriefTests : IDisposable
     /// <summary>Installs the conductor's real reference files at the project-scope location for Claude.</summary>
     private void InstallConductorReferences()
     {
-        string source = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents", "conductor", "references");
+        string source = Path.Combine(Corpus.Root, "products", "kyber-squad", "agents", "conductor", "references");
         string target = Path.Combine(_probe.Root, ".claude", "agents", "conductor", "references");
         Directory.CreateDirectory(target);
         foreach (string file in Directory.EnumerateFiles(source))

@@ -1,8 +1,14 @@
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.Configuration;
+
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -24,6 +30,14 @@ public sealed class SquadTaskGateHintTests
 {
     private const string HintFragment = "No task gates are declared";
     private const string DocsInitFragment = "kyber-weave docs init";
+
+    /// <summary>
+    /// The real config repository over the real disk. These cases are integration tests of what a prepared project's
+    /// own <c>.kyber-weave/kyber-weave.yml</c> makes the verb print, so an empty fake in its place would always report
+    /// no gates.
+    /// </summary>
+    private static IKyberWeaveConfigRepository ProjectConfigs =>
+        RealFileKyberWeaveConfigRepository.Create();
 
     /// <summary>
     /// A project with no config file gets the hint, because there are no task gates to find.
@@ -52,7 +66,7 @@ public sealed class SquadTaskGateHintTests
                   run: [git, --version]
             """;
         PreparedCase prepared = InstallCase("install-empty-gates", yaml, global: false);
-        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.Empty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.Contains(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
@@ -74,7 +88,7 @@ public sealed class SquadTaskGateHintTests
                     run: [git, --version]
             """;
         PreparedCase prepared = InstallCase("install-with-gates", yaml, global: false);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
@@ -95,8 +109,8 @@ public sealed class SquadTaskGateHintTests
                     run: [dotnet, build]
             """;
         PreparedCase prepared = InstallCase("install-with-technology-gates", yaml, global: false);
-        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TechnologyGates);
+        Assert.Empty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(ConfigFileReader.Load(prepared.TargetRoot).Review.TechnologyGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
@@ -179,8 +193,8 @@ public sealed class SquadTaskGateHintTests
                     run: [dotnet, build]
             """;
         PreparedCase prepared = UpdateCase("update-with-technology-gates", yaml);
-        Assert.Empty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TaskGates);
-        Assert.NotEmpty(KyberWeaveConfigLoader.Load(prepared.TargetRoot).Review.TechnologyGates);
+        Assert.Empty(ConfigFileReader.Load(prepared.TargetRoot).Review.TaskGates);
+        Assert.NotEmpty(ConfigFileReader.Load(prepared.TargetRoot).Review.TechnologyGates);
 
         Assert.Equal(0, prepared.Record.ExitCode);
         Assert.DoesNotContain(HintFragment, prepared.Record.StandardOutput, StringComparison.Ordinal);
@@ -233,7 +247,7 @@ public sealed class SquadTaskGateHintTests
             using FakeSquadReleaseSource releaseSource = new();
             FakeSquadRenderer renderer = new();
             FakeSquadUserPaths userPaths = new(homeDir);
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             CommandExecution execution = Capture(() => SquadTestCommands.Install(
                 userPaths: userPaths,
                 stateStore: stateStore,
@@ -241,7 +255,8 @@ public sealed class SquadTaskGateHintTests
                 renderer: renderer,
                 isInteractive: false,
                 readAnswer: null,
-                globalRoots: global ? new CodexOnlyGlobalRoots(globalRoot) : null).Execute(null!, new SquadInstallSettings
+                globalRoots: global ? new CodexOnlyGlobalRoots(globalRoot) : null,
+                configs: ProjectConfigs).Execute(null!, new SquadInstallSettings
                 {
                     Path = targetDir,
                     Targets = ["codex"],
@@ -281,7 +296,7 @@ public sealed class SquadTaskGateHintTests
             using FakeSquadReleaseSource releaseSource = new();
             FakeSquadRenderer renderer = new();
             FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "home"));
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             SeedDeployment(targetDir, stateStore);
             IReadOnlyDictionary<string, byte[]?> before = SnapshotConfigurationFiles(targetDir);
 
@@ -290,7 +305,8 @@ public sealed class SquadTaskGateHintTests
                 stateStore: stateStore,
                 releaseSource: releaseSource,
                 renderer: renderer,
-                isInteractive: false).Execute(null!, new SquadUpdateSettings
+                isInteractive: false,
+                configs: ProjectConfigs).Execute(null!, new SquadUpdateSettings
                 {
                     Path = targetDir,
                     Targets = ["codex"],

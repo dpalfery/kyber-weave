@@ -5,6 +5,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
@@ -48,7 +49,7 @@ internal static class SquadOperatorChannelFixture
     ];
 
     internal static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(CheckoutCorpusSource.Checkout.Root, "products", "kyber-squad");
 
     internal static readonly string OverlayPath =
         Path.Combine(ProductRoot, "agents", "conductor", "overlays", "operator-channel.md");
@@ -166,8 +167,12 @@ internal static class SquadOperatorChannelFixture
 
     internal static string OverlayText()
     {
-        Assert.True(File.Exists(OverlayPath), $"The operator-channel overlay is missing at {OverlayPath}.");
-        return File.ReadAllText(OverlayPath, Encoding.UTF8);
+        const string OverlayRelativePath = "products/kyber-squad/agents/conductor/overlays/operator-channel.md";
+
+        Assert.True(
+            CheckoutCorpusSource.Checkout.Exists(OverlayRelativePath),
+            $"The operator-channel overlay is missing at {OverlayPath}.");
+        return CheckoutCorpusSource.Checkout.ReadText(OverlayRelativePath);
     }
 
     /// <summary>

@@ -24,7 +24,7 @@ internal static class ModelTargetFacts
     private const string LadderNext = "model-targeting.ladder.next";
     private const string BudgetExceeded = "BUDGET_EXCEEDED";
 
-    private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfig.ProductDefaults.TestFilePatterns;
+    private static readonly IReadOnlyList<string> TestPatterns = ArbiterConfigDefaults.Product.TestFilePatterns;
 
     /// <summary>Fills the model-targeting facts the bag declares.</summary>
     /// <param name="facts">The bag, carrying <c>plan.task.files</c> and the delegation facts.</param>

@@ -46,7 +46,7 @@ public sealed partial class PlanTaskFileGenerator
     private const string PriorResultsSlot = "{prior_results}";
 
     private readonly string _repoRoot;
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
     private readonly IPlanTaskAgentPicker? _picker;
 
@@ -55,7 +55,7 @@ public sealed partial class PlanTaskFileGenerator
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
     /// <param name="files">Reads the plan and the task file and writes the task file.</param>
     /// <param name="picker">The agent picker, or null when no decision model is configured.</param>
-    public PlanTaskFileGenerator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IPlanTaskAgentPicker? picker = null)
+    public PlanTaskFileGenerator(string repoRoot, KyberWeaveConfig config, IRepositoryFileStore files, IPlanTaskAgentPicker? picker = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);

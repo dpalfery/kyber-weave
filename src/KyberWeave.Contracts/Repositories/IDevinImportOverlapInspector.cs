@@ -11,10 +11,8 @@ public interface IDevinImportOverlapInspector
     /// </summary>
     /// <param name="workingDirectory">The workspace a Devin session would open.</param>
     /// <param name="devinUserRoot">The Devin user configuration directory, or null when it cannot be resolved.</param>
-    /// <param name="readFileText">Reads a file's text, or null when absent or unreadable.</param>
     /// <returns>The overlapping trees.</returns>
     DevinImportOverlapReport Inspect(
         string workingDirectory,
-        string? devinUserRoot,
-        Func<string, string?> readFileText);
+        string? devinUserRoot);
 }

@@ -1,0 +1,155 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+
+namespace KyberWeave.Core.Squad.Deployment;
+
+/// <summary>Resolves Squad targets without prompting or writing global console state.</summary>
+/// <param name="files">Probes the root for each harness's marker files.</param>
+/// <param name="paths">Turns the caller's root spelling into a full path.</param>
+/// <param name="environment">Supplies the base directory a relative root resolves against.</param>
+public sealed class SquadTargetResolver(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : ISquadTargetResolver
+{
+    private static readonly IReadOnlyDictionary<SquadTarget, IReadOnlyList<StrongMarker>> Markers =
+        new Dictionary<SquadTarget, IReadOnlyList<StrongMarker>>
+        {
+            [SquadTarget.Codex] = [new(".codex", true)],
+            [SquadTarget.Cursor] = [new(".cursor", true)],
+            [SquadTarget.Claude] = [new(".claude", true)],
+            [SquadTarget.Copilot] =
+            [
+                new(".github/copilot-instructions.md", false),
+                new(".github/instructions", true),
+                new(".github/agents", true),
+                new(".github/prompts", true),
+                new(".github/hooks", true)
+            ],
+            [SquadTarget.OpenCode] = [new(".opencode", true)],
+            [SquadTarget.Kilo] = [new(".kilo", true)],
+            [SquadTarget.Warp] = [new(".warp", true)],
+            [SquadTarget.Factory] = [new(".factory", true)],
+            [SquadTarget.ZCode] = [new(".zcode", true)],
+            [SquadTarget.Devin] = [new(".devin", true)],
+            [SquadTarget.CommandCode] = [new(".commandcode", true)]
+        };
+
+    /// <summary>Resolves targets according to the operation-specific precedence contract.</summary>
+    public SquadTargetResolutionDecision Resolve(SquadTargetResolutionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.RootPath);
+
+        (IReadOnlyList<SquadTarget>? targets, SquadTargetResolutionSource source) = SelectTargets(request);
+        if (targets.Count > 0 && request.Operation == SquadTargetOperation.Install)
+            targets = ApplyExclusions(targets, request);
+
+        if (targets.Count > 0)
+            return Resolved(targets, source);
+
+        return request.IsInteractive
+            ? new SquadTargetResolutionDecision
+            {
+                Kind = SquadTargetResolutionKind.InteractiveSelectionRequired,
+                Targets = Array.Empty<SquadTarget>(),
+                Source = SquadTargetResolutionSource.None
+            }
+            : new SquadTargetResolutionDecision
+            {
+                Kind = SquadTargetResolutionKind.Failure,
+                Targets = Array.Empty<SquadTarget>(),
+                Source = SquadTargetResolutionSource.None,
+                ExitCode = 2,
+                RecoveryCommand = GetRecoveryCommand(request.Operation)
+            };
+    }
+
+    private const string InstallRecoveryCommand = "kyber-weave squad install --target <target>";
+    private const string UpdateRecoveryCommand = "kyber-weave squad update --target <target>";
+    private const string UninstallRecoveryCommand = "kyber-weave squad uninstall <harness>";
+
+    private static string GetRecoveryCommand(SquadTargetOperation operation) => operation switch
+    {
+        SquadTargetOperation.Update => UpdateRecoveryCommand,
+        SquadTargetOperation.Uninstall => UninstallRecoveryCommand,
+        _ => InstallRecoveryCommand
+    };
+
+    private (IReadOnlyList<SquadTarget> Targets, SquadTargetResolutionSource Source)
+        SelectTargets(SquadTargetResolutionRequest request)
+    {
+        if (request.Operation == SquadTargetOperation.Update && request.ExplicitTargets.Count > 0)
+            return (SquadTargetCatalog.Parse(request.ExplicitTargets), SquadTargetResolutionSource.Explicit);
+
+        if (request.Operation is SquadTargetOperation.Update or SquadTargetOperation.Uninstall)
+        {
+            return request.ReceiptTargets.Count > 0
+                ? (OrderedSet(request.ReceiptTargets), SquadTargetResolutionSource.Receipt)
+                : (Array.Empty<SquadTarget>(), SquadTargetResolutionSource.None);
+        }
+
+        if (request.ExplicitTargets.Count > 0)
+            return (SquadTargetCatalog.Parse(request.ExplicitTargets), SquadTargetResolutionSource.Explicit);
+
+        if (request.ConfiguredTargets.Count > 0)
+            return (OrderedSet(request.ConfiguredTargets), SquadTargetResolutionSource.Configuration);
+
+        IReadOnlyList<SquadTarget> detected = DetectMarkers(request.RootPath);
+        return detected.Count > 0
+            ? (detected, SquadTargetResolutionSource.Markers)
+            : (Array.Empty<SquadTarget>(), SquadTargetResolutionSource.None);
+    }
+
+    private static IReadOnlyList<SquadTarget> ApplyExclusions(
+        IReadOnlyList<SquadTarget> targets,
+        SquadTargetResolutionRequest request)
+    {
+        HashSet<SquadTarget> excluded = new HashSet<SquadTarget>(request.ConfiguredExclusions);
+        excluded.UnionWith(SquadTargetCatalog.Parse(request.ExplicitExclusions));
+        return targets.Where(target => !excluded.Contains(target)).ToArray();
+    }
+
+    private IReadOnlyList<SquadTarget> DetectMarkers(string rootPath)
+    {
+        string root = paths.GetFullPath(rootPath, environment.CurrentDirectory);
+        List<SquadTarget> detected = new List<SquadTarget>();
+        foreach (SquadTarget target in SquadTargetCatalog.All)
+        {
+            if (!Markers.TryGetValue(target, out IReadOnlyList<StrongMarker>? markers))
+                continue;
+
+            if (markers.Any(marker => marker.ExistsUnder(root, files)))
+                detected.Add(target);
+        }
+
+        return detected;
+    }
+
+    private static IReadOnlyList<SquadTarget> OrderedSet(IEnumerable<SquadTarget> targets)
+    {
+        HashSet<SquadTarget> seen = new HashSet<SquadTarget>();
+        return targets.Where(seen.Add).ToArray();
+    }
+
+    private static SquadTargetResolutionDecision Resolved(
+        IReadOnlyList<SquadTarget> targets,
+        SquadTargetResolutionSource source) =>
+        new()
+        {
+            Kind = SquadTargetResolutionKind.Resolved,
+            Targets = targets,
+            Source = source
+        };
+
+    private sealed record StrongMarker(string RelativePath, bool IsDirectory)
+    {
+        public bool ExistsUnder(string rootPath, IFileSystem files)
+        {
+            string path = Path.Combine(
+                rootPath,
+                RelativePath.Replace('/', Path.DirectorySeparatorChar));
+            return IsDirectory ? files.DirectoryExists(path) : files.FileExists(path);
+        }
+    }
+}

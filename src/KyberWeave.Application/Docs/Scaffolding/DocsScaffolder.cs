@@ -1,5 +1,6 @@
 using System.IO.Enumeration;
 using System.Text;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -29,7 +30,10 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 {
     private readonly IRepositoryFileStore _files;
     private readonly IKyberWeaveConfigRepository _config;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
     private readonly TimeProvider _time;
+    private readonly IKyberStandardsTemplates _templates;
     private readonly ReviewBlockWriter _reviewBlock;
 
     private const string AnalysisCacheIgnorePath = ".kyber-weave/.gitignore";
@@ -58,18 +62,27 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// <param name="config">Loads and locates the host configuration.</param>
     /// <param name="lister">Lists the repository's files, for project-root detection.</param>
     /// <param name="tree">Answers the path questions the review configuration parser asks.</param>
+    /// <param name="paths">Turns the caller's root spelling into a full path and checks a write's containment.</param>
+    /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
     /// <param name="time">Supplies the date every generated document carries.</param>
+    /// <param name="templates">Reads the standards templates the build ships.</param>
     public DocsScaffolder(
         IRepositoryFileStore files,
         IKyberWeaveConfigRepository config,
         IRepositoryFileLister lister,
         IRepositoryTreeProbe tree,
-        TimeProvider time)
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        TimeProvider time,
+        IKyberStandardsTemplates templates)
     {
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _time = time ?? throw new ArgumentNullException(nameof(time));
-        _reviewBlock = new ReviewBlockWriter(files, lister, tree);
+        _templates = templates ?? throw new ArgumentNullException(nameof(templates));
+        _reviewBlock = new ReviewBlockWriter(files, lister, tree, paths, environment);
     }
 
     /// <inheritdoc />
@@ -83,7 +96,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         IReadOnlyList<string>? standards = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string root = Path.GetFullPath(repoRoot);
+        string root = _paths.GetFullPath(repoRoot, _environment.CurrentDirectory);
 
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         string resolvedOwner = owner.Trim();
@@ -104,7 +117,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         // The registry publishes paths under the root being scaffolded into, which is not
         // necessarily the one the loaded configuration names — an operator moving the corpus
         // with --docs-root would otherwise get a registry describing where it used to be.
-        OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults)
+        OntologyConfig ontology = (loadedConfig.Config ?? KyberWeaveConfigDefaults.Product)
             .Ontology.WithDocsRoot(resolvedDocsRoot);
 
         // The two choices add to each other rather than replace each other: an operator may ask
@@ -179,7 +192,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 
                 string content =
                     templatedTechnologies.Contains(technology)
-                    && KyberStandardsTemplates.TryRenderPart(
+                    && _templates.TryRenderPart(
                         technology, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
                         : TechnologyStub(technology, part, resolvedOwner);
@@ -203,7 +216,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 }
 
                 string content =
-                    KyberStandardsTemplates.TryRenderPart(role, part, resolvedOwner, Today, out string? rendered)
+                    _templates.TryRenderPart(role, part, resolvedOwner, Today, out string? rendered)
                         ? rendered
                         : RoleStub(role, part, resolvedOwner);
 
@@ -212,7 +225,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         }
 
         if ((kyberStandards || standards is { Count: > 0 })
-            && KyberStandardsTemplates.TryRenderSharedRules(resolvedOwner, Today, out string? sharedRules))
+            && _templates.TryRenderSharedRules(resolvedOwner, Today, out string? sharedRules))
         {
             files.Add(Write(
                 root,
@@ -221,7 +234,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
                 force));
         }
 
-        ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfig.ProductDefaults).ConfigReg;
+        ConfigRegConfig configReg = (loadedConfig.Config ?? KyberWeaveConfigDefaults.Product).ConfigReg;
         files.Add(WriteConfigReg(root, resolvedDocsRoot, configReg.Resolve(ontology), configReg.Autonomy));
 
         return new ScaffoldResult(resolvedDocsRoot, resolution.Source, files)
@@ -448,11 +461,12 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// </remarks>
     private string RequireContained(string repoRoot, string relativePath, string parameterName)
     {
-        string absolute = Path.GetFullPath(
-            Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        string absolute = _paths.GetFullPath(
+            Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)),
+            repoRoot);
 
         string boundary = RepositoryBoundary.For(repoRoot, Path.DirectorySeparatorChar);
-        if (!RepositoryBoundary.IsWithin(absolute, boundary, OperatingSystem.IsWindows()))
+        if (!RepositoryBoundary.IsWithin(absolute, boundary, _environment.IsFileSystemCaseInsensitive))
         {
             throw new ArgumentException(
                 $"Refusing to write outside the repository root: '{relativePath}' resolves to '{absolute}'.",
@@ -757,7 +771,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             return FileSystemName.MatchesSimpleExpression(
                 pattern,
                 Path.GetFileName(databaseRelativePath),
-                ignoreCase: OperatingSystem.IsWindows());
+                ignoreCase: _environment.IsFileSystemCaseInsensitive);
         }
 
 #pragma warning disable CA1847 // Single-char Contains with StringComparison requires string overload to satisfy CA1307
@@ -766,7 +780,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             : FileSystemName.MatchesSimpleExpression(
                 pattern.Replace("**", "*", StringComparison.Ordinal),
                 databaseRelativePath,
-                ignoreCase: OperatingSystem.IsWindows());
+                ignoreCase: _environment.IsFileSystemCaseInsensitive);
 #pragma warning restore CA1847
     }
 

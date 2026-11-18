@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
@@ -9,7 +10,13 @@ namespace KyberWeave.Application.Review;
 /// <summary>Refuses a warning suppression the change adds unless it states a reason.</summary>
 /// <param name="scanner">Scans the lines the change adds.</param>
 /// <param name="files">Probes the repository path.</param>
-public sealed class ReviewSuppressionsService(ISuppressionScanService scanner, IFileSystem files) : IReviewSuppressionsService
+/// <param name="paths">Resolves the path the caller spelled.</param>
+/// <param name="environment">Names the working directory a relative path resolves against.</param>
+public sealed class ReviewSuppressionsService(
+    ISuppressionScanService scanner,
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IReviewSuppressionsService
 {
     /// <summary>An option value the command refuses before it reads anything.</summary>
     private const string InvalidInput = "KW-REVIEW-028";
@@ -23,20 +30,20 @@ public sealed class ReviewSuppressionsService(ISuppressionScanService scanner, I
         string root;
         try
         {
-            root = Path.GetFullPath(request.Path);
+            root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)
         {
-            return ReviewCommandResult.Refused($"{InvalidInput}: Cannot resolve path '{request.Path}': {ex.Message}");
+            return ReviewCommandResultFactory.Refused($"{InvalidInput}: Cannot resolve path '{request.Path}': {ex.Message}");
         }
 
         if (!files.DirectoryExists(root))
-            return ReviewCommandResult.Refused($"{InvalidInput}: '{root}' is not a directory");
+            return ReviewCommandResultFactory.Refused($"{InvalidInput}: '{root}' is not a directory");
 
         string baseRef = request.BaseRef ?? SuppressionScan.DefaultBase;
         if (GitChangeParsing.ValidateBase(baseRef) is { } baseProblem)
-            return ReviewCommandResult.Refused($"{InvalidInput}: {baseProblem}");
+            return ReviewCommandResultFactory.Refused($"{InvalidInput}: {baseProblem}");
 
         SuppressionScanResult result = scanner.Scan(root, baseRef);
 
@@ -49,7 +56,7 @@ public sealed class ReviewSuppressionsService(ISuppressionScanService scanner, I
                 "review suppressions",
                 Hint: "Run this inside a git repository that already has a commit, or name the ref to compare " +
                       "with using --base."));
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
         }
 
         foreach (SuppressionFinding finding in result.Findings)
@@ -66,6 +73,6 @@ public sealed class ReviewSuppressionsService(ISuppressionScanService scanner, I
                 EndLine: finding.Line));
         }
 
-        return ReviewCommandResult.Reported(report.HasErrors ? 1 : 0, report);
+        return ReviewCommandResultFactory.Reported(report.HasErrors ? 1 : 0, report);
     }
 }

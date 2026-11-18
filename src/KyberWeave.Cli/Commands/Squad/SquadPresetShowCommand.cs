@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -14,22 +15,32 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
     private readonly ISquadUserPaths _userPaths;
     private readonly ISquadModelPresetStore _presetStore;
     private readonly ISquadCanonicalProfileResolver _canonicalProfiles;
+    private readonly SquadConsole _output;
+    private readonly ISquadModelPresetValidator _validator;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="userPaths">Names the home the presets live under.</param>
     /// <param name="presetStore">Loads the named presets.</param>
     /// <param name="canonicalProfiles">Finds the canonical model profiles to show.</param>
+    /// <param name="output">Where the rows and the refusals are written.</param>
+    /// <param name="validator">Checks the preset against the canonical model profiles.</param>
     public SquadPresetShowCommand(
         ISquadUserPaths userPaths,
         ISquadModelPresetStore presetStore,
-        ISquadCanonicalProfileResolver canonicalProfiles)
+        ISquadCanonicalProfileResolver canonicalProfiles,
+        SquadConsole output,
+        ISquadModelPresetValidator validator)
     {
         ArgumentNullException.ThrowIfNull(userPaths);
         ArgumentNullException.ThrowIfNull(presetStore);
         ArgumentNullException.ThrowIfNull(canonicalProfiles);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(validator);
         _userPaths = userPaths;
         _presetStore = presetStore;
         _canonicalProfiles = canonicalProfiles;
+        _output = output;
+        _validator = validator;
     }
 
     /// <inheritdoc />
@@ -53,13 +64,13 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
 
         if (preset is null)
         {
-            SquadCommandComposition.WriteClientInputError($"Unknown preset '{settings.Name}'.");
+            _output.WriteClientInputError($"Unknown preset '{settings.Name}'.");
             return 2;
         }
 
         if (string.IsNullOrWhiteSpace(settings.Target))
         {
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 "No target specified. Specify a target using --target <target>.");
             return 2;
         }
@@ -70,7 +81,7 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
             IReadOnlyList<SquadTarget> targets = SquadTargetCatalog.Parse([settings.Target]);
             if (targets.Count != 1)
             {
-                SquadCommandComposition.WriteClientInputError(
+                _output.WriteClientInputError(
                     $"Specify exactly one target using --target. Received: '{settings.Target}'.");
                 return 2;
             }
@@ -79,13 +90,13 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
         }
         catch (ArgumentException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 
         if (target == SquadTarget.Warp)
         {
-            SquadCommandComposition.WriteLine("Warp renders no model.");
+            _output.WriteLine("Warp renders no model.");
             return 0;
         }
 
@@ -95,7 +106,7 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
             // Show has no deployment context to key a version on, so the chain already fell
             // back to the newest snapshot: a null here means no source at all, and the remedy
             // matches the one use and clear print.
-            SquadCommandComposition.WriteCanonicalProfilesUnresolvedError();
+            _output.WriteCanonicalProfilesUnresolvedError();
             return 1;
         }
 
@@ -103,17 +114,17 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
         // snapshot, so the rows can preview a different release than an apply would use:
         // name which source they came from. A checkout carries no release version.
         if (string.IsNullOrEmpty(canonical.SquadVersion))
-            SquadCommandComposition.WriteLine("Canonical model profiles from the current checkout.");
+            _output.WriteLine("Canonical model profiles from the current checkout.");
         else
-            SquadCommandComposition.WriteLine($"Canonical model profiles from Squad release {canonical.SquadVersion}.");
+            _output.WriteLine($"Canonical model profiles from Squad release {canonical.SquadVersion}.");
 
         try
         {
-            SquadModelPresetValidator.Validate(preset, canonical.Profiles);
+            _validator.Validate(preset, canonical.Profiles);
         }
         catch (SquadSourceValidationException ex)
         {
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 SquadCommandComposition.FormatPresetValidationError(ex));
             return 1;
         }
@@ -137,11 +148,11 @@ internal sealed class SquadPresetShowCommand : Command<SquadPresetShowSettings>
 
             if (isOverridden)
             {
-                SquadCommandComposition.WriteLine($"{category}: {resolvedToken ?? "none"}");
+                _output.WriteLine($"{category}: {resolvedToken ?? "none"}");
             }
             else
             {
-                SquadCommandComposition.WriteLine($"{category}: {resolvedToken ?? "none"} (bundled)");
+                _output.WriteLine($"{category}: {resolvedToken ?? "none"} (bundled)");
             }
         }
 

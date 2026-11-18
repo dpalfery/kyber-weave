@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text.Json;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
@@ -6,12 +5,14 @@ using KyberWeave.Core.FileSystem;
 namespace KyberWeave.Data.Hooks.Arbiter;
 
 /// <summary>The snapshot documents as files: written aside and moved into place, so a crash mid-write leaves the previous whole document.</summary>
-public sealed class FileHookSnapshotStore : IHookSnapshotStore
+public sealed class FileHookSnapshotStore(IWritableFileSystem files, TimeProvider time, IIdGenerator ids) : IHookSnapshotStore
 {
     private const string SnapshotLockFileName = ".snapshots.lock";
 
+    private static readonly TimeSpan LockWindow = TimeSpan.FromMilliseconds(500);
+
     /// <inheritdoc/>
-    public bool Exists(string directory, string fileName) => File.Exists(Path.Combine(directory, fileName));
+    public bool Exists(string directory, string fileName) => files.FileExists(Path.Combine(directory, fileName));
 
     /// <inheritdoc/>
     public string ReadText(string directory, string fileName) => ReadStoreText(Path.Combine(directory, fileName));
@@ -21,20 +22,20 @@ public sealed class FileHookSnapshotStore : IHookSnapshotStore
     {
         try
         {
-            Directory.CreateDirectory(directory);
+            files.CreateDirectory(directory);
             string lockPath = Path.Combine(directory, SnapshotLockFileName);
-            Stopwatch elapsed = Stopwatch.StartNew();
+            long started = time.GetTimestamp();
             TimeSpan backoff = TimeSpan.FromMilliseconds(5);
             while (true)
             {
-                FileStream? lockFile = null;
+                Stream? lockFile = null;
                 try
                 {
-                    lockFile = File.Open(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                    lockFile = files.OpenExclusive(lockPath);
                 }
-                catch (IOException) when (elapsed.Elapsed < TimeSpan.FromMilliseconds(500))
+                catch (IOException) when (time.GetElapsedTime(started) < LockWindow)
                 {
-                    Thread.Sleep(backoff);
+                    Task.Delay(backoff, time).GetAwaiter().GetResult();
                     backoff = TimeSpan.FromMilliseconds(Math.Min(50, backoff.TotalMilliseconds * 2));
                     continue;
                 }
@@ -48,17 +49,17 @@ public sealed class FileHookSnapshotStore : IHookSnapshotStore
                     {
                         // Write aside and move into place: a crash mid-write leaves the previous
                         // whole document behind, never a truncated one that reads back as [].
-                        string tempPath = Path.Combine(directory, ".snapshots." + Guid.NewGuid().ToString("N") + ".tmp");
+                        string tempPath = Path.Combine(directory, ".snapshots." + ids.NewGuid().ToString("N") + ".tmp");
                         try
                         {
-                            File.WriteAllText(tempPath, json);
-                            File.Move(tempPath, filePath, overwrite: true);
+                            files.WriteAllText(tempPath, json);
+                            files.MoveFile(tempPath, filePath, overwrite: true);
                         }
                         finally
                         {
                             try
                             {
-                                File.Delete(tempPath);
+                                files.DeleteFile(tempPath);
                             }
                             catch (Exception ex) when (FileFailure.Is(ex))
                             {
@@ -77,11 +78,11 @@ public sealed class FileHookSnapshotStore : IHookSnapshotStore
         }
     }
 
-    private static string ReadStoreText(string filePath)
+    private string ReadStoreText(string filePath)
     {
         try
         {
-            return File.Exists(filePath) ? File.ReadAllText(filePath) : string.Empty;
+            return files.FileExists(filePath) ? files.ReadAllText(filePath) : string.Empty;
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {
@@ -91,13 +92,13 @@ public sealed class FileHookSnapshotStore : IHookSnapshotStore
 
     // Crash debris from an interrupted write-aside: swept on the next locked record,
     // before the fresh document moves into place.
-    private static void SweepTempFiles(string directory)
+    private void SweepTempFiles(string directory)
     {
-        foreach (string temp in Directory.GetFiles(directory, ".snapshots.*.tmp"))
+        foreach (string temp in files.EnumerateFiles(directory, ".snapshots.*.tmp", recursive: false).ToList())
         {
             try
             {
-                File.Delete(temp);
+                files.DeleteFile(temp);
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {

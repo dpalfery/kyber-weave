@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -24,14 +25,15 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class DistributionManifestTests : IDisposable
 {
-    private static string RepoRoot => KyberWeaveTestPaths.ToolRoot;
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
-    private static string HomebrewFormulaPath =>
-        Path.Combine(RepoRoot, "homebrew", "kyber-weave.rb");
+    private static string RepoRoot => Corpus.Root;
+
+    private const string HomebrewFormulaPath = "homebrew/kyber-weave.rb";
 
     private static string NpmRoot => Path.Combine(RepoRoot, "npm");
 
-    private static string NpmPackageJsonPath => Path.Combine(NpmRoot, "package.json");
+    private const string NpmPackageJsonPath = "npm/package.json";
 
     private static string NpmArbiterWrapperPath =>
         Path.Combine(NpmRoot, "bin", "kyber-weave-arbiter.js");
@@ -73,7 +75,7 @@ public sealed class DistributionManifestTests : IDisposable
     [Fact]
     public void HomebrewFormulaDeclaresAnArbiterResourcePerPlatformAndInstallsIt()
     {
-        string formula = File.ReadAllText(HomebrewFormulaPath);
+        string formula = Corpus.ReadText(HomebrewFormulaPath);
 
         List<(string Rid, string Body)> resources = ExtractArbiterResources(formula);
 
@@ -115,7 +117,7 @@ public sealed class DistributionManifestTests : IDisposable
     [Fact]
     public void NpmPackageDeclaresTheArbiterBinWrapper()
     {
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(NpmPackageJsonPath));
+        using JsonDocument document = JsonDocument.Parse(Corpus.ReadText(NpmPackageJsonPath));
 
         Assert.True(
             document.RootElement.TryGetProperty("bin", out JsonElement bins),
@@ -133,10 +135,10 @@ public sealed class DistributionManifestTests : IDisposable
             "expected `bin/kyber-weave-arbiter.js`.");
 
         Assert.True(
-            File.Exists(NpmArbiterWrapperPath),
+            Corpus.Exists("npm/bin/kyber-weave-arbiter.js"),
             $"`{NpmArbiterWrapperPath}` does not exist, but package.json's `bin` map points at it.");
 
-        string wrapperSource = File.ReadAllText(NpmArbiterWrapperPath);
+        string wrapperSource = Corpus.ReadText("npm/bin/kyber-weave-arbiter.js");
         Assert.True(
             wrapperSource.Contains("resolveInstalledBinary(\"arbiter\")", StringComparison.Ordinal),
             "The kyber-weave-arbiter wrapper does not resolve the `arbiter` tool; it would " +
@@ -156,7 +158,7 @@ public sealed class DistributionManifestTests : IDisposable
     [Fact]
     public void DocumentedReleaseAssetsAreTheOnesTheReleasePublishes()
     {
-        string guide = File.ReadAllText(Path.Combine(RepoRoot, "docs", "distribution.md"));
+        string guide = Corpus.ReadText("docs/distribution.md");
         HashSet<string> expected = ExpectedAssetsFromVerifier();
 
         List<string> documented = DocumentedAssetNames(guide);
@@ -217,8 +219,7 @@ public sealed class DistributionManifestTests : IDisposable
     private static HashSet<string> ExpectedAssetsFromVerifier()
     {
         const string marker = "declare -a EXPECTED_ASSETS=(";
-        string script = File.ReadAllText(
-            Path.Combine(RepoRoot, "scripts", "verify-release-checksums.sh"));
+        string script = Corpus.ReadText("scripts/verify-release-checksums.sh");
         int start = script.IndexOf(marker, StringComparison.Ordinal);
         Assert.True(start >= 0, "EXPECTED_ASSETS is missing from scripts/verify-release-checksums.sh.");
         int end = script.IndexOf(')', start);
@@ -335,7 +336,7 @@ public sealed class DistributionManifestTests : IDisposable
     [Fact]
     public void NpmDownloadModuleFetchesTheArbiterArchiveInTheSameFlowAsMcp()
     {
-        string downloadSource = File.ReadAllText(NpmDownloadModulePath);
+        string downloadSource = Corpus.ReadText("npm/lib/download.js");
 
         Assert.True(
             downloadSource.Contains("installToolBinary(\"arbiter\"", StringComparison.Ordinal),

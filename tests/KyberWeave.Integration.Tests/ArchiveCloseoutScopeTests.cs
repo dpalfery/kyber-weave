@@ -8,6 +8,7 @@ using KyberWeave.Core.Processes;
 using KyberWeave.Core.Review;
 using Xunit;
 
+using KyberWeave.Tests;
 using KyberWeave.Tests.Fakes;
 namespace KyberWeave.Integration.Tests;
 
@@ -126,17 +127,17 @@ public sealed class ArchiveCloseoutScopeTests
 
     private static IReadOnlyList<ChangedPath> ChangedSince(CloseoutGitRepo repo, string baseRef)
     {
-        return ChangedFiles.ResolveSinceMergeBase(repo.Root, baseRef);
+        return ReviewTestServices.Git.ResolveSinceMergeBase(repo.Root, baseRef);
     }
 
     private static DiagnosticReport ValidateGate(CloseoutGitRepo repo, IReadOnlyList<ChangedPath> changes)
     {
         return new ArchiveCloseoutValidator(
                 repo.Root,
-                KyberWeaveConfig.ProductDefaults,
-                () => new DocumentLoader(repo.Root, KyberWeaveConfig.ProductDefaults.Ontology),
-                DocsPorts.Files)
-            .Validate(new DocumentLoader(repo.Root).Load(), changes);
+                KyberWeaveConfigDefaults.Product,
+                () => RealDocumentLoader.Create(repo.Root, KyberWeaveConfigDefaults.Product.Ontology),
+                DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment)
+            .Validate(RealDocumentLoader.Create(repo.Root).Load(), changes);
     }
 
     private static string FindingText(Diagnostic finding)
@@ -569,7 +570,7 @@ public sealed class ArchiveCloseoutScopeTests
     {
         const string HandbookPlan = "handbook/archive/plans/2026-10-20-widget.md";
         OntologyConfig handbook = OntologyConfig.ProductDefaults.WithDocsRoot("handbook");
-        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(handbook);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product.WithOntology(handbook);
         using DocFixture fixture = new();
         fixture.Write("handbook/catalog.md", CloseoutCorpus.Catalog)
             .Write("handbook/reference/widget.md", CloseoutCorpus.TargetDocument())
@@ -578,9 +579,9 @@ public sealed class ArchiveCloseoutScopeTests
         DiagnosticReport report = new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, handbook),
-            DocsPorts.Files).Validate(
-            new DocumentLoader(fixture.Root, handbook).Load(),
+            () => RealDocumentLoader.Create(fixture.Root, handbook),
+            DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate(
+            RealDocumentLoader.Create(fixture.Root, handbook).Load(),
             [new ChangedPath(HandbookPlan, ChangeKind.Added)]);
 
         Diagnostic finding = Assert.Single(report.Items);
@@ -601,7 +602,7 @@ public sealed class ArchiveCloseoutScopeTests
         const string PrimaryPlan = "6-Docs/archive/plans/2026-10-20-widget.md";
         const string HandbookPlan = "handbook/archive/plans/2026-10-20-widget.md";
         OntologyConfig both = OntologyConfig.ProductDefaults.WithDocsRoots(["6-Docs", "handbook"]);
-        KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(both);
+        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product.WithOntology(both);
         using DocFixture fixture = DocFixture.Create().WithCatalog();
         fixture.Write("6-Docs/reference/widget.md", CloseoutCorpus.TargetDocument())
             .Write(PrimaryPlan, CloseoutCorpus.PlanDocument(bodyStatus: "Ready"))
@@ -612,9 +613,9 @@ public sealed class ArchiveCloseoutScopeTests
         DiagnosticReport report = new ArchiveCloseoutValidator(
             fixture.Root,
             config,
-            () => new DocumentLoader(fixture.Root, both),
-            DocsPorts.Files).Validate(
-            new DocumentLoader(fixture.Root, both).Load(),
+            () => RealDocumentLoader.Create(fixture.Root, both),
+            DocsPorts.Files, DocsPorts.Paths, DocsPorts.Environment).Validate(
+            RealDocumentLoader.Create(fixture.Root, both).Load(),
             [
                 new ChangedPath(PrimaryPlan, ChangeKind.Added),
                 new ChangedPath(HandbookPlan, ChangeKind.Added)

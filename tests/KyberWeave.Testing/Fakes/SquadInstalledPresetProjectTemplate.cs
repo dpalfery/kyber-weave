@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -124,7 +125,7 @@ public sealed class SquadInstalledPresetProjectTemplate
             foreach ((string name, string yaml) in presets)
                 WritePreset(userPaths, name, yaml);
 
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             using FakeSquadReleaseSource releaseSource = new();
             SquadLifecycleService service =
                 SquadHostDefaults.CreateLifecycleService(releaseSource, new FakeSquadRenderer(), stateStore);
@@ -165,5 +166,5 @@ public sealed class SquadInstalledPresetProjectTemplate
             ".kyber-weave",
             "squad",
             "projects",
-            SquadPhysicalRootIdentity.KeyOf(canonicalRoot));
+            SquadPhysicalRootIdentities.KeyOf(canonicalRoot));
 }

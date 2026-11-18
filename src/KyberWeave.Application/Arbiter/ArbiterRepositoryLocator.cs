@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
@@ -8,20 +9,26 @@ namespace KyberWeave.Core.Arbiter;
 /// <summary>Finds the repository root through git, or through a walk up to the nearest <c>.git</c> entry.</summary>
 /// <param name="git">Runs git.</param>
 /// <param name="files">Probes the file system.</param>
-public sealed class ArbiterRepositoryLocator(IGitCommandRunner git, IWritableFileSystem files) : IArbiterRepositoryLocator
+/// <param name="paths">Turns the caller's spelling into a full path.</param>
+/// <param name="environment">Names the directory a relative path is resolved against.</param>
+public sealed class ArbiterRepositoryLocator(
+    IGitCommandRunner git,
+    IWritableFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IArbiterRepositoryLocator
 {
     /// <inheritdoc />
     public string ResolveRepositoryRoot(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        string working = Path.GetFullPath(path);
+        string working = paths.GetFullPath(path, environment.CurrentDirectory);
         try
         {
-            string workingDirectory = files.DirectoryExists(working) ? working : Path.GetDirectoryName(working) ?? ".";
+            string workingDirectory = files.DirectoryExists(working) ? working : Path.GetDirectoryName(working) ?? working;
             GitOutcome result = git.Run(workingDirectory, ["rev-parse", "--show-toplevel"]);
             string root = result.ExitCode == 0 ? result.StandardOutput.Trim() : string.Empty;
             if (!string.IsNullOrWhiteSpace(root))
-                return root;
+                return paths.GetFullPath(root, workingDirectory);
         }
         catch (Exception exception) when (FileFailure.Is(exception) || exception is InvalidOperationException or System.ComponentModel.Win32Exception or TimeoutException)
         {
@@ -38,14 +45,16 @@ public sealed class ArbiterRepositoryLocator(IGitCommandRunner git, IWritableFil
     /// <inheritdoc />
     public string FindGitRoot(string start)
     {
-        string full = Path.GetFullPath(start);
-        for (DirectoryInfo? directory = new(full); directory is not null; directory = directory.Parent)
+        string full = paths.GetFullPath(start, environment.CurrentDirectory);
+        for (string? directory = full; directory is not null;)
         {
-            string marker = Path.Combine(directory.FullName, ".git");
-            if (files.PathExists(marker))
+            if (files.PathExists(Path.Combine(directory, ".git")))
             {
-                return directory.FullName;
+                return directory;
             }
+
+            string? parent = Path.GetDirectoryName(directory);
+            directory = parent == directory ? null : parent;
         }
 
         return full;

@@ -13,6 +13,10 @@ public sealed class ConfiguredPlanTaskAgentPickerFactory(ConfiguredArbiterProvid
     : IPlanTaskAgentPickerFactory
 {
     /// <inheritdoc />
+    [System.Diagnostics.CodeAnalysis.SuppressMessage(
+        "Reliability",
+        "CA2000:Dispose objects before losing scope",
+        Justification = "The provider's lifetime transfers to the returned picker, which holds it for the task-file run.")]
     public IPlanTaskAgentPicker? ForConfig(KyberWeaveConfig config)
     {
         ArgumentNullException.ThrowIfNull(config);

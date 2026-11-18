@@ -12,27 +12,35 @@ using Spectre.Console;
 namespace KyberWeave.Cli.Commands.Docs;
 
 /// <summary>Emits the documentation graph as newline-delimited JSON.</summary>
-public sealed class DocsExportGraphCommand(IManagedGlossaryFactory glossaries) : Command<DocsExportGraphSettings>
+public sealed class DocsExportGraphCommand(
+    IManagedGlossaryFactory glossaries,
+    ICodeGraphPortsFactory codeGraph,
+    IKyberWeaveConfigRepository configs,
+    IWritableFileSystem files,
+    IDocumentSourceFactory documents,
+    IAnsiConsole console) : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
         if (!DocsCommandComposition.TryCreateLoader(
+                configs,
                 settings,
                 report,
-                out DocumentLoader? loader,
+                documents,
+                out IDocumentSource? loader,
                 out KyberWeaveConfig config))
         {
-            CommandHelpers.Finish(report, settings, "docs export-graph", "Document");
+            CommandHelpers.Finish(console, report, settings, "docs export-graph", "Document");
             return 1;
         }
 
         DocumentSet set = loader!.Load();
-        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings);
+        ICodeGraphResolver resolver = DocsCommandComposition.CreateResolver(settings, codeGraph);
 
         if (!resolver.IsAvailable)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"[red]{Markup.Escape(resolver.UnavailableReason ?? "CodeGraph index unavailable.")}[/] " +
                 "Document-to-code join edges cannot be emitted.");
             return 1;
@@ -47,20 +55,21 @@ public sealed class DocsExportGraphCommand(IManagedGlossaryFactory glossaries) :
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
             DocsAnalysisCommandErrors.Render(
+                console,
                 exception,
                 settings,
                 "docs export-graph",
                 ManagedGlossary.ValidationRuleCode);
             return 1;
         }
-        DocGraphExportResult result = new DocGraphExporter(resolver).Export(
+        DocGraphExportResult result = new DocGraphExporter(resolver, files).Export(
             set,
             settings.Out,
             contributors: [glossaryContributor]);
 
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[green]{result.NodeCount} nodes[/] → {Markup.Escape(result.NodesPath)}");
-        AnsiConsole.MarkupLine(
+        console.MarkupLine(
             $"[green]{result.EdgeCount} edges[/] → {Markup.Escape(result.EdgesPath)}");
         return 0;
     }

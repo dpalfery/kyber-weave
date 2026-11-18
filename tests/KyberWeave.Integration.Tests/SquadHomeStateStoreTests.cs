@@ -1,7 +1,9 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -74,7 +76,7 @@ public sealed class SquadHomeStateStoreTests
         Directory.CreateSymbolicLink(symlinkAlias, root);
         string lexicalAlias = Path.Combine(root, "..", "project");
         SquadStateStore store = StoreFor(home);
-        string key = SquadPhysicalRootIdentity.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
+        string key = SquadPhysicalRootIdentities.Resolve(root, SquadFileSystemPathSemantics.Instance).Key;
         string projectState = Path.Combine(
             PhysicalPathOf(home),
             ".kyber-weave",
@@ -258,7 +260,7 @@ public sealed class SquadHomeStateStoreTests
         Directory.CreateSymbolicLink(alias, root);
         SquadStateStore store = StoreFor(home);
 
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(alias, SquadDeploymentScope.Project, AgentFile(SquadDeploymentScope.Project, "alpha.toml", "alpha")));
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
@@ -279,7 +281,7 @@ public sealed class SquadHomeStateStoreTests
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
 
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(root, SquadDeploymentScope.Global, AgentFile(SquadDeploymentScope.Global, "alpha.toml", "alpha")));
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
@@ -299,7 +301,7 @@ public sealed class SquadHomeStateStoreTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(root, SquadDeploymentScope.Project, AgentFile(SquadDeploymentScope.Project, "alpha.toml", "alpha")));
         string receiptPath = store.ResolveReceiptPath(root, SquadDeploymentScope.Project);
         JsonObject document = JsonNode.Parse(File.ReadAllText(receiptPath, Encoding.UTF8))!.AsObject();
@@ -328,14 +330,14 @@ public sealed class SquadHomeStateStoreTests
         string root = Path.Combine(fixture.Path, "target");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(root, scope, AgentFile(scope, "alpha.toml", "alpha")));
         string homeStore = Path.Combine(PhysicalPathOf(home), ".kyber-weave");
         Assert.True(
             Directory.Exists(homeStore),
             "A committed transaction must write its state under the home store.");
         SortedSet<string> before = DirectoriesUnder(homeStore);
-        SquadDeploymentPlan update = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan update = RealSquadDeployment.Planner.CreateUpdate(
             root,
             scope,
             Lock("1.2.4"),
@@ -345,7 +347,7 @@ public sealed class SquadHomeStateStoreTests
             replaceManaged: false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
-        Exception? failure = Record.Exception(() => new SquadTransaction(
+        Exception? failure = Record.Exception(() => RealSquadDeployment.Transaction(
             store,
             new FailAtStepObserver(SquadTransactionStepKind.FileStaged)).Execute(update));
 
@@ -361,10 +363,10 @@ public sealed class SquadHomeStateStoreTests
     }
 
     private static string PhysicalPathOf(string path) =>
-        SquadPhysicalRootIdentity.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
+        SquadPhysicalRootIdentities.Resolve(path, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
     private static SquadStateStore StoreFor(string home) =>
-        new(new HomeOnlyUserPaths(home));
+        RealSquadState.Store(FakeSquadUserPaths.FromHome(home));
 
     /// <summary>
     /// Compares two locations by where they physically are. A path may be spelled through a symlinked
@@ -427,7 +429,7 @@ public sealed class SquadHomeStateStoreTests
         string root,
         SquadDeploymentScope scope,
         params SquadDeploymentFile[] files) =>
-        SquadDeploymentPlanner.CreateInstall(
+        RealSquadDeployment.Planner.CreateInstall(
             root,
             scope,
             Lock(),
@@ -442,13 +444,14 @@ public sealed class SquadHomeStateStoreTests
         SquadDeploymentPlan contenderPlan)
     {
         using LeaseHoldingObserver holder = new LeaseHoldingObserver(SquadTransactionStepKind.IntentWritten);
-        Task active = Task.Run(() => new SquadTransaction(store, holder).Execute(activePlan));
+        Task active = BlockedTransaction.Start(() => RealSquadDeployment.Transaction(store, holder).Execute(activePlan));
         try
         {
-            Assert.True(
-                holder.Reached.Wait(TimeSpan.FromSeconds(5)),
+            BlockedTransaction.WaitForStep(
+                holder.Reached,
+                active,
                 "The active transaction did not reach its durable intent, so it never held a lease.");
-            return Record.Exception(() => new SquadTransaction(store).Execute(contenderPlan));
+            return Record.Exception(() => RealSquadDeployment.Transaction(store).Execute(contenderPlan));
         }
         finally
         {
@@ -485,14 +488,6 @@ public sealed class SquadHomeStateStoreTests
 
     private static string Digest(string content) =>
         Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(content)));
-
-    private sealed class HomeOnlyUserPaths(string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } =
-            Path.Combine(Path.GetDirectoryName(homeDirectory)!, "application-data");
-
-        public string HomeDirectory { get; } = homeDirectory;
-    }
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider
     {

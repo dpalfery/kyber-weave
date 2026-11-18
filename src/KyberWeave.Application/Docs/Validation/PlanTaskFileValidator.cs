@@ -8,6 +8,7 @@ using KyberWeave.Core.Docs.Closeout;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Text;
+using KyberWeave.Domain.FileSystem;
 using static KyberWeave.Core.Docs.Validation.PlanTaskFileRules;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -44,14 +45,14 @@ public sealed partial class PlanTaskFileValidator
 {
 
     private readonly string _repoRoot;
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
 
     /// <summary>Creates the validator over a repository root and its registry and ontology.</summary>
     /// <param name="repoRoot">The absolute repository root the plan paths are relative to.</param>
     /// <param name="config">The effective host configuration, with its ontology applied.</param>
     /// <param name="files">Reads the task files and walks the plans folder.</param>
-    public PlanTaskFileValidator(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files)
+    public PlanTaskFileValidator(string repoRoot, KyberWeaveConfig config, IRepositoryFileStore files)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);

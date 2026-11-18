@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Processes;
@@ -52,6 +53,8 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     private readonly List<string> _filePaths = [];
     private readonly List<CodeGraphEdge> _edges = [];
     private readonly Dictionary<string, int> _edgeDegree = new(StringComparer.Ordinal);
+    private readonly IBoundedProcessExecutor _processes;
+    private readonly CodeGraphIndexStaleness _stalenessRule;
     private bool _stalenessRead;
     private string? _staleness;
 
@@ -68,12 +71,29 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
     /// Loads the given CodeGraph database path. Missing or unreadable indexes leave
     /// <see cref="IsAvailable"/> false with <see cref="UnavailableReason"/> set.
     /// </summary>
-    public CodeGraphResolverAdapter(string databasePath)
+    /// <param name="databasePath">The CodeGraph database, as the caller spelled it.</param>
+    /// <param name="files">Tells whether the database exists.</param>
+    /// <param name="paths">Resolves the database path to a full path.</param>
+    /// <param name="environment">Supplies the directory a relative path resolves against.</param>
+    /// <param name="processes">Runs <c>sqlite3</c> under a time limit.</param>
+    /// <param name="staleness">Judges whether the index has fallen behind the checkout.</param>
+    public CodeGraphResolverAdapter(
+        string databasePath,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IBoundedProcessExecutor processes,
+        CodeGraphIndexStaleness staleness)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(databasePath);
-        DatabasePath = Path.GetFullPath(databasePath);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        _processes = processes ?? throw new ArgumentNullException(nameof(processes));
+        _stalenessRule = staleness ?? throw new ArgumentNullException(nameof(staleness));
+        DatabasePath = paths.GetFullPath(databasePath, environment.CurrentDirectory);
 
-        if (!File.Exists(DatabasePath))
+        if (!files.FileExists(DatabasePath))
         {
             UnavailableReason = $"No CodeGraph index at {DatabasePath}.";
             return;
@@ -90,19 +110,6 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         {
             UnavailableReason = ex.Message;
         }
-    }
-
-    /// <summary>
-    /// Creates an adapter for the standard <c>.codegraph/codegraph.db</c> path under a
-    /// repository root. Composition roots call this; core consumers take
-    /// <see cref="ICodeGraphResolver"/> only.
-    /// </summary>
-    /// <param name="repoRoot">The checkout the index belongs to.</param>
-    public static CodeGraphResolverAdapter ForRepository(string repoRoot)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string databasePath = Path.Combine(Path.GetFullPath(repoRoot), ".codegraph", "codegraph.db");
-        return new CodeGraphResolverAdapter(databasePath);
     }
 
     private void Load()
@@ -173,7 +180,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         if (root is null) return _staleness = null;
 
         (string? indexedCommit, IReadOnlyDictionary<string, (long ModifiedMilliseconds, int NodeCount)> files) = ReadStalenessFacts();
-        return _staleness = CodeGraphIndexStaleness.Describe(root, indexedCommit, files);
+        return _staleness = _stalenessRule.Describe(root, indexedCommit, files);
     }
 
     /// <summary>Reads the recorded commit and per-file state the staleness rule needs.</summary>
@@ -267,7 +274,7 @@ public sealed class CodeGraphResolverAdapter : ICodeGraphResolver, ICodeGraphNei
         // The runner drains both pipes concurrently. This query returns the whole node table, so stdout is
         // large by design and stderr must not be left to fill behind it. A read that outlasts the bound is
         // killed and throws TimeoutException, which the constructor reports as the index being unavailable.
-        ProcessResult result = ProcessRunner.Run(startInfo, string.Empty, SqliteReadTimeout);
+        ProcessResult result = _processes.Run(startInfo, string.Empty, SqliteReadTimeout);
 
         if (result.ExitCode != 0)
         {

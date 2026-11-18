@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Diagnostics;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
@@ -61,8 +62,8 @@ public sealed class SquadPresetCliTests : IDisposable
         Directory.CreateDirectory(_projectDir);
         _userPaths = new FakeSquadUserPaths(_home);
         Directory.CreateDirectory(_userPaths.HomeDirectory);
-        _selectionStore = new SquadModelPresetSelectionStore(_userPaths);
-        _stateStore = new SquadStateStore(_userPaths);
+        _selectionStore = RealSquadSelectionStore.Create(_userPaths);
+        _stateStore = RealSquadState.Store(_userPaths);
     }
 
     public void Dispose()
@@ -766,7 +767,7 @@ public sealed class SquadPresetCliTests : IDisposable
     public void ShowWithSnapshotPresentResolvesNewestSnapshot()
     {
         WritePreset("percat", PerCategoryPresetYaml);
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
         string? seenVersion = "unset";
         SquadPresetShowCommand command = SquadTestCommands.PresetShow(
@@ -796,7 +797,7 @@ public sealed class SquadPresetCliTests : IDisposable
     public void ShowNamesTheSnapshotVersionItResolved()
     {
         WritePreset("percat", PerCategoryPresetYaml);
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
         SquadPresetShowCommand command = SquadTestCommands.PresetShow(
             _userPaths,
@@ -866,7 +867,7 @@ public sealed class SquadPresetCliTests : IDisposable
     public void ShowWithUnknownPresetCategoryExits1WithPathAndLine()
     {
         WritePreset("bad", BadPresetYaml);
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot("1.2.3"));
         SquadPresetShowCommand command = SquadTestCommands.PresetShow(_userPaths, (_, _) => snapshotStore.TryReadLatest());
 
@@ -921,7 +922,7 @@ public sealed class SquadPresetCliTests : IDisposable
         string version,
         Action<string?>? onVersion = null)
     {
-        SquadCanonicalProfileStore snapshotStore = new(_userPaths);
+        SquadCanonicalProfileStore snapshotStore = new(_userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
         snapshotStore.Write(CreateCanonicalSnapshot(version));
         return (preferredVersion, _) =>
         {

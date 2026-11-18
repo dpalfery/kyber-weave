@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -50,6 +51,8 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
     private readonly IClaudeHookCoverage _claudeHooks;
     private readonly IWritableFileSystem _files;
     private readonly IArbiterUninstaller _uninstaller;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
 
     /// <summary>Creates the gating report over the registered Squad state, hook coverage and file system.</summary>
     /// <param name="store">Reads the global and project receipts.</param>
@@ -57,18 +60,31 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
     /// <param name="claudeHooks">Lists the Claude hook sources a project declares.</param>
     /// <param name="files">Reads the hook files.</param>
     /// <param name="uninstaller">Says whether a project deployment is present.</param>
+    /// <param name="paths">Normalizes the two spellings a shim file is compared under.</param>
+    /// <param name="environment">Names the directory a relative spelling is resolved against.</param>
     public ArbiterHarnessGating(
         ISquadStateStore store,
         ISquadGlobalRootResolver roots,
         IClaudeHookCoverage claudeHooks,
         IWritableFileSystem files,
-        IArbiterUninstaller uninstaller)
+        IArbiterUninstaller uninstaller,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(claudeHooks);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(uninstaller);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _store = store;
         _roots = roots;
         _claudeHooks = claudeHooks;
         _files = files;
         _uninstaller = uninstaller;
+        _paths = paths;
+        _environment = environment;
     }
 
     /// <inheritdoc />
@@ -371,7 +387,7 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
         }
     }
 
-    private static bool OwnsGlobalHook(
+    private bool OwnsGlobalHook(
         SquadReceipt? receipt,
         SquadTarget target,
         string token,
@@ -399,10 +415,12 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
             return false;
         }
 
-        string shim = Path.GetFullPath(hookPath);
+        string shim = _paths.GetFullPath(hookPath, _environment.CurrentDirectory);
         return receipt.Files.Any(file =>
             string.Equals(file.Target, token, StringComparison.Ordinal)
-            && string.Equals(Path.GetFullPath(Path.Combine(globalRoot, file.RelativePath)), shim, StringComparison.Ordinal));
+            && _paths.AreSame(
+                _paths.GetFullPath(Path.Combine(globalRoot, file.RelativePath), _environment.CurrentDirectory),
+                shim));
     }
 
     private static string? ResolveGlobalRootOrNull(ISquadGlobalRootResolver roots, SquadTarget target)

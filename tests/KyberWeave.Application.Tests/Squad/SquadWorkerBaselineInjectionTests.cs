@@ -1,0 +1,154 @@
+using System.Text;
+using KyberWeave.Cli.Commands.Squad;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.Fakes;
+using Xunit;
+using KyberWeave.Tests.Corpus;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Pins the one always-on source of worker text (decision D27, task T47): the baseline lives in
+/// <c>products/kyber-squad/shared/worker-baseline.md</c>, carries the Discovery and plan-read rule
+/// tokens, and reaches each worker's render once. The full-suite ban and the batched-read rule it
+/// also carries are graded from the prose rule catalog.
+/// </summary>
+/// <remarks>
+/// <para>
+/// "Once" is the assertion that matters, so every case counts occurrences rather than asserting
+/// presence. Agent-file text is re-sent on every round trip of every worker, and a render carrying the
+/// same paragraph twice is the defect this slice exists to remove — a presence check passes for a
+/// render that carries it ten times.
+/// </para>
+/// <para>
+/// The target rows come from <see cref="SquadHostDefaults.CreateRenderers"/>, the same list the
+/// shared renderer contract suite uses, so a renderer that ships later is held to this contract the
+/// day it ships rather than whenever someone remembers it. The tag is
+/// <c>&lt;worker-baseline&gt;</c>, following the <c>&lt;response-preferences&gt;</c> block the
+/// deployment injector already replaces: it is what makes the paragraph findable and countable in a
+/// rendered body.
+/// </para>
+/// </remarks>
+public sealed class SquadWorkerBaselineInjectionTests
+{
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private const string BaselineOpenTag = "<worker-baseline";
+
+    /// <summary>The worker whose rendered body every harness carries, as an agent file or a role skill.</summary>
+    private const string SampleWorker = "dev-medium";
+
+    private const string BaselineSourcePath = "products/kyber-squad/shared/worker-baseline.md";
+
+    /// <summary>
+    /// The protocol tokens the one source carries: the Discovery tool and the plan-index lookup.
+    /// </summary>
+    private static readonly string[] BaselineRuleTokens =
+    [
+        "codegraph_explore",
+        "<plan-index>"
+    ];
+
+    public static TheoryData<SquadTarget> ShippedTargets() =>
+        new(SquadHostDefaults.CreateRenderers().SelectMany(renderer => renderer.SupportedTargets));
+
+    /// <summary>
+    /// The single source exists and carries the baseline's rule tokens. One file is the whole point:
+    /// text copied into each agent file is the text this slice removes.
+    /// </summary>
+    [Fact]
+    public void TheBaselineTextLivesInOneSharedSourceFile()
+    {
+        Assert.True(
+            Corpus.Exists(BaselineSourcePath),
+            $"The shared baseline must live at '{BaselineSourcePath}', the one source every worker render injects.");
+
+        string baseline = Corpus.ReadText(BaselineSourcePath);
+        foreach (string token in BaselineRuleTokens)
+        {
+            Assert.True(
+                baseline.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"The shared baseline must carry the rule that names '{token}'.");
+        }
+    }
+
+    /// <summary>
+    /// Every harness's render of a worker carries the baseline exactly once, and no rendered file in
+    /// the deployment carries a second copy.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(ShippedTargets))]
+    public async Task EachWorkerRenderCarriesTheBaselineExactlyOnce(SquadTarget target)
+    {
+        SquadRenderResult result = await CanonicalSquadTree.RenderSharedProjectAsync(target);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        (string RelativePath, string Content)[] files =
+        [
+            .. result.Files.Select(file =>
+                (file.RelativePath, Content: Encoding.UTF8.GetString(file.Content.Span)))
+        ];
+
+        (string RelativePath, string Content)[] workerFiles =
+        [
+            .. files.Where(file => file.RelativePath.Contains(SampleWorker, StringComparison.Ordinal))
+        ];
+        Assert.True(
+            workerFiles.Length > 0,
+            $"The {target} render carries no file for '{SampleWorker}', so this case would prove nothing.");
+
+        (string RelativePath, string Content) carrier = Assert.Single(
+            workerFiles, file => Occurrences(file.Content, BaselineOpenTag) == 1);
+
+        Assert.All(workerFiles, file => Assert.True(
+            Occurrences(file.Content, BaselineOpenTag) <= 1,
+            $"'{file.RelativePath}' carries the shared baseline more than once. It reaches a worker from one " +
+            "source, once per render."));
+
+        Assert.All(files, file => Assert.True(
+            Occurrences(file.Content, BaselineOpenTag) <= 1,
+            $"'{file.RelativePath}' carries the shared baseline more than once."));
+
+        foreach (string token in BaselineRuleTokens)
+        {
+            Assert.True(
+                carrier.Content.Contains(token, StringComparison.OrdinalIgnoreCase),
+                $"'{carrier.RelativePath}' carries the baseline block without the rule that names '{token}'.");
+        }
+    }
+
+    private static int Occurrences(string content, string value)
+    {
+        int count = 0;
+        int index = content.IndexOf(value, StringComparison.Ordinal);
+        while (index >= 0)
+        {
+            count++;
+            index = content.IndexOf(value, index + value.Length, StringComparison.Ordinal);
+        }
+
+        return count;
+    }
+
+    [Fact]
+    public void UnclosedBlockInInstructionBodyIsReplacedWithoutDuplicateBlock()
+    {
+        SquadAgent sample = CanonicalSquadTree.SharedSource.Agents.First(a => a.Invocation == SquadInvocation.Subagent);
+        SquadSource source = CanonicalSquadTree.SharedSource with
+        {
+            Agents = [sample with { InstructionBody = "body <worker-baseline> unclosed" }]
+        };
+
+        string block = "<worker-baseline>\nclean\n</worker-baseline>";
+        SquadSource applied = SquadWorkerBaselineInjector.Apply(source, block);
+
+        string body = applied.Agents[0].InstructionBody;
+        Assert.Equal(1, Occurrences(body, "<worker-baseline>"));
+        Assert.Equal(1, Occurrences(body, "</worker-baseline>"));
+        Assert.StartsWith("body", body, StringComparison.Ordinal);
+        Assert.DoesNotContain("unclosed", body, StringComparison.Ordinal);
+    }
+}

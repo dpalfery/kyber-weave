@@ -26,11 +26,12 @@
 
   <ItemGroup>
     <!-- The staleness stamp the document index host rebuilds on is asserted directly by its tests. -->
-    <InternalsVisibleTo Include="KyberWeave.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Application.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Content.Tests" />
+    <InternalsVisibleTo Include="KyberWeave.Mcp.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Integration.Tests" />
     <InternalsVisibleTo Include="KyberWeave.Testing" />
     <!-- The delivery runner reads the host-template seam the description renderer exposes for unreadable files. -->
-    <InternalsVisibleTo Include="KyberWeave.Core.Docs" />
   </ItemGroup>
 
   <!-- Each area owns one Areas\<Area>.props for its resources and package references, so parallel moves never edit the same lines. -->

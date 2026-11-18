@@ -1,6 +1,8 @@
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Review;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Review;
@@ -8,7 +10,7 @@ namespace KyberWeave.Cli.Commands.Review;
 /// <summary>
 /// Computes the review verdict from the council's seat output, or a findings document, and the gate report.
 /// </summary>
-public sealed class ReviewVerdictCommand(IReviewVerdictService verdicts) : Command<ReviewVerdictSettings>
+public sealed class ReviewVerdictCommand(IReviewVerdictService verdicts, IConsole standard, IAnsiConsole ansi) : Command<ReviewVerdictSettings>
 {
     /// <summary>The command description shared by the real registration and the help tests.</summary>
     public const string Description = "Compute approve / request-changes from findings and gates.";
@@ -36,9 +38,9 @@ public sealed class ReviewVerdictCommand(IReviewVerdictService verdicts) : Comma
                 ReviewSeatsCommand.VerdictCommand(settings.Task)),
             cancellationToken);
 
-        CommandHelpers.Finish(result.Report, settings, "review verdict", "Review");
-        if (result.NextStep is { } next && ReportRenderer.IsHuman(settings.ParsedFormat))
-            Console.WriteLine(next);
+        CommandHelpers.Finish(ansi, result.Report, settings, "review verdict", "Review");
+        if (result.NextStep is { } next && ReportRenderer.IsHuman(settings.FormatFor(ansi)))
+            standard.Out.WriteLine(next);
 
         return result.ExitCode;
     }

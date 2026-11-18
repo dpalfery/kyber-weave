@@ -28,10 +28,14 @@ This project only parses arguments and wires services; the decisions live in the
 builder, and an event that passes through untouched builds no container at all
 (`HookFastPath.IsPassThrough`). The pieces:
 
-- `src/KyberWeave.Domain/Arbiter/Hooks/`: the harness adapters, `HarnessAdapterRegistry`,
-  `ReadGuard`, `ArchitectShellGuard`, `PluginEnvelope`, the outcome records and the guards' pure rules.
-- `src/KyberWeave.Application/Arbiter/Hooks/`: `HookCommand` (the hook host), the decision engine,
-  `ConductorGuard`, `WorkerGuard` and `HookGitFacts`, behind the `Contracts/Services` interfaces.
+- `src/KyberWeave.Application/Arbiter/Hooks/`: the harness adapters, `HarnessAdapterRegistry`,
+  `ReadGuard`, `ArchitectShellGuard`, `PluginEnvelope`, the guards' pure rules, `HookCommand` (the hook
+  host), the decision engine, `ConductorGuard`, `WorkerGuard` and `HookGitFacts`, behind the
+  `Contracts/Services` interfaces.
+- `src/KyberWeave.Domain/Arbiter/Hooks/`: the outcome records and hook context the adapters and the host
+  agree on.
+- `src/KyberWeave.Contracts/Repositories/`: the `IFactoryTranscriptSource` port the Factory adapter reads a
+  session transcript through; `Data`'s `FileFactoryTranscriptSource` implements it.
 - `src/KyberWeave.Data/Hooks/Arbiter/`: the claim, snapshot and budget files, the Factory transcript reader.
 
 Tests build `HookCommand` through `ArbiterTestServices` with scripted engines and counting config
@@ -52,7 +56,7 @@ fallback for the harnesses that render no hooks. Two names describe it, and they
 interchangeable.
 
 - **Server key `kw-arbiter`.** It is the value of `McpServerNames.Arbiter` in
-  `src/KyberWeave.Core/Configuration/`, never a literal in this project. Every rendered
+  `src/KyberWeave.Domain/Configuration/`, never a literal in this project. Every rendered
   grant and every client configuration is built from that key, so a literal spelled here
   is how a grant stops resolving.
 - **Executable and argv are unchanged.** `kyber-weave-arbiter serve --repo-root <root>`

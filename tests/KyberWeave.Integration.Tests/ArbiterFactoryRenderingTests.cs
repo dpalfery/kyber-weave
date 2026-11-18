@@ -1,7 +1,9 @@
+using KyberWeave.Testing.Squad;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
@@ -24,6 +26,8 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private const string BlockPath = ".factory/hooks.json";
     private const string ExpectedCommand = "kyber-weave-arbiter hook --harness factory";
     private const int HookTimeoutSeconds = 5;
+
+    private static readonly FactoryHooksShadowing HooksShadowing = new(new PhysicalFileSystem());
 
     private readonly ArbiterSquadFixture _fixture = ArbiterSquadFixture.Create();
 
@@ -435,7 +439,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
              "hooks": {"post_tool_use": [{"command": "user-own-linter"}]}}
             """);
 
-        Assert.True(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.True(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
@@ -445,7 +449,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         WriteFile(Path.Combine(targetRoot.Path, ".factory/settings.json"), "{\"hooks\": {}}");
         WriteFile(Path.Combine(targetRoot.Path, ".factory/hooks.json"), "{}");
 
-        Assert.False(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.False(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
@@ -454,7 +458,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         using TempDirectory targetRoot = new();
         WriteFile(Path.Combine(targetRoot.Path, ".factory/settings.json"), "{\"model\": \"droid\"}");
 
-        Assert.False(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.False(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
@@ -462,13 +466,13 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     {
         using TempDirectory targetRoot = new();
 
-        Assert.False(FactoryHooksShadowing.IsShadowed(targetRoot.Path));
+        Assert.False(HooksShadowing.IsShadowed(targetRoot.Path));
     }
 
     [Fact]
     public void Degradation_RecordsSettingsHooksShadowedWithTheNamedFix()
     {
-        SquadDegradationRecord record = FactoryHooksShadowing.Degradation();
+        SquadDegradationRecord record = HooksShadowing.Degradation();
 
         Assert.Equal("factory", record.Target);
         Assert.Equal("arbiter", record.CanonicalIdentity);
@@ -538,7 +542,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
         WriteFile(Path.Combine(targetRoot.Path, ".factory/settings.json"), "{ // jsonc comment\n \"hooks\": {} }");
         SquadRenderedBlock block = new("factory", BlockPath, SquadHookBlockFormat.Factory, []);
 
-        FactoryHooksShadowingOutcome outcome = FactoryHooksShadowing.Resolve(
+        FactoryHooksShadowingOutcome outcome = HooksShadowing.Resolve(
             targetRoot.Path,
             [SquadTarget.Factory],
             new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: HookTimeoutSeconds),
@@ -710,10 +714,10 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private async Task<SquadLifecycleResult> UninstallAsync(string targetRoot, string applicationData)
     {
         using FakeSquadReleaseSource releases = new();
-        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
-            new FactoryBlockStubRenderer(),
+            FakeSquadRenderer.WithBlocks(SquadTarget.Factory, FactoryBlock()),
             store,
             new FixedTimeProvider(DateTimeOffset.UtcNow));
 
@@ -723,10 +727,10 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private async Task<SquadLifecycleResult> InstallAsync(string targetRoot, string applicationData, bool subagentStop = true)
     {
         using FakeSquadReleaseSource releases = new();
-        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
-            new FactoryBlockStubRenderer(subagentStop),
+            FakeSquadRenderer.WithBlocks(SquadTarget.Factory, FactoryBlock(subagentStop)),
             store,
             new FixedTimeProvider(DateTimeOffset.UtcNow));
 
@@ -741,10 +745,10 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private async Task<SquadLifecycleResult> UpdateAsync(string targetRoot, string applicationData, bool subagentStop = true)
     {
         using FakeSquadReleaseSource releases = new();
-        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
-            new FactoryBlockStubRenderer(subagentStop),
+            FakeSquadRenderer.WithBlocks(SquadTarget.Factory, FactoryBlock(subagentStop)),
             store,
             new FixedTimeProvider(DateTimeOffset.UtcNow));
 
@@ -773,56 +777,23 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     /// Emits the Factory block as the real renderer does. <paramref name="includeSubagentStop"/>
     /// set to false reproduces the two-container file an older Squad wrote, for upgrade tests.
     /// </summary>
-    private sealed class FactoryBlockStubRenderer(bool includeSubagentStop = true) : ISquadRenderer
+    /// <summary>
+    /// Emits the Factory block as the real renderer does. <paramref name="includeSubagentStop"/>
+    /// set to false reproduces the two-container file an older Squad wrote, for upgrade tests.
+    /// </summary>
+    private static SquadRenderedBlock FactoryBlock(bool includeSubagentStop = true)
     {
-        public IReadOnlyCollection<SquadTarget> SupportedTargets { get; } = [SquadTarget.Factory];
-
-        public Task<SquadRenderResult> RenderAsync(
-            SquadRenderRequest request,
-            CancellationToken cancellationToken = default)
+        List<SquadRenderedBlockEntry> entries =
+        [
+            new SquadRenderedBlockEntry("PreToolUse", SquadGroup("Task")),
+            new SquadRenderedBlockEntry("PostToolUse", SquadGroup("Task")),
+        ];
+        if (includeSubagentStop)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new SquadRenderResult(
-                true,
-                [],
-                [],
-                [],
-                [],
-                Blocks: [FactoryBlock()]));
+            entries.Add(new SquadRenderedBlockEntry("SubagentStop", SquadGroup(null)));
         }
 
-        private SquadRenderedBlock FactoryBlock()
-        {
-            List<SquadRenderedBlockEntry> entries =
-            [
-                new SquadRenderedBlockEntry("PreToolUse", MatcherGroup(ExpectedCommand)),
-                new SquadRenderedBlockEntry("PostToolUse", MatcherGroup(ExpectedCommand)),
-            ];
-            if (includeSubagentStop)
-            {
-                entries.Add(new SquadRenderedBlockEntry("SubagentStop", MatcherGroup(ExpectedCommand, matcher: null)));
-            }
-
-            return new("factory", BlockPath, SquadHookBlockFormat.Factory, entries);
-        }
-
-        private static JsonObject MatcherGroup(string command, string? matcher = "Task")
-        {
-            JsonObject group = new();
-            if (matcher is not null)
-            {
-                group["matcher"] = matcher;
-            }
-
-            group["hooks"] = new JsonArray(
-                new JsonObject
-                {
-                    ["type"] = "command",
-                    ["command"] = command,
-                    ["timeout"] = HookTimeoutSeconds,
-                });
-            return group;
-        }
+        return new("factory", BlockPath, SquadHookBlockFormat.Factory, entries);
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset value) : TimeProvider

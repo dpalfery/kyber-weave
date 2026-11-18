@@ -8,6 +8,8 @@ using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Arbiter.Providers;
 using KyberWeave.Core.RunStart;
 using Xunit;
+using KyberWeave.Tests.Arbiter;
+using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests.Arbiter;
 
@@ -46,7 +48,7 @@ public sealed class ArbiterPlanWorktreeTests
         string worktree = AddWorktree(probe, "run-wt");
         WritePlan(worktree);
 
-        string root = new PlanRootResolver(new GitFacts(), new PlanPathResolver()).Resolve(probe.Root, Prompt());
+        string root = RealPlanRoots.Create().Resolve(probe.Root, Prompt());
 
         Assert.True(HoldsPlan(root), $"resolved '{root}', which does not hold the plan");
         Assert.NotEqual(Path.GetFullPath(probe.Root), Path.GetFullPath(root));
@@ -60,7 +62,7 @@ public sealed class ArbiterPlanWorktreeTests
         WritePlan(worktree);
         WritePlan(probe.Root);
 
-        Assert.Equal(probe.Root, new PlanRootResolver(new GitFacts(), new PlanPathResolver()).Resolve(probe.Root, Prompt()));
+        Assert.Equal(probe.Root, RealPlanRoots.Create().Resolve(probe.Root, Prompt()));
     }
 
     [Fact]
@@ -69,7 +71,7 @@ public sealed class ArbiterPlanWorktreeTests
         using RunStartProbe probe = RunStartProbe.Create();
         _ = AddWorktree(probe, "run-wt");
 
-        Assert.Equal(probe.Root, new PlanRootResolver(new GitFacts(), new PlanPathResolver()).Resolve(probe.Root, Prompt()));
+        Assert.Equal(probe.Root, RealPlanRoots.Create().Resolve(probe.Root, Prompt()));
     }
 
     [Fact]
@@ -82,8 +84,8 @@ public sealed class ArbiterPlanWorktreeTests
         WritePlan(second);
         File.SetLastWriteTimeUtc(Path.Combine(first, PlanRelative), DateTime.UtcNow.AddHours(1));
 
-        string named = new PlanRootResolver(new GitFacts(), new PlanPathResolver()).Resolve(probe.Root, Prompt($"Worktree: {second}\n\nWrite the tests."));
-        string newest = new PlanRootResolver(new GitFacts(), new PlanPathResolver()).Resolve(probe.Root, Prompt());
+        string named = RealPlanRoots.Create().Resolve(probe.Root, Prompt($"Worktree: {second}\n\nWrite the tests."));
+        string newest = RealPlanRoots.Create().Resolve(probe.Root, Prompt());
 
         Assert.EndsWith("run-b", Path.TrimEndingDirectorySeparator(named), StringComparison.Ordinal);
         Assert.EndsWith("run-a", Path.TrimEndingDirectorySeparator(newest), StringComparison.Ordinal);
@@ -95,7 +97,7 @@ public sealed class ArbiterPlanWorktreeTests
         using RunStartProbe probe = RunStartProbe.Create();
         string worktree = AddWorktree(probe, "run-wt");
 
-        string root = new PlanRootResolver(new GitFacts(), new PlanPathResolver()).Resolve(probe.Root, $"Worktree: {worktree}\n\nWrite the tests.");
+        string root = RealPlanRoots.Create().Resolve(probe.Root, $"Worktree: {worktree}\n\nWrite the tests.");
 
         Assert.EndsWith("run-wt", Path.TrimEndingDirectorySeparator(root), StringComparison.Ordinal);
     }
@@ -112,9 +114,9 @@ public sealed class ArbiterPlanWorktreeTests
         string worktree = AddWorktree(probe, "run-wt");
         WritePlan(worktree);
         // run start recorded the run, so KW-ARB-RUN-001 sees it live.
-        RunBaseState.Write(
+        RunStartTestServices.RunStateStore().Write(
             home.Path, "run-wt", "origin/main",
-            new RunStartPlace(new GitFacts().GetCommonDirectory(probe.Root)!, worktree, DateTimeOffset.UtcNow));
+            new RunStartPlace(RealGitFacts.Create().GetCommonDirectory(probe.Root)!, worktree, DateTimeOffset.UtcNow));
         Directory.CreateDirectory(Path.Combine(probe.Root, ".kyber-weave"));
         File.WriteAllText(
             Path.Combine(probe.Root, ".kyber-weave", "kyber-weave.yml"),
@@ -138,7 +140,7 @@ public sealed class ArbiterPlanWorktreeTests
 
         Assert.Equal(0, exit);
         Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
-        ArbiterDecisionRecord record = new DecisionLog(Path.Combine(probe.Root, "artifacts", "arbiter"))
+        ArbiterDecisionRecord record = RealArbiterState.Decisions(Path.Combine(probe.Root, "artifacts", "arbiter"))
             .ReadAll()
             .First(decision => decision.Trigger == "delegate");
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "has-tasks");
@@ -180,8 +182,8 @@ public sealed class ArbiterPlanWorktreeTests
         Assert.Equal(0, command.Run("copilot-cli", null, stdin, stdout, log, homeDirectory: home.Path));
 
         Assert.DoesNotContain("\"deny\"", stdout.ToString(), StringComparison.Ordinal);
-        ArbiterDecisionRecord record = new DecisionLog(Path.Combine(worktree, "artifacts", "arbiter")).ReadAll()
-            .Concat(new DecisionLog(Path.Combine(probe.Root, "artifacts", "arbiter")).ReadAll())
+        ArbiterDecisionRecord record = RealArbiterState.Decisions(Path.Combine(worktree, "artifacts", "arbiter")).ReadAll()
+            .Concat(RealArbiterState.Decisions(Path.Combine(probe.Root, "artifacts", "arbiter")).ReadAll())
             .First(decision => decision.Trigger == "delegate");
         Assert.Contains(record.Rules, rule => rule.Id == "KW-ARB-PLAN-001" && rule.Answer == "has-tasks");
         // The task resolved, so the task rules read it rather than their unknown-task answers.

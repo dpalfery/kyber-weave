@@ -19,5 +19,6 @@ last-reviewed: 2026-11-16
 - Never weaken, skip or delete a test to make a gate pass.
 - Tests whose subject is the repository itself (scripts, workflows, gate configuration, docs
   prose, source scans) live in `tests/KyberWeave.RepoPolicy.Tests`. Tests whose subject is the
-  wording of skills and agents live in `tests/KyberWeave.PromptContent.Tests`.
+  shipped content (agents, skills, standards, documents) live in `tests/KyberWeave.Content.Tests`,
+  reading it through the corpus seam and writing nothing.
 - Fixtures and the targeted commands per area are in the `AGENTS.md` of each test project.

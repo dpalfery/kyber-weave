@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Configuration;
@@ -8,6 +9,7 @@ using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Parsing;
 using KyberWeave.Core.Review;
+using KyberWeave.Domain.FileSystem;
 using YamlDotNet.Core;
 
 namespace KyberWeave.Core.Docs.Validation;
@@ -70,13 +72,17 @@ public sealed partial class ArchiveCloseoutValidator
         string repoRoot,
         KyberWeaveConfig config,
         Func<IDocumentSource> loaderFactory,
-        IFileSystem files)
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(loaderFactory);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
         _loaderFactory = loaderFactory;
         _files = files;
@@ -630,7 +636,7 @@ public sealed partial class ArchiveCloseoutValidator
     {
         foreach (string link in DocumentLoader.ExtractRelativeLinks(destination))
         {
-            string? target = DocGraphProjection.ResolveLink(entryPath, link);
+            string? target = DocumentLinkPaths.Resolve(entryPath, link);
             if (target is null)
                 continue;
 
@@ -725,7 +731,7 @@ public sealed partial class ArchiveCloseoutValidator
             bool tracked = false;
             foreach (string link in DocumentLoader.ExtractRelativeLinks(row.Destination))
             {
-                string? target = DocGraphProjection.ResolveLink(entryPath, link);
+                string? target = DocumentLinkPaths.Resolve(entryPath, link);
                 if (target is null)
                     continue;
 

@@ -292,14 +292,11 @@ surface of both binaries — plus every canonical install, update, and configure
 
 ```
 src/
-  KyberWeave.Core/        shared engine
-    Skills/ Agents/         Feature 2 — governance per artifact class
-    Security/               Feature 2 — shared instruction-surface scanner
-    Diagnostics/            Feature 4 — rule ids, severities, reports
-    CodeGraph/              read-only port over the CodeGraph index
-    Configuration/ Text/ Parsing/
-  KyberWeave.Core.Docs/   Feature 1 — parsing, search, validation, export
-  KyberWeave.Core.Squad/  Feature 3 — multi-harness deployment engine & transaction store
+  KyberWeave.Kernel/      process, file-system and text primitives
+  KyberWeave.Domain/      data: models, enums, options
+  KyberWeave.Contracts/   interfaces
+  KyberWeave.Data/        adapters over files, processes, git and the network
+  KyberWeave.Application/ the engine: parsing, search, validation, Squad deployment
   KyberWeave.Cli/         kyber-weave — skill | agent | squad | docs | utilities | review | update
   KyberWeave.Mcp/         kyber-weave-mcp — stdio MCP server
 products/
@@ -307,7 +304,7 @@ products/
 dash/                     Feature 5 — KyberDash, first-party since a one-time fork of CodeBurn
   src/ dash/                CLI engine, provider parsers, and the web dashboard
   kyber/                    analyzers, OTLP receiver, canon store
-tests/KyberWeave.Tests/
+tests/                    unit test projects (one per product project), content, policy, architecture and integration tests
 .apm/skills/              kyber-docs-authoring — the authoring skill, shipped as an APM package
 samples/                  exemplar and deliberately bad skills; routing eval set
 templates/github-actions/ host gate workflows
@@ -323,7 +320,7 @@ Requires .NET SDK 10 (`global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build
+dotnet test --solution KyberWeave.Unit.slnf -c Release --no-build
 ```
 
 KyberDash (`dash/`) and tray commands run directly too — `npm --prefix dash …`,

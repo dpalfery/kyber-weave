@@ -1,5 +1,6 @@
 using KyberWeave.Application;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
@@ -52,6 +53,9 @@ internal static class DocsToolsComposition
                 repositoryRoot,
                 () => provider.GetRequiredService<ICodeGraphPortsFactory>().ForRepository(repositoryRoot).Resolver,
                 () => provider.GetRequiredService<IDocumentSourceFactory>().Create(repositoryRoot, ontology).Load(),
+                provider.GetRequiredService<IRepositoryFileStore>(),
+                provider.GetRequiredService<IPathResolver>(),
+                provider.GetRequiredService<IProcessEnvironment>(),
                 ontology.DocsRoots,
                 ontology.ResolvedCatalogPath);
         });
@@ -59,16 +63,11 @@ internal static class DocsToolsComposition
 
         // A tool constructor parameter has to be a service the container resolves: the SDK builds each tool type from
         // the container on every call, so a bare root string would make every tool call fail.
-        services.AddSingleton(new DocsHostRoot(Path.GetFullPath(repositoryRoot)));
+        services.AddSingleton(provider => HostRoot(provider, repositoryRoot));
 
         // The refresh schedule is a process-wide decision, made once from this process's own argv. The
         // tools receive it by injection so a test that asks them directly gets the default cadence.
-        services.AddSingleton<ICodeGraphFreshnessGate>(provider => new CodeGraphFreshness(
-            repositoryRoot,
-            codeGraphRefreshEnabled,
-            provider.GetRequiredService<ICodeGraphProvisioner>(),
-            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
-            provider.GetRequiredService<TimeProvider>()));
+        services.AddSingleton<ICodeGraphFreshnessGate>(provider => Freshness(provider, repositoryRoot, codeGraphRefreshEnabled));
         services.AddSingleton<IDocsGateRunner, DocsGateRunner>();
         services.AddSingleton<IDocsQueryService, DocsQueryService>();
         services.AddSingleton<IPlanLifecycleService>(provider => new PlanLifecycleService(
@@ -78,7 +77,9 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IPlanFinalizeService>(),
             provider.GetRequiredService<IPlanCloseoutService>(),
             provider.GetRequiredService<IRepositoryFileStore>(),
-            provider.GetRequiredService<TimeProvider>()));
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>()));
         services.AddSingleton<IRunDeliveryService>(provider => new RunDeliveryService(
             repositoryRoot,
             provider.GetRequiredService<IDocsQueryService>(),
@@ -102,6 +103,36 @@ internal static class DocsToolsComposition
         return services;
     }
 
+    /// <summary>The root the tools answer for, as a full path resolved against the process working directory.</summary>
+    /// <param name="provider">The container the path and environment seams are resolved from.</param>
+    /// <param name="repositoryRoot">The checkout root, as the caller spelled it.</param>
+    public static DocsHostRoot HostRoot(IServiceProvider provider, string repositoryRoot)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return new DocsHostRoot(provider.GetRequiredService<IPathResolver>()
+            .GetFullPath(repositoryRoot, provider.GetRequiredService<IProcessEnvironment>().CurrentDirectory));
+    }
+
+    /// <summary>The CodeGraph refresh schedule over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
+    /// <param name="provider">The container the ports are resolved from.</param>
+    /// <param name="repositoryRoot">The bound repository root.</param>
+    /// <param name="refreshEnabled">False when the process runs with <c>--no-codegraph-refresh</c>.</param>
+    public static CodeGraphFreshness Freshness(IServiceProvider provider, string repositoryRoot, bool refreshEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(provider);
+        return new CodeGraphFreshness(
+            repositoryRoot,
+            refreshEnabled,
+            provider.GetRequiredService<ICodeGraphProvisioner>(),
+            provider.GetRequiredService<IKyberWeaveConfigRepository>(),
+            provider.GetRequiredService<TimeProvider>(),
+            provider.GetRequiredService<IFileSystem>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IProcessRunner>(),
+            provider.GetRequiredService<IBoundedProcessExecutor>());
+    }
+
     /// <summary>The task prompt service over <paramref name="host"/>'s checkout, built from the ports of <paramref name="provider"/>.</summary>
     /// <param name="provider">The container the ports are resolved from.</param>
     /// <param name="host">The corpus whose standards the prompt carries, and the root it is bound to.</param>
@@ -112,8 +143,9 @@ internal static class DocsToolsComposition
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
-            provider.GetRequiredService<IFileSystem>(),
-            technology => host.Current().StandardsFor(technology));
+            provider.GetRequiredService<IWritableFileSystem>(),
+            technology => host.Current().StandardsFor(technology),
+            provider.GetRequiredService<IProcessEnvironment>());
     }
 
     /// <summary>The analysis reader over <paramref name="repositoryRoot"/>, built from the ports of <paramref name="provider"/>.</summary>
@@ -127,7 +159,11 @@ internal static class DocsToolsComposition
             provider.GetRequiredService<IDocsHostConfiguration>(),
             provider.GetRequiredService<ICodeGraphPortsFactory>(),
             provider.GetRequiredService<IManagedGlossaryFactory>(),
-            provider.GetRequiredService<IDocumentSourceFactory>());
+            provider.GetRequiredService<IDocumentSourceFactory>(),
+            provider.GetRequiredService<IPathResolver>(),
+            provider.GetRequiredService<IProcessEnvironment>(),
+            provider.GetRequiredService<IAnalysisPersistenceFactory>(),
+            provider.GetRequiredService<IEmbeddingGeneratorFactory>());
     }
 
     /// <summary>The tools over <paramref name="host"/>.</summary>
@@ -172,7 +208,9 @@ internal static class DocsToolsComposition
                 provider.GetRequiredService<IPlanFinalizeService>(),
                 provider.GetRequiredService<IPlanCloseoutService>(),
                 provider.GetRequiredService<IRepositoryFileStore>(),
-                provider.GetRequiredService<TimeProvider>()),
+                provider.GetRequiredService<TimeProvider>(),
+                provider.GetRequiredService<IPathResolver>(),
+                provider.GetRequiredService<IProcessEnvironment>()),
             new RunDeliveryService(host.RepositoryRoot, query, hostConfiguration, provider.GetRequiredService<RunDeliveryPorts>())
             {
                 DeliveryExecutor = deliveryExecutor,
@@ -190,7 +228,7 @@ internal static class DocsToolsComposition
             },
             Prompts(provider, host),
             hostConfiguration,
-            new DocsHostRoot(host.RepositoryRoot),
+            HostRoot(provider, host.RepositoryRoot),
             roots);
     }
 }

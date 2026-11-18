@@ -1,6 +1,5 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Candidates;
@@ -20,20 +19,22 @@ namespace KyberWeave.Cli.Commands.Docs;
 internal static class DocsCommandComposition
 {
     public static bool TryResolveOntology(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         out OntologyConfig ontology)
     {
-        return TryResolveConfig(settings, report, out _, out ontology);
+        return TryResolveConfig(configs, settings, report, out _, out ontology);
     }
 
     public static bool TryResolveConfig(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         out KyberWeaveConfig config,
         out OntologyConfig ontology)
     {
-        if (!CommandHelpers.TryLoadConfig(settings.Path, settings.Config, report, out config))
+        if (!CommandHelpers.TryLoadConfig(configs, settings.Path, settings.Config, report, out config))
         {
             ontology = OntologyConfig.ProductDefaults;
             return false;
@@ -57,7 +58,8 @@ internal static class DocsCommandComposition
                 Ontology = ontology,
                 Harness = config.Harness,
                 DocsAnalysis = config.DocsAnalysis.ResolveFor(ontology),
-                Squad = config.Squad
+                Squad = config.Squad,
+                Arbiter = Core.Arbiter.ArbiterConfigDefaults.Product
             };
             return true;
         }
@@ -66,7 +68,7 @@ internal static class DocsCommandComposition
             // A rejected --docs-root is the same class of operator error as a rejected
             // docs-root in the config file, and reports under the same code.
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                KyberWeaveConfigDiagnosticCodes.LoadError,
                 Severity.Error,
                 ex.Message,
                 "--docs-root"));
@@ -76,31 +78,36 @@ internal static class DocsCommandComposition
     }
 
     public static bool TryCreateLoader(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
-        out DocumentLoader? loader) =>
-        TryCreateLoader(settings, report, out loader, out _);
+        IDocumentSourceFactory documents,
+        out IDocumentSource? loader) =>
+        TryCreateLoader(configs, settings, report, documents, out loader, out _);
 
     public static bool TryCreateLoader(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
-        out DocumentLoader? loader,
+        IDocumentSourceFactory documents,
+        out IDocumentSource? loader,
         out KyberWeaveConfig config)
     {
-        if (!TryResolveConfig(settings, report, out config, out OntologyConfig ontology))
+        if (!TryResolveConfig(configs, settings, report, out config, out OntologyConfig ontology))
         {
             loader = null;
             return false;
         }
 
-        loader = new DocumentLoader(settings.Path, ontology);
+        loader = documents.Create(settings.Path, ontology);
         return true;
     }
 
-    public static ICodeGraphResolver CreateResolver(DocsSettings settings) =>
-        CodeGraphResolvers.ForRepository(settings.Path).Resolver;
+    public static ICodeGraphResolver CreateResolver(DocsSettings settings, ICodeGraphPortsFactory codeGraph) =>
+        codeGraph.ForRepository(settings.Path).Resolver;
 
     public static bool TryCreateAnalysisRuntime(
+        IKyberWeaveConfigRepository configs,
         DocsSettings settings,
         DiagnosticReport report,
         DocsAnalysisCompositionFactories factories,
@@ -111,7 +118,7 @@ internal static class DocsCommandComposition
         ArgumentNullException.ThrowIfNull(factories);
 
         runtime = null;
-        if (!TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
+        if (!TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
             return false;
         }
@@ -191,15 +198,16 @@ internal static class DocsCommandComposition
     }
 }
 
-internal sealed class DocsAnalysisCompositionFactories
+internal sealed class DocsAnalysisCompositionFactories(
+    ICodeGraphPortsFactory codeGraph,
+    IAnalysisPersistenceFactory persistence,
+    IEmbeddingGeneratorFactory embeddings)
 {
-    public Func<string, bool> IsCacheSafe { get; init; } = AnalysisCacheSafety.IsSafe;
-    public Func<string, IAnalysisPersistence> CreatePersistence { get; init; } =
-        repositoryRoot => new SqliteAnalysisPersistence(repositoryRoot);
-    public Func<IEmbeddingGenerator> CreateEmbeddingGenerator { get; init; } =
-        () => new OpenAiCompatibleEmbeddingGenerator();
+    public Func<string, bool> IsCacheSafe { get; init; } = persistence.IsCacheSafe;
+    public Func<string, IAnalysisPersistence> CreatePersistence { get; init; } = persistence.Open;
+    public Func<IEmbeddingGenerator> CreateEmbeddingGenerator { get; init; } = embeddings.Create;
     public Func<string, ICodeGraphResolver> CreateResolver { get; init; } =
-        repositoryRoot => CodeGraphResolvers.ForRepository(repositoryRoot).Resolver;
+        repositoryRoot => codeGraph.ForRepository(repositoryRoot).Resolver;
 }
 
 internal sealed class DocsAnalysisRuntime(

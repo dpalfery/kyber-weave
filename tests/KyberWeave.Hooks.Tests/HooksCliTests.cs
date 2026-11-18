@@ -158,9 +158,61 @@ public sealed class HooksCliTests : IDisposable
         Assert.Equal(string.Empty, stderr.ToString());
     }
 
+    [Fact]
+    public async Task ProjectDirectoryFromTheEnvironmentSeamLimitsWhichRepositoryIsUsed()
+    {
+        string file = Repository();
+        string elsewhere = Path.Combine(root.FullName, "elsewhere");
+        _ = Directory.CreateDirectory(elsewhere);
+
+        int code = await HooksCli.DispatchAsync(
+            ["run", "--harness", "claude"],
+            new StringReader(Json(file)),
+            stdout,
+            stderr,
+            services =>
+            {
+                _ = services.AddSingleton<IProcessRunner>(new StubRunner(new ProcessRunResult(2, "bad", false)));
+                _ = services.AddSingleton<IProcessEnvironment>(new StubEnvironment(name => name == "CLAUDE_PROJECT_DIR" ? elsewhere : null));
+            });
+
+        Assert.Equal(0, code);
+        Assert.Equal(string.Empty, stderr.ToString());
+    }
+
+    private sealed class StubEnvironment(Func<string, string?> variables) : IProcessEnvironment
+    {
+        public string CurrentDirectory => string.Empty;
+
+        public string ApplicationBaseDirectory => string.Empty;
+
+        public string HomeDirectory => string.Empty;
+
+        public string TempDirectory => string.Empty;
+
+        public OperatingSystemKind OperatingSystem => OperatingSystemKind.Unknown;
+
+        public string UserName => string.Empty;
+
+        public string MachineName => string.Empty;
+
+        public bool IsFileSystemCaseInsensitive => false;
+
+        public bool IsInputRedirected => true;
+
+        public string? GetVariable(string name) => variables(name);
+    }
+
     private sealed class StubRunner(ProcessRunResult result) : IProcessRunner
     {
+        public Task<ProcessRunResult> RunAsync(ProcessRunRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(result);
+
         public Task<ProcessRunResult> RunAsync(IReadOnlyList<string> argv, string workingDirectory, TimeSpan timeout, CancellationToken cancellationToken) =>
             Task.FromResult(result);
+
+        public bool IsAlive(int processId) => false;
+
+        public string? FindOnPath(string program) => null;
     }
 }

@@ -1,3 +1,5 @@
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.Configuration;
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Cli;
@@ -314,7 +316,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
         Assert.Contains("user-owned read hook", installed, StringComparison.Ordinal);
 
         FakeSquadUserPaths userPaths = new(home);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         string receiptPath = stateStore.ResolveReceiptPath(home, SquadDeploymentScope.Global);
         Assert.True(File.Exists(receiptPath), "the real global install must write a global receipt");
 
@@ -329,7 +331,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
         Assert.Contains("user-owned read hook", after, StringComparison.Ordinal);
         Assert.Contains("custom", after, StringComparison.Ordinal);
         Assert.Contains("keep me", after, StringComparison.Ordinal);
-        Assert.DoesNotContain(new FileUserHostConfigStore().ReadGlobalTargets(home), target =>
+        Assert.DoesNotContain(RealUserHostConfigStore.Create().ReadGlobalTargets(home), target =>
             string.Equals(target, "claude", StringComparison.OrdinalIgnoreCase));
         Assert.False(File.Exists(receiptPath), "the global receipt must be removed after uninstall");
         Assert.Null(stateStore.ReadReceipt(home, SquadDeploymentScope.Global));
@@ -441,7 +443,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
             new ArbiterUninstallSettings { Path = home, Target = "claude" }));
 
         Assert.Equal(0, execution.ExitCode);
-        IReadOnlyList<string> targets = new FileUserHostConfigStore().ReadGlobalTargets(home);
+        IReadOnlyList<string> targets = RealUserHostConfigStore.Create().ReadGlobalTargets(home);
         Assert.DoesNotContain(targets, target => string.Equals(target, "claude", StringComparison.OrdinalIgnoreCase));
         Assert.Contains(targets, target => string.Equals(target, "codex", StringComparison.OrdinalIgnoreCase));
         Assert.True(File.Exists(Path.Combine(home, ".codex", "hooks.json")));
@@ -491,7 +493,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
     [Fact]
     public void AnotherTargetIsDeployed_UnreadableState_ReportsNoOtherTargetWithoutThrowing()
     {
-        SquadStateStore store = new(new BlankHomeUserPaths(Path.Combine(_temp.Path, "blank-home")));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(Path.Combine(_temp.Path, "blank-home"), string.Empty));
         using ArbiterTestHost stateHost = HostWith(store);
 
         Assert.False(
@@ -541,7 +543,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, name));
         Directory.CreateDirectory(userPaths.HomeDirectory);
-        return new SquadStateStore(userPaths);
+        return RealSquadState.Store(userPaths);
     }
 
     /// <summary>
@@ -553,7 +555,7 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
         string path = Path.Combine(home, ".kyber-weave", "squad", "global", "squad.receipt.json");
         Assert.True(File.Exists(path), $"Expected one global receipt at '{path}'.");
 
-        SquadStateStore reader = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "global-receipt-reader")));
+        SquadStateStore reader = RealSquadState.Store(new FakeSquadUserPaths(Path.Combine(_temp.Path, "global-receipt-reader")));
         return reader.DeserializeReceipt(File.ReadAllText(path));
     }
 
@@ -580,14 +582,6 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
         return new SquadOwnedFile(relativePath, new string('0', 64), target, Adopted: false);
     }
 
-    /// <summary>A user-paths stub with no home, so any state read fails on an unresolved home.</summary>
-    private sealed class BlankHomeUserPaths(string applicationDataDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-
-        public string HomeDirectory => string.Empty;
-    }
-
     private string NewDir(string name)
     {
         string dir = Path.Combine(_temp.Path, name);
@@ -602,30 +596,6 @@ public sealed class ArbiterUninstallCommandTests : IClassFixture<UninstallComman
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);
-
-    private sealed class FakeCredentialStore : ICredentialStore
-    {
-        private readonly Dictionary<string, string> _entries = new(StringComparer.Ordinal);
-
-        public string? Read(string origin)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            return _entries.TryGetValue(origin, out string? key) ? key : null;
-        }
-
-        public void Write(string origin, string key)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            ArgumentException.ThrowIfNullOrEmpty(key);
-            _entries[origin] = key;
-        }
-
-        public void Delete(string origin)
-        {
-            ArgumentException.ThrowIfNullOrWhiteSpace(origin);
-            _entries.Remove(origin);
-        }
-    }
 
     /// <summary>
     /// Probe for the uninstall seam behind <c>ArbiterUninstallCommand</c>: it binds

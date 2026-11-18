@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -30,13 +31,7 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class UpstreamSeveranceTests
 {
-    private static string RepoRoot => KyberWeaveTestPaths.ToolRoot;
-
-    private static string ReleaseWorkflowPath =>
-        Path.Combine(RepoRoot, ".github", "workflows", "release.yml");
-
-    private static string ThirdPartyNoticesPath =>
-        Path.Combine(RepoRoot, "dash", "THIRD_PARTY_NOTICES.md");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     // The forms that tie the repository to its upstream. Matched without case:
     // a domain or org name in prose or a URL is a tie to upstream whatever its
@@ -75,11 +70,10 @@ public sealed class UpstreamSeveranceTests
                 return;
             }
 
-            string absolutePath = Path.Combine(RepoRoot, relativePath);
             byte[] bytes;
             try
             {
-                bytes = File.ReadAllBytes(absolutePath);
+                bytes = Corpus.ReadBytes(relativePath);
             }
             catch (IOException)
             {
@@ -116,8 +110,7 @@ public sealed class UpstreamSeveranceTests
 
         // The guard's own file is exempt, and it is exempt because it contains
         // them — if it stopped containing them, the exemption is dead weight.
-        string self = File.ReadAllText(
-            Path.Combine(RepoRoot, "tests", "KyberWeave.RepoPolicy.Tests", "UpstreamSeveranceTests.cs"));
+        string self = Corpus.ReadText("tests/KyberWeave.RepoPolicy.Tests/UpstreamSeveranceTests.cs");
         Assert.True(
             BannedMarkers.Any(marker => self.Contains(marker, StringComparison.OrdinalIgnoreCase)),
             "UpstreamSeveranceTests.cs no longer names the markers it bans, so its " +
@@ -138,11 +131,11 @@ public sealed class UpstreamSeveranceTests
     [Fact]
     public void KyberdashArchivesShipThirdPartyNotices()
     {
-        string notices = File.ReadAllText(ThirdPartyNoticesPath);
+        string notices = Corpus.ReadText("dash/THIRD_PARTY_NOTICES.md");
         Assert.Contains("AgentSeal", notices, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("MIT", notices, StringComparison.OrdinalIgnoreCase);
 
-        string workflow = File.ReadAllText(ReleaseWorkflowPath);
+        string workflow = Corpus.ReadText(".github/workflows/release.yml");
 
         // The build-kyberdash job stages the notices next to the binary and
         // packs that staged copy into both archive forms the RID matrix
@@ -177,7 +170,7 @@ public sealed class UpstreamSeveranceTests
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
-            WorkingDirectory = RepoRoot
+            WorkingDirectory = Corpus.Root
         };
         start.ArgumentList.Add("ls-files");
         start.ArgumentList.Add("-z");

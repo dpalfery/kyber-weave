@@ -14,6 +14,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -23,6 +24,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateTestBase
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string UpdatedAgentOnePath = ".codex/agents/one.toml";
     private const string UpdatedAgentTwoPath = ".codex/agents/two.toml";
     private const string NewWarpRolePath = ".warp/roles/three.md";
@@ -50,7 +53,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
                     "codex",
                     false)
             ]);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -65,7 +68,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             store.ResolveStateDirectory(targetRoot, SquadDeploymentScope.Global),
             store.ResolveTransactionDirectory(targetRoot, SquadDeploymentScope.Global));
 
-        new SquadTransaction(store, observer).Execute(plan);
+        RealSquadDeployment.Transaction(store, observer).Execute(plan);
 
         Assert.True(observer.SawDurableIntentInJournal);
         Assert.True(observer.SawStagingInJournal);
@@ -82,9 +85,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction transaction = Transaction(fixture.Path, blocker);
         SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
-        Task execution = Task.Run(() => transaction.Execute(plan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task execution = BlockedTransaction.Start(() => transaction.Execute(plan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            execution,
             "The transaction did not reach its durable intent checkpoint.");
 
         bool heldExclusiveLease;
@@ -120,9 +124,10 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
         SquadTransaction activeTransaction = Transaction(fixturePath, blocker);
         SquadDeploymentPlan plan = fixture.CreateUpdatePlan();
-        Task execution = Task.Run(() => activeTransaction.Execute(plan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        Task execution = BlockedTransaction.Start(() => activeTransaction.Execute(plan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            execution,
             "The transaction did not reach its durable intent checkpoint.");
 
         Exception? recoveryException;
@@ -224,7 +229,8 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
                 SquadTransactionCheckpointKind.Prepared,
                 SquadTransactionCheckpointKind.ActiveTransitionWritten,
                 SquadTransactionCheckpointKind.OriginalClaimed,
-                SquadTransactionCheckpointKind.AfterImagePublished
+                SquadTransactionCheckpointKind.AfterImagePublished,
+                SquadTransactionCheckpointKind.Committed
             ],
             Enum.GetValues<SquadTransactionCheckpointKind>());
         Assert.Equal(
@@ -327,7 +333,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             SquadDeploymentScope.Project,
             fixture.RelativePath,
             replacementCheckpoint);
-        SquadTransaction transaction = new(store, observer);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
 
         Exception? exception = Record.Exception(() => transaction.Execute(updatePlan));
@@ -375,7 +381,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         string fixturePath = fixture.Path;
         const string generatedPath = ".warp/roles/reviewer.md";
         const string externalPath = ".warp/roles/operator-note.md";
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixturePath,
             SquadDeploymentScope.Project,
             Lock(),
@@ -497,7 +503,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         Directory.CreateDirectory(targetRoot);
         Directory.CreateSymbolicLink(aliasRoot, targetRoot);
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan activePlan = RealSquadDeployment.Planner.CreateInstall(
             targetRoot,
             activeScope,
             Lock(),
@@ -507,7 +513,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             new FixedTimeProvider(InstalledAt));
         string contenderRoot = useSymlinkAlias ? aliasRoot : targetRoot;
         string contenderFile = AgentRelativePath(contenderScope, "contender.toml");
-        SquadDeploymentPlan contenderPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan contenderPlan = RealSquadDeployment.Planner.CreateInstall(
             contenderRoot,
             contenderScope,
             Lock(),
@@ -516,11 +522,12 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             false,
             new FixedTimeProvider(InstalledAt));
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadTransaction activeTransaction = new(store, blocker);
-        Task activeExecution = Task.Run(() =>
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
+        Task activeExecution = BlockedTransaction.Start(() =>
             activeTransaction.Execute(activePlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            activeExecution,
             "The active transaction did not acquire its lease before contention was tested.");
         SortedDictionary<string, TreeEntry> beforeContention = CaptureTree(fixture.Path);
 
@@ -529,7 +536,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         IReadOnlyDictionary<string, TreeEntry>? afterContention;
         try
         {
-            SquadTransaction storeTransaction = new(store);
+            SquadTransaction storeTransaction = RealSquadDeployment.Transaction(store);
             if (expectContention)
                 recoveryException = Record.Exception(() => storeTransaction.Recover(
                     contenderRoot,
@@ -570,7 +577,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         using TempDirectory fixture = new();
         const string relativePath = ".codex/agents/conductor.toml";
         SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Project,
             Lock(),
@@ -583,7 +590,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             relativePath,
             artifact);
 
-        Exception? exception = Record.Exception(() => new SquadTransaction(store, observer).Execute(plan));
+        Exception? exception = Record.Exception(() => RealSquadDeployment.Transaction(store, observer).Execute(plan));
 
         InvalidDataException invalid = Assert.IsType<InvalidDataException>(exception);
         string reportedArtifact = artifact == "target-file"
@@ -734,7 +741,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
             subject,
             mutation);
         SquadDeploymentPlan updatePlan = fixture.CreateUpdatePlan();
-        SquadTransaction transaction = new(store, observer);
+        SquadTransaction transaction = RealSquadDeployment.Transaction(store, observer);
 
         Exception? exception = Record.Exception(() =>
             transaction.Execute(updatePlan));
@@ -772,13 +779,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
     [Fact]
     public void PublishStageNoOverwriteVerifiesAuthorityAtAdjacentMoveBoundary()
     {
-        string source = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "src",
-            "KyberWeave.Data",
-            "Squad",
-            "Deployment",
-            "SquadTransaction.cs"), Encoding.UTF8);
+        string source = Corpus.ReadText("src/KyberWeave.Application/Squad/Deployment/SquadTransaction.cs");
         string declaration = ExtractMethodDeclaration(source, "PublishStageNoOverwrite");
         string method = ExtractMethod(source, "PublishStageNoOverwrite");
 
@@ -955,7 +956,7 @@ public sealed class SquadDeploymentStateTransactionTests : SquadDeploymentStateT
         string root,
         SquadReceipt receipt)
     {
-        return SquadDeploymentPlanner.CreateUpdate(
+        return RealSquadDeployment.Planner.CreateUpdate(
             root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),

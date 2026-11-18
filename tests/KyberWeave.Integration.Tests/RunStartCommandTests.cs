@@ -2,10 +2,12 @@ using System.Text.Json;
 using KyberWeave.Application.RunStart;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Data.RunStart;
 using KyberWeave.Core.RunStart;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -83,7 +85,7 @@ public sealed class RunStartCommandTests : IDisposable
     [Fact]
     public void WorktreeFolderIsStampedInUtcAndUniqueWithinASecond()
     {
-        RunStartRunner runner = new(new ProcessGitCommandRunner(TimeSpan.FromSeconds(5)), new PhysicalFileSystem(), new ProcessEnvironment(), _probe.Root);
+        RunStartRunner runner = new(new ProcessGitCommandRunner(TimeSpan.FromSeconds(5)), new PhysicalFileSystem(), new ProcessEnvironment(), new PhysicalPathResolver(new PhysicalFileSystem()), _probe.Root);
         DateTimeOffset startedAt = new(2026, 11, 10, 10, 6, 12, TimeSpan.FromHours(-5));
 
         string first = runner.WorktreePathFor("claude/fix/x", startedAt);
@@ -202,7 +204,7 @@ public sealed class RunStartCommandTests : IDisposable
 
         Assert.True(result.ExitCode == 0, $"A ready run must exit 0, not {result.ExitCode}. {result.Output}");
         Assert.True(
-            RunBaseState.TryReadBaseRef(_probe.Home, "claude/fix/tighten-the-gate", out string? baseRef),
+            RunStartTestServices.RunStateStore().TryReadBaseRef(_probe.Home, "claude/fix/tighten-the-gate", out string? baseRef),
             "a ready run must record the base its branch was created from.");
         Assert.Equal("origin/main", baseRef);
     }

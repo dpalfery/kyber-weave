@@ -1,0 +1,120 @@
+using KyberWeave.Contracts.Repositories;
+using System.Text.Json;
+using KyberWeave.Core.Arbiter.Rules;
+
+namespace KyberWeave.Core.Arbiter.Facts;
+
+/// <summary>
+/// The decision log (<c>artifacts/arbiter/decisions.jsonl</c>, schema
+/// <c>kyber-arbiter.decision/v1</c>): every decision the Arbiter records, and
+/// the <c>REPEAT</c> query the escalation envelope reads (§1.10).
+/// </summary>
+/// <remarks>
+/// Append-only, like the ledger: the hook computes <c>REPEAT</c> from the
+/// decisions already in the log, so the conductor keeps no count and a Draft
+/// amendment — which changes the plan digest — resets it (R8). The arbiter
+/// directory is passed in because the hook resolves the repository root with
+/// <c>git rev-parse --show-toplevel</c> from the payload's <c>cwd</c>.
+/// </remarks>
+public sealed class DecisionLog : IArbiterDecisionLog
+{
+    /// <summary>The decision log file name, relative to the arbiter directory.</summary>
+    public const string FileName = "decisions.jsonl";
+
+    private readonly string _directory;
+    private readonly IArbiterLogStore _log;
+
+    /// <summary>Creates a decision log over <paramref name="arbiterDirectory"/>.</summary>
+    /// <param name="arbiterDirectory">The arbiter state directory the log file sits in.</param>
+    /// <param name="log">The append and windowed-read mechanics the log shares with the ledger.</param>
+    public DecisionLog(string arbiterDirectory, IArbiterLogStore log)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(arbiterDirectory);
+        ArgumentNullException.ThrowIfNull(log);
+        _directory = arbiterDirectory;
+        _log = log;
+    }
+
+    /// <summary>The directory holding the ledger, the decision log and the lock.</summary>
+    public string DirectoryPath => _directory;
+
+    /// <summary>The decision log file path.</summary>
+    public string FilePath => Path.Combine(_directory, FileName);
+
+    /// <summary>The exclusive append lock path (shared with the ledger).</summary>
+    public string LockFilePath => Path.Combine(_directory, ".lock");
+
+    /// <summary>Appends one decision as one complete JSON line under the exclusive lock.</summary>
+    /// <exception cref="IOException">Thrown when the lock is not acquired within 500 ms (fail closed).</exception>
+    public async Task AppendAsync(ArbiterDecisionRecord record, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        await _log.AppendLineAsync(_directory, FileName, ArbiterJson.Serialize(record), cancellationToken);
+    }
+
+    /// <summary>Reads every complete decision in the newest bytes, in append order. Takes no lock.</summary>
+    public IReadOnlyList<ArbiterDecisionRecord> ReadAll() => ReadAllWithDiagnostics().Records;
+
+    /// <summary>
+    /// Reads every complete decision in the newest bytes and reports what
+    /// the read could not show: how many lines were malformed, whether older decisions fell outside the window, and
+    /// why a log that exists could not be read. The hook uses <see cref="ReadAll"/> and stays quiet about all three;
+    /// <c>audit</c> and <c>tune</c> use this overload to report them instead of presenting a partial log as whole.
+    /// </summary>
+    public ArbiterLogRead<ArbiterDecisionRecord> ReadAllWithDiagnostics()
+    {
+        List<ArbiterDecisionRecord> records = [];
+        int malformed = 0;
+        LogTail tail = _log.ReadComplete(FilePath);
+        foreach (string line in tail.Lines)
+        {
+            ArbiterDecisionRecord? record = TryDeserialize(line);
+            if (record is null)
+            {
+                malformed++;
+                continue;
+            }
+
+            records.Add(record);
+        }
+
+        return new ArbiterLogRead<ArbiterDecisionRecord>(records, malformed, tail.Truncated, tail.Unreadable);
+    }
+
+    /// <summary>
+    /// A malformed line is skipped rather than thrown: one corrupt append must not
+    /// fail every future evaluation, which the hook would otherwise turn into
+    /// KW-ARB-HOOK-001 until someone edits the file by hand.
+    /// </summary>
+    private static ArbiterDecisionRecord? TryDeserialize(string line)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<ArbiterDecisionRecord>(line, ArbiterJson.Options);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The <c>REPEAT</c> count: one plus the number of earlier escalation
+    /// decisions with the same plan file, plan digest and task that share
+    /// <paramref name="ruleId"/>. The current decision is not in the log yet
+    /// when the hook calls this, so "earlier" is every matching decision read.
+    /// </summary>
+    /// <remarks>
+    /// A dispatch with no plan file has no plan to key on, so without a session
+    /// every such escalation in the repository would count toward one another.
+    /// <c>session</c> is consulted only when the plan file is null, and matching on it
+    /// keeps a planless repeat to the same conversation. A null or blank session never matches:
+    /// some harnesses send none, the log never expires, and a repeat of two or more stops
+    /// the task, so counting those together would stop unrelated conversations for good.
+    /// </remarks>
+    public int Repeat(string ruleId, string? planFile, string? planDigest, string? task, string? session = null)
+    {
+        ArgumentNullException.ThrowIfNull(ruleId);
+        return ArbiterDecisionQueries.Repeat(ReadAll(), ruleId, planFile, planDigest, task, session);
+    }
+}

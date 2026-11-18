@@ -8,15 +8,15 @@
   -->
   <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Same two suppressions, for the same reasons, as KyberWeave.Tests.csproj. -->
+    <!-- CA1707: xUnit test methods are named Method_Condition_Expectation. xUnit1051: the v3 cancellation token is not threaded through. -->
     <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
     <OutputType>Exe</OutputType>
-    <!-- The classes keep the namespace they had in KyberWeave.Tests, so a fully-qualified class
-         name (CI filters, scripts/fast-loop-classes.txt) means the same test in either project. -->
+    <!-- The classes keep the KyberWeave.Tests namespace they had before the catch-all project was retired,
+         so a fully-qualified class name means the same test as before. -->
     <RootNamespace>KyberWeave.Tests</RootNamespace>
   </PropertyGroup>
 
@@ -31,8 +31,8 @@
     <!-- The repository-root locator, the disposable temp directory and the per-process temp
          root all live in the shared test library now, so this project references the one copy
          instead of compiling source files from another test project. -->
+    <ProjectReference Include="..\..\src\KyberWeave.Kernel\KyberWeave.Kernel.csproj" />
     <ProjectReference Include="..\KyberWeave.Testing\KyberWeave.Testing.csproj" />
-    <ProjectReference Include="..\..\src\KyberWeave.Core\KyberWeave.Core.csproj" />
   </ItemGroup>
 
 </Project>

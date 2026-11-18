@@ -34,7 +34,7 @@ public sealed partial class DocsTools
     /// <param name="toolingCheck">The tooling check service for that root.</param>
     /// <param name="prompts">Builds one task's prompt, so the conductor learns which agent to dispatch.</param>
     /// <param name="hostConfiguration">Loads that root's configuration, which holds the prompt budget.</param>
-    /// <param name="hostRoot">The root these tools answer for. A service type, because the SDK constructs the tools from
+    /// <param name="hostRoot">The root these tools answer for, as a full path. A service type, because the SDK constructs the tools from
     /// the container and cannot resolve a bare string.</param>
     /// <param name="roots">Resolves a per-call <c>projectPath</c>, or null when this host serves one root only.</param>
     public DocsTools(
@@ -55,7 +55,7 @@ public sealed partial class DocsTools
         _hostConfiguration = hostConfiguration ?? throw new ArgumentNullException(nameof(hostConfiguration));
         ArgumentNullException.ThrowIfNull(hostRoot);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostRoot.Path);
-        _repositoryRoot = Path.GetFullPath(hostRoot.Path);
+        _repositoryRoot = hostRoot.Path;
         _roots = roots;
     }
 

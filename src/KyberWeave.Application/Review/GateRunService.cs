@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using System.Diagnostics;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -28,12 +28,14 @@ public sealed class GateRunService(
     IProgramRunner programs,
     ICoverageReportSource coverage,
     IWritableFileSystem fileSystem,
-    TimeProvider clock) : IGateRunService
+    TimeProvider clock,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IGateRunService
 {
     private const string DeadlineKey = "review.council-deadline-seconds";
 
     private static readonly ArbiterRule GateSelectRule =
-        ArbiterConfig.ProductDefaults.Rules.Single(rule => rule.Id == "KW-ARB-GATE-001");
+        ArbiterConfigDefaults.Product.Rules.Single(rule => rule.Id == "KW-ARB-GATE-001");
 
     /// <summary>Runs every declared gate and returns the normalized report.</summary>
     /// <remarks>
@@ -81,7 +83,7 @@ public sealed class GateRunService(
         GateResult?[] results = new GateResult?[gates.Count];
         List<(int Index, Task<GateResult?> Run)> alongside = [];
         DateTime startedUtc = clock.GetUtcNow().UtcDateTime;
-        long started = Stopwatch.GetTimestamp();
+        long started = clock.GetTimestamp();
         bool stopped = false;
 
         using CancellationTokenSource stop = new();
@@ -95,7 +97,7 @@ public sealed class GateRunService(
                 GateResult? settled;
                 if (AppliesWhenReason(gate, changedPaths) is string reason)
                     settled = NotApplicable(gate, reason);
-                else if (deadline is { } passed && deadline - Stopwatch.GetElapsedTime(started) <= TimeSpan.Zero)
+                else if (deadline is { } passed && deadline - clock.GetElapsedTime(started) <= TimeSpan.Zero)
                     settled = DeadlinePassedBeforeStart(gate, passed);
                 else
                     settled = MissingRequirement(gate, workingDirectory);
@@ -175,7 +177,7 @@ public sealed class GateRunService(
     /// requested, runs before its verify command; a fix that does not succeed is reported beside the
     /// run and never decides the gate on its own, because the verify command is what the change must pass.
     /// </summary>
-    /// <param name="gates">The gates that will start, already expanded by <c>TaskGateSelection.Plan</c>.</param>
+    /// <param name="gates">The gates that will start, already expanded by <c>TaskGateSelectionService.Plan</c>.</param>
     /// <param name="workingDirectory">The repository root the gates run against.</param>
     /// <param name="fix">Whether to run each gate's fix command before its verify command.</param>
     /// <param name="stopOnBlockingFailure">Whether to skip the remaining gates once a blocking one fails.</param>
@@ -248,7 +250,7 @@ public sealed class GateRunService(
             string full;
             try
             {
-                full = Path.GetFullPath(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)));
+                full = Resolve(root, path);
             }
             catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
             {
@@ -330,7 +332,7 @@ public sealed class GateRunService(
 
         try
         {
-            TimeSpan? timeLeft = deadline - Stopwatch.GetElapsedTime(runStarted);
+            TimeSpan? timeLeft = deadline - clock.GetElapsedTime(runStarted);
             if (deadline is { } passed && timeLeft <= TimeSpan.Zero)
                 return DeadlinePassedBeforeStart(gate, passed);
 
@@ -361,13 +363,18 @@ public sealed class GateRunService(
     /// The directory a gate starts in: the repository root, or the gate's declared subdirectory of it.
     /// The loader has already refused a declared directory that is absolute, leaves the root, or does not exist.
     /// </summary>
-    private static string ResolveWorkingDirectory(string root, string? repositoryRelative)
+    private string ResolveWorkingDirectory(string root, string? repositoryRelative)
     {
         if (string.IsNullOrEmpty(repositoryRelative))
             return root;
 
-        return Path.GetFullPath(Path.Combine(root, repositoryRelative.Replace('/', Path.DirectorySeparatorChar)));
+        return Resolve(root, repositoryRelative);
     }
+
+    private string Resolve(string root, string repositoryRelative) =>
+        paths.GetFullPath(
+            repositoryRelative.Replace('/', Path.DirectorySeparatorChar),
+            paths.GetFullPath(root, environment.CurrentDirectory));
 
     private GateResult RunArgv(
         string id,
@@ -392,7 +399,7 @@ public sealed class GateRunService(
                 Outcome: GateOutcome.NotStarted);
         }
 
-        long start = Stopwatch.GetTimestamp();
+        long start = clock.GetTimestamp();
         TimeSpan ownTimeout = TimeSpan.FromSeconds(timeoutSeconds);
         bool deadlineFirst = budget?.TimeLeft is { } left && left <= ownTimeout;
         TimeSpan timeout = deadlineFirst && budget?.TimeLeft is { } remaining ? remaining : ownTimeout;
@@ -410,7 +417,7 @@ public sealed class GateRunService(
                 blocking,
                 printed ? 1 : process.ExitCode,
                 printed ? SummarizeOutput(process.StandardOutput) : Summarize(process),
-                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                (long)clock.GetElapsedTime(start).TotalMilliseconds,
                 Outcome: GateOutcome.Completed);
         }
         catch (TimeoutException ex) when (deadlineFirst)
@@ -421,7 +428,7 @@ public sealed class GateRunService(
                 -1,
                 $"stopped at the council deadline of {budget?.Deadline.TotalSeconds:0} seconds ({DeadlineKey}) " +
                 $"after running {timeout.TotalSeconds:0} seconds: {ex.Message}",
-                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                (long)clock.GetElapsedTime(start).TotalMilliseconds,
                 Outcome: GateOutcome.DeadlinePassed);
         }
         catch (TimeoutException ex)
@@ -431,7 +438,7 @@ public sealed class GateRunService(
                 blocking,
                 -1,
                 $"timed out after {timeoutSeconds} seconds: {ex.Message}",
-                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                (long)clock.GetElapsedTime(start).TotalMilliseconds,
                 Outcome: GateOutcome.TimedOut);
         }
         catch (Exception ex) when (ex is Win32Exception or InvalidOperationException)
@@ -444,7 +451,7 @@ public sealed class GateRunService(
                 blocking,
                 -1,
                 $"could not start '{argv[0]}': {ex.Message}",
-                (long)Stopwatch.GetElapsedTime(start).TotalMilliseconds,
+                (long)clock.GetElapsedTime(start).TotalMilliseconds,
                 Outcome: GateOutcome.NotStarted);
         }
     }

@@ -5,7 +5,7 @@ doc-type: architecture
 component: KyberArbiter
 source-root: src/KyberWeave.Domain/Arbiter
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 status: current
 decided-by:
   - adr/0053-kyber-arbiter-three-step-decision-gates
@@ -910,7 +910,7 @@ publishes no accuracy or calibration comparison between the two, so the figures 
 this project's own.
 
 **Method.** 120 invented cases, 30 for each of the four step-1 rules, in
-`tests/KyberWeave.Tests/Fixtures/arbiter-calibration/cases.jsonl`. Two Claude models labelled
+`tests/KyberWeave.Integration.Tests/Fixtures/arbiter-calibration/cases.jsonl`. Two Claude models labelled
 them independently and agreed on all 120; no person reviewed them. Each case went through the
 production request builder, over OpenRouter, as `typesafe/jev-1.13` and `typesafe/jev-1.14`,
 in four full runs. A direct TypeSafe run was not made, so OpenRouter and TypeSafe were not
@@ -958,6 +958,10 @@ configuration that names no model moves to the new default.
   `KW-ARB-LENS-001`'s ceiling of 0.1 has not been measured against what it now reads. The
   harness now sends that text too, so a repeat run measures it.
 - `jev-1.13-free` does not appear in TypeSafe's models page, changelog or Jev 1.14 post.
+
+`ArbiterCalibrationTests` lives in `KyberWeave.Integration.Tests` as an opt-in harness: it uses
+checkout fixtures and environment variables, and makes paid HTTP calls only when it is enabled. It
+skips by default, so it never runs in the unit suite or its time budget.
 
 To repeat the measurement, set `KW_ARBITER_CALIBRATE_OUT` to a new output file and run
 `ArbiterCalibrationTests`. It makes paid calls, about one cent per run. By default it calls

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
@@ -16,13 +17,15 @@ namespace KyberWeave.Core.Squad.Briefs;
 /// <param name="globalRoots">Resolves each harness's global install root.</param>
 /// <param name="squadSources">Finds the canonical Squad source of a checkout.</param>
 /// <param name="environment">The directory a relative plan argument is read against.</param>
+/// <param name="paths">Turns a plan or reference-directory argument into a full path.</param>
 public sealed class SquadBriefBuilder(
     ISquadBriefService briefs,
     IFileSystem files,
     IRepositoryFileStore plans,
     ISquadGlobalRootResolver globalRoots,
     ISquadSourceLocator squadSources,
-    IProcessEnvironment environment) : ISquadBriefBuilder
+    IProcessEnvironment environment,
+    IPathResolver paths) : ISquadBriefBuilder
 {
     private const string AmbiguousPlan = "KW-DOC-PLANREF-001";
 
@@ -72,7 +75,7 @@ public sealed class SquadBriefBuilder(
         }
 
         string? agentsMarkdown = ReadRootAgents(request.RepositoryRoot);
-        (string autonomy, string autonomySource) = BriefFacts.ResolveAutonomy(
+        (string autonomy, string autonomySource) = BriefAutonomy.Resolve(
             request.Autonomy, agentsMarkdown, request.Config?.ConfigReg.Autonomy);
         sources["autonomy"] = request.Autonomy is null ? autonomySource : "given";
 
@@ -81,7 +84,7 @@ public sealed class SquadBriefBuilder(
         BriefMap map;
         try
         {
-            map = BriefMap.Load();
+            map = BriefMapLoader.Load();
         }
         catch (BriefMapException exception)
         {
@@ -132,14 +135,14 @@ public sealed class SquadBriefBuilder(
     {
         plan = null;
         DiagnosticReport report = new();
-        KyberWeaveConfig config = request.Config ?? KyberWeaveConfig.ProductDefaults;
+        KyberWeaveConfig config = request.Config ?? KyberWeaveConfigDefaults.Product;
         if (!TryResolvePlan(request.RepositoryRoot, config, request.Plan!, report, out string relative))
         {
             error = string.Join(" ", report.Items.Select(item => item.Message));
             return false;
         }
 
-        string full = System.IO.Path.GetFullPath(relative, request.RepositoryRoot);
+        string full = paths.GetFullPath(relative, request.RepositoryRoot);
         if (!files.FileExists(full))
         {
             error = $"No plan file '{request.Plan}' was found ({full}). Pass its path, or its file name or slug under the plans folder.";
@@ -153,8 +156,8 @@ public sealed class SquadBriefBuilder(
 
     private bool TryResolvePlan(string root, KyberWeaveConfig config, string argument, DiagnosticReport report, out string relative)
     {
-        string current = System.IO.Path.GetFullPath(environment.CurrentDirectory);
-        PlanPathResolution resolution = new PlanFileResolver(root, config, plans).Resolve(argument, current);
+        string current = paths.GetFullPath(environment.CurrentDirectory, environment.CurrentDirectory);
+        PlanPathResolution resolution = new PlanFileResolver(root, config, plans, paths, environment).Resolve(argument, current);
         if (resolution.Found)
         {
             relative = resolution.Path!;
@@ -173,7 +176,7 @@ public sealed class SquadBriefBuilder(
             return false;
         }
 
-        string full = System.IO.Path.GetFullPath(argument, current);
+        string full = paths.GetFullPath(argument, current);
         relative = System.IO.Path.GetRelativePath(root, full).Replace('\\', '/');
         return true;
     }
@@ -199,7 +202,7 @@ public sealed class SquadBriefBuilder(
 
         if (!string.IsNullOrWhiteSpace(request.From))
         {
-            string given = System.IO.Path.GetFullPath(request.From, request.RepositoryRoot);
+            string given = paths.GetFullPath(request.From, request.RepositoryRoot);
             if (!files.DirectoryExists(given))
             {
                 error = $"The reference directory '{given}' does not exist.";

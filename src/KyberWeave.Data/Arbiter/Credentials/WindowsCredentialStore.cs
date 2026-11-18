@@ -31,6 +31,7 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        RejectLineBreak(origin, nameof(origin));
         string target = TargetFor(origin);
 
         if (!NativeMethods.CredReadW(target, GenericType, 0, out nint credential) || credential == 0)
@@ -75,6 +76,8 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
 
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
         ArgumentException.ThrowIfNullOrEmpty(key);
+        RejectLineBreak(origin, nameof(origin));
+        RejectLineBreak(key, nameof(key));
 
         byte[] bytes = Encoding.UTF8.GetBytes(key);
         nint targetPtr = Marshal.StringToHGlobalUni(TargetFor(origin));
@@ -112,6 +115,14 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
 
     private static string TargetFor(string origin) => $"{Service}:{origin}";
 
+    private static void RejectLineBreak(string value, string parameterName)
+    {
+        if (value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
+        {
+            throw new ArgumentException("A credential origin or key cannot contain a line break.", parameterName);
+        }
+    }
+
     /// <inheritdoc />
     public void Delete(string origin)
     {
@@ -122,6 +133,7 @@ public sealed partial class WindowsCredentialStore : ICredentialStore
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(origin);
+        RejectLineBreak(origin, nameof(origin));
 
         if (NativeMethods.CredDeleteW(TargetFor(origin), GenericType, 0))
             return;

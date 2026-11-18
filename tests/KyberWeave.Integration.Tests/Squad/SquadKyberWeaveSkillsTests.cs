@@ -1,5 +1,4 @@
 using System.IO.Compression;
-using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -13,6 +12,8 @@ using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
+using KyberWeave.Testing.Squad;
 
 namespace KyberWeave.Integration.Tests.Squad;
 
@@ -25,11 +26,13 @@ namespace KyberWeave.Integration.Tests.Squad;
 /// </summary>
 public sealed class SquadKyberWeavePackFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The release version every pack in this fixture is stamped with.</summary>
     public const string PackedVersion = "1.2.3";
 
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private readonly TempDirectory _temp = new();
 
@@ -154,7 +157,7 @@ public sealed class SquadKyberWeavePackFixture : IDisposable
     {
         string outDirectory = Path.Combine(_temp.Path, format);
         CapturedConsoleExecution<int> run = ProcessConsoleCapture.Run(() =>
-            SquadTestCommands.Pack(KyberWeaveTestPaths.ToolRoot).Execute(
+            SquadTestCommands.Pack(Corpus.Root).Execute(
                 null!,
                 new SquadPackSettings { Format = format, Out = outDirectory, Version = PackedVersion }));
         return new SquadPackRun(run.Result, run.Output, outDirectory);
@@ -169,15 +172,18 @@ public sealed record SquadPackRun(int ExitCode, string Output, string OutDirecto
 /// level as the Squad skills. Cases (a) to (g) fail on the base because the six are absent from the archives, the
 /// loaded source, the render targets, the user-level install, and the checkout release source. Case (h) is a
 /// declared characterization that passes by design.
+/// Unit twin: <c>SquadKyberWeaveSkillsUnitTests</c> (the logic cases, not the real-repository pack).
 /// </summary>
 /// <remarks>
 /// Contract: <c>docs/plans/2026-10-31-kyber-skills-user-level-deploy.md</c>, "Test contract (test-first)". The pinned names
 /// are pinned here, and every <c>.apm/skills/*/SKILL.md</c> is discovered at test time so a later skill is covered
-/// too. Real-repository cases resolve the root through <see cref="KyberWeaveTestPaths.ToolRoot"/>. Every temp directory
+/// too. Real-repository cases resolve the root through <see cref="ICorpusSource.Root"/>. Every temp directory
 /// is disposed, and install, update, and uninstall run against a temp home.
 /// </remarks>
 public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePackFixture>, IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string PackedVersion = SquadKyberWeavePackFixture.PackedVersion;
 
     /// <summary>The Squad skill whose render path each target's Kyber-Weave skill path is derived from.</summary>
@@ -249,7 +255,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
         string extracted = ExtractApmArchive();
 
-        SquadSource source = SquadSourceLoader.Load(extracted);
+        SquadSource source = RealSquadServices.Load(extracted);
 
         string[] loaded = source.Skills.Select(skill => skill.Name).ToArray();
         string[] expected = AllKyberWeaveSkillNames();
@@ -273,7 +279,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     {
         AssertExit(_pack.ApmPack.ExitCode, _pack.ApmPack.Output, 0);
         string extracted = ExtractApmArchive();
-        SquadSource source = SquadSourceLoader.Load(extracted);
+        SquadSource source = RealSquadServices.Load(extracted);
         using SquadHomeHarness harness = new(Path.Combine(_temp.Path, "home"));
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         string[] kyberWeaveSkills = AllKyberWeaveSkillNames();
@@ -324,7 +330,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string archive = ArchivePath(_pack.ApmPack, $"kyber-squad-{PackedVersion}.zip");
         using SquadHomeHarness harness = new(Path.Combine(_temp.Path, "home"));
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
-        using ISquadReleaseSource releaseSource = new ArchiveSquadReleaseSource(archive);
+        using ISquadReleaseSource releaseSource = FakeSquadReleaseSource.FromArchive(archive);
         string anchor = harness.MakeDirectory("anchor");
         string claudeRoot = harness.GlobalRoot(SquadTarget.Claude);
         string receiptPath = Path.Combine(harness.Home, ".kyber-weave", "squad", "global", "squad.receipt.json");
@@ -464,7 +470,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), ParitySkillName);
         string destination = Path.Combine(_temp.Path, "checkout-release");
         using LocalCheckoutSquadReleaseSource source =
-            new(Path.Combine(repository, "products", "kyber-squad"));
+            new(Path.Combine(repository, "products", "kyber-squad"), RealSquadServices.CompanionSkills());
 
         SquadReleaseResult result = await source.DownloadAndExtractAsync(
             new SquadReleaseRequest("local/kyber-squad", PackedVersion, destination));
@@ -485,7 +491,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string repository = _pack.CreateRepositoryWithCompanionSkill(Path.Combine(_temp.Path, "repo"), "task-gate");
         string destination = Path.Combine(_temp.Path, "checkout-clash");
         using LocalCheckoutSquadReleaseSource source =
-            new(Path.Combine(repository, "products", "kyber-squad"));
+            new(Path.Combine(repository, "products", "kyber-squad"), RealSquadServices.CompanionSkills());
         SquadReleaseRequest request = new("local/kyber-squad", PackedVersion, destination);
 
         Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => source.DownloadAndExtractAsync(request));
@@ -660,7 +666,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         string link = LinkCompanionSkill(repository, ParitySkillName, linkWholeDirectory);
         string destination = Path.Combine(_temp.Path, "checkout-link");
         using LocalCheckoutSquadReleaseSource source =
-            new(Path.Combine(repository, "products", "kyber-squad"));
+            new(Path.Combine(repository, "products", "kyber-squad"), RealSquadServices.CompanionSkills());
         SquadReleaseRequest request = new("local/kyber-squad", PackedVersion, destination);
 
         Exception failure = await Assert.ThrowsAnyAsync<Exception>(() => source.DownloadAndExtractAsync(request));
@@ -737,7 +743,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         File.WriteAllBytes(archivePath, previous);
 
         SquadSourceValidationException failure = Assert.Throws<SquadSourceValidationException>(() =>
-            SquadPacker.PackApm(
+            RealSquadPacker.Create().PackApm(
                 Path.Combine(repository, "products", "kyber-squad"),
                 outDirectory,
                 PackedVersion,
@@ -770,7 +776,7 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         ];
 
         IOException failure = Assert.Throws<IOException>(() =>
-            SquadPacker.WriteArchive(archivePath, entries, beforeEntry: name =>
+            RealSquadPacker.Create().WriteArchive(archivePath, entries, beforeEntry: name =>
             {
                 if (name == "second.md")
                 {
@@ -806,9 +812,9 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
         }
     }
 
-    private static string ProductRoot => Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static string ProductRoot => Path.Combine(Corpus.Root, "products", "kyber-squad");
 
-    private static string ApmSkillsRoot => Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills");
+    private static string ApmSkillsRoot => Path.Combine(Corpus.Root, ".apm", "skills");
 
     /// <summary>The pinned names, plus every <c>.apm/skills</c> directory that holds a <c>SKILL.md</c>, ordinally sorted.</summary>
     private static string[] AllKyberWeaveSkillNames()
@@ -1065,48 +1071,5 @@ public sealed class SquadKyberWeaveSkillsTests : IClassFixture<SquadKyberWeavePa
     private static string Compact(string text)
     {
         return new string(NormalizePath(text).Where(static character => !char.IsWhiteSpace(character)).ToArray());
-    }
-
-    /// <summary>
-    /// Stands in for a downloaded release: extracts a pack archive into the requested destination, as the lifecycle
-    /// receives a real release. The archive is the fixture's own pack output, never a copy of the working tree.
-    /// </summary>
-    private sealed class ArchiveSquadReleaseSource(string archivePath) : ISquadReleaseSource
-    {
-        public async Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-
-            await ZipFile.ExtractToDirectoryAsync(
-                archivePath,
-                request.DestinationPath,
-                true,
-                cancellationToken);
-            List<string> extracted = Directory.EnumerateFiles(request.DestinationPath, "*", SearchOption.AllDirectories)
-                .Select(path => NormalizePath(Path.GetRelativePath(request.DestinationPath, path)))
-                .Order(StringComparer.Ordinal)
-                .ToList();
-
-            byte[] archiveBytes = await File.ReadAllBytesAsync(archivePath, cancellationToken);
-            string assetName = $"kyber-squad-{request.Version}.zip";
-            return new SquadReleaseResult(
-                request.Version,
-                new SquadReleaseAsset(
-                    assetName,
-                    new Uri($"https://localhost/{assetName}"),
-                    new FileInfo(archivePath).Length),
-                new SquadReleaseChecksum(
-                    assetName,
-                    Convert.ToHexStringLower(SHA256.HashData(archiveBytes))),
-                Path.GetFullPath(request.DestinationPath),
-                extracted);
-        }
-
-        public void Dispose()
-        {
-            // No unmanaged resources.
-        }
     }
 }

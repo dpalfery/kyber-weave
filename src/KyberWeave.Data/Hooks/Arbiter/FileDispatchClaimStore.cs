@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -14,7 +13,7 @@ namespace KyberWeave.Data.Hooks.Arbiter;
 /// claim before its owner line is in it. Claims older than a day are pruned, at most once an hour, so the folder does not
 /// grow with every dispatch ever made and no dispatch pays for a scan of it.
 /// </summary>
-public sealed class FileDispatchClaimStore : IDispatchClaimStore
+public sealed class FileDispatchClaimStore(IWritableFileSystem files, TimeProvider time, IIdGenerator ids) : IDispatchClaimStore
 {
     /// <summary>How long a user-level hook waits for a project hook to claim a dispatch it can see.</summary>
     internal static readonly TimeSpan WaitWindow = TimeSpan.FromMilliseconds(1500);
@@ -36,16 +35,16 @@ public sealed class FileDispatchClaimStore : IDispatchClaimStore
     {
         string path = ClaimPath(projectRoot, key);
         string directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
+        files.CreateDirectory(directory);
         PruneStale(directory);
-        string temp = Path.Combine(directory, $".{Guid.NewGuid():N}.tmp");
+        string temp = Path.Combine(directory, $".{ids.NewGuid():N}.tmp");
         try
         {
             // A failure to write the temporary file propagates: the caller evaluates without a claim.
-            File.WriteAllText(temp, owner + "\n", new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+            files.WriteAllText(temp, owner + "\n");
             try
             {
-                File.Move(temp, path, overwrite: false);
+                files.MoveFile(temp, path, overwrite: false);
                 return true;
             }
             catch (IOException) when (ReadOwner(projectRoot, key) is not null)
@@ -59,7 +58,7 @@ public sealed class FileDispatchClaimStore : IDispatchClaimStore
         {
             try
             {
-                File.Delete(temp);
+                files.DeleteFile(temp);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
@@ -73,7 +72,7 @@ public sealed class FileDispatchClaimStore : IDispatchClaimStore
     {
         try
         {
-            string? owner = File.ReadLines(ClaimPath(projectRoot, key)).FirstOrDefault()?.Trim();
+            string? owner = files.ReadLines(ClaimPath(projectRoot, key)).FirstOrDefault()?.Trim();
             return string.IsNullOrEmpty(owner) ? null : owner;
         }
         catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
@@ -86,15 +85,15 @@ public sealed class FileDispatchClaimStore : IDispatchClaimStore
     public bool WaitForClaim(string projectRoot, DispatchClaimKey key)
     {
         string path = ClaimPath(projectRoot, key);
-        Stopwatch clock = Stopwatch.StartNew();
-        while (!File.Exists(path))
+        long started = time.GetTimestamp();
+        while (!files.FileExists(path))
         {
-            if (clock.Elapsed >= WaitWindow)
+            if (time.GetElapsedTime(started) >= WaitWindow)
             {
                 return false;
             }
 
-            Thread.Sleep(PollInterval);
+            Task.Delay(PollInterval, time).GetAwaiter().GetResult();
         }
 
         return true;
@@ -110,31 +109,31 @@ public sealed class FileDispatchClaimStore : IDispatchClaimStore
 
     // Pruning is housekeeping: a file that cannot be deleted now is retried on the next claim, and it
     // must not stop the dispatch that is being claimed.
-    private static void PruneStale(string directory)
+    private void PruneStale(string directory)
     {
         string marker = Path.Combine(directory, PruneMarker);
         try
         {
-            if (File.Exists(marker) && DateTime.UtcNow - File.GetLastWriteTimeUtc(marker) < PruneInterval)
+            if (files.FileExists(marker) && time.GetUtcNow().UtcDateTime - files.GetLastWriteTimeUtc(marker) < PruneInterval)
             {
                 return;
             }
 
-            File.WriteAllText(marker, string.Empty);
+            files.WriteAllText(marker, string.Empty);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return;
         }
 
-        DateTime cutoff = DateTime.UtcNow - StaleAge;
-        foreach (string file in Directory.EnumerateFiles(directory))
+        DateTime cutoff = time.GetUtcNow().UtcDateTime - StaleAge;
+        foreach (string file in files.EnumerateFiles(directory, "*", recursive: false))
         {
             try
             {
-                if (File.GetLastWriteTimeUtc(file) < cutoff)
+                if (files.GetLastWriteTimeUtc(file) < cutoff)
                 {
-                    File.Delete(file);
+                    files.DeleteFile(file);
                 }
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -1,8 +1,8 @@
 using KyberWeave.Cli.Rendering;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using Spectre.Console;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Cli.Commands;
 
@@ -10,18 +10,20 @@ public static class CommandHelpers
 {
     /// <summary>
     /// Loads <c>.kyber-weave/kyber-weave.yml</c> for CLI commands. On failure, adds
-    /// <see cref="KyberWeaveConfigLoader.ConfigLoadErrorCode"/> and returns false.
+    /// <see cref="KyberWeaveConfigDiagnosticCodes.LoadError"/> and returns false.
     /// </summary>
     public static bool TryLoadConfig(
+        IKyberWeaveConfigRepository configs,
         string repoRoot,
         string? configPath,
         DiagnosticReport report,
         out KyberWeaveConfig config) =>
-        TryLoadConfig(repoRoot, configPath, report, out config, out _);
+        TryLoadConfig(configs, repoRoot, configPath, report, out config, out _);
 
     /// <summary>
     /// Loads <c>.kyber-weave/kyber-weave.yml</c> for CLI commands, reporting the file it read.
     /// </summary>
+    /// <param name="configs">The repository the configuration is read through.</param>
     /// <param name="repoRoot">The repository root the configuration is resolved under.</param>
     /// <param name="configPath">An explicit <c>--config</c> path, or null for the repository's own.</param>
     /// <param name="report">The report a load failure is recorded in.</param>
@@ -32,23 +34,26 @@ public static class CommandHelpers
     /// difference between "unset" and "not configured".
     /// </param>
     public static bool TryLoadConfig(
+        IKyberWeaveConfigRepository configs,
         string repoRoot,
         string? configPath,
         DiagnosticReport report,
         out KyberWeaveConfig config,
         out string? resolvedConfigPath)
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(repoRoot, configPath);
+        ArgumentNullException.ThrowIfNull(configs);
+
+        KyberWeaveConfigLoadResult result = configs.TryLoad(repoRoot, configPath);
         resolvedConfigPath = result.ConfigPath;
         if (!result.Success)
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigLoadErrorCode,
+                KyberWeaveConfigDiagnosticCodes.LoadError,
                 Severity.Error,
                 result.Error ?? "Failed to load kyber-weave.yml.",
                 "kyber-weave.yml",
                 result.ConfigPath));
-            config = KyberWeaveConfig.ProductDefaults;
+            config = KyberWeaveConfigDefaults.Product;
             return false;
         }
 
@@ -58,7 +63,7 @@ public static class CommandHelpers
         foreach (string warning in config.Review.Warnings)
         {
             report.Add(new Diagnostic(
-                KyberWeaveConfigLoader.ConfigWarningCode,
+                KyberWeaveConfigDiagnosticCodes.Warning,
                 Severity.Warning,
                 warning,
                 "kyber-weave.yml",
@@ -69,8 +74,25 @@ public static class CommandHelpers
         return true;
     }
 
-    public static void Finish(DiagnosticReport report, AnalysisSettings settings, string command, string subjectLabel)
+    /// <summary>
+    /// Applies <c>--no-info</c>, renders <paramref name="report"/> in the requested format through
+    /// <paramref name="console"/>, and prints the summary, so a command that writes to an injected console renders its
+    /// findings there too.
+    /// </summary>
+    /// <param name="console">The console the findings are written to.</param>
+    /// <param name="report">The findings to render.</param>
+    /// <param name="settings">The command's settings, which choose the format.</param>
+    /// <param name="command">The command name a document format records.</param>
+    /// <param name="subjectLabel">Names what the findings are about.</param>
+    public static void Finish(
+        IAnsiConsole console,
+        DiagnosticReport report,
+        AnalysisSettings settings,
+        string command,
+        string subjectLabel)
     {
+        ArgumentNullException.ThrowIfNull(console);
+
         if (settings.NoInfo)
         {
             DiagnosticReport filtered = new DiagnosticReport();
@@ -83,22 +105,23 @@ public static class CommandHelpers
             report = filtered;
         }
 
-        ReportRenderer.Render(report, settings.ParsedFormat, command, subjectLabel);
-        OutputFormat format = settings.ParsedFormat;
+        OutputFormat format = settings.FormatFor(console);
+        ReportRenderer.Render(console, report, format, command, subjectLabel);
         if (format == OutputFormat.Table)
         {
-            AnsiConsole.WriteLine();
-            ReportRenderer.RenderSummary(report);
+            console.WriteLine();
+            ReportRenderer.RenderSummary(console, report);
         }
         else if (format == OutputFormat.Lines)
         {
-            ReportRenderer.RenderSummary(report);
+            ReportRenderer.RenderSummary(console, report);
         }
     }
 
     /// <summary>
-    /// Runs <paramref name="write"/> with console folding lifted, then restores the width.
+    /// Runs <paramref name="write"/> with <paramref name="console"/>'s folding lifted, then restores its width.
     /// </summary>
+    /// <param name="console">The console whose width is lifted for the write.</param>
     /// <param name="write">The output to produce at full width.</param>
     /// <remarks>
     /// <para>
@@ -114,63 +137,28 @@ public static class CommandHelpers
     /// is restored to <see cref="ConsoleWidth.Default"/>. A copy per branch is a fix that lands in
     /// one of them, and two commands that then render the same finding differently.
     /// </para>
+    /// <para>
+    /// The width belongs to the console the output goes to, so a command that writes to an injected console lifts that
+    /// one rather than the process-wide console.
+    /// </para>
     /// </remarks>
-    public static void WriteUnfolded(Action write)
+    public static void WriteUnfolded(IAnsiConsole console, Action write)
     {
+        ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(write);
 
-        int originalWidth = AnsiConsole.Profile.Width;
-        AnsiConsole.Profile.Width = int.MaxValue;
+        // The profile is read once: the console a caller holds may name a different console by the time the write
+        // returns, and restoring through it would leave this one unfolded and overwrite that one's width.
+        Profile profile = console.Profile;
+        int originalWidth = profile.Width;
+        profile.Width = int.MaxValue;
         try
         {
             write();
         }
         finally
         {
-            AnsiConsole.Profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
-        }
-    }
-
-    /// <summary>
-    /// Writes a report document to <paramref name="path"/>. A write failure is recorded as a
-    /// diagnostic rather than thrown: the analysis already ran, and losing its findings to a
-    /// filesystem error is a worse outcome than losing the file.
-    /// </summary>
-    public static void TryWriteReport(string? path, string content, string code, DiagnosticReport report)
-    {
-        if (path is null)
-            return;
-
-        // An empty --out names no file; resolving it would throw rather than report.
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            report.Add(new Diagnostic(
-                code,
-                Severity.Error,
-                "--out was given an empty value, so the report was not written.",
-                "review",
-                Hint: "Name the file to write, or drop --out."));
-            return;
-        }
-
-        string full = Path.GetFullPath(path);
-        try
-        {
-            string? directory = Path.GetDirectoryName(full);
-            if (!string.IsNullOrEmpty(directory))
-                Directory.CreateDirectory(directory);
-
-            File.WriteAllText(full, content);
-        }
-        catch (Exception ex) when (FileFailure.Is(ex))
-        {
-            report.Add(new Diagnostic(
-                code,
-                Severity.Error,
-                $"Could not write the report to '{full}': {ex.Message}",
-                "review",
-                full,
-                Hint: "Check that the directory is writable, or drop --out."));
+            profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
         }
     }
 }

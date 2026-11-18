@@ -7,6 +7,7 @@ using KyberWeave.Core.Review.Catalogue;
 using Spectre.Console.Cli;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -46,6 +47,8 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ToolchainFlag = "KW_GATE_TOOLCHAIN";
     private const string ConfigRelativePath = ".kyber-weave/kyber-weave.yml";
     private const string PassedCode = "KW-REVIEW-021";
@@ -187,7 +190,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     {
         Dictionary<string, Dictionary<string, string>> installPaths = InstallPaths();
         List<(GateCatalogueFamily Catalogue, FamilyGate Gate)> matches = [];
-        foreach (GateCatalogueFamily catalogue in GateCatalogue.LoadEmbedded())
+        foreach (GateCatalogueFamily catalogue in GateCatalogueRenderer.LoadEmbedded())
         {
             foreach (FamilyGate gate in catalogue.Gates.Concat(catalogue.TaskGates))
             {
@@ -226,11 +229,6 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
             "to get it.");
     }
 
-    private static string FamilyFilePath(string family)
-    {
-        return Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "standards", family, "gates.yml");
-    }
-
     private static bool NamesAnInstallPath(
         Dictionary<string, Dictionary<string, string>> installPaths,
         string family,
@@ -248,13 +246,13 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     private static Dictionary<string, Dictionary<string, string>> InstallPaths()
     {
         Dictionary<string, Dictionary<string, string>> byFamily = new(StringComparer.Ordinal);
-        foreach (GateCatalogueFamily catalogue in GateCatalogue.LoadEmbedded())
+        foreach (GateCatalogueFamily catalogue in GateCatalogueRenderer.LoadEmbedded())
         {
-            string path = FamilyFilePath(catalogue.Family);
-            Assert.True(File.Exists(path), $"The catalogue family '{catalogue.Family}' has no file at '{path}'.");
+            string path = $"products/kyber-squad/standards/{catalogue.Family}/gates.yml";
+            Assert.True(Corpus.Exists(path), $"The catalogue family '{catalogue.Family}' has no file at '{path}'.");
 
             YamlStream stream = new();
-            using (StreamReader reader = new(path))
+            using (StringReader reader = new(Corpus.ReadText(path)))
             {
                 stream.Load(reader);
             }
@@ -301,7 +299,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
     private string NewToolchainRepo(string family, string variant)
     {
         string source = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot, "tests", "fixtures", "gate-catalogue", family, variant);
+            Corpus.Root, "tests", "fixtures", "gate-catalogue", family, variant);
         Assert.True(
             Directory.Exists(source),
             $"Gate-catalogue fixture '{source}' is missing; the toolchain run has nothing to copy.");
@@ -333,7 +331,7 @@ public sealed class GateCatalogueToolchainTests(ITestOutputHelper output) : IDis
 
     private static IReadOnlyList<string> TechnologiesFor(string family)
     {
-        GateCatalogueFamily catalogue = GateCatalogue.LoadEmbedded()
+        GateCatalogueFamily catalogue = GateCatalogueRenderer.LoadEmbedded()
             .Single(candidate => string.Equals(candidate.Family, family, StringComparison.Ordinal));
         return catalogue.Technologies;
     }

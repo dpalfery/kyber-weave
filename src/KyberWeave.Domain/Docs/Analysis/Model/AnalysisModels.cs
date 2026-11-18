@@ -1,5 +1,3 @@
-using System.Security.Cryptography;
-using System.Text;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Candidates;
 using KyberWeave.Core.Docs.Analysis.Claims;
@@ -50,29 +48,7 @@ public sealed record ApprovedGlossarySense(
     IReadOnlyList<string> Aliases);
 
 /// <summary>Approved glossary data used to suppress fully explained terminology findings.</summary>
-public sealed record AnalysisGlossary(IReadOnlyList<ApprovedGlossarySense> Senses)
-{
-    /// <summary>True when each occurrence maps to exactly one approved sense.</summary>
-    public bool Covers(string term, IReadOnlyList<Claim> claims)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(term);
-        ArgumentNullException.ThrowIfNull(claims);
-
-        ApprovedGlossarySense[] senses = Senses
-            .Where(sense => StringComparer.OrdinalIgnoreCase.Equals(sense.Term, term))
-            .ToArray();
-        if (senses.Length == 0) return false;
-
-        return claims.All(claim => senses.Count(sense => AppliesTo(sense, claim)) == 1);
-    }
-
-    private static bool AppliesTo(ApprovedGlossarySense sense, Claim claim) =>
-        sense.Scopes.Any(scope =>
-            scope.StartsWith("component:", StringComparison.Ordinal)
-                ? StringComparer.OrdinalIgnoreCase.Equals(scope["component:".Length..], claim.Component)
-                : scope.StartsWith("code-ref:", StringComparison.Ordinal)
-                  && claim.CodeRefs.Contains(scope["code-ref:".Length..], StringComparer.Ordinal));
-}
+public sealed record AnalysisGlossary(IReadOnlyList<ApprovedGlossarySense> Senses);
 
 /// <summary>One clustered analysis finding and its evidence claims.</summary>
 public sealed record AnalysisCandidate(
@@ -104,33 +80,6 @@ public sealed record DocumentationAnalysisResult(
     IReadOnlyList<AnalysisCandidate> Candidates,
     DiagnosticReport Diagnostics,
     AnalysisMetrics Metrics);
-
-/// <summary>Stable IDs for review decisions that survive source-file moves.</summary>
-public static class AnalysisCandidateId
-{
-    public static string Compute(
-        AnalysisRuleKind kind,
-        string? normalizedTerm,
-        IEnumerable<string> claimContentHashes,
-        string analyzerVersion,
-        string rubricVersion)
-    {
-        ArgumentNullException.ThrowIfNull(claimContentHashes);
-        ArgumentException.ThrowIfNullOrWhiteSpace(analyzerVersion);
-        ArgumentException.ThrowIfNullOrWhiteSpace(rubricVersion);
-
-#pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
-        IOrderedEnumerable<string> hashes = claimContentHashes.Order(StringComparer.Ordinal);
-        string identity = string.Join('\n',
-            kind.ToString().ToLowerInvariant(),
-            normalizedTerm?.Trim().ToLowerInvariant() ?? string.Empty,
-#pragma warning restore CA1308
-            analyzerVersion,
-            rubricVersion,
-            string.Join('\n', hashes));
-        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
-    }
-}
 
 /// <summary>Identity of one cached embedding.</summary>
 public sealed record EmbeddingCacheKey(

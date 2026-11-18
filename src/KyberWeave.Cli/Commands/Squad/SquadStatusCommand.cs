@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -18,6 +19,10 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     private readonly ISquadGlobalRootResolver _globalRoots;
     private readonly ISquadModelPresetStore _presetStore;
     private readonly IFileSystemPathSemantics _pathSemantics;
+    private readonly SquadConsole _output;
+    private readonly IFileSystem _files;
+    private readonly IProcessEnvironment _environment;
+    private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the status command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -25,23 +30,39 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// <param name="globalRoots">Resolves each target's global root.</param>
     /// <param name="presetStore">Loads the presets the lock names.</param>
     /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
+    /// <param name="output">Where the command writes.</param>
+    /// <param name="files">Reads the deployed files, the shared hook files and the instance state.</param>
+    /// <param name="environment">Names the working directory the migration reports.</param>
+    /// <param name="roots">Resolves the target root, migrates legacy state and anchors a global run.</param>
     public SquadStatusCommand(
         ISquadStateStore stateStore,
         ISquadStateMigration migration,
         ISquadGlobalRootResolver globalRoots,
         ISquadModelPresetStore presetStore,
-        IFileSystemPathSemantics pathSemantics)
+        IFileSystemPathSemantics pathSemantics,
+        SquadConsole output,
+        IFileSystem files,
+        IProcessEnvironment environment,
+        SquadCommandRoots roots)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
         ArgumentNullException.ThrowIfNull(globalRoots);
         ArgumentNullException.ThrowIfNull(presetStore);
         ArgumentNullException.ThrowIfNull(pathSemantics);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(roots);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
         _presetStore = presetStore;
         _pathSemantics = pathSemantics;
+        _output = output;
+        _files = files;
+        _environment = environment;
+        _roots = roots;
     }
 
     /// <inheritdoc />
@@ -61,7 +82,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
         catch (ArgumentException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 
@@ -70,14 +91,14 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         // State is migrated before the receipt is read, and the anchor is chosen after the migration. A --global
         // status reads the one home-level receipt, so it is anchored at the home directory whatever the working
         // directory is, or at the recorded root of a legacy single-root receipt the migration has just copied.
-        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
-        SquadCommandComposition.WriteMigrationNotes(SquadCommandComposition.EnsureStateMigrated(
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
+        _output.WriteMigrationNotes(_roots.EnsureStateMigrated(
             _migration,
-            Environment.CurrentDirectory,
+            _environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
             false));
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
+            ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
             : projectRoot;
         ISquadGlobalRootResolver globalRoots = _globalRoots;
 
@@ -90,32 +111,32 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             if (scope == SquadDeploymentScope.Global && instances.Count > 0)
             {
-                AnsiConsole.MarkupLine(
+                _output.Ansi.MarkupLine(
                     $"Kyber-Squad deployment at [bold]{Markup.Escape(targetRoot)}[/] ([grey]global[/]):");
-                AnsiConsole.MarkupLine("  [grey]none[/]");
+                _output.Ansi.MarkupLine("  [grey]none[/]");
 
                 WriteInstances(instances);
                 bool registryFailed = !WriteRegisteredProjects(stateStore);
                 if (registryFailed)
                 {
-                    AnsiConsole.WriteLine();
-                    AnsiConsole.MarkupLine("[red]The Kyber-Squad project registry is unreadable.[/]");
+                    _output.Ansi.WriteLine();
+                    _output.Ansi.MarkupLine("[red]The Kyber-Squad project registry is unreadable.[/]");
                     return 1;
                 }
 
                 return 0;
             }
 
-            AnsiConsole.MarkupLine($"[red]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/].[/]");
-            AnsiConsole.MarkupLine("Run [bold]kyber-weave squad install[/] to deploy agents and skills.");
+            _output.Ansi.MarkupLine($"[red]No Kyber-Squad deployment found at [bold]{Markup.Escape(targetRoot)}[/].[/]");
+            _output.Ansi.MarkupLine("Run [bold]kyber-weave squad install[/] to deploy agents and skills.");
             return 1;
         }
 
-        AnsiConsole.MarkupLine(
+        _output.Ansi.MarkupLine(
             $"Kyber-Squad deployment at [bold]{Markup.Escape(targetRoot)}[/] ([grey]{(scope == SquadDeploymentScope.Global ? "global" : "project")}[/]):");
 
-        if (SquadDeploymentPlan.IsLegacySingleRootReceipt(receipt))
-            AnsiConsole.MarkupLine(
+        if (SquadDeploymentPlanRules.IsLegacySingleRootReceipt(receipt))
+            _output.Ansi.MarkupLine(
                 $"[yellow]legacy layout:[/] this receipt predates issue #91 and every entry " +
                 $"resolves beneath the recorded root [bold]{Markup.Escape(targetRoot)}[/] rather " +
                 "than each target's own global root. Recover with [bold]kyber-weave squad uninstall --global[/] " +
@@ -133,39 +154,39 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                 // beneath the recorded root for a legacy single-root receipt — see
                 // ResolveOwnedFilePath). Joining targetRoot directly would check a global
                 // deployment against the project directory and report every file missing.
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file, _pathSemantics);
+                fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(receipt, targetRoot, globalRoots, file, _pathSemantics);
             }
             catch (Exception)
             {
-                AnsiConsole.MarkupLine(
+                _output.Ansi.MarkupLine(
                     $"  [red]invalid[/] {Markup.Escape(file.RelativePath)} (outside the deployment root)");
                 hasIssues = true;
                 continue;
             }
 
-            if (!File.Exists(fullPath))
+            if (!_files.FileExists(fullPath))
             {
-                AnsiConsole.MarkupLine(StatusLine("red", "missing", file, scope));
+                _output.Ansi.MarkupLine(StatusLine("red", "missing", file, scope));
                 hasIssues = true;
                 hasMissing = true;
                 continue;
             }
 
-            byte[] bytes = File.ReadAllBytes(fullPath);
+            byte[] bytes = _files.ReadAllBytes(fullPath);
             string actualSha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
             if (!string.Equals(actualSha256, file.Sha256, StringComparison.Ordinal))
             {
                 // The receipt holds only the digest of the bytes Squad shipped, so a mismatch cannot
                 // say whether an update kept an earlier edit or someone edited the file afterwards.
                 // Both are reported the same way, naming the flag that ends the difference.
-                AnsiConsole.MarkupLine(
+                _output.Ansi.MarkupLine(
                     StatusLine("yellow", "modified locally", file, scope)
                     + " (kept at update; run [bold]squad update --replace-managed[/] to take the shipped file)");
                 hasIssues = true;
                 continue;
             }
 
-            AnsiConsole.MarkupLine(StatusLine("green", "ok", file, scope));
+            _output.Ansi.MarkupLine(StatusLine("green", "ok", file, scope));
         }
 
         foreach (SquadOwnedBlock block in receipt.Blocks)
@@ -181,7 +202,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
 
         if (hasIssues || hasMissingPreset || hasLockError || registryUnreadable)
         {
-            AnsiConsole.WriteLine();
+            _output.Ansi.WriteLine();
             string summary = registryUnreadable
                 ? "The Kyber-Squad project registry is unreadable."
                 : hasLockError
@@ -191,12 +212,12 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                         : hasMissingPreset
                             ? "Missing model preset detected in Kyber-Squad deployment."
                             : "Drift detected in Kyber-Squad deployment.";
-            AnsiConsole.MarkupLine($"[red]{summary}[/]");
+            _output.Ansi.MarkupLine($"[red]{summary}[/]");
             return 1;
         }
 
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("[green]All deployed files match the recorded receipt.[/]");
+        _output.Ansi.WriteLine();
+        _output.Ansi.MarkupLine("[green]All deployed files match the recorded receipt.[/]");
         return 0;
     }
 
@@ -230,7 +251,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             // Blocks resolve through the same receipt-aware helper as owned files, so a
             // global block lands beneath its target's own root.
-            fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
+            fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(
                 receipt,
                 targetRoot,
                 globalRoots,
@@ -238,28 +259,28 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
         catch (Exception)
         {
-            AnsiConsole.MarkupLine($"  [red]invalid[/] {Markup.Escape(block.RelativePath)} (outside the deployment root)");
+            _output.Ansi.MarkupLine($"  [red]invalid[/] {Markup.Escape(block.RelativePath)} (outside the deployment root)");
             hasIssues = true;
             return;
         }
 
         if (!SquadHookJsonBlock.TryResolveFormat(block, out SquadHookBlockFormat format))
         {
-            AnsiConsole.MarkupLine($"  [red]invalid[/] {fileLabel} (unknown shared hook file)");
+            _output.Ansi.MarkupLine($"  [red]invalid[/] {fileLabel} (unknown shared hook file)");
             hasIssues = true;
             return;
         }
 
-        if (!File.Exists(fullPath))
+        if (!_files.FileExists(fullPath))
         {
             foreach (SquadOwnedBlockEntry entry in block.Entries)
             {
-                AnsiConsole.MarkupLine($"  [red]drift  [/] {fileLabel} {Markup.Escape(entry.Container)} (missing)");
+                _output.Ansi.MarkupLine($"  [red]drift  [/] {fileLabel} {Markup.Escape(entry.Container)} (missing)");
             }
 
             if (block.Entries.Count == 0)
             {
-                AnsiConsole.MarkupLine($"  [red]drift  [/] {fileLabel} (missing)");
+                _output.Ansi.MarkupLine($"  [red]drift  [/] {fileLabel} (missing)");
             }
 
             hasIssues = true;
@@ -270,11 +291,11 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         string currentJson;
         try
         {
-            currentJson = File.ReadAllText(fullPath);
+            currentJson = _files.ReadAllText(fullPath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            AnsiConsole.MarkupLine(
+            _output.Ansi.MarkupLine(
                 $"  [red]drift  [/] {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");
             hasIssues = true;
             return;
@@ -295,7 +316,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         {
             foreach (SquadOwnedBlockEntry entry in block.Entries)
             {
-                AnsiConsole.MarkupLine($"  [yellow]drift  [/] {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
+                _output.Ansi.MarkupLine($"  [yellow]drift  [/] {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
             }
 
             hasIssues = true;
@@ -304,13 +325,13 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
 
         if (drifts.Count == 0)
         {
-            AnsiConsole.MarkupLine($"  [green]ok     [/] {fileLabel} {block.Entries.Count} {entryWord}");
+            _output.Ansi.MarkupLine($"  [green]ok     [/] {fileLabel} {block.Entries.Count} {entryWord}");
             return;
         }
 
         foreach (SquadHookDrift drift in drifts)
         {
-            AnsiConsole.MarkupLine($"  [yellow]drift  [/] {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
+            _output.Ansi.MarkupLine($"  [yellow]drift  [/] {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
         }
 
         hasIssues = true;
@@ -334,19 +355,19 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
         catch (Exception ex)
         {
-            AnsiConsole.WriteLine();
-            AnsiConsole.MarkupLine($"[red]Error reading Squad lock file: {Markup.Escape(ex.Message)}[/]");
+            _output.Ansi.WriteLine();
+            _output.Ansi.MarkupLine($"[red]Error reading Squad lock file: {Markup.Escape(ex.Message)}[/]");
             return (false, true);
         }
 
-        AnsiConsole.WriteLine();
+        _output.Ansi.WriteLine();
         if (squadLock?.ModelPresets is null || squadLock.ModelPresets.Count == 0)
         {
-            AnsiConsole.MarkupLine("Model presets: [grey]none[/]");
+            _output.Ansi.MarkupLine("Model presets: [grey]none[/]");
             return (false, false);
         }
 
-        AnsiConsole.MarkupLine("Model presets:");
+        _output.Ansi.MarkupLine("Model presets:");
         ISquadModelPresetStore presetStore = _presetStore;
         bool hasMissingPreset = false;
 
@@ -367,18 +388,18 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
 
             if (loadedPreset is null)
             {
-                AnsiConsole.MarkupLine(
+                _output.Ansi.MarkupLine(
                     $"  [red]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)} (missing)[/]");
                 hasMissingPreset = true;
             }
             else if (!string.Equals(loadedPreset.Digest, entry.Value.Digest, StringComparison.Ordinal))
             {
-                AnsiConsole.MarkupLine(
+                _output.Ansi.MarkupLine(
                     $"  [yellow]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)} (changed since applied)[/]");
             }
             else
             {
-                AnsiConsole.MarkupLine(
+                _output.Ansi.MarkupLine(
                     $"  [green]{Markup.Escape(targetToken)}: {Markup.Escape(presetName)}[/]");
             }
         }
@@ -399,7 +420,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     ///     rebuild it.
     /// </remarks>
     /// <returns><see langword="false" /> when the registry could not be read; otherwise <see langword="true" />.</returns>
-    private static bool WriteRegisteredProjects(ISquadStateStore stateStore)
+    private bool WriteRegisteredProjects(ISquadStateStore stateStore)
     {
         IReadOnlyList<SquadProjectRegistryEntry> projects;
         try
@@ -408,26 +429,26 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
         }
         catch (InvalidDataException ex)
         {
-            AnsiConsole.WriteLine();
-            SquadCommandComposition.WriteLine(
+            _output.Ansi.WriteLine();
+            _output.WriteLine(
                 $"  [red]fail[/] Squad project registry is unreadable: {Markup.Escape(ex.Message)}");
             return false;
         }
 
-        AnsiConsole.WriteLine();
+        _output.Ansi.WriteLine();
         if (projects.Count == 0)
         {
-            SquadCommandComposition.WriteLine("[grey]No projects are registered.[/]");
+            _output.WriteLine("[grey]No projects are registered.[/]");
             return true;
         }
 
-        SquadCommandComposition.WriteLine("Registered projects:");
+        _output.WriteLine("Registered projects:");
         foreach (SquadProjectRegistryEntry project in projects)
         {
             string line = project.Stale
                 ? $"  [yellow]stale[/] {Markup.Escape(project.Path)} (stale: {Markup.Escape(project.StaleReason ?? "unknown")})"
                 : $"  [green]ok[/]    {Markup.Escape(project.Path)}";
-            SquadCommandComposition.WriteLine(line);
+            _output.WriteLine(line);
         }
 
         return true;
@@ -436,41 +457,32 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// <summary>
     ///     Inspects and returns the deployed harness instances recorded in the instance state directory.
     /// </summary>
-    private static List<(string TargetPreset, string Version)> GetDeployedInstances(ISquadStateStore stateStore)
+    private List<(string TargetPreset, string Version)> GetDeployedInstances(ISquadStateStore stateStore)
     {
         string home = stateStore.UserPaths.HomeDirectory;
         string instanceStateBase = Path.Combine(home, ".kyber-weave", "squad", "instance-state");
 
         List<(string TargetPreset, string Version)> instances = [];
 
-        if (!Directory.Exists(instanceStateBase)) return instances;
-
-        DirectoryInfo baseDir = new(instanceStateBase);
-        EnumerationOptions options = new()
+        foreach (FileSystemEntry targetEntry in _files.EnumerateEntries(instanceStateBase))
         {
-            RecurseSubdirectories = false,
-            AttributesToSkip = 0
-        };
+            if (!targetEntry.IsDirectory || targetEntry.IsLink) continue;
 
-        foreach (FileSystemInfo targetEntry in baseDir.EnumerateFileSystemInfos("*", options))
-        {
-            if (targetEntry is not DirectoryInfo targetDir || targetEntry.LinkTarget is not null) continue;
+            string targetToken = Path.GetFileName(targetEntry.Path);
 
-            string targetToken = targetDir.Name;
-
-            foreach (FileSystemInfo presetEntry in targetDir.EnumerateFileSystemInfos("*", options))
+            foreach (FileSystemEntry presetEntry in _files.EnumerateEntries(targetEntry.Path))
             {
-                if (presetEntry is not DirectoryInfo presetDir || presetEntry.LinkTarget is not null) continue;
+                if (!presetEntry.IsDirectory || presetEntry.IsLink) continue;
 
-                string receiptPath = Path.Combine(presetDir.FullName, "squad.receipt.json");
-                if (!File.Exists(receiptPath)) continue;
+                string receiptPath = Path.Combine(presetEntry.Path, "squad.receipt.json");
+                if (!_files.FileExists(receiptPath)) continue;
 
                 string version = "unknown";
-                string lockPath = Path.Combine(presetDir.FullName, "squad.lock.yml");
-                if (File.Exists(lockPath))
+                string lockPath = Path.Combine(presetEntry.Path, "squad.lock.yml");
+                if (_files.FileExists(lockPath))
                     try
                     {
-                        SquadLock? squadLock = stateStore.DeserializeLock(File.ReadAllText(lockPath));
+                        SquadLock? squadLock = stateStore.DeserializeLock(_files.ReadAllText(lockPath));
                         if (!string.IsNullOrWhiteSpace(squadLock?.SquadVersion))
                             version = squadLock.SquadVersion;
                         else if (!string.IsNullOrWhiteSpace(squadLock?.CliVersion)) version = squadLock.CliVersion;
@@ -480,7 +492,7 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
                         // Treat unreadable lock as unknown version
                     }
 
-                instances.Add(($"{targetToken}/{presetDir.Name}", version));
+                instances.Add(($"{targetToken}/{Path.GetFileName(presetEntry.Path)}", version));
             }
         }
 
@@ -490,20 +502,20 @@ internal sealed class SquadStatusCommand : Command<SquadStatusSettings>
     /// <summary>
     ///     Inspects and renders the deployed harness instances recorded in the instance state directory.
     /// </summary>
-    private static void WriteInstances(IReadOnlyList<(string TargetPreset, string Version)> instances)
+    private void WriteInstances(IReadOnlyList<(string TargetPreset, string Version)> instances)
     {
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine("Instances:");
+        _output.Ansi.WriteLine();
+        _output.Ansi.MarkupLine("Instances:");
 
         if (instances.Count == 0)
         {
-            AnsiConsole.MarkupLine("  [grey]none[/]");
+            _output.Ansi.MarkupLine("  [grey]none[/]");
             return;
         }
 
         foreach ((string targetPreset, string version) in instances.OrderBy(static i => i.TargetPreset,
                      StringComparer.Ordinal))
-            AnsiConsole.MarkupLine($"  {Markup.Escape(targetPreset)}  {Markup.Escape(version)}");
+            _output.Ansi.MarkupLine($"  {Markup.Escape(targetPreset)}  {Markup.Escape(version)}");
     }
 
     /// <summary>

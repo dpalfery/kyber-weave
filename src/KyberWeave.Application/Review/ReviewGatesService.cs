@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.CodeGraph;
@@ -30,7 +31,8 @@ namespace KyberWeave.Application.Review;
 /// <param name="graphs">Reads the CodeGraph index the duplicate report is computed over.</param>
 /// <param name="worktreeIndex">Makes sure the tree has a CodeGraph index before any gate starts.</param>
 /// <param name="files">Reads and writes the report, the logs and the cycle folder.</param>
-/// <param name="environment">Names the temporary directory the index lock lives in.</param>
+/// <param name="environment">Names the temporary directory the index lock lives in, and the working directory a relative path resolves against.</param>
+/// <param name="pathResolver">Resolves the paths the caller spelled, relative ones against the working directory.</param>
 /// <param name="selector">Finds the review folder and the prior cycle's findings.</param>
 /// <param name="configs">Loads the host's configuration.</param>
 /// <param name="taskGates">Checks and expands one agent's task gates.</param>
@@ -48,6 +50,7 @@ public sealed class ReviewGatesService(
     IWorktreeIndexGuard worktreeIndex,
     IWritableFileSystem files,
     IProcessEnvironment environment,
+    IPathResolver pathResolver,
     IReviewCycleSelector selector,
     IConfigLoadService configs,
     ITaskGateSelectionService taskGates,
@@ -75,10 +78,10 @@ public sealed class ReviewGatesService(
         ReviewGatesRequest request, IProcessExecutor indexExecutor, TextWriter output)
     {
         DiagnosticReport report = new();
-        string root = Path.GetFullPath(request.Path);
+        string root = FullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // Inputs are checked before any gate is considered, so an unsafe path or base is refused the same
         // way whether or not the host declares a gate that uses it.
@@ -105,7 +108,7 @@ public sealed class ReviewGatesService(
                 "review.gates",
                 Hint: "Declare the repository's build, test, and analysis commands under " +
                       "review.gates in kyber-weave.yml."));
-            return ReviewCommandResult.Reported(0, report);
+            return ReviewCommandResultFactory.Reported(0, report);
         }
 
         // --gate narrows the run to the gates named, so a reviewer re-checks one gate without paying for the whole
@@ -184,7 +187,7 @@ public sealed class ReviewGatesService(
             }
         }
 
-        CouncilGatePlan plan = CouncilGateSelection.Plan(declared, changed, ReviewGateReporting.CurrentOs());
+        CouncilGatePlan plan = CouncilGateSelection.Plan(declared, changed, ReviewGateReporting.CurrentOs(environment));
         ReviewGateReporting.AddSkips(report, plan.Skipped);
 
         // Full-suite gates run only for the council or CI, or for a person at a terminal. A refusal is a blocking
@@ -205,11 +208,13 @@ public sealed class ReviewGatesService(
         {
             ReviewReportWriter.TryWrite(
                 files,
+                pathResolver,
+                environment,
                 request.Out,
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
                 report);
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
         }
 
         // GateRunner.Run reads only Gates from its configuration, so the selected gates travel in a
@@ -242,7 +247,7 @@ public sealed class ReviewGatesService(
         // runs' results, so a reviewer could never finish a verifier cycle gate by gate.
         if (request.Gates.Count > 0 && request.Out is not null)
         {
-            written = MergedWithExisting(config.Review.Gates, written, request.Out);
+            written = MergedWithExisting(files, pathResolver, environment, config.Review.Gates, written, request.Out);
             report.AddMetric("kept", written.Gates.Count - gates.Gates.Count);
         }
 
@@ -253,7 +258,8 @@ public sealed class ReviewGatesService(
         if (request.Deadline)
             report.AddMetric("not-run", gates.Gates.Count(VerdictEngine.IsStoppedForTime));
 
-        ReviewReportWriter.TryWrite(files, request.Out, ReviewJson.Write(written), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(
+            files, pathResolver, environment, request.Out, ReviewJson.Write(written), ReviewGateReporting.ReportWriteFailed, report);
         string? evidence = cycle is { WritesIdentity: true } && request.Out is not null
             ? WriteEvidence(cycle, root, request, written, config, report)
             : null;
@@ -286,7 +292,7 @@ public sealed class ReviewGatesService(
         // Blocking failures are already Error diagnostics; a failed --out write is too.
         // Non-blocking gate failures stay Warning and do not fail the process. Gates that
         // did not apply are Info and never fail it either.
-        return ReviewCommandResult.Reported(report.HasErrors ? 1 : 0, report, epilogue);
+        return ReviewCommandResultFactory.Reported(report.HasErrors ? 1 : 0, report, epilogue);
     }
 
     /// <summary>The cycle a council run found itself in, and what that decides for each declared gate.</summary>
@@ -319,7 +325,7 @@ public sealed class ReviewGatesService(
     ///     The cycle this council run is in, or null when no review folder can be named. The review folder comes from the
     ///     <c>--out</c> path when it sits in <c>review/cycle-&lt;n&gt;</c>, else from the task's only review folder in
     ///     the git work tree the command was run against. A cycle counts as prior only when it belongs to this change
-    ///     (<c>ReviewCycles.Belonging</c>); one that is finished, this one included, or that belongs to another
+    ///     (<c>ReviewCyclePlanning.Belonging</c>); one that is finished, this one included, or that belongs to another
     ///     change is never counted. When nothing says this is a later cycle, the run is a full one, which is the safe answer.
     /// </summary>
     private CouncilCycle? DetectCycle(
@@ -335,12 +341,13 @@ public sealed class ReviewGatesService(
         string? folder = null;
         string scratchpad = ReviewWorkTree.Scratchpad(tree);
         ReviewTaskChoice choice = selector.ChooseTask(tree, scratchpad, null);
-        if (request.Out is not null && ReviewCycleView.TryFromOutPath(request.Out, out string fromOut, out int number))
+        if (request.Out is not null
+            && ReviewCycleView.TryFromOutPath(pathResolver, environment, request.Out, out string fromOut, out int number))
         {
             reviewFolder = fromOut;
             thisCycle = number;
-            folder = Path.GetDirectoryName(Path.GetFullPath(request.Out));
-            if (!ReviewCycleView.IsUnder(tree, fromOut))
+            folder = Path.GetDirectoryName(FullPath(request.Out));
+            if (!ReviewCycleView.IsUnder(pathResolver, environment, tree, fromOut))
                 notes.Add($"worktree: --out is outside {tree}, so this review writes to {folder}; use {ReviewWorkTree.Scratchpad(tree)} for this worktree's review folders.");
         }
         else if (choice.Chosen)
@@ -359,7 +366,7 @@ public sealed class ReviewGatesService(
         IReadOnlyList<ReviewCycleRecord> finished = prior.Valid;
 
         ReviewCyclePlan plan = ReviewCyclePlanning.Plan(
-            finished, config.Review.Gates, ReviewGateReporting.CurrentOs(), commit => selector.ChangedSince(tree, commit));
+            finished, config.Review.Gates, ReviewGateReporting.CurrentOs(environment), commit => selector.ChangedSince(tree, commit));
         folder ??= Path.Combine(reviewFolder, $"cycle-{plan.Number}");
         IReadOnlyList<ReviewFinding> recheck = [];
         if (plan.Prior is { } priorCycle)
@@ -436,7 +443,13 @@ public sealed class ReviewGatesService(
         CodeGraphPorts graph = graphs.ForRepository(root);
         DuplicateReport duplicates = duplicateDetection.Analyze(root, graph.Resolver, graph.Enumerator, config.Review.Duplicates);
         ReviewReportWriter.TryWrite(
-            files, Path.Combine(cycle.Folder!, "duplicates.json"), ReviewJson.Write(duplicates), ReviewGateReporting.ReportWriteFailed, report);
+            files,
+            pathResolver,
+            environment,
+            Path.Combine(cycle.Folder!, "duplicates.json"),
+            ReviewJson.Write(duplicates),
+            ReviewGateReporting.ReportWriteFailed,
+            report);
         (IReadOnlyList<string>? changed, _) = ResolveCouncilChangedSet(root, request);
         IReadOnlyDictionary<string, string> skips = CouncilSeating.GateProvenSkips(written, duplicates, changed);
         try
@@ -496,21 +509,35 @@ public sealed class ReviewGatesService(
     }
 
     /// <summary>
-    ///     The report already at <paramref name="path"/>, with each result this run produced in place of the earlier
-    ///     result for the same gate and the rest kept, in declaration order. An unreadable or missing report is nothing
-    ///     to keep.
+    ///     The report already at <paramref name="path"/>, merged into this run's, or this run's alone when the file is
+    ///     missing or unreadable. The path is resolved the same way it is written, so a relative <c>--out</c> reads
+    ///     back what an earlier run wrote.
     /// </summary>
-    private GateReport MergedWithExisting(IReadOnlyList<ReviewGate> declared, GateReport ran, string path)
+    /// <param name="files">Reads the earlier report.</param>
+    /// <param name="paths">Resolves the path the caller spelled.</param>
+    /// <param name="environment">Names the working directory a relative path resolves against.</param>
+    /// <param name="declared">The declared gates, in declaration order.</param>
+    /// <param name="ran">The report this run produced.</param>
+    /// <param name="path">Where the earlier report was written.</param>
+    internal static GateReport MergedWithExisting(
+        IWritableFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IReadOnlyList<ReviewGate> declared,
+        GateReport ran,
+        string path)
     {
         GateReport existing;
         try
         {
-            if (!files.FileExists(path))
+            string full = paths.GetFullPath(path, environment.CurrentDirectory);
+            if (!files.FileExists(full))
                 return ran;
 
-            existing = ReviewJson.ReadGates(files.ReadAllText(path));
+            existing = ReviewJson.ReadGates(files.ReadAllText(full));
         }
-        catch (Exception ex) when (FileFailure.Is(ex) || ex is System.Text.Json.JsonException or InvalidOperationException)
+        catch (Exception ex) when (FileFailure.Is(ex) || ex is System.Text.Json.JsonException or InvalidOperationException
+                                       or ArgumentException or NotSupportedException)
         {
             return ran;
         }
@@ -518,16 +545,18 @@ public sealed class ReviewGatesService(
         return ReviewGateReporting.MergedWithExisting(declared, ran, existing);
     }
 
+    private string FullPath(string path) => pathResolver.GetFullPath(path, environment.CurrentDirectory);
+
     private static string? BaseRef(string? baseRef) =>
         string.IsNullOrWhiteSpace(baseRef) ? null : baseRef.Trim();
 
     private ReviewCommandResult ExecuteAgentGates(ReviewGatesRequest request, TextWriter output)
     {
         DiagnosticReport report = new();
-        string root = Path.GetFullPath(request.Path);
+        string root = FullPath(request.Path);
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // Every input is checked before the agent is looked up, so an unsafe path or slug is refused
         // the same way whether or not the agent declares gates.
@@ -568,7 +597,7 @@ public sealed class ReviewGatesService(
 
         List<string> unreadableStandards = [];
         string? parentTechnology = TaskGateResolver.ParentTechnologyOrNone(
-            EnclosingRepositoryRoot(root), config, target?.Entry.Technology, unreadableStandards);
+            files, EnclosingRepositoryRoot(root), config, target?.Entry.Technology, unreadableStandards);
         if (unreadableStandards.Count > 0)
         {
             // The task's gates may be keyed on the parent technology, so a standard this process may not read
@@ -602,11 +631,13 @@ public sealed class ReviewGatesService(
                       "review.task-gates for the agent."));
             ReviewReportWriter.TryWrite(
                 files,
+                pathResolver,
+                environment,
                 outPath,
                 ReviewJson.Write(new GateReport(GateReport.CurrentSchema, [])),
                 ReviewGateReporting.ReportWriteFailed,
                 report);
-            return ReviewCommandResult.Reported(
+            return ReviewCommandResultFactory.Reported(
                 report.HasErrors ? 1 : 0,
                 report,
                 request.HumanOutput && !resolved.IsRefused ? TaskGateNextStep.NoneDeclared(request.Agent!, paths, outPath) : []);
@@ -641,7 +672,7 @@ public sealed class ReviewGatesService(
 
         string repoRoot = EnclosingRepositoryRoot(root);
         TaskGatePlan plan = taskGates.Plan(
-            agentGates, changed, taskSlug, ReviewGateReporting.CurrentOs(), repoRoot, config.Review.TestMap,
+            agentGates, changed, taskSlug, ReviewGateReporting.CurrentOs(environment), repoRoot, config.Review.TestMap,
             target is null ? null : targets.DeclaredClasses(target.Row));
         if (plan.Refusals.Count > 0)
             return RefuseInput(report, plan.Refusals);
@@ -695,7 +726,8 @@ public sealed class ReviewGatesService(
         report.AddMetric("gates", finalReport.Gates.Count);
         report.AddMetric("failed", finalReport.Gates.Count(g => !g.Passed && !g.NotApplicable));
 
-        ReviewReportWriter.TryWrite(files, outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
+        ReviewReportWriter.TryWrite(
+            files, pathResolver, environment, outPath, ReviewJson.Write(finalReport), ReviewGateReporting.ReportWriteFailed, report);
 
         // The run as it happened, not as --red re-judged it: an accepted compile failure is still a failed build to read.
         IReadOnlyList<string> digest = TestDigest(root, taskSlug, request.Red, plan.Gates, run.Report, outputs);
@@ -725,7 +757,7 @@ public sealed class ReviewGatesService(
             }
         }
 
-        return ReviewCommandResult.Reported(report.HasErrors ? 1 : 0, report, epilogue);
+        return ReviewCommandResultFactory.Reported(report.HasErrors ? 1 : 0, report, epilogue);
     }
 
     /// <summary>
@@ -771,7 +803,7 @@ public sealed class ReviewGatesService(
         string? hint = null)
     {
         ReviewGateReporting.AddRefusals(report, reasons, hint);
-        return ReviewCommandResult.Reported(1, report);
+        return ReviewCommandResultFactory.Reported(1, report);
     }
 
     /// <summary>
@@ -801,13 +833,17 @@ public sealed class ReviewGatesService(
 
     private string EnclosingRepositoryRoot(string path)
     {
-        for (DirectoryInfo? dir = new(path); dir is not null; dir = dir.Parent)
+        string full = FullPath(path);
+        for (string? dir = full; !string.IsNullOrEmpty(dir); dir = Path.GetDirectoryName(dir))
         {
-            string gitPath = Path.Combine(dir.FullName, ".git");
-            if (files.DirectoryExists(gitPath) || files.FileExists(gitPath) || files.DirectoryExists(Path.Combine(dir.FullName, ".kyber-weave")))
-                return dir.FullName;
+            string gitPath = Path.Combine(dir, ".git");
+            if (files.DirectoryExists(gitPath)
+                || files.FileExists(gitPath)
+                || files.DirectoryExists(Path.Combine(dir, ".kyber-weave")))
+                return dir;
         }
-        return path;
+
+        return full;
     }
 
     /// <summary>The verdict command line the reviewer copies; it needs no other argument, since the cycle folder records the rest.</summary>

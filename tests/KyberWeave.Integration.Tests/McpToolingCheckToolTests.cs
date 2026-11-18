@@ -34,10 +34,18 @@ public sealed class McpToolingCheckToolTests : IDisposable
     private string Root => _fixture.Root;
 
     /// <summary>The tools over the fixture, with the doctor's children scripted and no home directory to probe.</summary>
+    /// <remarks>
+    /// The environment's temp directory is the running process's, because this run touches a real disk: the
+    /// doctor takes its cross-process index lock in the temp directory, and the shared fake's own default is a
+    /// path that exists nowhere, so a run over it reports the index lock directory as missing.
+    /// </remarks>
     private DocsTools Tools(Func<IReadOnlyList<string>, ProcessResult>? codegraph = null)
     {
         IServiceProvider provider = DocsTestCommands.Services(services =>
-            services.AddSingleton<IProcessEnvironment>(new DoctorTestEnvironment(false, _ => null)));
+            services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(
+                tempDirectory: Path.GetTempPath(),
+                isInputRedirected: true,
+                readVariable: _ => null)));
         return DocsRootRegistry.CreateTools(
             Root,
             codeGraphRefreshEnabled: false,

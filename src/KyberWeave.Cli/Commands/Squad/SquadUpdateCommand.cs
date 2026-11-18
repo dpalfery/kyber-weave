@@ -33,7 +33,12 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     private readonly ISquadFileAccess _files;
     private readonly ISquadProjectPicker? _picker;
     private readonly SquadConsoleOptions _console;
+    private readonly SquadConsole _output;
+    private readonly SquadTargetRootConfirmation _confirmation;
+    private readonly IProcessEnvironment _environment;
+    private readonly SquadCommandRoots _roots;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
+    private readonly IKyberWeaveConfigRepository _configs;
 
     /// <summary>Creates the update command over the Squad services the host registers.</summary>
     /// <param name="lifecycle">Updates the deployment.</param>
@@ -44,8 +49,13 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     /// <param name="globalRoots">Names the roots a global update writes beneath.</param>
     /// <param name="files">Lists the installed instances.</param>
     /// <param name="console">How the command prompts; the defaults read the console.</param>
+    /// <param name="output">Where the command writes and asks.</param>
+    /// <param name="confirmation">Echoes the target root and asks before anything is written.</param>
+    /// <param name="environment">Names the working directory a relative path resolves against.</param>
+    /// <param name="roots">Resolves the target root, anchors a global run and reads the scope's configuration.</param>
     /// <param name="picker">Offers the registered projects to choose from, or null for the terminal picker.</param>
     /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
+    /// <param name="configs">Reads the project's host config for the task-gate hint.</param>
     public SquadUpdateCommand(
         ISquadLifecycleService lifecycle,
         ISquadInstanceService instances,
@@ -55,6 +65,11 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         ISquadGlobalRootResolver globalRoots,
         ISquadFileAccess files,
         SquadConsoleOptions console,
+        SquadConsole output,
+        SquadTargetRootConfirmation confirmation,
+        IProcessEnvironment environment,
+        SquadCommandRoots roots,
+        IKyberWeaveConfigRepository configs,
         ISquadProjectPicker? picker = null,
         KyberDashCapturePluginStep? capturePluginStep = null)
     {
@@ -66,6 +81,11 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         ArgumentNullException.ThrowIfNull(globalRoots);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(console);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(confirmation);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(configs);
         _lifecycle = lifecycle;
         _instances = instances;
         _stateStore = stateStore;
@@ -74,6 +94,11 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         _globalRoots = globalRoots;
         _files = files;
         _console = console;
+        _output = output;
+        _confirmation = confirmation;
+        _environment = environment;
+        _roots = roots;
+        _configs = configs;
         _picker = picker;
         _capturePluginStep = capturePluginStep;
     }
@@ -115,7 +140,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 string presetFile = Path.Combine(presetsDir, $"{presetName}.yml");
                 if (!_files.FileExists(presetFile))
                 {
-                    SquadCommandComposition.WriteLine(
+                    _output.WriteLine(
                         $"[red]error:[/] Missing preset file '{Markup.Escape(presetFile)}' for instance '{Markup.Escape(targetDir.Name)}/{Markup.Escape(presetName)}'.");
                     return false;
                 }
@@ -124,6 +149,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
         return true;
     }
+
 
     public override int Execute(CommandContext context, SquadUpdateSettings settings,
         CancellationToken cancellationToken)
@@ -159,11 +185,11 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
         catch (Exception ex) when (ex is ArgumentException or SelfUpdateException)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 
-        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         // A named project that cannot be resolved is refused before any global work, so a typo costs
         // nothing: no migration, no receipt read, no write.
@@ -171,37 +197,37 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         if (scope == SquadDeploymentScope.Global && selection.Kind == SquadProjectSelectionKind.Paths)
             try
             {
-                namedProjects = SquadCommandComposition.ResolveNamedProjects(selection.Paths, stateStore);
+                namedProjects = _roots.ResolveNamedProjects(selection.Paths, stateStore);
             }
             catch (ArgumentException ex)
             {
-                SquadCommandComposition.WriteClientInputError(ex.Message);
+                _output.WriteClientInputError(ex.Message);
                 return 2;
             }
             catch (InvalidDataException ex)
             {
-                SquadCommandComposition.WriteClientInputError(ex.Message);
+                _output.WriteClientInputError(ex.Message);
                 return 1;
             }
 
         // State is migrated before anything reads it. A dry run that finds legacy state reports it and
         // stops without reading a deployment the migration has not yet moved.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
-            Environment.CurrentDirectory,
+            _environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
             settings.DryRun);
-        SquadCommandComposition.WriteMigrationNotes(migration);
+        _output.WriteMigrationNotes(migration);
         if (SquadCommandComposition.IsPendingDryRunMigration(migration, settings.DryRun)) return 0;
 
         // Chosen after the migration, so a legacy receipt the migration has just copied is anchored on its recorded root.
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
+            ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
         ISquadLifecycleService lifecycleService = _lifecycle;
 
-        bool interactive = _console.IsInteractive ?? SquadCommandComposition.IsInteractiveConsole();
+        bool interactive = _console.IsInteractive ?? _output.IsInteractive;
 
         UpdateRun run = new(
             targetRoot,
@@ -242,12 +268,12 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             }
             catch (SquadDeploymentConflictException ex)
             {
-                SquadCommandComposition.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
+                _output.WriteLine($"[red]error:[/] {Markup.Escape(ex.Message)}");
                 return 1;
             }
             catch (Exception ex)
             {
-                SquadCommandComposition.WriteClientInputError($"Instance refresh failed: {ex.Message}");
+                _output.WriteClientInputError($"Instance refresh failed: {ex.Message}");
                 return 1;
             }
 
@@ -287,7 +313,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 .ToArray(),
             SquadProjectSelectionKind.Paths => namedProjects,
             SquadProjectSelectionKind.Absent when interactive && registry.Count > 0 =>
-                SquadCommandComposition.RunProjectPicker(_picker, registry),
+                SquadCommandComposition.RunProjectPicker(_picker, registry, _output.Ansi),
             _ => []
         };
 
@@ -300,7 +326,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 string.Equals(project.Path, path, StringComparison.Ordinal));
             if (entry is { Stale: true })
             {
-                SquadCommandComposition.WriteLine(
+                _output.WriteLine(
                     $"[yellow]warning:[/] skipping stale project '{Markup.Escape(path)}': " +
                     $"{Markup.Escape(entry.StaleReason ?? "it no longer carries a deployment")}.");
                 outcomes.Add(new ProjectOutcome(path, ProjectState.Skipped));
@@ -309,7 +335,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
             SquadMigrationReport import =
                 SquadCommandComposition.ImportProjectIfHomeStateAbsent(stateStore, _migration, path, settings.DryRun);
-            SquadCommandComposition.WriteMigrationNotes(import);
+            _output.WriteMigrationNotes(import);
             if (settings.DryRun && import.ImportedProjects.Count > 0)
             {
                 // A dry run imports nothing, so the project has no home state yet and a plan against it would
@@ -335,13 +361,13 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     }
 
     /// <summary>Prints the per-project summary, one unfolded line per project, and returns the run's exit code.</summary>
-    private static int WriteSummary(IReadOnlyList<ProjectOutcome> outcomes)
+    private int WriteSummary(IReadOnlyList<ProjectOutcome> outcomes)
     {
         int updated = outcomes.Count(outcome => outcome.State == ProjectState.Updated);
         int failed = outcomes.Count(outcome => outcome.State == ProjectState.Failed);
         int skipped = outcomes.Count(outcome => outcome.State == ProjectState.Skipped);
 
-        SquadCommandComposition.WriteLine(
+        _output.WriteLine(
             $"[bold]Project update summary:[/] {updated} updated, {failed} failed, {skipped} skipped.");
         foreach (ProjectOutcome outcome in outcomes)
         {
@@ -351,7 +377,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 ProjectState.Failed => "[red]failed[/]",
                 _ => "[yellow]skipped[/]"
             };
-            SquadCommandComposition.WriteLine($"  {label} {Markup.Escape(outcome.Path)}");
+            _output.WriteLine($"  {label} {Markup.Escape(outcome.Path)}");
         }
 
         return failed > 0 ? 1 : 0;
@@ -374,9 +400,9 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         SquadReceipt? receipt = stateStore.ReadReceipt(run.TargetRoot, run.Scope);
         if (receipt is null)
         {
-            SquadCommandComposition.WriteLine(
+            _output.WriteLine(
                 $"[red]No Kyber-Squad deployment found at [bold]{Markup.Escape(run.TargetRoot)}[/].[/]");
-            SquadCommandComposition.WriteLine(
+            _output.WriteLine(
                 "Run [bold]kyber-weave squad install[/] to create an initial deployment.");
             return 1;
         }
@@ -392,13 +418,14 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
 
         // Load configuration if present
-        KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
+            _configs,
             run.TargetRoot,
             run.Scope,
             stateStore.UserPaths.HomeDirectory);
         if (!configResult.Success)
         {
-            SquadCommandComposition.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
+            _output.WriteClientInputError(configResult.Error ?? "Failed to load configuration.");
             return 1;
         }
 
@@ -413,15 +440,15 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             ReceiptTargets = receiptTargets,
             ExplicitExclusions = run.ExplicitExclusions,
             ConfiguredExclusions = squadConfig.Exclusions,
-            IsInteractive = SquadCommandComposition.IsInteractiveConsole()
+            IsInteractive = _output.IsInteractive
         };
 
         SquadTargetResolutionDecision decision = _targets.Resolve(request);
         if (decision.Kind == SquadTargetResolutionKind.Failure)
         {
-            AnsiConsole.MarkupLine("[red]No deployment targets specified or detected.[/]");
+            _output.Ansi.MarkupLine("[red]No deployment targets specified or detected.[/]");
             if (decision.RecoveryCommand is not null)
-                AnsiConsole.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
+                _output.Ansi.MarkupLine($"Specify target(s) using [bold]{Markup.Escape(decision.RecoveryCommand)}[/].");
 
             return decision.ExitCode ?? 2;
         }
@@ -429,7 +456,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         // The host's Arbiter settings travel into rendering (Req 22.2, 5.3): enabled
         // verbatim, timeout-ms as whole hook seconds with headroom.
         SquadArbiterWiring arbiterWiring = SquadCommandComposition.ResolveArbiterWiring(
-            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfig.ProductDefaults);
+            configResult.Config?.Arbiter ?? Core.Arbiter.ArbiterConfigDefaults.Product);
 
         SquadUpdateRequest updateRequest = new(
             run.TargetRoot,
@@ -453,16 +480,16 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         // The confirmation is the last gate before the lifecycle call — the only
         // side-effecting step — so a decline aborts with zero writes (plan N3/N5);
         // a dry-run's output already names the root, so it never prompts (N4).
-        if (!run.DryRun && !SquadTargetRootConfirmation.Confirm(
+        if (!run.DryRun && !_confirmation.Confirm(
                 run.TargetRoot,
                 run.Scope,
                 "update",
                 interactive,
                 run.Yes,
-                _console.ReadAnswer ?? SquadTargetRootConfirmation.ReadConsoleAnswer,
+                _console.ReadAnswer,
                 globalTargetRoots))
         {
-            AnsiConsole.MarkupLine("[yellow]Declined. No changes were made.[/]");
+            _output.Ansi.MarkupLine("[yellow]Declined. No changes were made.[/]");
             return 2;
         }
 
@@ -476,45 +503,45 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
                 if (run.DryRun)
                 {
                     int fileCount = result.Receipt?.Files.Count ?? 0;
-                    SquadCommandComposition.WriteLine(
+                    _output.WriteLine(
                         $"[bold]Dry-run:[/] planned {fileCount} deployed files for [bold]{Markup.Escape(run.TargetRoot)}[/].");
                 }
                 else
                 {
-                    SquadCommandComposition.WriteLine(
+                    _output.WriteLine(
                         $"[green]Successfully updated Kyber-Squad at [bold]{Markup.Escape(run.TargetRoot)}[/].[/]");
                 }
 
-                SquadCommandComposition.WriteTransactionWarnings(result.Warnings);
+                _output.WriteTransactionWarnings(result.Warnings);
 
                 // A project with no task gates learns where they come from. Squad writes no
                 // configuration itself, and the hint never changes this exit code.
                 if (run.Scope == SquadDeploymentScope.Project)
                 {
-                    SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot);
+                    SquadTaskGateHint.WriteIfNoTaskGates(run.TargetRoot, _configs, _output);
                 }
 
                 // Until trust is granted the hooks stay off (§10.7), so the update names
                 // each selected target's trust gate where the audit cannot observe the gap.
-                SquadInstallCommand.WriteArbiterTrustSteps(decision.Targets, arbiterWiring);
+                SquadInstallCommand.WriteArbiterTrustSteps(_output, decision.Targets, arbiterWiring);
 
                 return 0;
             }
 
             if (result.Errors is { Count: > 0 })
                 foreach (string error in result.Errors)
-                    SquadCommandComposition.WriteClientInputError(error);
+                    _output.WriteClientInputError(error);
 
             return 1;
         }
         catch (SquadDeploymentConflictException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteFailure(ex);
             return 1;
         }
         catch (Exception ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteFailure(ex);
             return 1;
         }
     }

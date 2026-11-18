@@ -44,9 +44,9 @@ cannot stop a run, so the rule is enforced in code.
      (Error, a gate that never started) and exit 1. What happens to the rest of the run depends
      on how it was asked for — see decision 6. The `--agent` task gates are not affected. The rule
      lives in `FullSuiteGate`
-     (`src/KyberWeave.Domain/Configuration/FullSuiteGate.cs`), and the command applies it in
+     (`src/KyberWeave.Application/Configuration/FullSuiteGate.cs`), and the command applies it in
      `src/KyberWeave.Cli/Commands/Review/ReviewGatesCommand.cs`.
-   - **B. `scripts/fast-loop.sh`.** `--full`, `--scoped` and `--regenerate` exit 89 before any
+   - **B. `scripts/fast-loop.sh`.** `--full` and `--scoped` exit 89 before any
      build when stdin is not a terminal. This script has no `--council` flag.
 
    The original third layer, `scripts/proc-guard.sh run`, was retired on 2026-11-15 with the Node

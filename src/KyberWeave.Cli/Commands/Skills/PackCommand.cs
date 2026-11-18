@@ -21,7 +21,7 @@ public sealed class PackSettings : CommandSettings
     public bool SkipValidation { get; set; }
 }
 
-public sealed class PackCommand(ISkillGovernanceService skills) : Command<PackSettings>
+public sealed class PackCommand(ISkillGovernanceService skills, IAnsiConsole ansi) : Command<PackSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, PackSettings settings, CancellationToken cancellationToken)
@@ -31,24 +31,24 @@ public sealed class PackCommand(ISkillGovernanceService skills) : Command<PackSe
         switch (result.Status)
         {
             case SkillPackStatus.NoSkillFile:
-                AnsiConsole.MarkupLine($"[red]No SKILL.md in '{Markup.Escape(settings.Path)}'.[/]");
+                ansi.MarkupLine($"[red]No SKILL.md in '{Markup.Escape(settings.Path)}'.[/]");
                 return 2;
             case SkillPackStatus.ValidationFailed:
-                AnsiConsole.MarkupLine("[red]Refusing to pack: spec validation failed. Run 'kyber-weave skill validate' or pass --skip-validation.[/]");
+                ansi.MarkupLine("[red]Refusing to pack: spec validation failed. Run 'kyber-weave skill validate' or pass --skip-validation.[/]");
                 ReportRenderer_RenderErrors(result.Report);
                 return 1;
             default:
-                AnsiConsole.MarkupLine($"[green]Packed[/] [bold]{Markup.Escape(result.Name)}[/] → {Markup.Escape(result.Output)} ({result.BundledFiles} bundled file(s)).");
+                ansi.MarkupLine($"[green]Packed[/] [bold]{Markup.Escape(result.Name)}[/] → {Markup.Escape(result.Output)} ({result.BundledFiles} bundled file(s)).");
                 return 0;
         }
     }
 
     /// <summary>Prints each error or critical diagnostic, code first.</summary>
-    private static void ReportRenderer_RenderErrors(DiagnosticReport report)
+    private void ReportRenderer_RenderErrors(DiagnosticReport report)
     {
         foreach (Diagnostic d in report.Items.Where(i => i.Severity is Severity.Error or Severity.Critical))
         {
-            AnsiConsole.MarkupLine($"  [red]{Markup.Escape(d.Code)}[/] {Markup.Escape(d.Message)}");
+            ansi.MarkupLine($"  [red]{Markup.Escape(d.Code)}[/] {Markup.Escape(d.Message)}");
         }
     }
 }

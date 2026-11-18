@@ -7,6 +7,7 @@ using KyberWeave.Core.RunStart;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console.Cli;
 using Xunit;
+using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -549,12 +550,12 @@ public sealed class ReviewGatesCycleTests : IDisposable
         string worktree = Path.Combine(_temp.Path, "repo.worktrees", "run");
         Git("worktree", "add", "--quiet", "-b", "run-branch", worktree);
         string home = Path.Combine(_temp.Path, "home");
-        RunBaseState.Write(home, "run-branch", "master", new RunStartPlace(Path.Combine(_repo, ".git"), worktree, DateTimeOffset.UtcNow));
+        RunStartTestServices.RunStateStore().Write(home, "run-branch", "master", new RunStartPlace(Path.Combine(_repo, ".git"), worktree, DateTimeOffset.UtcNow));
 
         string? note = ReviewTestServices.WorkTrees.LiveRunNote(_repo, home);
 
         Assert.NotNull(note);
-        Assert.Contains(RunCheckout.RealPath(worktree), note, StringComparison.Ordinal);
+        Assert.Contains(RunStartTestServices.RealPath(worktree), note, StringComparison.Ordinal);
         Assert.Contains("run the review there", note, StringComparison.Ordinal);
         Assert.Null(ReviewTestServices.WorkTrees.LiveRunNote(worktree, home));
     }

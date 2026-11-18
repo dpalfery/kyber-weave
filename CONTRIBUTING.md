@@ -48,7 +48,7 @@ Requires .NET SDK 10 (see `global.json`).
 ```bash
 dotnet restore KyberWeave.sln
 dotnet build KyberWeave.sln -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --filter "FullyQualifiedName~<TestClass>"
+dotnet test tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release --filter "FullyQualifiedName~<TestClass>"
 dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release
 ```
 
@@ -100,7 +100,7 @@ copies. To add a template:
 
 1. Add the four files; use an existing folder as the shape, not as the content.
 2. Register the name in `KyberStandardsTemplates` (and `Docs.props` for the embedded files).
-3. Run `dotnet test tests/KyberWeave.Tests --filter "FullyQualifiedName~KyberStandardsTemplateShapeTests"`.
+3. Run `dotnet test tests/KyberWeave.Content.Tests --filter "FullyQualifiedName~KyberStandardsTemplateShapeTests"`.
 4. Run `dotnet run --project src/KyberWeave.Cli -- docs validate .`.
 
 A contribution that restates a language's own documentation is noise. Write the decisions a

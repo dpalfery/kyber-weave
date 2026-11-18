@@ -60,6 +60,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     private readonly IArbiterHostConfig _hostConfig;
     private readonly IProcessEnvironment _process;
     private readonly IBackgroundDispatchStore _background;
+    private readonly IIdGenerator _ids;
 
     /// <summary>
     /// Creates an engine over the ports it decides through. Every factory is injectable so tests run the real
@@ -76,6 +77,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
     /// <param name="hostConfig">Resolves the home directory a global-scope evaluation keeps its state under.</param>
     /// <param name="process">The process the engine reads its home, directory and environment variables from.</param>
     /// <param name="background">Keeps the background dispatches whose turns are still to return.</param>
+    /// <param name="ids">Builds the decision id for a hook decision that has none of its own.</param>
     /// <param name="providerFactory">Replaces the provider the configuration names.</param>
     /// <param name="gitFactsFactory">Replaces the git facts.</param>
     /// <param name="planReaderFactory">Replaces the plan reader.</param>
@@ -95,6 +97,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         IArbiterHostConfig hostConfig,
         IProcessEnvironment process,
         IBackgroundDispatchStore background,
+        IIdGenerator ids,
         Func<KyberWeaveConfig, IArbiterProvider>? providerFactory = null,
         Func<string, IArbiterGitFacts>? gitFactsFactory = null,
         Func<string, IArbiterPlanReader>? planReaderFactory = null,
@@ -115,6 +118,8 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         ArgumentNullException.ThrowIfNull(process);
         ArgumentNullException.ThrowIfNull(background);
         _background = background;
+        ArgumentNullException.ThrowIfNull(ids);
+        _ids = ids;
         _evaluators = evaluators;
         _state = state;
         _providers = providers;
@@ -141,7 +146,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             target,
             prompt,
             config,
-            new HookContext(_process.CurrentDirectory, () => Guid.NewGuid().ToString("N"), TextWriter.Null));
+            new HookContext(_process.CurrentDirectory, () => _ids.NewGuid().ToString("N"), TextWriter.Null));
 
     /// <inheritdoc/>
     public HookOutcome DecidePostDispatch(string caller, string? target, string toolOutput, KyberWeaveConfig config) =>
@@ -152,7 +157,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
             string.Empty,
             toolOutput,
             config,
-            new HookContext(_process.CurrentDirectory, () => Guid.NewGuid().ToString("N"), TextWriter.Null));
+            new HookContext(_process.CurrentDirectory, () => _ids.NewGuid().ToString("N"), TextWriter.Null));
 
     /// <inheritdoc/>
     public HookOutcome DecidePreDispatch(
@@ -761,7 +766,7 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         if (scope == HookScope.Global)
         {
             string effectiveHome = _hostConfig.ResolveHomeDirectory(homeDirectory);
-            string rootKey = ProjectRootKey(repoRoot);
+            string rootKey = ProjectRootKey(repoRoot, _process.CurrentDirectory);
             return Path.Combine(effectiveHome, ".kyber-weave", "arbiter", "projects", rootKey);
         }
 
@@ -798,9 +803,12 @@ public sealed class ArbiterHookDecisionEngine : IContextualHookDecisionEngine, I
         }
     }
 
-    internal static string ProjectRootKey(string projectRoot)
+    /// <summary>The per-project key a global ledger directory is named by: the hash of the root's full path.</summary>
+    /// <param name="projectRoot">The project root, relative or fully qualified.</param>
+    /// <param name="baseDirectory">The fully qualified directory a relative root is resolved against.</param>
+    internal static string ProjectRootKey(string projectRoot, string baseDirectory)
     {
-        string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot));
+        string canonical = Path.TrimEndingDirectorySeparator(Path.GetFullPath(projectRoot, baseDirectory));
         byte[] hash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexStringLower(hash);
     }

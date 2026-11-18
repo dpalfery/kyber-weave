@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Processes;
@@ -27,7 +28,12 @@ namespace KyberWeave.Application.Doctor;
 ///         run's writes.
 ///     </para>
 /// </remarks>
-public sealed class CodeGraphIndexProvisioner(IDoctorFileSystem files, ICodeGraphIndexWorkspace workspace) : ICodeGraphProvisioner
+public sealed class CodeGraphIndexProvisioner(
+    IDoctorFileSystem files,
+    ICodeGraphIndexWorkspace workspace,
+    IPathResolver paths,
+    IProcessEnvironment environment,
+    TimeProvider timeProvider) : ICodeGraphProvisioner
 {
     /// <summary>The directory name CodeGraph keeps its index in, at the repository root.</summary>
     private const string IndexDirectoryName = CodeGraphIndexRules.IndexDirectoryName;
@@ -148,7 +154,7 @@ public sealed class CodeGraphIndexProvisioner(IDoctorFileSystem files, ICodeGrap
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentException.ThrowIfNullOrWhiteSpace(lockDirectory);
 
-        using IDisposable? lockFile = workspace.TryAcquireLock(CodeGraphIndexRules.LockPathFor(root, lockDirectory), lockWait, out string? lockFailure);
+        using IDisposable? lockFile = workspace.TryAcquireLock(CodeGraphIndexRules.LockPathFor(paths.GetFullPath(root, environment.CurrentDirectory), lockDirectory), lockWait, out string? lockFailure);
         if (lockFile is null)
             return LockRefused(lockFailure, ProvisionFlag);
 
@@ -211,7 +217,7 @@ public sealed class CodeGraphIndexProvisioner(IDoctorFileSystem files, ICodeGrap
         initialised = false;
 
         using IDisposable? lockFile = workspace.TryAcquireLock(
-            CodeGraphIndexRules.LockPathFor(root, lockDirectory), options.IndexTimeout, out string? lockFailure);
+            CodeGraphIndexRules.LockPathFor(paths.GetFullPath(root, environment.CurrentDirectory), lockDirectory), options.IndexTimeout, out string? lockFailure);
         if (lockFile is null)
         {
             checks.Add(LockRefused(lockFailure, EnsureFlag));
@@ -236,7 +242,7 @@ public sealed class CodeGraphIndexProvisioner(IDoctorFileSystem files, ICodeGrap
             if (!FoundIndexLockHeld(prepared, options))
                 break;
 
-            Thread.Sleep(pause);
+            Task.Delay(pause, timeProvider).GetAwaiter().GetResult();
             prepared = PrepareIndex(root, verb, options, executor);
         }
 

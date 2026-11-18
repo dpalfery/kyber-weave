@@ -13,9 +13,9 @@ last-reviewed: 2026-11-16
 ## Commands
 
 ```bash
-# The product's tests: build once, then the classes the change covers.
-dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build \
+# The unit tests of the project that holds the code: build once, then the classes the change covers.
+dotnet build tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release
+dotnet test tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release --no-build \
   --filter "FullyQualifiedName~<Class>"
 
 # Repository policy: scripts, workflows, gate configuration, docs prose, source scans.
@@ -23,8 +23,8 @@ dotnet build tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.cspro
 dotnet test tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj -c Release --no-build \
   --filter "FullyQualifiedName~<Class>"
 
-# Skill, agent and instruction wording.
-dotnet test tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj -c Release \
+# Shipped content: skills, agents, standards and documents.
+dotnet test tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj -c Release \
   --filter "FullyQualifiedName~<Class>"
 ```
 

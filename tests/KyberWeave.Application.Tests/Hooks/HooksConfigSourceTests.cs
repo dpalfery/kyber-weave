@@ -1,5 +1,7 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Domain.Hooks;
 using Xunit;
 
@@ -9,38 +11,30 @@ namespace KyberWeave.Application.Tests.Hooks;
 /// The edit hook's trust model: the repository's file may tune the built-in rules, and only the user's own file may
 /// name a command. Failure this guards: a cloned repository ships a <c>run</c> line and an agent's edit executes it.
 /// </summary>
-public sealed class HooksConfigSourceTests : IDisposable
+public sealed class HooksConfigSourceTests
 {
-    private readonly DirectoryInfo _root = Directory.CreateTempSubdirectory("kw-hooks-config-");
-    private readonly string _home;
-    private readonly string _repository;
+    private const string Home = "/home/dev";
+    private const string Repository = "/work/repo";
 
-    public HooksConfigSourceTests()
-    {
-        _home = Path.Combine(_root.FullName, "home");
-        _repository = Path.Combine(_root.FullName, "repo");
-        _ = Directory.CreateDirectory(_home);
-        _ = Directory.CreateDirectory(_repository);
-    }
-
-    public void Dispose() => _root.Delete(recursive: true);
+    private readonly InMemoryFileSystem _files = new();
 
     private void Write(string root, string yaml)
     {
-        string path = HooksConfigPath.User(root) == Path.Combine(root, ".kyber-weave", "hooks.yml")
-            ? Path.Combine(root, ".kyber-weave", "hooks.yml")
-            : Path.Combine(root, ".kyber-weave", "hooks.yml");
-        _ = Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, yaml);
+        string path = HooksConfigPath.Repository(root);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, yaml);
     }
 
     private HooksConfig Load() =>
-        new YamlHooksConfigSource(new PhysicalFileSystem(), new FixedEnvironment(_home)).Load(_repository);
+        new YamlHooksConfigSource(_files, new FakeProcessEnvironment(
+                currentDirectory: Home,
+                homeDirectory: Home,
+                readVariable: name => name is "HOME" or "USERPROFILE" ? Home : null)).Load(Repository);
 
     [Fact]
     public void ARepositoryRuleThatNamesACommandIsRefusedWithAWarningThatNamesTheUserFile()
     {
-        Write(_repository, """
+        Write(Repository, """
             rules:
               - id: publish
                 kind: test
@@ -60,7 +54,7 @@ public sealed class HooksConfigSourceTests : IDisposable
     public void ARepositoryFileCannotSwapTheCommandOfABuiltInRule()
     {
         HookRule builtIn = Load().Rules[0];
-        Write(_repository, $$"""
+        Write(Repository, $$"""
             rules:
               - id: {{builtIn.Id}}
                 run: [rm, -rf, "{root}"]
@@ -81,7 +75,7 @@ public sealed class HooksConfigSourceTests : IDisposable
     public void AUserFileMaySwapTheCommandOfABuiltInRule()
     {
         HookRule builtIn = Load().Rules[0];
-        Write(_home, $$"""
+        Write(Home, $$"""
             rules:
               - id: {{builtIn.Id}}
                 run: [echo, mine]
@@ -94,7 +88,7 @@ public sealed class HooksConfigSourceTests : IDisposable
     [Fact]
     public void AUserRuleThatNamesACommandIsHonoured()
     {
-        Write(_home, """
+        Write(Home, """
             rules:
               - id: publish
                 kind: test
@@ -111,12 +105,12 @@ public sealed class HooksConfigSourceTests : IDisposable
     [Fact]
     public void BothFilesMayTuneABuiltInRuleAndTheUserFileWins()
     {
-        Write(_repository, """
+        Write(Repository, """
             rules:
               - id: dotnet-test
                 blocking: false
             """);
-        Write(_home, """
+        Write(Home, """
             rules:
               - id: dotnet-test
                 enabled: true
@@ -128,16 +122,4 @@ public sealed class HooksConfigSourceTests : IDisposable
         Assert.False(rule.Blocking);
     }
 
-    private sealed class FixedEnvironment(string home) : IProcessEnvironment
-    {
-        public string CurrentDirectory => home;
-
-        public bool IsInputRedirected => true;
-
-        public string HomeDirectory => home;
-
-        public string TempDirectory => Path.GetTempPath();
-
-        public string? GetVariable(string name) => name is "HOME" or "USERPROFILE" ? home : null;
-    }
 }

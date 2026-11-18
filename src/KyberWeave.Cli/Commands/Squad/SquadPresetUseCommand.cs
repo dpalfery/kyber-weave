@@ -23,6 +23,11 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
     private readonly ISquadDeploymentPlanner _planner;
     private readonly ISquadTransactionFactory _transactions;
     private readonly IFileSystemPathSemantics _pathSemantics;
+    private readonly SquadCommandRoots _roots;
+    private readonly IFileSystem _files;
+    private readonly SquadConsole _output;
+    private readonly TimeProvider _time;
+    private readonly ISquadModelPresetValidator _validator;
 
     /// <summary>Creates the command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -32,6 +37,12 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
     /// <param name="canonicalProfiles">Finds the canonical model profiles to re-render with.</param>
     /// <param name="planner">Preflights the re-render.</param>
     /// <param name="transactions">Applies the re-render.</param>
+    /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
+    /// <param name="roots">Resolves the target root and anchors a global run.</param>
+    /// <param name="files">Reads the deployed files the rewrite starts from.</param>
+    /// <param name="output">Where the diff rows and the refusals are written.</param>
+    /// <param name="time">Stamps the deployment plan.</param>
+    /// <param name="validator">Checks the preset against the canonical model profiles.</param>
     public SquadPresetUseCommand(
         ISquadStateStore stateStore,
         ISquadGlobalRootResolver globalRoots,
@@ -40,7 +51,12 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         ISquadCanonicalProfileResolver canonicalProfiles,
         ISquadDeploymentPlanner planner,
         ISquadTransactionFactory transactions,
-        IFileSystemPathSemantics pathSemantics)
+        IFileSystemPathSemantics pathSemantics,
+        SquadCommandRoots roots,
+        IFileSystem files,
+        SquadConsole output,
+        TimeProvider time,
+        ISquadModelPresetValidator validator)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(globalRoots);
@@ -50,6 +66,11 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         ArgumentNullException.ThrowIfNull(planner);
         ArgumentNullException.ThrowIfNull(transactions);
         ArgumentNullException.ThrowIfNull(pathSemantics);
+        ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(validator);
         _stateStore = stateStore;
         _globalRoots = globalRoots;
         _presetStore = presetStore;
@@ -58,6 +79,11 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         _planner = planner;
         _transactions = transactions;
         _pathSemantics = pathSemantics;
+        _roots = roots;
+        _files = files;
+        _output = output;
+        _time = time;
+        _validator = validator;
     }
 
     /// <inheritdoc />
@@ -72,7 +98,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
 
         SquadDeploymentScope scope = SquadCommandComposition.ResolveScope(settings.Global);
         string? effectivePath = SquadCommandComposition.CoalesceTargetPath(settings.Path, settings.PathOption);
-        string projectRoot = SquadCommandComposition.ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         SquadModelPreset? preset = null;
         try
@@ -90,7 +116,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             string available = existing.Count > 0
                 ? string.Join(", ", existing)
                 : "none";
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 $"Unknown preset '{settings.Name}'. Available presets: {available}.");
             return 2;
         }
@@ -105,7 +131,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             else
             {
                 string checkRoot = scope == SquadDeploymentScope.Global
-                    ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
+                    ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, false)
                     : projectRoot;
                 SquadReceipt? receipt = stateStore.ReadReceipt(checkRoot, scope);
                 if (receipt is not null && receipt.Files.Count > 0)
@@ -114,7 +140,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
                 }
                 else
                 {
-                    SquadCommandComposition.WriteClientInputError(
+                    _output.WriteClientInputError(
                         "No deployment target specified. Specify target(s) using --target <target>.");
                     return 2;
                 }
@@ -122,14 +148,14 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         }
         catch (ArgumentException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _output.WriteClientInputError(ex.Message);
             return 2;
         }
 
         if (scope == SquadDeploymentScope.Global)
         {
             string globalAnchor =
-                SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun);
+                _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun);
             SquadReceipt? globalReceipt = stateStore.ReadReceipt(globalAnchor, SquadDeploymentScope.Global);
             SquadLock? globalLock = stateStore.ReadLock(globalAnchor, SquadDeploymentScope.Global);
 
@@ -155,7 +181,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
                 string token = SquadTargetCatalog.GetToken(target);
                 if (!deployedTokens.Contains(token))
                 {
-                    SquadCommandComposition.WriteClientInputError(
+                    _output.WriteClientInputError(
                         $"{token} is not deployed globally; run `kyber-weave squad install --global --target {token}` first.");
                     return 2;
                 }
@@ -163,7 +189,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
 
             if (globalReceipt is null)
             {
-                SquadCommandComposition.WriteClientInputError(
+                _output.WriteClientInputError(
                     "Global deployment receipt is missing or unreadable. Run `kyber-weave squad install --global` to repair the deployment.");
                 return 1;
             }
@@ -219,7 +245,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             foreach (SquadTarget target in targets)
             {
                 string token = SquadTargetCatalog.GetToken(target);
-                SquadCommandComposition.WriteLine(
+                _output.WriteLine(
                     $"Recorded `{preset.Name}` for `{token}` in this project; it applies on install or `squad run`.");
             }
 
@@ -228,7 +254,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
 
         if (projectReceipt is null)
         {
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 "Project deployment receipt is missing or unreadable. Run `kyber-weave squad install` to repair the deployment.");
             return 1;
         }
@@ -269,17 +295,17 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             // The deployment cannot be re-rendered without the release it was rendered from:
             // fail before the rewrite loop in both dry-run and apply, never printing a plan
             // built on a silent general fallback.
-            SquadCommandComposition.WriteCanonicalProfilesUnresolvedError();
+            _output.WriteCanonicalProfilesUnresolvedError();
             return 1;
         }
 
         try
         {
-            SquadModelPresetValidator.Validate(preset, canonical.Profiles);
+            _validator.Validate(preset, canonical.Profiles);
         }
         catch (SquadSourceValidationException ex)
         {
-            SquadCommandComposition.WriteClientInputError(
+            _output.WriteClientInputError(
                 SquadCommandComposition.FormatPresetValidationError(ex));
             return 1;
         }
@@ -294,9 +320,9 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             file =>
             {
                 string physicalPath = scope == SquadDeploymentScope.Global
-                    ? SquadDeploymentPlan.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
+                    ? SquadDeploymentPlanRules.ResolveOwnedFilePath(activeReceipt, anchorRoot, effectiveGlobalRoots, file, _pathSemantics)
                     : Path.Combine(anchorRoot, file.RelativePath);
-                return File.Exists(physicalPath) ? File.ReadAllBytes(physicalPath) : null;
+                return _files.FileExists(physicalPath) ? _files.ReadAllBytes(physicalPath) : null;
             },
             new ArbiterModelTargetsPreset(preset.Name, preset.Digest),
             bundled: canonical.Profiles);
@@ -305,7 +331,7 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
         {
             foreach (SquadModelDiffItem diff in rewrite.Diffs)
             {
-                SquadCommandComposition.WriteLine(
+                _output.WriteLine(
                     $"{diff.Agent}: {diff.OldModel ?? "none"} -> {diff.NewModel ?? "none"}");
             }
 
@@ -346,11 +372,24 @@ internal sealed class SquadPresetUseCommand : Command<SquadPresetUseSettings>
             activeReceipt,
             [],
             true,
-            TimeProvider.System,
+            _time,
             effectiveGlobalRoots);
 
         ISquadTransaction transaction = _transactions.Create(null);
-        transaction.Execute(plan);
+        try
+        {
+            transaction.Execute(plan);
+        }
+        catch (Exception failure)
+        {
+            // A recovery under this deployment's lease can refuse the stale plan, or fail and name the journal. Both
+            // are this command's ordinary error output, not an unhandled exception.
+            _output.WriteTransactionWarnings(transaction.Warnings);
+            _output.WriteFailure(failure);
+            return 1;
+        }
+
+        _output.WriteTransactionWarnings(transaction.Warnings);
 
         foreach (ISquadModelPresetSelectionStore store in selectionStores)
         {

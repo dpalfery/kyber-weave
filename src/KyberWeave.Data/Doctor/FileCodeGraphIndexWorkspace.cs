@@ -6,7 +6,7 @@ using KyberWeave.Domain.Doctor;
 namespace KyberWeave.Data.Doctor;
 
 /// <summary>Holds the CodeGraph index lock as an exclusively opened file and probes writability on the real disk.</summary>
-public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
+public sealed class FileCodeGraphIndexWorkspace(TimeProvider time) : ICodeGraphIndexWorkspace
 {
     /// <summary>How long a waiting run sleeps between attempts to take the lock.</summary>
     private static readonly TimeSpan LockPollInterval = TimeSpan.FromMilliseconds(100);
@@ -15,7 +15,7 @@ public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
     public IDisposable? TryAcquireLock(string path, TimeSpan wait, out string? failure)
     {
         failure = null;
-        DateTime deadline = DateTime.UtcNow + wait;
+        long started = time.GetTimestamp();
         while (true)
         {
             try
@@ -34,11 +34,11 @@ public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
                 failure = $"the index lock path '{path}' is too long";
                 return null;
             }
-            catch (IOException ex) when (CodeGraphIndexRules.IsSharingViolation(ex) && DateTime.UtcNow < deadline)
+            catch (IOException ex) when (IsSharingViolation(ex) && time.GetElapsedTime(started) < wait)
             {
-                Thread.Sleep(LockPollInterval);
+                Task.Delay(LockPollInterval, time).GetAwaiter().GetResult();
             }
-            catch (IOException ex) when (CodeGraphIndexRules.IsSharingViolation(ex))
+            catch (IOException ex) when (IsSharingViolation(ex))
             {
                 return null;
             }
@@ -78,7 +78,7 @@ public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
     /// <inheritdoc />
     public bool IsCodeGraphLockHeld(string indexDirectory)
     {
-        string lockFile = Path.Combine(indexDirectory, CodeGraphIndexRules.IndexLockFileName);
+        string lockFile = Path.Combine(indexDirectory, CodeGraphIndexFiles.IndexLockFileName);
         try
         {
             if (!File.Exists(lockFile)
@@ -94,5 +94,21 @@ public sealed class FileCodeGraphIndexWorkspace : ICodeGraphIndexWorkspace
             // No such process, or a lock file that vanished or cannot be read: CodeGraph treats both as not held.
             return false;
         }
+    }
+
+    /// <summary>
+    ///     Whether an <see cref="IOException"/> represents a sharing or locking violation caused by another process.
+    /// </summary>
+    /// <param name="ex">The exception.</param>
+    public static bool IsSharingViolation(IOException ex)
+    {
+        int hr = ex.HResult;
+        if (hr is unchecked((int)0x80070020) or unchecked((int)0x80070021) || (hr & 0xFFFF) is 32 or 33)
+            return true;
+
+        string msg = ex.Message;
+        return msg.Contains("being used by another process", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("sharing violation", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("locked", StringComparison.OrdinalIgnoreCase);
     }
 }

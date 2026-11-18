@@ -1,15 +1,18 @@
+using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Plans;
-using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
+using Spectre.Console;
 using Spectre.Console.Cli;
 using KyberWeave.Core.FileSystem;
 
@@ -19,7 +22,23 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Prints one task's packet for the worker that was dispatched for it, so a conductor passes a task id and nothing
 /// else, and a worker, which may not open a plan, still gets the whole brief.
 /// </summary>
-public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts hostFacts, IFileSystem files, IProcessEnvironment environment) : Command<DocsPacketSettings>
+public sealed class DocsPacketCommand(
+    IPlanTaskService tasks,
+    IPacketHostFacts hostFacts,
+    IWritableFileSystem files,
+    IProcessEnvironment environment,
+    IPlanTaskTargetService targets,
+    ITaskGateSelectionService taskGates,
+    ICodeGraphPortsFactory codeGraph,
+    IRepositoryFileStore repositoryFiles,
+    IGitRepositoryFacts git,
+    IKyberWeaveConfigRepository configs,
+    IDocumentSourceFactory documents,
+    IPathResolver paths,
+    IAnsiConsole console,
+    IConsole standardError,
+    PlanArguments plans,
+    ArbiterRepoRoot roots) : Command<DocsPacketSettings>
 {
     /// <summary>The plan could not be chosen: none is Ready or In progress, or several are.</summary>
     public const string PlanNotChosen = "KW-DOC-TASKS-CLI-002";
@@ -35,7 +54,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
 
     /// <summary>
     /// Prints the packet of the named task: the built prompt, then the task's resolved test command
-    /// (<see cref="PacketTestCommand" />). The prompt has <c>{worktree}</c> filled in and the prior-results slot
+    /// (<see cref="PacketTestCommandRenderer" />). The prompt has <c>{worktree}</c> filled in and the prior-results slot
     /// filled from <c>--prior-results</c>, or labelled as empty. The plan comes from <c>--plan</c>, else from the one Ready or In progress plan under the planning
     /// folders. When this checkout has none, the repository's other git worktrees are searched for the one active
     /// plan that has the task, so a worker whose shell is not in its worktree still gets its packet. The task file is checked against the plan first, so a stale file is refused with the fix.
@@ -44,9 +63,9 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
     public override int Execute(CommandContext context, DocsPacketSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        string current = Path.GetFullPath(settings.WorkingDirectory ?? environment.CurrentDirectory);
-        string root = settings.Plan is null ? ArbiterRepoRoot.Find(current) : PlanArguments.RepositoryRootFor(settings.Plan, current);
-        if (!CommandHelpers.TryLoadConfig(root, settings.Config, report, out KyberWeaveConfig config))
+        string current = CurrentDirectory(settings);
+        string root = settings.Plan is null ? roots.Find(current) : plans.RepositoryRootFor(settings.Plan, current);
+        if (!CommandHelpers.TryLoadConfig(configs, root, settings.Config, report, out KyberWeaveConfig config))
         {
             return Fail(report);
         }
@@ -94,7 +113,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
         {
             // Checked here so a refusal is reported under the packet's own code, before any prompt is built;
             // the service applies the same rule when it reads the file for the <task> part.
-            if (!TaskPromptService.IsScratchFile(root, settings.PriorResults))
+            if (!TaskPromptService.IsScratchFile(files, root, settings.PriorResults))
             {
                 report.Add(new Diagnostic(
                     PriorResultsUnreadable,
@@ -108,7 +127,7 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
 
             try
             {
-                _ = files.ReadAllText(Path.GetFullPath(settings.PriorResults, root));
+                _ = files.ReadAllText(paths.GetFullPath(settings.PriorResults, root));
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
@@ -124,9 +143,9 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
 
         // The prompt is built at print time, never written into the task file, so the digest is unaffected.
         DocumentIndex index = DocumentIndex.Build(
-            new DocumentLoader(root, config.Ontology).Load(),
-            CodeGraphResolvers.ForRepository(root).Resolver);
-        TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor);
+            documents.Create(root, config.Ontology).Load(),
+            codeGraph.ForRepository(root).Resolver);
+        TaskPromptService prompts = new(tasks, hostFacts, files, index.StandardsFor, environment);
         TaskPromptResult prompt = prompts.Build(
             new TaskPromptRequest(root, settings.Task, plan, settings.Agent, settings.PriorResults),
             config);
@@ -143,34 +162,45 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
             return Fail(report);
         }
 
-        Console.Out.WriteLine(prompt.Prompt);
+        CommandHelpers.WriteUnfolded(console, () => console.Profile.Out.Writer.WriteLine(prompt.Prompt));
         if (prompt.Substitution is not null)
         {
             // A warning to the conductor, not part of the prompt: the hook inserts stdout unchanged.
-            Console.Error.WriteLine(prompt.Substitution);
+            standardError.Error.WriteLine(prompt.Substitution);
         }
 
         // The test command is a packet extra, not part of the prompt the hook inserts, so it is printed here.
-        if (PacketTestCommand.Render(
+        if (PacketTestCommandRenderer.Render(
                 root,
                 config,
                 prompt.Agent,
                 entry,
-                PlanTaskTarget.ContractRow(root, plan, entry.Id),
-                OperatingSystem.IsWindows()) is { } tests)
+                targets.ContractRow(root, plan, entry.Id),
+                environment.OperatingSystem == OperatingSystemKind.Windows,
+                targets,
+                taskGates,
+                files) is { } tests)
         {
-            Console.Out.WriteLine();
-            Console.Out.WriteLine(tests);
+            CommandHelpers.WriteUnfolded(console, () =>
+            {
+                console.Profile.Out.Writer.WriteLine();
+                console.Profile.Out.Writer.WriteLine(tests);
+            });
         }
 
         return 0;
     }
 
+    private string CurrentDirectory(DocsPacketSettings settings) =>
+        settings.WorkingDirectory is null
+            ? environment.CurrentDirectory
+            : paths.GetFullPath(settings.WorkingDirectory, environment.CurrentDirectory);
+
     private string? ChoosePlan(string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
     {
         if (settings.Plan is not null)
         {
-            return PlanArguments.TryResolve(root, config, settings.Plan, current, "docs packet", report, out string relative)
+            return plans.TryResolve(root, config, repositoryFiles, settings.Plan, current, "docs packet", report, out string relative)
                 ? relative
                 : null;
         }
@@ -198,11 +228,11 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
 
     private string? FindInOtherWorktrees(ref string root, KyberWeaveConfig config, DocsPacketSettings settings, string current, DiagnosticReport report)
     {
-        string here = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+        string here = paths.GetFullPath(root, current);
         List<(string Worktree, string Plan)> matches = [];
-        foreach (string worktree in (settings.ListWorktrees ?? (dir => new GitFacts().ListWorktrees(dir)))(root))
+        foreach (string worktree in (settings.ListWorktrees ?? (dir => git.ListWorktrees(dir)))(root))
         {
-            string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(worktree));
+            string other = paths.GetFullPath(worktree, current);
             if (string.Equals(other, here, StringComparison.Ordinal) || !files.DirectoryExists(other))
             {
                 continue;
@@ -246,9 +276,9 @@ public sealed class DocsPacketCommand(IPlanTaskService tasks, IPacketHostFacts h
         return null;
     }
 
-    private static int Fail(DiagnosticReport report)
+    private int Fail(DiagnosticReport report)
     {
-        ReportRenderer.Render(report, OutputFormat.Lines, "docs packet", "Task packet");
+        ReportRenderer.Render(console, report, OutputFormat.Lines, "docs packet", "Task packet");
         return 1;
     }
 }

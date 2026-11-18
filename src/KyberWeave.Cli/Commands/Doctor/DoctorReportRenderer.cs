@@ -16,14 +16,15 @@ internal static class DoctorReportRenderer
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
 
-    /// <summary>Writes the report as check lines, or as JSON when <paramref name="asJson"/> is set.</summary>
-    public static void Write(DoctorReport report, bool asJson)
+    /// <summary>Writes the report to <paramref name="output"/> as check lines, or as JSON when <paramref name="asJson"/> is set.</summary>
+    public static void Write(TextWriter output, DoctorReport report, bool asJson)
     {
+        ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(report);
 
         if (asJson)
         {
-            Console.Out.WriteLine(JsonSerializer.Serialize(
+            output.WriteLine(JsonSerializer.Serialize(
                 new
                 {
                     root = report.Root,
@@ -42,7 +43,7 @@ internal static class DoctorReportRenderer
         }
 
         foreach (string line in DoctorReportLines.For(report))
-            Console.Out.WriteLine(line);
+            output.WriteLine(line);
     }
 
     /// <summary>The wire name of the mode the run actually used. It matches the option that selected it.</summary>

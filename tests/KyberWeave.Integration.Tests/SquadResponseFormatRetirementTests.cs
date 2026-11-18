@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
@@ -12,6 +13,7 @@ namespace KyberWeave.Integration.Tests;
 ///     Pins how <c>squad update</c> retires the <c>response-format</c> skill from installs that already hold it.
 ///     The skill is no longer part of the product, so an update must delete the copies the operator never
 ///     edited, keep an edited copy and the receipt claim on it, and leave the home response guidance alone.
+///     Unit twin: <c>SquadResponseFormatRetirementUnitTests</c>.
 /// </summary>
 /// <remarks>
 ///     The prior release is seeded rather than installed from the product tree. The product no longer
@@ -54,8 +56,8 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
         Directory.CreateDirectory(globalRootsDirectory);
         Directory.CreateDirectory(home);
 
-        HomeUserPaths userPaths = new(applicationData, home);
-        SquadStateStore store = new(userPaths);
+        FakeSquadUserPaths userPaths = new(applicationData, home);
+        SquadStateStore store = RealSquadState.Store(userPaths);
         TempGlobalRoots roots = new(globalRootsDirectory);
         string guidancePath = Path.Combine(home, ".kyber-weave", "response-guidance.md");
 
@@ -174,10 +176,10 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
             byte[] homeGuidance = Encoding.UTF8.GetBytes(HomeGuidanceBody);
             File.WriteAllBytes(guidancePath, homeGuidance);
 
-            HomeUserPaths userPaths = new(applicationData, home);
-            SquadStateStore store = new(userPaths);
+            FakeSquadUserPaths userPaths = new(applicationData, home);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             TempGlobalRoots roots = new(globalRoots);
-            using SeededPriorReleaseSource prior = new(directory.Path);
+            using FakeSquadReleaseSource prior = SeededPriorRelease();
             SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(
                 prior,
                 SquadHostDefaults.ResolveRenderer(),
@@ -231,7 +233,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
         /// <summary>The home guidance bytes the template held before its install ran.</summary>
         public byte[] HomeGuidanceBeforeInstall { get; } = homeGuidanceBeforeInstall;
 
-        public void CopyInto(HomeUserPaths userPaths, string destinationAnchor, string destinationGlobalRoots)
+        public void CopyInto(FakeSquadUserPaths userPaths, string destinationAnchor, string destinationGlobalRoots)
         {
             ArgumentNullException.ThrowIfNull(userPaths);
             ArgumentException.ThrowIfNullOrWhiteSpace(destinationAnchor);
@@ -247,7 +249,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
                 SquadInstallCopy.Canonical(home),
                 SquadInstallCopy.Canonical(userPaths.HomeDirectory));
 
-            SquadStateStore store = new(userPaths);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             string receiptPath = store.ResolveReceiptPath(destinationAnchor, SquadDeploymentScope.Global);
             foreach (SquadTarget target in Targets)
             {
@@ -266,22 +268,15 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
     }
 
     /// <summary>
-    ///     A release that carries the response-format skill as the prior version shipped it. It is the
-    ///     synthetic corpus plus an inline skill and a bundle that lists it, so it does not read the product tree.
+    ///     A release that carries the response-format skill as the prior version shipped it: the synthetic corpus plus
+    ///     the skill and a bundle that lists it, so it does not read the product tree.
     /// </summary>
-    private sealed class SeededPriorReleaseSource : ISquadReleaseSource
+    private static FakeSquadReleaseSource SeededPriorRelease() => new()
     {
-        private const string AssetSha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-        private readonly string _corpusRoot;
-
-        public SeededPriorReleaseSource(string root)
+        SourceDirectory = SyntheticValidSquadReleaseSource.SyntheticCorpusRoot,
+        FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            _corpusRoot = Path.Combine(root, "prior-corpus");
-            CopyTree(SyntheticValidSquadReleaseSource.SyntheticCorpusRoot, _corpusRoot);
-
-            File.WriteAllText(
-                Path.Combine(_corpusRoot, "bundles", "full.yml"),
+            ["bundles/full.yml"] =
                 """
                 schema: kyber-squad.bundle/v1
                 name: full
@@ -292,65 +287,11 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
                   - response-format
                   - task-gate
                 """,
-                new UTF8Encoding(false));
-
-            string skillRoot = Path.Combine(_corpusRoot, "skills", "response-format");
-            Directory.CreateDirectory(skillRoot);
-            File.WriteAllText(
-                Path.Combine(skillRoot, "SKILL.md"),
+            ["skills/response-format/SKILL.md"] =
                 "---\nname: response-format\ndescription: \"Seeded prior response-format skill.\"\n---\n" +
                 SeededSkillBody,
-                new UTF8Encoding(false));
-        }
-
-        public Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            CopyTree(_corpusRoot, request.DestinationPath);
-            List<string> extracted = Directory
-                .EnumerateFiles(request.DestinationPath, "*", SearchOption.AllDirectories)
-                .Select(path =>
-                    Path.GetRelativePath(request.DestinationPath, path).Replace(Path.DirectorySeparatorChar, '/'))
-                .Order(StringComparer.Ordinal)
-                .ToList();
-
-            string assetName = $"kyber-squad-{request.Version}.zip";
-            return Task.FromResult(new SquadReleaseResult(
-                request.Version,
-                new SquadReleaseAsset(
-                    assetName,
-                    new Uri(
-                        $"https://github.com/{request.Repository}/releases/download/v{request.Version}/{assetName}"),
-                    1024),
-                new SquadReleaseChecksum(assetName, AssetSha256),
-                Path.GetFullPath(request.DestinationPath),
-                extracted));
-        }
-
-        public void Dispose()
-        {
-            // The corpus lives under the test's own temp directory, which the test disposes.
-        }
-
-        private static void CopyTree(string source, string destination)
-        {
-            Directory.CreateDirectory(destination);
-            foreach (string file in Directory.EnumerateFiles(source))
-                File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), true);
-            foreach (string directory in Directory.EnumerateDirectories(source))
-                CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
-        }
-    }
-
-    private sealed class HomeUserPaths(string applicationDataDirectory, string homeDirectory) : ISquadUserPaths
-    {
-        public string ApplicationDataDirectory { get; } = applicationDataDirectory;
-        public string HomeDirectory { get; } = homeDirectory;
-    }
+        },
+    };
 
     private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver
     {

@@ -55,22 +55,29 @@ internal sealed class KyberDashCapturePluginStep
 
     private readonly IProcessExecutor _executor;
     private readonly Func<string?> _locateKyberDash;
+    private readonly SquadConsole _console;
 
-    /// <summary>Creates a step over an executor and a locator for the <c>kyberdash</c> executable.</summary>
+    /// <summary>Creates a step over an executor, a locator for the <c>kyberdash</c> executable and a console.</summary>
     /// <param name="executor">Runs the verb. Injected so tests never start a real process.</param>
     /// <param name="locateKyberDash">Returns the full path of <c>kyberdash</c>, or null when it is not installed.</param>
-    public KyberDashCapturePluginStep(IProcessExecutor executor, Func<string?> locateKyberDash)
+    /// <param name="console">Where the verdict, the guidance and the warnings are written.</param>
+    public KyberDashCapturePluginStep(IProcessExecutor executor, Func<string?> locateKyberDash, SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(executor);
         ArgumentNullException.ThrowIfNull(locateKyberDash);
+        ArgumentNullException.ThrowIfNull(console);
         _executor = executor;
         _locateKyberDash = locateKyberDash;
+        _console = console;
     }
 
-    /// <summary>The production step: the shared process executor and the real KyberDash locator.</summary>
-    public static KyberDashCapturePluginStep CreateDefault()
+    /// <summary>The production step: the shared process executor bounded for the verb, and the given locator.</summary>
+    /// <param name="locator">Finds <c>kyberdash</c> beside the running binary or on <c>PATH</c>.</param>
+    /// <param name="console">Where the step writes.</param>
+    public static KyberDashCapturePluginStep Create(KyberDashLocator locator, SquadConsole console)
     {
-        return new KyberDashCapturePluginStep(ProcessExecutor.WithTimeout(PluginVerbTimeout), LocateKyberDash);
+        ArgumentNullException.ThrowIfNull(locator);
+        return new KyberDashCapturePluginStep(ProcessExecutor.WithTimeout(PluginVerbTimeout), locator.Locate, console);
     }
 
     /// <summary>Runs the verb against one OpenCode global root, prints its verdict, and relays its OpenCode guidance.</summary>
@@ -94,7 +101,7 @@ internal sealed class KyberDashCapturePluginStep
         string? kyberdash = _locateKyberDash();
         if (kyberdash is null)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"[yellow]skipped[/] {name} capture plugin: KyberDash was not found beside kyber-weave or on PATH. " +
                 "Install KyberDash, then run [bold]kyber-weave update[/].");
             return CapturePluginStepOutcome.Skipped;
@@ -118,7 +125,7 @@ internal sealed class KyberDashCapturePluginStep
         catch (Exception ex) when (ex is InvalidOperationException or IOException or Win32Exception
                                        or UnauthorizedAccessException or TimeoutException)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"[yellow]warning:[/] {name} capture plugin step could not run KyberDash: {Markup.Escape(ex.Message)}. " +
                 "The Squad deployment is unchanged.");
             return CapturePluginStepOutcome.Warned;
@@ -131,13 +138,13 @@ internal sealed class KyberDashCapturePluginStep
             // gap to name, not a failure of the capture step.
             if (combined.Contains(UnknownCommandMarker, StringComparison.OrdinalIgnoreCase))
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"[yellow]skipped[/] {name} capture plugin: this KyberDash predates the capture plugin command. " +
                     "Run [bold]kyber-weave update[/] to upgrade it.");
                 return CapturePluginStepOutcome.Skipped;
             }
 
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"[yellow]warning:[/] {name} capture plugin step failed (exit {result.ExitCode}): " +
                 $"{Markup.Escape(FirstLine(combined))}. The Squad deployment is unchanged. " +
                 $"Retry with [bold]kyberdash kyber capture plugin install --harness {SquadTargetCatalog.GetToken(harness)} --preserve[/].");
@@ -145,14 +152,14 @@ internal sealed class KyberDashCapturePluginStep
         }
 
         string verdict = FirstLine(result.StandardOutput);
-        AnsiConsole.MarkupLine(verdict.Length == 0
+        _console.Ansi.MarkupLine(verdict.Length == 0
             ? $"{name} capture plugin: ok"
             : Markup.Escape(verdict));
         foreach (string guidance in KyberDashGuidance.CapturePluginGuidanceLines(
                      SquadTargetCatalog.GetToken(harness),
                      result.StandardOutput,
                      verdict))
-            AnsiConsole.MarkupLine(Markup.Escape(guidance));
+            _console.Ansi.MarkupLine(Markup.Escape(guidance));
 
         return CapturePluginStepOutcome.Completed;
     }
@@ -192,7 +199,7 @@ internal sealed class KyberDashCapturePluginStep
                 SquadCommandComposition.ResolveGlobalTargetRoots([harness], globalRoots);
             if (roots.Count == 0)
             {
-                AnsiConsole.MarkupLine(
+                step._console.Ansi.MarkupLine(
                     $"[yellow]skipped[/] {DisplayName(harness)} capture plugin: " +
                     $"the {DisplayName(harness)} global root could not be resolved.");
                 continue;
@@ -241,40 +248,5 @@ internal sealed class KyberDashCapturePluginStep
         }
 
         return string.Empty;
-    }
-
-    /// <summary>
-    ///     Finds <c>kyberdash</c> beside the running <c>kyber-weave</c>, then on <c>PATH</c>. Returns null when it
-    ///     is installed in neither place.
-    /// </summary>
-    private static string? LocateKyberDash()
-    {
-        string fileName = OperatingSystem.IsWindows() ? "kyberdash.exe" : "kyberdash";
-
-        string? installDirectory = Path.GetDirectoryName(Environment.ProcessPath);
-        if (!string.IsNullOrEmpty(installDirectory))
-        {
-            string beside = Path.Combine(installDirectory, fileName);
-            if (File.Exists(beside))
-                return beside;
-        }
-
-        string? path = Environment.GetEnvironmentVariable("PATH");
-        if (string.IsNullOrEmpty(path))
-            return null;
-
-        foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
-            try
-            {
-                string candidate = Path.Combine(directory, fileName);
-                if (File.Exists(candidate))
-                    return candidate;
-            }
-            catch (ArgumentException)
-            {
-                // A PATH entry with characters Path.Combine rejects cannot hold kyberdash; keep searching.
-            }
-
-        return null;
     }
 }

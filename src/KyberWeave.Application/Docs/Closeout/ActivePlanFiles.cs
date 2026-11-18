@@ -18,11 +18,11 @@ internal sealed class ActivePlanFiles
     private static readonly TimeSpan GitTimeout = TimeSpan.FromSeconds(60);
 
     private readonly string _repoRoot;
-    private readonly IDocsEngineConfig _config;
+    private readonly KyberWeaveConfig _config;
     private readonly IRepositoryFileStore _files;
     private readonly IBoundedProcessExecutor _process;
 
-    internal ActivePlanFiles(string repoRoot, IDocsEngineConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process)
+    internal ActivePlanFiles(string repoRoot, KyberWeaveConfig config, IRepositoryFileStore files, IBoundedProcessExecutor process)
     {
         _repoRoot = repoRoot;
         _config = config;

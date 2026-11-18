@@ -14,6 +14,8 @@ using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using ModelContextProtocol.Server;
 using Xunit;
+using KyberWeave.Tests.Corpus;
+using KyberWeave.Tests.RunStart;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -24,6 +26,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTemplate>, IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string Branch = "claude/feat/widget-export";
     private const string ArchivedPlan = "docs/archive/plans/2026-11-13-widget-export.md";
     private const string PrUrl = "https://github.com/acme/widgets/pull/42";
@@ -94,19 +98,21 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
 
     // ---------------------------------------------------------------- the description
 
+    private static KyberWeave.Contracts.Host.IEmbeddedResources Resources => DocsTestCommands.DeliveryPorts.Resources;
+
     [Fact]
     public void TheEmbeddedTemplateIsTheSkillsTemplateByteForByte()
     {
-        string product = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "skills",
-            "create-pull-request", "assets", "pull-request-description.md"));
+        string product = Corpus.ReadText(
+            "products/kyber-squad/skills/create-pull-request/assets/pull-request-description.md");
 
-        Assert.Equal(product, PullRequestDescription.Template);
+        Assert.Equal(product, PullRequestDescription.Template(Resources));
     }
 
     [Fact]
     public void WithNoHostTemplateTheStandardSectionsAppearInOrderAndEmptyOptionalOnesAreLeftOut()
     {
-        string body = PullRequestDescription.Render(new PullRequestContent
+        string body = PullRequestDescription.Render(Resources, new PullRequestContent
         {
             Summary = "Lists could not be exported. Now they can.",
             Type = "Feature",
@@ -126,7 +132,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public void UnverifiedItemsDecisionsAndOpenFindingsGetTheirOwnSections()
     {
-        string body = PullRequestDescription.Render(new PullRequestContent
+        string body = PullRequestDescription.Render(Resources, new PullRequestContent
         {
             Summary = "S.",
             NotVerified = ["the export in a real browser"],
@@ -160,7 +166,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
             - [ ] No secrets or credentials in the diff
             """;
 
-        string body = PullRequestDescription.Render(new PullRequestContent
+        string body = PullRequestDescription.Render(Resources, new PullRequestContent
         {
             Summary = "Lists can be exported.",
             Validation = ["Review: approved, no open findings after 1 round."],
@@ -408,7 +414,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     [Fact]
     public void AFollowUpSectionFollowsAHostTemplateThatDoesNotAskForIt()
     {
-        string body = PullRequestDescription.Render(
+        string body = PullRequestDescription.Render(Resources,
             new PullRequestContent { Summary = "S.", FollowUps = ["Move the shared DTOs (`docs/todo/move-shared-dtos.md`)"] },
             "## Summary\n\n<!-- what -->\n");
 
@@ -512,7 +518,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         File.WriteAllText(Path.Combine(repo, "pull_request_template.md"), "## Summary\n");
         File.WriteAllText(Path.Combine(repo, ".github", "pull_request_template.md"), "## Why\n");
 
-        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, path =>
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(DocsPorts.Files, repo, path =>
             Path.GetFileName(Path.GetDirectoryName(path)) == "template-repo" ? throw new IOException("denied") : File.ReadAllText(path));
 
         Assert.Equal("## Why\n", read.Text);
@@ -527,7 +533,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         File.WriteAllText(Path.Combine(repo, "pull_request_template.md"), "## Summary\n");
         File.WriteAllText(Path.Combine(repo, "docs", "pull_request_template.md"), "## Summary\n");
 
-        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, _ => throw new UnauthorizedAccessException());
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(DocsPorts.Files, repo, _ => throw new UnauthorizedAccessException());
 
         Assert.Null(read.Text);
         Assert.Equal(["pull_request_template.md", "docs/pull_request_template.md"], read.Unreadable);
@@ -568,7 +574,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         File.SetUnixFileMode(locked, UnixFileMode.None);
         try
         {
-            PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, File.ReadAllText);
+            PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(DocsPorts.Files, repo, File.ReadAllText);
 
             Assert.Equal("## Why\n", read.Text);
             Assert.Equal(["docs/pull_request_template.md"], read.Unreadable);
@@ -588,6 +594,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         File.WriteAllText(Path.Combine(repo, ".github", "pull_request_template.md"), "## Why\n");
 
         PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(
+            DocsPorts.Files,
             repo,
             File.ReadAllText,
             folder => string.Equals(Path.GetFileName(folder), "docs", StringComparison.Ordinal)
@@ -608,7 +615,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         File.CreateSymbolicLink(Path.Combine(repo, "pull_request_template.md"), outside);
         File.WriteAllText(Path.Combine(repo, ".github", "pull_request_template.md"), "## Why\n");
 
-        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, File.ReadAllText);
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(DocsPorts.Files, repo, File.ReadAllText);
 
         Assert.Equal("## Why\n", read.Text);
         Assert.Equal(["pull_request_template.md"], read.Unreadable);
@@ -621,7 +628,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         Directory.CreateDirectory(repo);
         File.WriteAllText(Path.Combine(repo, "pull_request_template.md"), new string('x', (int)BoundedFile.MaxBytes + 1));
 
-        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(repo, BoundedFile.ReadAllText);
+        PullRequestDescription.HostTemplate read = PullRequestDescription.ReadHostTemplate(DocsPorts.Files, repo, BoundedFile.ReadAllText);
 
         Assert.Null(read.Text);
         Assert.Equal(["pull_request_template.md"], read.Unreadable);
@@ -705,7 +712,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
         File.SetUnixFileMode(template, UnixFileMode.None);
         try
         {
-            Assert.Null(PullRequestDescription.ReadHostTemplate(repo));
+            Assert.Null(PullRequestDescription.ReadHostTemplate(DocsPorts.Files, repo));
         }
         finally
         {
@@ -844,7 +851,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
     private const string Config = "ontology:\n  docs-root: docs\n";
 
     private DeliveryOutcome Deliver(ScriptedGh gh, DeliveryRequest request, Action<string>? afterPlanFound = null, Func<string, string>? readTemplateFile = null) =>
-        new RunDelivery(_work, KyberWeaveConfigLoader.LoadFromYaml(Config), gh, _home, DocsTestCommands.DeliveryPorts) { AfterPlanFound = afterPlanFound, ReadTemplateFile = readTemplateFile }.Run(request);
+        new RunDelivery(_work, KyberWeaveConfigAssembler.FromYaml(Config), gh, _home, DocsTestCommands.DeliveryPorts) { AfterPlanFound = afterPlanFound, ReadTemplateFile = readTemplateFile }.Run(request);
 
     private void AssertRefusedBeforeAnythingLeaves(DeliveryOutcome outcome, ScriptedGh gh, string code)
     {
@@ -873,7 +880,7 @@ public sealed class RunDeliveryTests : IClassFixture<RunDeliveryRepositoryTempla
             _remote);
 
         string common = Path.GetFullPath(Path.Combine(_work, Git(_work, "rev-parse", "--git-common-dir").Trim()));
-        RunBaseState.Write(_home, Branch, "origin/main", new RunStartPlace(common, _work, DateTimeOffset.UtcNow.AddMinutes(-5)));
+        RunStartTestServices.RunStateStore().Write(_home, Branch, "origin/main", new RunStartPlace(common, _work, DateTimeOffset.UtcNow.AddMinutes(-5)));
     }
 
     private void Write(string relative, string text)

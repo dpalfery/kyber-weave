@@ -35,7 +35,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         string home = Path.Combine(applicationData, "home");
         Directory.CreateDirectory(home);
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -43,12 +43,12 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        string physicalHome = SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath;
+        string physicalHome = SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath;
 
         // The planner cannot know the home anchor, so it records the unanchored marker. The transaction
         // stamps the physical home on the plan as it writes, which is what this test asserts afterwards.
-        Assert.Equal(SquadStateStore.UnanchoredTargetRoot, plan.Receipt.TargetRoot);
-        new SquadTransaction(store).Execute(plan);
+        Assert.Equal(SquadStateSchemas.UnanchoredTargetRoot, plan.Receipt.TargetRoot);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         string stateDirectory = store.ResolveStateDirectory(
             fixture.Path,
@@ -85,7 +85,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         // dot-prefixed path here would only manufacture a self-contradicting receipt of this
         // test's own making against the read-side layout cross-check (#91), not exercise
         // anything CreateInstall itself does.
-        SquadDeploymentPlan firstPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan firstPlan = RealSquadDeployment.Planner.CreateInstall(
             firstRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -94,7 +94,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt));
 
-        new SquadTransaction(store).Execute(firstPlan);
+        RealSquadDeployment.Transaction(store).Execute(firstPlan);
 
         SquadReceipt firstReceipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
             firstRoot,
@@ -107,7 +107,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Assert.Equal("agents/first.toml", Assert.Single(sharedReceipt.Files).RelativePath);
 
         string globalState = Path.Combine(
-            SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+            SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
             ".kyber-weave",
             "squad",
             "global");
@@ -156,7 +156,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [SquadTarget.Codex] = codexRoot
         });
         SquadStateStore store = Store(applicationData);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             fixture.Path,
             SquadDeploymentScope.Global,
             Lock(),
@@ -169,7 +169,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             new FixedTimeProvider(InstalledAt),
             globalRoots);
 
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         Assert.Equal("claude conductor", Read(claudeRoot, "agents/conductor.md"));
         Assert.Equal("codex conductor", Read(codexRoot, "agents/conductor.md"));
@@ -177,7 +177,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         // persisted and re-read differs from the plan's own v1-labeled in-memory receipt only
         // in that one field.
         AssertReceiptEqual(
-            plan.Receipt with { Schema = SquadStateStore.ReceiptSchemaV2 },
+            plan.Receipt with { Schema = SquadStateSchemas.ReceiptSchemaV2 },
             Assert.IsType<SquadReceipt>(store.ReadReceipt(fixture.Path, SquadDeploymentScope.Global)));
 
         SquadStatusCommand command = SquadTestCommands.Status(stateStore: store, globalRoots: globalRoots);
@@ -231,7 +231,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             SquadDeploymentPlan plan = CreateGlobalInstallPlan(targetRoot);
             SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
             FailingObserver failure = new(fixture.Path, failureSequence);
-            SquadTransaction transaction = new(store, failure);
+            SquadTransaction transaction = RealSquadDeployment.Transaction(store, failure);
 
             Assert.Throws<InjectedSquadTransactionFailure>(() => transaction.Execute(plan));
             AssertTreesEqual(before, CaptureTree(fixture.Path));
@@ -269,7 +269,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Directory.CreateSymbolicLink(aliasRoot, targetRoot);
         SquadStateStore store = Store(applicationData);
         string globalState = Path.Combine(
-            SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+            SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
             ".kyber-weave",
             "squad",
             "global");
@@ -311,7 +311,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Directory.CreateDirectory(home);
         SquadStateStore store = Store(applicationData);
         string expected = Path.Combine(
-            SquadPhysicalRootIdentity.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
+            SquadPhysicalRootIdentities.Resolve(home, SquadFileSystemPathSemantics.Instance).PhysicalPath,
             ".kyber-weave",
             "squad",
             "global",
@@ -333,16 +333,16 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         if (Directory.Exists(lowerRoot))
         {
             Assert.Equal(
-                SquadPhysicalRootIdentity.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance),
-                SquadPhysicalRootIdentity.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance));
+                SquadPhysicalRootIdentities.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance),
+                SquadPhysicalRootIdentities.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance));
             return;
         }
 
         Directory.CreateDirectory(lowerRoot);
         Directory.CreateSymbolicLink(symlinkRoot, upperRoot);
-        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentity.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
-        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentity.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
-        SquadPhysicalRootIdentity symlinkIdentity = SquadPhysicalRootIdentity.Resolve(symlinkRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity upperIdentity = SquadPhysicalRootIdentities.Resolve(upperRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity lowerIdentity = SquadPhysicalRootIdentities.Resolve(lowerRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity symlinkIdentity = SquadPhysicalRootIdentities.Resolve(symlinkRoot, SquadFileSystemPathSemantics.Instance);
         SquadStateStore store = Store(applicationData);
 
         Assert.NotEqual(upperIdentity.PhysicalPath, lowerIdentity.PhysicalPath);
@@ -353,7 +353,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Assert.Equal(upperIdentity, symlinkIdentity);
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan activePlan = RealSquadDeployment.Planner.CreateInstall(
             upperRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -361,7 +361,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        SquadDeploymentPlan siblingPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan siblingPlan = RealSquadDeployment.Planner.CreateInstall(
             lowerRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -369,16 +369,17 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        SquadTransaction activeTransaction = new(store, blocker);
-        Task activeExecution = Task.Run(() => activeTransaction.Execute(activePlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
+        Task activeExecution = BlockedTransaction.Start(() => activeTransaction.Execute(activePlan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            activeExecution,
             "The first case-distinct root did not acquire its physical-root lease.");
 
         Exception? siblingException;
         try
         {
-            SquadTransaction siblingTransaction = new(store);
+            SquadTransaction siblingTransaction = RealSquadDeployment.Transaction(store);
             siblingException = Record.Exception(() => siblingTransaction.Execute(siblingPlan));
         }
         finally
@@ -402,9 +403,9 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(actualRoot);
         Directory.CreateSymbolicLink(symlinkAlias, actualRoot);
-        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentity.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity actualIdentity = SquadPhysicalRootIdentities.Resolve(actualRoot, SquadFileSystemPathSemantics.Instance);
 
-        Assert.Equal(actualIdentity, SquadPhysicalRootIdentity.Resolve(symlinkAlias, SquadFileSystemPathSemantics.Instance));
+        Assert.Equal(actualIdentity, SquadPhysicalRootIdentities.Resolve(symlinkAlias, SquadFileSystemPathSemantics.Instance));
         if (!Directory.Exists(caseAlias))
         {
             Assert.NotEqual(
@@ -413,7 +414,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             return;
         }
 
-        SquadPhysicalRootIdentity aliasIdentity = SquadPhysicalRootIdentity.Resolve(caseAlias, SquadFileSystemPathSemantics.Instance);
+        SquadPhysicalRootIdentity aliasIdentity = SquadPhysicalRootIdentities.Resolve(caseAlias, SquadFileSystemPathSemantics.Instance);
         SquadStateStore store = Store(applicationData);
         Assert.Equal(actualIdentity.PhysicalPath, aliasIdentity.PhysicalPath);
         Assert.Equal(actualIdentity.Key, aliasIdentity.Key);
@@ -422,7 +423,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             store.ResolveReceiptPath(caseAlias, SquadDeploymentScope.Global));
 
         using BlockingObserver blocker = new(SquadTransactionStepKind.IntentWritten);
-        SquadDeploymentPlan activePlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan activePlan = RealSquadDeployment.Planner.CreateInstall(
             actualRoot,
             SquadDeploymentScope.Project,
             Lock(),
@@ -433,7 +434,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         // Project scope, not global: the lease of a project is its physical root, so a case alias of that
         // root contends. Global state is leased on the home, which this root is not, so a global alias
         // would correctly not contend with a project at an unrelated root.
-        SquadDeploymentPlan aliasPlan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan aliasPlan = RealSquadDeployment.Planner.CreateInstall(
             caseAlias,
             SquadDeploymentScope.Project,
             Lock(),
@@ -441,16 +442,17 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [],
             false,
             new FixedTimeProvider(InstalledAt));
-        SquadTransaction activeTransaction = new(store, blocker);
-        Task activeExecution = Task.Run(() => activeTransaction.Execute(activePlan));
-        Assert.True(
-            blocker.Reached.Wait(TimeSpan.FromSeconds(5)),
+        SquadTransaction activeTransaction = RealSquadDeployment.Transaction(store, blocker);
+        Task activeExecution = BlockedTransaction.Start(() => activeTransaction.Execute(activePlan));
+        BlockedTransaction.WaitForStep(
+            blocker.Reached,
+            activeExecution,
             "The physical-root alias did not acquire its shared lease.");
 
         Exception? aliasException;
         try
         {
-            SquadTransaction aliasTransaction = new(store);
+            SquadTransaction aliasTransaction = RealSquadDeployment.Transaction(store);
             aliasException = Record.Exception(() => aliasTransaction.Execute(aliasPlan));
         }
         finally
@@ -473,7 +475,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         Directory.CreateDirectory(firstRoot);
         Directory.CreateDirectory(secondRoot);
         Directory.CreateSymbolicLink(aliasRoot, firstRoot);
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateInstall(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
             aliasRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -486,7 +488,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         SortedDictionary<string, TreeEntry> before = CaptureTree(fixture.Path);
 
         Exception? exception = Record.Exception(() =>
-            new SquadTransaction(Store(applicationData)).Execute(plan));
+            RealSquadDeployment.Transaction(Store(applicationData)).Execute(plan));
 
         SquadDeploymentConflictException
             conflict = Assert.IsAssignableFrom<SquadDeploymentConflictException>(exception);
@@ -814,13 +816,13 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [SquadTarget.Copilot] = fakeCopilotRoot
         });
 
-        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan uninstallPlan = RealSquadDeployment.Planner.CreateUninstall(
             recordedRoot,
             SquadDeploymentScope.Global,
             legacyReceipt,
             globalRoots);
 
-        new SquadTransaction(Store(applicationData)).Execute(uninstallPlan);
+        RealSquadDeployment.Transaction(Store(applicationData)).Execute(uninstallPlan);
 
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".codex/agents/conductor.toml")));
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".github/agents/reviewer.agent.md")));
@@ -886,13 +888,13 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             [SquadTarget.Copilot] = fakeCopilotRoot
         });
 
-        SquadDeploymentPlan uninstallPlan = SquadDeploymentPlanner.CreateUninstall(
+        SquadDeploymentPlan uninstallPlan = RealSquadDeployment.Planner.CreateUninstall(
             recordedRoot,
             SquadDeploymentScope.Global,
             legacyReceipt,
             globalRoots);
 
-        new SquadTransaction(stateStore).Execute(uninstallPlan);
+        RealSquadDeployment.Transaction(stateStore).Execute(uninstallPlan);
 
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".codex/agents/conductor.toml")));
         Assert.False(File.Exists(Path.Combine(recordedRoot, ".github/agents/reviewer.agent.md")));
@@ -942,7 +944,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         SortedDictionary<string, byte[]> receiptSnapshotBefore = Snapshot(stateDir);
         SortedDictionary<string, byte[]> deploymentSnapshotBefore = Snapshot(recordedRoot);
 
-        using RecordingReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = FakeSquadReleaseSource.Failing(new NotImplementedException());
         FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
@@ -1003,7 +1005,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
         SortedDictionary<string, byte[]> receiptSnapshotBefore = Snapshot(stateDir);
         SortedDictionary<string, byte[]> deploymentSnapshotBefore = Snapshot(recordedRoot);
 
-        using RecordingReleaseSource releaseSource = new();
+        using FakeSquadReleaseSource releaseSource = FakeSquadReleaseSource.Failing(new NotImplementedException());
         FakeGlobalRootResolver globalRoots = new(new Dictionary<SquadTarget, string>
         {
             [SquadTarget.Codex] = Path.Combine(fixture.Path, "fake-codex")
@@ -1051,7 +1053,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
                     false)
             ]);
 
-        SquadDeploymentPlan updatePlan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan updatePlan = RealSquadDeployment.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -1095,7 +1097,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             ]);
 
         SquadDeploymentConflictException exception = Assert.Throws<SquadDeploymentConflictException>(() =>
-            SquadDeploymentPlanner.CreateUpdate(
+            RealSquadDeployment.Planner.CreateUpdate(
                 targetRoot,
                 SquadDeploymentScope.Global,
                 Lock("1.2.4"),
@@ -1134,7 +1136,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
                     false)
             ]);
 
-        SquadDeploymentPlan plan = SquadDeploymentPlanner.CreateUpdate(
+        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock("1.2.4"),
@@ -1145,7 +1147,7 @@ public sealed class SquadDeploymentStateLayoutTests : SquadDeploymentStateTestBa
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
         Assert.Equal(
-            SquadDeploymentPlan.ClassifyGlobalLayout(plan.Receipt.Files),
+            SquadDeploymentPlanRules.ClassifyGlobalLayout(plan.Receipt.Files),
             plan.Receipt.Layout);
         Assert.Equal(SquadReceiptLayout.SingleRoot, plan.Receipt.Layout);
     }

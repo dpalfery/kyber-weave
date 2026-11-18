@@ -135,6 +135,90 @@ public static class ProcessRunner
             standardError.GetAwaiter().GetResult());
     }
 
+    /// <summary>Whether a process with this id is still running.</summary>
+    /// <param name="processId">The process id, as the operating system reports it.</param>
+    /// <returns>True when the process is running; false when it has ended, never existed or the id is not valid.</returns>
+    internal static bool IsAlive(int processId)
+    {
+        if (processId <= 0)
+        {
+            return false;
+        }
+
+        try
+        {
+            using Process process = Process.GetProcessById(processId);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+        catch (InvalidOperationException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Finds a program the way the operating system's process launcher does.</summary>
+    /// <param name="program">A program name to look up on the path, or a path to check.</param>
+    /// <returns>The full path of the program, or null when it is not there.</returns>
+    internal static string? FindOnPath(string program)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(program);
+
+        if (ContainsDirectorySeparator(program))
+        {
+            return IsExecutable(program) ? Path.GetFullPath(program) : null;
+        }
+
+        string path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+        foreach (string directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            foreach (string extension in ExecutableExtensions(program))
+            {
+                string candidate = Path.Combine(directory, program + extension);
+                if (IsExecutable(candidate))
+                {
+                    return Path.GetFullPath(candidate);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool ContainsDirectorySeparator(string program) =>
+        program.Contains(Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+        program.Contains(Path.AltDirectorySeparatorChar, StringComparison.Ordinal);
+
+    private static string[] ExecutableExtensions(string program)
+    {
+        if (!OperatingSystem.IsWindows() || Path.HasExtension(program))
+        {
+            return [string.Empty];
+        }
+
+        string pathExtensions = Environment.GetEnvironmentVariable("PATHEXT") ?? ".EXE;.CMD;.BAT;.COM";
+        return [string.Empty, .. pathExtensions.Split(';', StringSplitOptions.RemoveEmptyEntries)];
+    }
+
+    private static bool IsExecutable(string candidate)
+    {
+        if (!File.Exists(candidate))
+        {
+            return false;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            return true;
+        }
+
+        UnixFileMode mode = File.GetUnixFileMode(candidate);
+        return (mode & (UnixFileMode.UserExecute | UnixFileMode.GroupExecute | UnixFileMode.OtherExecute)) != 0;
+    }
+
     internal static void TryKillTree(Process process)
     {
         try
@@ -203,11 +287,11 @@ public static class ProcessRunner
         startInfo.RedirectStandardOutput = false;
         startInfo.RedirectStandardError = false;
 
-        // UseShellExecute is explicitly disabled above, and upstream callers (such as
-        // SquadHarnessLauncher.BuildStartInfo) validate executables and arguments
-        // against command-injection characters before launch.
-        // nosemgrep: csharp.lang.security.injections.os-command.os-command-injection
-        using Process process = Process.Start(startInfo)
+        // UseShellExecute is explicitly disabled above. The one caller that sets the
+        // concatenated Arguments string is SquadHarnessLauncher.BuildStartInfo, for Windows
+        // cmd/bat shims, and it refuses any argument containing a cmd metacharacter
+        // (quotes, %, !, ^, &, |, <, >, ;, $, backtick, parentheses, CR, LF) before launch.
+        using Process process = Process.Start(startInfo) // nosemgrep
                                 ?? throw new InvalidOperationException("The child process could not be started.");
 
         process.WaitForExit();

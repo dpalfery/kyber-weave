@@ -1,8 +1,11 @@
 using System.Globalization;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Closeout;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands.Docs;
@@ -11,7 +14,13 @@ namespace KyberWeave.Cli.Commands.Docs;
 /// Does the mechanical half of a plan closeout: checks the closeout evidence the archive gate wants, then archives
 /// the plan, removes its task file and updates the plan index and the archived plan inventory.
 /// </summary>
-public sealed class DocsCloseoutCommand(IPlanCloseoutService closeout) : Command<DocsCloseoutSettings>
+public sealed class DocsCloseoutCommand(
+    IPlanCloseoutService closeout,
+    IRepositoryFileStore files,
+    IKyberWeaveConfigRepository configs,
+    TimeProvider time,
+    IAnsiConsole console,
+    PlanArguments plans) : Command<DocsCloseoutSettings>
 {
     /// <summary>The <c>--date</c> value is not a date.</summary>
     public const string InvalidDate = "KW-DOC-CLOSEOUT-005";
@@ -29,39 +38,39 @@ public sealed class DocsCloseoutCommand(IPlanCloseoutService closeout) : Command
         ArgumentNullException.ThrowIfNull(settings);
 
         DiagnosticReport report = new();
-        DateOnly date = DateOnly.FromDateTime(DateTime.UtcNow);
+        DateOnly date = DateOnly.FromDateTime(time.GetUtcNow().UtcDateTime);
         if (settings.Date is not null
             && !DateOnly.TryParseExact(settings.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date))
         {
             report.Add(new Diagnostic(
                 InvalidDate, Severity.Error, $"--date '{settings.Date}' is not a date.", "docs closeout",
                 Hint: "Write the date as yyyy-MM-dd."));
-            CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
+            CommandHelpers.Finish(console, report, settings, "docs closeout", "Plan");
             return 1;
         }
 
         string typed = settings.Path;
-        string root = PlanArguments.RepositoryRootFor(typed, settings.WorkingDirectory);
+        string root = plans.RepositoryRootFor(typed, settings.WorkingDirectory);
         settings.Path = root;
-        if (!DocsCommandComposition.TryResolveConfig(settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
+        if (!DocsCommandComposition.TryResolveConfig(configs, settings, report, out KyberWeaveConfig config, out OntologyConfig ontology))
         {
-            CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
+            CommandHelpers.Finish(console, report, settings, "docs closeout", "Plan");
             return 1;
         }
 
         KyberWeaveConfig effective = config.WithOntology(ontology);
-        if (!PlanArguments.TryResolve(root, effective, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
+        if (!plans.TryResolve(root, effective, files, typed, settings.WorkingDirectory, "docs closeout", report, out string relative))
         {
-            CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
+            CommandHelpers.Finish(console, report, settings, "docs closeout", "Plan");
             return 1;
         }
 
-        PlanArguments.Announce(report, settings, relative);
+        plans.Announce(report, settings, relative);
         PlanCloseoutOutcome outcome = closeout.Run(root, effective, relative, date, settings.Archive && !settings.DryRun);
         report.AddRange(outcome.Report.Items);
         report.AddMetric("archived", outcome.Archived);
 
-        CommandHelpers.Finish(report, settings, "docs closeout", "Plan");
+        CommandHelpers.Finish(console, report, settings, "docs closeout", "Plan");
         return report.HasErrors ? 1 : 0;
     }
 }

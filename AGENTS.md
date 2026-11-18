@@ -35,15 +35,15 @@ you do write.
 run a targeted set instead. The council's `test` gate and CI run the full suite. To reproduce a CI failure, run the classes or files CI reported.
 Three mechanical refusals back that rule (best-effort; limits in the test standard):
 `kyber-weave review gates` refuses a gate marked `full-suite: true` with `KW-REVIEW-033` unless the caller is the council
-(`--council`) or a person at a terminal; `scripts/fast-loop.sh --full`, `--scoped` and `--regenerate` exit 89 from a
+(`--council`) or a person at a terminal; `scripts/fast-loop.sh --full` and `--scoped` exit 89 from a
 non-interactive shell; and the shipped gate catalogue writes `full-suite: true` on every whole-suite gate.
 
 Inside a Squad run, your task packet names the test command and your agent rules say when to
 run it. Otherwise, run `scripts/fast-loop.sh --touched` while iterating: it inspects modified files and
 routes to targeted checks for .NET, KyberDash, the tray crate, and governed docs. For .NET it runs only the
-product test classes that name a type from a changed C# file, the layer test projects at the same time, and checks
+unit test classes that name a type from a changed C# file, every unit project at the same time, and checks
 format and style on the changed files only (about 45 seconds warm, against several minutes for the whole suite);
-when nothing matches it falls back to the fast tier. `--help` lists
+when nothing matches it runs every unit project whole. `--help` lists
 its modes; `--full` and `--scoped` reach the `test` gate, so they are not for dev agents and exit 89 from a non-terminal shell. It is
 **not** evidence and must never be cited as such ([`REVIEW.md`](REVIEW.md)).
 
@@ -56,8 +56,8 @@ run reports a non-zero test count. The commands for each area:
 - .NET: [`docs/standards/test/test.standards.md`](docs/standards/test/test.standards.md#completion)
 - Repository policy (scripts, workflows, gate configuration, docs prose, source scans):
   [`tests/KyberWeave.RepoPolicy.Tests/AGENTS.md`](tests/KyberWeave.RepoPolicy.Tests/AGENTS.md)
-- Wording of skills, agents and instructions (scheduled to become eval-style):
-  [`tests/KyberWeave.PromptContent.Tests/AGENTS.md`](tests/KyberWeave.PromptContent.Tests/AGENTS.md)
+- Shipped content: agents, skills, standards, documents and workflows, read through the corpus seam:
+  [`tests/KyberWeave.Content.Tests/AGENTS.md`](tests/KyberWeave.Content.Tests/AGENTS.md)
 - KyberDash: [`dash/AGENTS.md`](dash/AGENTS.md#gates)
 - Tray UI and tray crate: [`dash/tray/AGENTS.md`](dash/tray/AGENTS.md#gates)
 
@@ -70,6 +70,50 @@ comes from bounded, allow-listed process sites ([ADR 0047](docs/adr/0047-kyberda
 `fast-loop.sh` runs the same commands directly. Playwright runs only with
 `--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
 [Running tests safely](docs/dash/runbook.md#running-tests-safely).
+
+### Seams: only an adapter touches a resource
+
+Every outside resource — the disk, a child process, the environment, the console, the clock,
+identifiers, a cross-process lease, an embedded resource, configuration, the network, the operating
+system's credential store, and the shipped content a test reads — is reached through one interface,
+a **seam**. The interface lives in `src/KyberWeave.Contracts`; its adapter lives in
+`src/KyberWeave.Data` (or `src/KyberWeave.Kernel` for the low-level file-system and process work);
+its fake lives in `tests/KyberWeave.Testing`, one fake per interface, and a shared contract suite
+runs that fake in a unit project and the adapter in `KyberWeave.Integration.Tests`.
+[`docs/reference/seams.md`](docs/reference/seams.md) is the register of every seam, adapter, fake,
+contract suite and allowed sealed framework type.
+
+- **Only an adapter, or a composition root wiring one at startup, calls `System.IO`, `Process`,
+  `Environment`, `Console`, the system clock, `Guid.NewGuid`, `Random`, `Mutex` or a network client
+  directly.** Any other class that does is a defect, and a reviewer raises it as a finding.
+- **New behaviour gets an in-memory unit test written against an interface.** The test lives in the
+  unit project of the code under test, runs over the shared fakes, and touches no disk, starts no
+  program, reads no environment variable, reads no real clock and opens no socket.
+- **Code testable only through a real resource is a design gap to raise, not a reason to add a slow
+  test.** Add or widen the seam first and write the unit test against it. The real-disk or
+  real-program proof stays in `KyberWeave.Integration.Tests`.
+- **`KyberWeave.Domain` holds data only**: records, DTOs, property bags, value objects, enums,
+  options and constants. Logic lives in `KyberWeave.Application`. A read-only property computed
+  from a type's own fields counts as data.
+- **Three kinds of test.** A unit test runs in memory with the unit projects. An integration test
+  performs a real deployment, starts a real program or needs a real file system, and runs only in
+  CI. A content test checks the shipped agents, skills, standards and documents, reads them through
+  the corpus seam, and runs with the unit projects. Developer agents, task gates and the review
+  council's gates run the unit and content projects; CI runs the integration project as its own
+  required job.
+- **Test roots are platform-qualified.** Derive a path from the fake's in-memory root or the test
+  temp root, never from a POSIX literal such as `/kw/work`, so the same test runs on Windows. The
+  unit projects do not yet run on Windows and some fixtures still carry that literal; the gap is
+  tracked in [`docs/todo/unit-tests-on-windows-ci.md`](docs/todo/unit-tests-on-windows-ci.md).
+
+No build check or architecture test enforces these rules, and none is to be added: written
+guidance and review do ([ADR 0089](docs/adr/0089-every-behaviour-is-testable-through-a-seam.md)).
+The one mechanical check is the repository-policy scan that keeps ambient I/O out of
+`KyberWeave.Domain`; it is deliberately narrower than the rule and does not check the seam rule
+elsewhere. A class that has not caught up is debt, not a licence: the seam register lists every
+remaining one and the follow-up todos name the work that removes it. New code follows the rule.
+The test rules themselves are in
+[the test standard](docs/standards/test/test.standards.md#three-kinds-of-test).
 
 ### Before opening a PR
 
@@ -87,8 +131,8 @@ dotnet run --project src/KyberWeave.Cli -- docs drift .
 
 #### The .NET unit suite completes in 120 seconds or less — a hard limit
 
-The full run — `dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release`, the `test` gate's command over
-`tests/KyberWeave.Tests` — must complete within 120 seconds of wall-clock time. That is a hard limit, not a target.
+The full run — `dotnet test --solution KyberWeave.Unit.slnf -c Release`, the `test` gate's command over every unit,
+content, policy and architecture project — must complete within 120 seconds of wall-clock time. That is a hard limit, not a target.
 Time every local full run: the runner's closing summary `duration:` line is the number, and whoever ran it, person
 or agent, states it in their report. Any local full run over 120 seconds is escalated at once, whatever else the
 machine was doing — no second run to confirm. The work is not done: escalate with the measured time, the commit,
@@ -100,16 +144,19 @@ What keeps the run there is written down, in [the test standard's speed rules](d
 read them before you write a test. Do not add a guard script or a timing check for them: the rules are guidance an
 author reads, and the classes themselves stay performant.
 
+**Unit tests live in one project per product project**: `tests/KyberWeave.<Project>.Tests` for Application, Hooks, Kernel,
+Mcp, Arbiter, Cli and Data (see [the test standard](docs/standards/test/test.standards.md#stack)).
+
 **Integration tests live in `tests/KyberWeave.Integration.Tests`.** A test that performs a real Squad
 deployment, starts a real program, or needs a real file system beyond its own small scratch folder
-belongs there. That project is the safety net: CI runs it on every pull request as its own job, and a
-developer agent does not run it. The rule for which project a test belongs in, and the in-memory unit
+belongs there. That project is the safety net: CI runs it on every pull request as its own required job.
+A developer agent, a task gate and the review council's gates run unit and content projects only, never this one. The rule for which project a test belongs in, and the in-memory unit
 test that stands in for new behaviour, are in
 [the test standard](docs/standards/test/test.standards.md#which-project-a-test-belongs-in).
 
 `review gates .` is the review council's command, not a dev agent's: its `test` gate has no filter,
 so any .NET change runs the whole product suite, scoped or not. CI runs the full suite on the PR.
-Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `integration-test`, `ts-test`, `cargo-test`)
+Without `--council`, from a shell with no terminal, its full-suite gates (`test`, `ts-test`, `cargo-test`)
 are not run: each is reported as a refused blocking failure (`KW-REVIEW-033`, exit `1`) that means "not run
 here", not a code finding. Only the `code-reviewer` council and CI pass `--council`. A scoped run still
 runs the other gates; with `--all` a refused full-suite gate ends the run at once, with no gate started.
@@ -117,7 +164,7 @@ runs the other gates; with `--all` a refused full-suite gate ends the run at onc
 Run every test and e2e command you start yourself directly: `.NET` via `dotnet`, KyberDash and tray
 via `npm --prefix dash …`, `npx --prefix dash playwright test …` and `cargo … --manifest-path
 dash/tray/src-tauri/Cargo.toml …`. In [`.kyber-weave/kyber-weave.yml`](.kyber-weave/kyber-weave.yml)
-every gate — the `dotnet test` gates (`test`, `integration-test`, `test-policy`) and the dash
+every gate — the `dotnet test` gates (`test`, `test-policy`) and the dash
 `ts-test` gate — declares its command directly. Council gates skip gates whose `include` does not match changed files (`KW-REVIEW-026`);
 see [`docs/code-review/architecture.md`](docs/code-review/architecture.md). Format, build,
 test, and skill argv are the `review.gates` entries in
@@ -184,20 +231,20 @@ schedulers, or jobs; shared engine, one datastore, one `/api/kyber/*` API. See
 ## Dependencies
 
 Core dependency policy (Markdig, YamlDotNet, sqlite3 CLI for CodeGraph): see
-[`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md).
+[`src/KyberWeave.Application/AGENTS.md`](src/KyberWeave.Application/AGENTS.md).
 
 ## Where to go next
 
 | Working on | Read |
 |---|---|
 | Writing C# anywhere in this repository | [`docs/standards/csharp/csharp.standards.md`](docs/standards/csharp/csharp.standards.md), the path declared as **<csharp-coding-standard>** below |
-| The engine — `KyberWeave.Core`, `KyberWeave.Core.Docs` and `KyberWeave.Core.Squad` | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
+| The engine — `KyberWeave.Application` and the layers under it | [`src/KyberWeave.Application/AGENTS.md`](src/KyberWeave.Application/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
 | KyberDash gates (`dash/web` and `dash/tray` are display layers) | [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), [`dash/AGENTS.md`](dash/AGENTS.md) |
 | KyberDash architecture and runbook (`dash/web` and `dash/tray` are display layers) | [`docs/rules/kyberdash-display-layer.md`](docs/rules/kyberdash-display-layer.md), [`dash/AGENTS.md`](dash/AGENTS.md), [`docs/dash/architecture.md`](docs/dash/architecture.md), [`docs/dash/runbook.md`](docs/dash/runbook.md) |
-| Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Tests/AGENTS.md`](tests/KyberWeave.Tests/AGENTS.md) for fixtures |
+| Tests | The path declared as **<test-coding-standard>** below, then [`tests/KyberWeave.Testing/AGENTS.md`](tests/KyberWeave.Testing/AGENTS.md) for fixtures |
 | Authoring documentation | [`docs/documentation-ontology.md`](docs/documentation-ontology.md), and the `kyber-docs-authoring` skill in [`.apm/skills/`](.apm/skills/kyber-docs-authoring/SKILL.md) |
 
 ## House style

@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Processes;
@@ -27,7 +28,8 @@ public sealed class RepositoryDoctorService(
     PostCheckoutHookInstaller postCheckoutHook,
     IDoctorFileSystem files,
     IRepositoryToolSettings settings,
-    IProcessEnvironment processEnvironment) : IRepositoryDoctor
+    IProcessEnvironment processEnvironment,
+    IPathResolver paths) : IRepositoryDoctor
 {
     /// <summary>Runs the doctor against <paramref name="root"/>.</summary>
     /// <param name="root">The directory to check. The git toplevel of this directory becomes the repository root.</param>
@@ -98,7 +100,7 @@ public sealed class RepositoryDoctorService(
         // The Copilot prompt override is opt-in: with no installed prompt file the probe adds nothing. It runs for any
         // repository the user's home contains, because the override is machine-wide and not a per-repository setting.
         if (!string.IsNullOrWhiteSpace(home))
-            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), files, environment("XDG_CONFIG_HOME"))];
+            checks = [.. checks, .. CopilotPromptProbe.Run(mode, home, environment("APPDATA"), CurrentPlatform(), files, paths, processEnvironment.CurrentDirectory, environment("XDG_CONFIG_HOME"))];
 
         // Advisory only: a passing check with a warning, in every mode, so it never changes the exit code.
         checks = [.. checks, .. CopilotLargeOutputProbe.Run(repositoryRoot, home, environment, files.DirectoryExists, files.FileExists)];
@@ -231,5 +233,6 @@ public sealed class RepositoryDoctorService(
     ///     empty string, a NUL, or a too-long path. A home directory that is not a path is not the repository root.
     ///     Uses the same rule as the Copilot prompt commands, so the two never disagree about a path.
     /// </remarks>
-    private static bool SamePath(string left, string right) => CopilotPromptFile.SamePath(left, right);
+    private bool SamePath(string left, string right) =>
+        CopilotPromptFile.SamePath(paths, processEnvironment.CurrentDirectory, left, right);
 }

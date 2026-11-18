@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -10,8 +11,9 @@ namespace KyberWeave.Tests;
 /// Macs, so each spawn site must appear in Fixtures/spawn-sites-allowlist.json with a non-empty
 /// <c>bound</c> that says what stops it (a timeout, a kill in finally, a self-exiting
 /// command, or a fake). A site is keyed by its repository-relative file (prefixed with its scan root,
-/// <c>tests/KyberWeave.Tests/</c>, <c>tests/KyberWeave.Integration.Tests/</c>,
-/// <c>tests/KyberWeave.Testing/</c>, <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
+/// <c>tests/KyberWeave.Application.Tests/</c>, <c>tests/KyberWeave.Integration.Tests/</c>,
+/// <c>tests/KyberWeave.Mcp.Tests/</c> (and the other test projects), <c>tests/KyberWeave.Testing/</c>,
+/// <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
 /// normalized line text with an occurrence count, so unrelated edits above a site do not invalidate
 /// its entry. Unlisted sites fail
 /// with root-prefixed file:line, and entries that no longer match a site fail as stale.
@@ -19,6 +21,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ProcessSpawnSitesTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string AllowListFileName = "spawn-sites-allowlist.json";
     private const string ThisFileName = "ProcessSpawnSitesTests.cs";
 
@@ -26,7 +30,15 @@ public sealed class ProcessSpawnSitesTests
     // sources; product code under src/ is scanned for C# only. bin and obj are skipped under each root.
     private static readonly (string Root, string[] Extensions)[] ScanRoots =
     [
-        ("tests/KyberWeave.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Application.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Arbiter.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Architecture.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Cli.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Content.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Data.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Hooks.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Kernel.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Mcp.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Integration.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Testing", [".cs", ".sh"]),
         ("tests/KyberWeave.RepoPolicy.Tests", [".cs", ".sh"]),
@@ -64,9 +76,8 @@ public sealed class ProcessSpawnSitesTests
     [Fact]
     public void EveryProcessSpawnSiteIsAllowListedWithinItsCount()
     {
-        string repoRoot = RepoRoot();
-        IReadOnlyList<SpawnSite> sites = ScanSpawnSites(repoRoot);
-        Dictionary<(string File, string Text), int> allowed = AllowedCounts(LoadAllowList(repoRoot));
+        IReadOnlyList<SpawnSite> sites = ScanSpawnSites();
+        Dictionary<(string File, string Text), int> allowed = AllowedCounts(LoadAllowList());
 
         List<string> unlisted = [];
         foreach (IGrouping<(string File, string Text), SpawnSite> group in sites.GroupBy(s => (s.File, s.Text)))
@@ -88,14 +99,13 @@ public sealed class ProcessSpawnSitesTests
     [Fact]
     public void EveryAllowListEntryHasABoundAndStillMatchesASpawnSite()
     {
-        string repoRoot = RepoRoot();
-        IReadOnlyList<SpawnSite> sites = ScanSpawnSites(repoRoot);
+        IReadOnlyList<SpawnSite> sites = ScanSpawnSites();
         Dictionary<(string File, string Text), int> found =
             sites.GroupBy(s => (s.File, s.Text)).ToDictionary(g => g.Key, g => g.Count());
 
         List<string> violations = [];
         HashSet<(string File, string Text)> seen = [];
-        foreach (AllowListEntry entry in LoadAllowList(repoRoot))
+        foreach (AllowListEntry entry in LoadAllowList())
         {
             string label = $"{entry.File} \"{entry.Text}\"";
             if (!seen.Add((entry.File, entry.Text)))
@@ -158,26 +168,19 @@ public sealed class ProcessSpawnSitesTests
         Assert.Equal(expectedKind, ClassifyShell(line));
     }
 
-    private static string RepoRoot()
-    {
-        return KyberWeaveTestPaths.ToolRoot;
-    }
-
-    private static IReadOnlyList<SpawnSite> ScanSpawnSites(string repoRoot)
+    private static IReadOnlyList<SpawnSite> ScanSpawnSites()
     {
         List<SpawnSite> sites = [];
         foreach ((string root, string[] extensions) in ScanRoots)
         {
-            string absoluteRoot = Path.Combine(repoRoot, root);
-            IEnumerable<string> files = Directory.EnumerateFiles(absoluteRoot, "*", SearchOption.AllDirectories)
-                .Where(path => IsScannedSource(absoluteRoot, path, extensions))
+            IEnumerable<string> files = Corpus.EnumerateFiles(root, "*")
+                .Where(path => IsScannedSource(path, extensions))
                 .OrderBy(path => path, StringComparer.Ordinal);
 
-            foreach (string path in files)
+            foreach (string relative in files)
             {
-                string relative = Path.GetRelativePath(repoRoot, path).Replace('\\', '/');
-                bool csharp = path.EndsWith(".cs", StringComparison.Ordinal);
-                string[] lines = File.ReadAllLines(path);
+                bool csharp = relative.EndsWith(".cs", StringComparison.Ordinal);
+                string[] lines = Corpus.ReadText(relative).ReplaceLineEndings("\n").Split('\n');
                 for (int i = 0; i < lines.Length; i++)
                 {
                     string? kind = csharp ? ClassifyCSharp(lines[i]) : ClassifyShell(lines[i]);
@@ -190,16 +193,12 @@ public sealed class ProcessSpawnSitesTests
         return sites;
     }
 
-    private static bool IsScannedSource(string scanRoot, string path, string[] extensions)
+    private static bool IsScannedSource(string path, string[] extensions)
     {
         if (!extensions.Contains(Path.GetExtension(path), StringComparer.Ordinal))
             return false;
 
-        if (Path.GetFileName(path) == ThisFileName)
-            return false;
-
-        string relative = Path.GetRelativePath(scanRoot, path);
-        return !relative.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj");
+        return Path.GetFileName(path) != ThisFileName;
     }
 
     private static string? ClassifyCSharp(string line)
@@ -260,12 +259,12 @@ public sealed class ProcessSpawnSitesTests
         return Regex.Replace(line.Trim(), @"\s+", " ");
     }
 
-    private static List<AllowListEntry> LoadAllowList(string repoRoot)
+    private static List<AllowListEntry> LoadAllowList()
     {
-        string path = Path.Combine(repoRoot, "tests", "KyberWeave.RepoPolicy.Tests", "Fixtures", AllowListFileName);
-        Assert.True(File.Exists(path), $"Missing spawn-site allow-list: {path}");
+        const string relativePath = "tests/KyberWeave.RepoPolicy.Tests/Fixtures/" + AllowListFileName;
+        Assert.True(Corpus.Exists(relativePath), $"Missing spawn-site allow-list: {relativePath}");
 
-        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        using JsonDocument document = JsonDocument.Parse(Corpus.ReadText(relativePath));
         List<AllowListEntry> entries = [];
         if (!document.RootElement.TryGetProperty("entries", out JsonElement items))
             return entries;

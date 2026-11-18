@@ -4,9 +4,9 @@ title: Review council architecture
 doc-type: architecture
 status: current
 component: ReviewCouncil
-source-root: src/KyberWeave.Core/Review
+source-root: src/KyberWeave.Application/Review
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 decided-by:
   - adr/0002-three-layer-review-council-verdict-engine
   - adr/0003-cross-file-duplication-and-prior-art-lenses
@@ -22,10 +22,10 @@ code-refs:
   - GateRunService
   - PathGlob
   - ReviewConfig
-  - ReviewConfigLoader
+  - ReviewConfigParser
   - ReviewTaskGate
-  - TaskGateSelection
-  - GateCatalogue
+  - TaskGateSelectionService
+  - GateCatalogueRenderer
   - ProjectRootDetection
   - ReviewBlockWriter
   - ReviewCatalogueCommand
@@ -170,7 +170,7 @@ is recorded like any other evidence, and it exits 0 whether or not it finds anyt
 | `GateRunService` | Runs declared gates, normalizes results | `src/KyberWeave.Application/Review/GateRunService.cs` |
 | `DuplicateDetector` | Clusters symbols by normalized body, from the CodeGraph index | `src/KyberWeave.Application/Review/DuplicateDetectionService.cs` |
 | `ICodeGraphSymbolEnumerator` | Optional CodeGraph port: every indexed symbol of one kind | `src/KyberWeave.Contracts/Repositories/ICodeGraphSymbolEnumerator.cs` |
-| `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Domain/Review/VerdictEngine.cs` |
+| `VerdictEngine` | The rules. Pure — no clock, no filesystem, no process | `src/KyberWeave.Application/Review/VerdictEngine.cs` |
 | `PathGlob` | Matches changed paths against reserved patterns | `src/KyberWeave.Kernel/Text/PathGlob.cs` |
 | `ReviewConfig` | The `review:` host configuration | `src/KyberWeave.Domain/Configuration/ReviewConfig.cs` |
 
@@ -183,7 +183,11 @@ failure. There are two sources, and neither copies the other.
   Reg. It holds the defect classes this repository has actually been caught on. Each rule is
   cited by id (`R2`–`R16`) or by section (`§N`). A new rule needs the same class of finding in
   three or more reviews, across at least two PRs; otherwise it becomes an example bullet under an
-  existing section.
+  existing section. Section 15 is the seam rule: direct resource access outside an adapter, logic
+  in `KyberWeave.Domain`, and a unit test that reaches a real resource are findings for the
+  `correctness`, `di-composition`, `test-adequacy` and `test-infrastructure` seats. It is written
+  guidance only; no build check or architecture test enforces it (decision D11,
+  [ADR 0089](../adr/0089-every-behaviour-is-testable-through-a-seam.md)).
 - **Technology checklists.** Eleven pointer checklists under
   `skills/code-review/references/`: C#, Python, React, SQL, Pulumi, Azure, GitHub Actions,
   TypeScript (Node), Rust, Tauri and Go. Each names the host's `<technology>-coding-standard`
@@ -231,8 +235,9 @@ sections it checked.
 section of `REVIEW.md`: a table of `Id`, `Finding class`, `Severity` (`critical`, `major`, `minor` or
 `nitpick`), `Applies to` (lens and technology names; empty for every seat) and `Why`. Precedence, as
 seats and the reviewer read it: host override, then the lens's shipped severity guidance, then the
-general definitions. An override changes the grade up or down. `SeverityOverrides`
-(`src/KyberWeave.Domain/Review/SeverityOverrides.cs`) is the one reader; an absent file or section is
+general definitions. An override changes the grade up or down. `SeverityOverrideRules`
+(`src/KyberWeave.Application/Review/SeverityOverrideRules.cs`) is the one reader, and it fills `SeverityOverrides`
+(`src/KyberWeave.Domain/Review/SeverityOverrides.cs`); an absent file or section is
 no rows, and rows inside an HTML comment or a code fence are examples, not rows.
 
 - **Delivery.** `review seats` writes into each packet only that seat's rows: unscoped rows, rows
@@ -605,7 +610,7 @@ review:
 | `fail-on-output` | no | `false` | When `true`, the gate also fails if the command exits zero but writes anything other than whitespace to standard output; a non-zero exit fails as always. For tools that list problems and still exit zero, such as `gofmt -l` |
 
 Both `run` and `fix` are argv for the same reason `review.gates` is. Three tokens expand, and only
-in `TaskGateSelection`: `{changed}` must be an entire list element and becomes one argument per
+in `TaskGateSelectionService`: `{changed}` must be an entire list element and becomes one argument per
 changed file the gate's `include` matches; `{task}` is the `--task` slug and may sit inside an
 argument; `{tests}` is the fully qualified test classes that cover the change, described under
 [the tests a task gate runs](#the-tests-a-task-gate-runs). The program, the first element of
@@ -694,13 +699,13 @@ third token. `{tests}` expands in the same step `{changed}` and `{task}` do, and
 ```yaml
 review:
   test-map:
-    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+    "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
   task-gates:
     csharp-dev:
       - id: tests
         include: ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets"]
-        run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        run: [dotnet, test, tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
         timeout: 600
 ```
 
@@ -923,7 +928,7 @@ partitioned by ecosystem:
 
 - **Pure C# formatting and duplicate detection** (`format-whitespace`, `format-style`, `duplicates`): scoped to `&net-source-paths` (`["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig"]`).
 - **.NET build and test** (`build`, `test`): scoped to `&net-test-paths`, which extends C# source paths to cover tested non-C# repository assets and build/test configuration: `products/**` (tested by Squad canonical content, rendering, and preset tests, and verified by `KyberWeave.Core.csproj`'s pre-build SHA-256 hash guard), `REVIEW.md` (tested by review guidance council contract tests), `.kyber-weave/kyber-weave.yml`, `apm.yml`, `.apm/**`, `global.json`, and `scripts/**` — while strictly excluding `dash/**` and `docs/**`. When `net-test-paths` match, the full .NET test suite runs to preserve ADR 0005 guarantees across solution dependencies.
-- **APM skill gates** (`skill-*`, 21 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, and `src/KyberWeave.Domain/Skills/**`.
+- **APM skill gates** (`skill-*`, 21 gates): scoped to their respective `.apm/skills/<skill-name>/**`, `src/KyberWeave.Cli/**`, `src/KyberWeave.Domain/Skills/**` and `src/KyberWeave.Application/Skills/**`.
 - **Documentation gates**: `docs-validate` scoped to `["docs/**", "**/*.md", ".kyber-weave/kyber-weave.yml", "src/**"]`; `docs-drift` adds `"dash/**"` so `KyberDash` `code-refs` and `api-endpoints` drift is caught when `dash/` changes (~0.8s).
 - **TypeScript gates** (`ts-*`): scoped to `["dash/**"]` (which also keeps `display-layer.test.ts` active when `dash/tray/**` changes).
 - **Rust gates** (`cargo-*`): scoped to `["dash/tray/src-tauri/**"]`.
@@ -931,19 +936,20 @@ partitioned by ecosystem:
 #### Test and build gates run their commands directly
 
 Every gate declares its argv as the command itself — no process wrapper. The `.NET` gates (`build`,
-`test`, `integration-test`, `test-policy`) and the format checks run `dotnet` directly so Roslyn/MSBuild build servers
+`test`, `test-policy`) and the format checks run `dotnet` directly so Roslyn/MSBuild build servers
 stay warm, and the KyberDash `ts-test` gate (`npm --prefix dash run test`) runs `npm` directly. The
 retired watchdog (`scripts/proc-guard.sh`) used to wrap `ts-test` and reap its process tree; it went
 away with the Node engine, which no longer spawns recursive children
 ([ADR 0047](../adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint.md)). A gate that runs
 away is stopped by its own `timeout-seconds`, and the council reports it as any other non-zero exit.
-`test`, `integration-test`, `ts-test` and `cargo-test` keep `full-suite: true` so `kyber-weave review gates` still refuses dev
-agents unless `--council` is passed; the integration suite is CI's safety net, not a developer agent's run.
+`test`, `ts-test` and `cargo-test` keep `full-suite: true` so `kyber-weave review gates` still refuses dev
+agents unless `--council` is passed. There is no `integration-test` gate: the integration suite is CI's
+safety net, not a developer agent's run.
 
 Gates run one after another unless marked `concurrent`, and `review.parallelism` bounds the ones
 that do. There is no machine-wide slot: a gate that must not overlap another is ordered after it.
 
-`ReviewGateFullSuiteConfigTests` pins the `full-suite` keys on the `test`, `integration-test`, `ts-test` and
+`ReviewGateFullSuiteConfigTests` pins the `full-suite` keys on the `test`, `ts-test` and
 `cargo-test` gates, so a change to those entries has to change the test
 with it. The
 local commands and what a gate failure means are in the
@@ -969,7 +975,7 @@ id, a non-slug id, a missing or empty `run`, a non-positive timeout, or an unrec
 ### The shipped gate catalogue
 
 `kyber-weave docs init` does not invent per-technology gates. It renders them
-(`ReviewBlockWriter`, planned from `GateCatalogue`) from five embedded families, one per
+(`ReviewBlockWriter`, planned from `GateCatalogueRenderer`) from five embedded families, one per
 version-1 technology set:
 
 | Family | Technologies | Root marker | Nesting | Notes |

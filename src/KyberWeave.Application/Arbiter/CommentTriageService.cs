@@ -21,7 +21,8 @@ namespace KyberWeave.Core.Arbiter;
 /// <param name="provider">The provider that answers the question; <c>NoneProvider</c> answers nothing.</param>
 /// <param name="repoRoot">The repository root the cited path is read under.</param>
 /// <param name="arbiterDirectory">The directory the decision log is written to.</param>
-/// <param name="clock">Stamps the decision record and allocates its id.</param>
+/// <param name="clock">Stamps the decision record.</param>
+/// <param name="ids">Allocates the decision record id.</param>
 /// <param name="fileText">Reads the window of the cited file the comment is judged against.</param>
 /// <param name="state">Opens the decision log the decision is written to.</param>
 /// <param name="ruleSet">The rule-set hash the decision records, when the caller has one; empty otherwise.</param>
@@ -36,6 +37,7 @@ public sealed class CommentTriageService(
     string repoRoot,
     string arbiterDirectory,
     TimeProvider clock,
+    IIdGenerator ids,
     IFileTextFacts fileText,
     IArbiterStateFactory state,
     string? ruleSet = null,
@@ -45,7 +47,7 @@ public sealed class CommentTriageService(
     /// <summary>The shipped rule that classifies a comment.</summary>
     public const string CommentRuleId = "KW-ARB-COMMENT-001";
 
-    private readonly IReadOnlyList<ArbiterRule> _rules = rules ?? ArbiterConfig.ProductDefaults.Rules;
+    private readonly IReadOnlyList<ArbiterRule> _rules = rules ?? ArbiterConfigDefaults.Product.Rules;
 
     /// <summary>
     /// The most summary rows sent to the classifier in one call. Rows past the cap stay real and unasked, so a long
@@ -67,7 +69,7 @@ public sealed class CommentTriageService(
         ArgumentNullException.ThrowIfNull(request);
 
         DateTimeOffset now = clock.GetUtcNow();
-        string decisionId = ArbiterRecordId.New(now);
+        string decisionId = ids.NewSortableId(now);
         ArbiterRule? rule = CommentRule();
         FileExcerpt? excerpt = fileText.ReadExcerpt(repoRoot, request.Path, request.Line);
 

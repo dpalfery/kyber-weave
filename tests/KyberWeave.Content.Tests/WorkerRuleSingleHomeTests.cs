@@ -1,0 +1,157 @@
+using Xunit;
+using KyberWeave.Tests.Corpus;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Pins the rule map's single-home promise: a rule that moved to its one home must not also remain in
+/// a second file, because regrowth is what the text trim has to survive (task T50, decision D62).
+/// </summary>
+/// <remarks>
+/// The rule map (<c>docs/kyber-squad/worker-rule-map.md</c>) carries one row per sentence removed.
+/// This class checks the homes by token: the <c>cleanupcode</c> pass is removed from the squad
+/// (ADR 0074), and the failure-loop rules live in the reference a worker loads after a failed fix.
+/// The input-site table header is in no agent body. That the map and the prose rule catalog name the
+/// same rules is checked by <c>ProseRuleCatalogTests</c>.
+/// </remarks>
+public sealed class WorkerRuleSingleHomeTests
+{
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    /// <summary>The developer agents whose failure-loop text the rule map moves to the rework reference.</summary>
+    private static readonly string[] FailureLoopAgents = ["dev-easy", "dev-medium", "dev-hard", "devops"];
+
+    private const string ProductRoot = "products/kyber-squad";
+
+    private const string AgentsRoot = "products/kyber-squad/agents";
+
+    private const string RuleMapPath = "docs/kyber-squad/worker-rule-map.md";
+
+    /// <summary>
+    ///     The cleanupcode pass is removed from the squad (ADR 0074): it never exits on the reference
+    ///     machine, so no agent body may mention it and the skill no longer carries the command.
+    /// </summary>
+    [Fact]
+    public void TheCleanupCodePassIsNotRequiredInAnyAgentBody()
+    {
+        string[] repeating = AgentsContaining("cleanupcode");
+
+        Assert.True(
+            repeating.Length == 0,
+            "The cleanupcode pass was removed from the squad because it never exits (ADR 0074); no agent " +
+            "body may mention it. Still mentioning it: " + string.Join(", ", repeating));
+    }
+
+    /// <summary>
+    ///     InspectCode is removed from the squad (ADR 0075): the tool never exits on the reference machine and a
+    ///     host repository has no wrapper to stop it. The skill is gone and no agent body names it or the tool.
+    /// </summary>
+    [Fact]
+    public void InspectCodeAndItsSkillAreAbsentFromTheSquad()
+    {
+        Assert.False(
+            CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/skills/resharper-clt"),
+            "The resharper-clt skill was removed with InspectCode (ADR 0075).");
+
+        string[] skillNamed = AgentsContaining("resharper-clt");
+        string[] toolNamed = AgentsContaining("inspectcode");
+
+        Assert.True(
+            skillNamed.Length == 0 && toolNamed.Length == 0,
+            "InspectCode was removed from the squad (ADR 0075); no agent body may name it or its skill. " +
+            "Still naming it: " + string.Join(", ", skillNamed.Concat(toolNamed).Distinct()));
+    }
+
+    /// <summary>
+    ///     The failure-loop rules moved to the one reference the task gate loads after a failed fix.
+    ///     The JEV checkpoints, the retry limit, oscillation detection and the closed
+    ///     <c>CIRCUIT_BREAKER_TRIGGER</c> vocabulary are asserted there by
+    ///     <c>SquadCanonicalContentTests</c>; this case is the other half — no developer agent body
+    ///     carries them as well.
+    /// </summary>
+    [Fact]
+    public void TheFailureLoopRulesAreInNoDeveloperAgentBody()
+    {
+        string rework = ReadProductFile("skills/task-gate/references/rework.md");
+        Assert.Contains("CIRCUIT_BREAKER_TRIGGER", rework, StringComparison.Ordinal);
+
+        string[] repeating = FailureLoopAgents
+            .Select(agent => (Agent: agent, Body: ReadProductFile($"agents/{agent}.md")))
+            .Where(entry => entry.Body.Contains("CIRCUIT_BREAKER_TRIGGER", StringComparison.Ordinal))
+            .Select(entry => entry.Agent)
+            .ToArray();
+
+        Assert.True(
+            repeating.Length == 0,
+            "The failure-loop rules live in 'skills/task-gate/references/rework.md'. Still carrying them: " +
+            string.Join(", ", repeating));
+    }
+
+    /// <summary>
+    ///     T49's rule map is what makes the rest of the single-home rows assertable: it names each
+    ///     removed sentence and the home it moved to. It records the two homes above, so the map and
+    ///     these cases cannot disagree about where the text went.
+    /// </summary>
+    [Fact]
+    public void TheRuleMapRecordsAHomeForEveryRuleThatMoved()
+    {
+        Assert.True(
+            Corpus.Exists(RuleMapPath),
+            $"The rule map must live at '{RuleMapPath}'. Task T49 writes it before T50, one row per " +
+            "removed sentence, and it is what stops the text growing back.");
+
+        string map = Corpus.ReadText(RuleMapPath);
+        Assert.Contains("task-gate/references/rework.md", map, StringComparison.Ordinal);
+        Assert.Contains("cleanupcode", map, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    ///     The correctness table's header is defined once, in the correctness lens of the code-review skill.
+    ///     An agent body that spells it again is a second copy that drifts from the lens owning the columns.
+    /// </summary>
+    [Fact]
+    public void TheInputSiteTableIsInNoAgentBody()
+    {
+        string[] repeating = AgentsContaining("| Site | Source | Absent or null |");
+
+        Assert.True(
+            repeating.Length == 0,
+            "The input-site table is defined once, in the correctness lens, not in an agent body. " +
+            "Still carrying the table header: " + string.Join(", ", repeating));
+    }
+
+    /// <summary>
+    ///     The rule map names the developer exit gate's skill, delivery-execution, as a home. Which rule
+    ///     lives there is a prose matter the catalog checks; this case keeps the home named at all.
+    /// </summary>
+    [Fact]
+    public void TheRuleMapNamesTheDeliveryExecutionHome()
+    {
+        Assert.True(
+            Corpus.Exists(RuleMapPath),
+            $"The rule map must live at '{RuleMapPath}'.");
+
+        string map = Corpus.ReadText(RuleMapPath);
+        Assert.Contains("delivery-execution", map, StringComparison.Ordinal);
+    }
+
+    /// <summary>Every agent body holding <paramref name="text"/>, by file name.</summary>
+    private static string[] AgentsContaining(string text)
+    {
+        return
+        [
+            .. Corpus.EnumerateFiles(AgentsRoot, "*.md")
+                .Where(path => Corpus.ReadText(path).Contains(text, StringComparison.OrdinalIgnoreCase))
+                .Select(Path.GetFileName)
+                .OfType<string>()
+                .Order(StringComparer.Ordinal)
+        ];
+    }
+
+    private static string ReadProductFile(string relativePath)
+    {
+        string path = $"{ProductRoot}/{relativePath}";
+        Assert.True(Corpus.Exists(path), $"Expected the canonical product file at '{path}'.");
+        return Corpus.ReadText(path);
+    }
+}

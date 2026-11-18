@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
@@ -25,6 +26,7 @@ namespace KyberWeave.Application.Arbiter;
 /// </remarks>
 public sealed class ArbiterInstallService(
     IProcessEnvironment environment,
+    IPathResolver paths,
     IUserHostConfigStore userConfig,
     IArbiterConfigResolver configs,
     IArbiterUserSettings userSettings,
@@ -45,10 +47,12 @@ public sealed class ArbiterInstallService(
         List<ArbiterInstallEvent> events = [];
         bool isProjectScope = request.ProjectScope;
         string root = isProjectScope
-            ? Path.GetFullPath(string.IsNullOrWhiteSpace(request.PathOption)
-                ? (string.IsNullOrWhiteSpace(request.RepositoryPath) ? "." : request.RepositoryPath)
-                : request.PathOption)
-            : Path.GetFullPath(environment.HomeDirectory);
+            ? paths.GetFullPath(
+                string.IsNullOrWhiteSpace(request.PathOption)
+                    ? (string.IsNullOrWhiteSpace(request.RepositoryPath) ? "." : request.RepositoryPath)
+                    : request.PathOption,
+                environment.CurrentDirectory)
+            : paths.GetFullPath(environment.HomeDirectory, environment.CurrentDirectory);
 
         ArbiterProviderKind existingKind;
         ArbiterProviderKind effectiveKind;
@@ -277,12 +281,12 @@ public sealed class ArbiterInstallService(
         {
             try
             {
-                configLoad = KyberWeaveConfigLoadResult.Ok(
+                configLoad = KyberWeaveConfigLoadResultFactory.Ok(
                     configs.LoadFromYaml(plan.DesiredConfigText), plan.ConfigPath);
             }
             catch (YamlDotNet.Core.YamlException ex)
             {
-                configLoad = KyberWeaveConfigLoadResult.Fail(ex.Message, plan.ConfigPath);
+                configLoad = KyberWeaveConfigLoadResultFactory.Fail(ex.Message, plan.ConfigPath);
             }
         }
         else
@@ -408,7 +412,7 @@ public sealed class ArbiterInstallService(
         KyberWeaveConfigLoadResult loaded = configs.Load(root, configOption, projectScope);
         ArbiterProviderConfig repository = loaded.Success && loaded.Config is not null
             ? loaded.Config.Arbiter.Provider
-            : KyberWeaveConfig.ProductDefaults.Arbiter.Provider;
+            : KyberWeaveConfigDefaults.Product.Arbiter.Provider;
         ArbiterProviderKind effective =
             userSettings.ApplyTo(repository, environment.HomeDirectory).Kind;
         return (repository.Kind, effective);

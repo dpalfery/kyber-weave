@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Services;
 using KyberWeave.Cli.Composition;
 using System.Text.Json;
 using KyberWeave.Cli;
@@ -40,6 +41,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly IZCodeMcpInspector _zcodeMcp;
     private readonly SquadDoctorOptions _options;
     private readonly IFileSystemPathSemantics _pathSemantics;
+    private readonly IKyberWeaveConfigRepository _configs;
+    private readonly SquadConsole _console;
+    private readonly IWritableFileSystem _files;
+    private readonly IMcpWiringService _wiring;
+    private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -57,6 +63,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <param name="zcodeMcp">Reads the MCP servers a ZCode installation declares.</param>
     /// <param name="options">The process executor and working directory; the defaults use the real ones.</param>
     /// <param name="pathSemantics">The filesystem's containment and canonical spelling rules.</param>
+    /// <param name="configs">Reads the repository configuration the Arbiter probe follows.</param>
+    /// <param name="output">Where every line is written.</param>
+    /// <param name="files">Reads the deployment state files the checks probe.</param>
+    /// <param name="roots">Resolves the target root, migrates legacy state and anchors a global run.</param>
+    /// <param name="wiring">Scans for retired MCP server keys.</param>
     public SquadDoctorCommand(
         ISquadStateStore stateStore,
         ISquadStateMigration migration,
@@ -72,7 +83,12 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         IDevinImportOverlapInspector devinOverlap,
         IZCodeMcpInspector zcodeMcp,
         SquadDoctorOptions options,
-        IFileSystemPathSemantics pathSemantics)
+        IFileSystemPathSemantics pathSemantics,
+        IKyberWeaveConfigRepository configs,
+        SquadConsole output,
+        IWritableFileSystem files,
+        SquadCommandRoots roots,
+        IMcpWiringService wiring)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -89,6 +105,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ArgumentNullException.ThrowIfNull(zcodeMcp);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(pathSemantics);
+        ArgumentNullException.ThrowIfNull(configs);
+        ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(wiring);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
@@ -104,6 +125,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _zcodeMcp = zcodeMcp;
         _options = options;
         _pathSemantics = pathSemantics;
+        _configs = configs;
+        _console = output;
+        _files = files;
+        _wiring = wiring;
+        _roots = roots;
     }
 
     /// <inheritdoc />
@@ -123,31 +149,33 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
         catch (ArgumentException ex)
         {
-            SquadCommandComposition.WriteClientInputError(ex.Message);
+            _console.WriteClientInputError(ex.Message);
             return 2;
         }
 
         // The named root is the diagnosed root. The unresolved default — "." positional,
-        // no --path — keeps the injected working directory, the process's current
-        // directory in production, exactly as before the option existed.
-        string workingDirectory = SquadCommandComposition.ResolveTargetRoot(
-            effectivePath is null or "." ? _options.WorkingDirectory : effectivePath);
+        // no --path — is the environment seam's current directory, the process's in
+        // production, exactly as before the option existed.
+        string targetRoot = effectivePath is null or "."
+            ? _options.WorkingDirectory ?? _environment.CurrentDirectory
+            : effectivePath;
+        string workingDirectory = _roots.ResolveTargetRoot(targetRoot);
 
         // Doctor reads home-level state, so it resolves the store once. A --global doctor is anchored at the
         // home directory whatever the working directory is, and a path given with it is named and ignored.
         // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
         // the migration below runs with dryRun: false and may move legacy state into the home.
         ISquadStateStore homeStateStore = _stateStore;
-        if (settings.Global) _ = SquadCommandComposition.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
+        if (settings.Global) _ = _roots.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
 
-        AnsiConsole.MarkupLine("[bold]Kyber-Squad Doctor[/]");
-        AnsiConsole.WriteLine();
+        _console.Ansi.MarkupLine("[bold]Kyber-Squad Doctor[/]");
+        _console.Ansi.WriteLine();
 
         bool hasIssues = false;
 
         // 1. CLI Version
         string cliVersion = CliAssemblyVersion.Informational(typeof(SquadDoctorCommand).Assembly);
-        AnsiConsole.MarkupLine($"  [green]ok[/] CLI Version: [bold]{Markup.Escape(cliVersion)}[/]");
+        _console.Ansi.MarkupLine($"  [green]ok[/] CLI Version: [bold]{Markup.Escape(cliVersion)}[/]");
 
         // 2. Renderer coverage — which of the declared targets can actually install today.
         ISquadRenderer renderer = _renderer;
@@ -160,24 +188,24 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             .Except(supported, StringComparer.Ordinal)
             .OrderBy(token => token, StringComparer.Ordinal)
             .ToArray();
-        AnsiConsole.MarkupLine(
+        _console.Ansi.MarkupLine(
             $"  [green]ok[/] Renderers available: [bold]{Markup.Escape(string.Join(", ", supported))}[/]");
         if (pending.Length > 0)
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"  [grey]info[/] Not yet implemented: [bold]{Markup.Escape(string.Join(", ", pending))}[/] (see docs/todo/<target>.md)");
 
         // 3. MCP Probe
-        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor);
+        McpProcessProbe mcpProbe = SquadCommandComposition.ResolveProbe(_options.Executor, _environment);
         ToolProbeResult mcpResult = mcpProbe.Probe();
         if (mcpResult is { IsAvailable: true, Version: not null })
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"  [green]ok[/] Kyber-Weave MCP: [bold]kyber-weave-mcp {Markup.Escape(mcpResult.Version)}[/]");
         }
         else
         {
             string reason = mcpResult.FailureReason ?? "The 'kyber-weave-mcp' executable is not available on PATH.";
-            AnsiConsole.MarkupLine($"  [red]fail[/] Kyber-Weave MCP: {Markup.Escape(reason)}");
+            _console.Ansi.MarkupLine($"  [red]fail[/] Kyber-Weave MCP: {Markup.Escape(reason)}");
             hasIssues = true;
         }
 
@@ -199,7 +227,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             try
             {
                 SquadSource source = _sourceLoader.Load(canonicalSourcePath);
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [green]ok[/] Canonical source: valid ([grey]{Markup.Escape(source.Manifest.Name)}[/], {source.Agents.Count} agents, {source.Skills.Count} skills)");
                 canonicalSourceValid = true;
 
@@ -210,13 +238,13 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             }
             catch (SquadSourceValidationException ex)
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [red]fail[/] Canonical source validation failed: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
             }
             catch (Exception ex)
             {
-                AnsiConsole.MarkupLine($"  [red]fail[/] Canonical source loading failed: {Markup.Escape(ex.Message)}");
+                _console.Ansi.MarkupLine($"  [red]fail[/] Canonical source loading failed: {Markup.Escape(ex.Message)}");
                 hasIssues = true;
             }
 
@@ -233,19 +261,19 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ReportShadowedSkills(workingDirectory, homeStateStore);
 
         // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
-            Environment.CurrentDirectory,
+            _environment.CurrentDirectory,
             settings.Global ? null : workingDirectory,
             false);
-        SquadCommandComposition.WriteMigrationNotes(migration, true);
+        _console.WriteMigrationNotes(migration, true);
         try
         {
             ReportHomeState(homeStateStore);
         }
         catch (InvalidDataException ex)
         {
-            SquadCommandComposition.WriteLine(
+            _console.WriteLine(
                 $"  [red]fail[/] Squad project registry is unreadable: {Markup.Escape(ex.Message)}");
             hasIssues = true;
         }
@@ -259,14 +287,14 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             ReportGlobalCollisions(workingDirectory, canonicalSourcePath, canonicalSourceValid))
             hasIssues = true;
 
-        AnsiConsole.WriteLine();
+        _console.Ansi.WriteLine();
         if (hasIssues)
         {
-            AnsiConsole.MarkupLine("[red]Doctor found issues with prerequisites or environment.[/]");
+            _console.Ansi.MarkupLine("[red]Doctor found issues with prerequisites or environment.[/]");
             return 1;
         }
 
-        AnsiConsole.MarkupLine("[green]All checked prerequisites and components are healthy.[/]");
+        _console.Ansi.MarkupLine("[green]All checked prerequisites and components are healthy.[/]");
         return 0;
     }
 
@@ -286,11 +314,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// not move on it: a healthy install that has not yet been asked to rename its keys is still
     /// healthy. Nothing is written; the rename belongs to <c>docs mcp-migrate</c>.
     /// </remarks>
-    private static void ReportRetiredMcpKeys(string workingDirectory)
+    private void ReportRetiredMcpKeys(string workingDirectory)
     {
         IReadOnlyList<McpRenameChange> leftovers =
         [
-            .. LegacyMcpWiring.Service.Scan(workingDirectory, null)
+            .. _wiring.Scan(workingDirectory, null)
                 .Where(change => change.Code is McpServerRenamer.RenameCode
                     or McpServerRenamer.LeftAloneCode
                     or McpServerRenamer.RefusedCode)
@@ -299,13 +327,13 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         if (leftovers.Count == 0)
             return;
 
-        CommandHelpers.WriteUnfolded(() =>
+        _console.WriteUnfolded(() =>
         {
             foreach (McpRenameChange leftover in leftovers)
             {
                 string file = Markup.Escape(TerminalText.Line(leftover.Path ?? leftover.Harness));
 
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [yellow]warn[/] {Markup.Escape(leftover.Code ?? McpServerRenamer.RenameCode)} {file}: "
                     + Markup.Escape(TerminalText.Line(leftover.Message)));
 
@@ -315,7 +343,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
                 if (!string.IsNullOrWhiteSpace(remedy))
                 {
-                    AnsiConsole.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(remedy))}[/]");
+                    _console.Ansi.MarkupLine($"         [grey]{Markup.Escape(TerminalText.Line(remedy))}[/]");
                 }
             }
         });
@@ -334,21 +362,21 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <returns><see langword="true"/> when doctor should exit non-zero.</returns>
     private bool ReportArbiterBinary(string workingDirectory)
     {
-        if (!ArbiterEnabled(workingDirectory))
+        if (!IsArbiterEnabled(workingDirectory))
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "  [grey]info[/] Kyber-Weave Arbiter: not checked (Arbiter is not enabled)");
             return false;
         }
 
-        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_options.Executor);
+        ArbiterProcessProbe arbiterProbe = SquadCommandComposition.ResolveArbiterProbe(_options.Executor, _environment);
         ToolProbeResult arbiterResult = arbiterProbe.Probe();
         string cliVersion = CliAssemblyVersion.ForProbe(typeof(SquadDoctorCommand).Assembly);
 
         if (arbiterResult is { IsAvailable: true, Version: not null }
             && string.Equals(arbiterResult.Version, cliVersion, StringComparison.Ordinal))
         {
-            AnsiConsole.MarkupLine($"  [green]ok[/] Kyber-Weave Arbiter: [bold]kyber-weave-arbiter {Markup.Escape(arbiterResult.Version)}[/]");
+            _console.Ansi.MarkupLine($"  [green]ok[/] Kyber-Weave Arbiter: [bold]kyber-weave-arbiter {Markup.Escape(arbiterResult.Version)}[/]");
             return false;
         }
 
@@ -356,15 +384,15 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             ?? (arbiterResult.Version is null
                 ? "The 'kyber-weave-arbiter' executable is not available on PATH."
                 : $"The 'kyber-weave-arbiter' version '{arbiterResult.Version}' differs from the CLI version '{cliVersion}'.");
-        AnsiConsole.MarkupLine($"  [red]fail[/] Kyber-Weave Arbiter [bold]KW-ARB-BIN-001[/]: {Markup.Escape(reason)}");
+        _console.Ansi.MarkupLine($"  [red]fail[/] Kyber-Weave Arbiter [bold]KW-ARB-BIN-001[/]: {Markup.Escape(reason)}");
         return true;
     }
 
     /// <summary>Whether the repository configuration enables the Arbiter. An unreadable
     /// configuration reads as disabled, the product default.</summary>
-    private static bool ArbiterEnabled(string workingDirectory)
+    private bool IsArbiterEnabled(string workingDirectory)
     {
-        KyberWeaveConfigLoadResult configResult = KyberWeaveConfigLoader.TryLoad(workingDirectory);
+        KyberWeaveConfigLoadResult configResult = _configs.TryLoad(workingDirectory);
         return configResult.Success && configResult.Config?.Arbiter.Enabled == true;
     }
 
@@ -395,7 +423,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         // with the Arbiter enabled. The scope is the one the deployment is inspected at: the same
         // scope ReportOwnedBlockDrift reads the receipt for, so it is never unknowable here.
         bool arbiterGranted = SquadCommandComposition.ResolveScope(isGlobal) == SquadDeploymentScope.Project
-            && ArbiterEnabled(workingDirectory);
+            && IsArbiterEnabled(workingDirectory);
         IReadOnlyCollection<string> required = source.Toolchain.RequiredMcpTools.Keys
             .Where(server => arbiterGranted || !string.Equals(server, ArbiterServer, StringComparison.Ordinal))
             .ToArray();
@@ -405,9 +433,9 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
 
         string marker = Path.Combine(workingDirectory, ".zcode");
-        if (!Directory.Exists(marker))
+        if (!_files.DirectoryExists(marker))
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "  [grey]info[/] ZCode MCP servers: not checked (no '.zcode/' in this directory)");
             return false;
         }
@@ -420,7 +448,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
         catch (ArgumentException ex)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"  [red]fail[/] ZCode MCP servers: cannot resolve the ZCode storage root: {Markup.Escape(ex.Message)}");
             return true;
         }
@@ -428,26 +456,25 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ZCodeMcpConfigurationReport report = _zcodeMcp.Inspect(
             required,
             zcodeRoot,
-            workingDirectory,
-            SquadCommandComposition.ReadFileTextOrNull);
+            workingDirectory);
 
         if (report.MissingServers.Count == 0)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"  [green]ok[/] ZCode MCP servers: [bold]{Markup.Escape(string.Join(", ", required.Order(StringComparer.Ordinal)))}[/] configured");
             return false;
         }
 
-        AnsiConsole.MarkupLine(
+        _console.Ansi.MarkupLine(
             $"  [red]fail[/] ZCode MCP servers not configured: [bold]{Markup.Escape(string.Join(", ", report.MissingServers))}[/]");
-        AnsiConsole.MarkupLine(
+        _console.Ansi.MarkupLine(
             "         Squad agents on ZCode are granted these servers' tools by exact name, so " +
             "ZCode fails an agent whose server is not connected.");
-        AnsiConsole.MarkupLine(
+        _console.Ansi.MarkupLine(
             $"         Declare them under 'mcp.servers' in {Markup.Escape(Path.Combine(zcodeRoot, "cli", "config.json"))}, " +
             "or in a project 'zcode.json' / '.zcode/config.json'.");
         if (report.InspectedPaths.Count == 0)
-            AnsiConsole.MarkupLine("         No ZCode configuration file was found to read.");
+            _console.Ansi.MarkupLine("         No ZCode configuration file was found to read.");
 
         return true;
     }
@@ -466,9 +493,9 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// </remarks>
     private void ReportDevinImportOverlap(string workingDirectory)
     {
-        if (!Directory.Exists(Path.Combine(workingDirectory, ".devin")))
+        if (!_files.DirectoryExists(Path.Combine(workingDirectory, ".devin")))
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "  [grey]info[/] Devin duplicate imports: not checked (no '.devin/' in this directory)");
             return;
         }
@@ -488,22 +515,21 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
         DevinImportOverlapReport report = _devinOverlap.Inspect(
             workingDirectory,
-            devinUserRoot,
-            SquadCommandComposition.ReadFileTextOrNull);
+            devinUserRoot);
 
         if (report.Overlaps.Count == 0)
         {
-            AnsiConsole.MarkupLine("  [green]ok[/] Devin duplicate imports: none");
+            _console.Ansi.MarkupLine("  [green]ok[/] Devin duplicate imports: none");
             return;
         }
 
         foreach (DevinImportOverlapEntry overlap in report.Overlaps)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"  [yellow]warn[/] Devin also loads {overlap.Identities.Count} {overlap.Kind}(s) from " +
                 $"'{Markup.Escape(overlap.SourceRoot)}/' that '.devin/' already defines: " +
                 $"[bold]{Markup.Escape(string.Join(", ", overlap.Identities))}[/]");
-            AnsiConsole.MarkupLine(overlap.ImportSetting is null
+            _console.Ansi.MarkupLine(overlap.ImportSetting is null
                 ? $"         Devin reads '{Markup.Escape(overlap.SourceRoot)}/' natively and cannot be told " +
                   "not to; deploy only one of the targets that write there."
                 : $"         Set \"read_config_from\": {{ \"{Markup.Escape(overlap.ImportSetting)}\": false }} " +
@@ -550,7 +576,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 string fullPath;
                 try
                 {
-                    fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
+                    fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(receipt, workingDirectory, globalRoots, file, _pathSemantics);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
                 {
@@ -558,13 +584,13 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 }
 
                 if (scope == SquadDeploymentScope.Project) managed.Add(fullPath);
-                if (File.Exists(fullPath)) installed.Add(new SquadInstalledSkill(parts[^2], fullPath));
+                if (_files.FileExists(fullPath)) installed.Add(new SquadInstalledSkill(parts[^2], fullPath));
             }
         }
 
         if (installed.Count == 0)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "  [grey]info[/] Project skills shadowing the squad: not checked (no installed squad skills found)");
             return;
         }
@@ -572,19 +598,19 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         IReadOnlyList<SquadSkillShadow> shadows = _skillShadowing.Find(workingDirectory, installed, managed);
         if (shadows.Count == 0)
         {
-            AnsiConsole.MarkupLine("  [green]ok[/] Project skills shadowing the squad: none");
+            _console.Ansi.MarkupLine("  [green]ok[/] Project skills shadowing the squad: none");
             return;
         }
 
-        CommandHelpers.WriteUnfolded(() =>
+        _console.WriteUnfolded(() =>
         {
             foreach (SquadSkillShadow shadow in shadows)
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [yellow]warn[/] [bold]KW-SQUAD-SHADOW-001[/] Project skill '{Markup.Escape(shadow.Name)}' at " +
                     $"[bold]{Markup.Escape(shadow.ProjectPath)}[/] differs from the installed squad skill at " +
                     $"[bold]{Markup.Escape(shadow.InstalledPath)}[/]; agents may read the project copy.");
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     "         Delete the project copy, or re-run [grey]squad install[/] for this project.");
             }
         });
@@ -610,7 +636,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             foreach (string retired in SquadRetiredSkills.RetiredSkillNames)
             {
                 string staleDir = Path.Combine(workingDirectory, skillsRoot, retired);
-                if (Directory.Exists(staleDir))
+                if (_files.DirectoryExists(staleDir))
                 {
                     staleDirs.Add(staleDir);
                 }
@@ -638,11 +664,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         if (receiptError is not null)
         {
             string message = receiptError;
-            CommandHelpers.WriteUnfolded(() =>
+            _console.WriteUnfolded(() =>
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [yellow]warn[/] Deployment receipt is unreadable: {Markup.Escape(message)}");
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     "         Delete the receipt and lock, then run [grey]squad update[/] to reconcile them.");
             });
         }
@@ -652,23 +678,23 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             return;
         }
 
-        CommandHelpers.WriteUnfolded(() =>
+        _console.WriteUnfolded(() =>
         {
             foreach (string staleDir in staleDirs)
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [yellow]warn[/] Retired skill '{Markup.Escape(SquadRetiredSkills.SecondBrain)}' still present at [bold]{Markup.Escape(staleDir)}[/].");
             }
 
             if (retained.Count > 0)
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [yellow]warn[/] Deployment receipt still claims retired '{Markup.Escape(SquadRetiredSkills.SecondBrain)}' files: [bold]{Markup.Escape(string.Join(", ", retained))}[/].");
             }
 
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "         Delete the stale directory, then run [grey]squad update[/] to reconcile the receipt.");
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"         The workflow moved to the Kyber-Docs skills ([grey]{Markup.Escape(SquadRetiredSkills.NewHomeSkillPrefix)}*[/], " +
                 $"see [grey]{Markup.Escape(SquadRetiredSkills.NewHomeSkill)}[/]); run [grey]docs init[/] to deploy them.");
         });
@@ -684,12 +710,12 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     ///     The retained-state warning is only raised for a project still registered as live, because a stale
     ///     project's home state is already gone and there is nothing to be authoritative over.
     /// </remarks>
-    private static void ReportHomeState(ISquadStateStore stateStore)
+    private void ReportHomeState(ISquadStateStore stateStore)
     {
         IReadOnlyList<SquadProjectRegistryEntry> projects = stateStore.ListProjects();
         if (projects.Count == 0)
         {
-            SquadCommandComposition.WriteLine("  [grey]info[/] Registered Squad projects: none");
+            _console.WriteLine("  [grey]info[/] Registered Squad projects: none");
             return;
         }
 
@@ -697,7 +723,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         {
             if (project.Stale)
             {
-                SquadCommandComposition.WriteLine(
+                _console.WriteLine(
                     $"  [yellow]warn[/] registered project '{Markup.Escape(project.Path)}' is stale " +
                     $"({Markup.Escape(project.StaleReason ?? "unknown")}); " +
                     "global updates skip it until its path is restored or its receipt is reinstalled.");
@@ -705,9 +731,9 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             }
 
             string inRepoState = Path.Combine(project.Path, ".kyber-weave");
-            if (File.Exists(Path.Combine(inRepoState, "squad.receipt.json")) ||
-                File.Exists(Path.Combine(inRepoState, "squad.lock.yml")))
-                SquadCommandComposition.WriteLine(
+            if (_files.FileExists(Path.Combine(inRepoState, "squad.receipt.json")) ||
+                _files.FileExists(Path.Combine(inRepoState, "squad.lock.yml")))
+                _console.WriteLine(
                     $"  [yellow]warn[/] in-repo Squad state at '{Markup.Escape(inRepoState)}' is retained after its import. " +
                     "The home record is now authoritative, so remove that directory from version control.");
         }
@@ -724,14 +750,14 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     {
         if (canonicalSourcePath is null)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source is not available from this working directory.");
             return false;
         }
 
         if (!canonicalSourceValid)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "  [grey]info[/] Global unmanaged-collision scan skipped: canonical source validation failed.");
             return false;
         }
@@ -796,13 +822,13 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                 }
                 catch (ArgumentOutOfRangeException)
                 {
-                    AnsiConsole.MarkupLine(
+                    _console.Ansi.MarkupLine(
                         $"  [grey]info[/] Global unmanaged-collision scan skipped for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': no verified global root.");
                     continue;
                 }
                 catch (ArgumentException ex)
                 {
-                    AnsiConsole.MarkupLine(
+                    _console.Ansi.MarkupLine(
                         $"  [red]fail[/] Invalid global root for '{Markup.Escape(SquadTargetCatalog.GetToken(target))}': {Markup.Escape(ex.Message)}");
                     invalidGlobalRoot = true;
                     continue;
@@ -836,7 +862,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
                     warnings);
                 if (!SquadResponsePreferencesInjector.HasAnyBlock(render))
                     warnings.Add(SquadResponsePreferencesInjector.NoBlockWarning);
-                SquadCommandComposition.WriteTransactionWarnings(warnings);
+                _console.WriteTransactionWarnings(warnings);
                 render = SquadResponsePreferencesInjector.Inject(render, effectiveGuidance);
 
                 collisions.AddRange(_planner.CollectUnmanagedCollisions(
@@ -851,16 +877,16 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         catch (Exception ex) when (
             FileFailure.Is(ex) || ex is SquadRenderValidationException or InvalidDataException)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 $"  [red]fail[/] Global unmanaged-collision scan failed: {Markup.Escape(ex.Message)}");
             return true;
         }
 
         if (collisions.Count == 0)
-            AnsiConsole.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
+            _console.Ansi.MarkupLine("  [green]ok[/] Global unmanaged collisions: none");
         else
             foreach (SquadUnmanagedPathCollision collision in collisions)
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [yellow]warn[/] Unmanaged global file '{Markup.Escape(collision.RelativePath)}' collides with canonical identity '{Markup.Escape(collision.Identity)}'.");
 
         return invalidGlobalRoot;
@@ -893,20 +919,20 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         }
         catch (Exception ex) when (FileFailure.Is(ex) || ex is InvalidDataException or System.Text.Json.JsonException)
         {
-            AnsiConsole.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
+            _console.Ansi.MarkupLine($"  [yellow]warn[/] Owned blocks: cannot read the ownership receipt: {Markup.Escape(ex.Message)}");
             return false;
         }
 
         if (receipt is null)
         {
-            AnsiConsole.MarkupLine(
+            _console.Ansi.MarkupLine(
                 "  [grey]info[/] Owned blocks: not checked (no Kyber-Squad deployment found)");
             return false;
         }
 
         if (receipt.Blocks.Count == 0)
         {
-            AnsiConsole.MarkupLine("  [green]ok[/] Owned blocks: none");
+            _console.Ansi.MarkupLine("  [green]ok[/] Owned blocks: none");
             return false;
         }
 
@@ -919,7 +945,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             string fullPath;
             try
             {
-                fullPath = SquadDeploymentPlan.ResolveOwnedFilePath(
+                fullPath = SquadDeploymentPlanRules.ResolveOwnedFilePath(
                     receipt,
                     workingDirectory,
                     globalRoots,
@@ -927,7 +953,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             }
             catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [red]fail[/] Owned block drift: {fileLabel} ({Markup.Escape(ex.Message)})");
                 hasDrift = true;
                 continue;
@@ -935,21 +961,21 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
             if (!SquadHookJsonBlock.TryResolveFormat(block, out SquadHookBlockFormat format))
             {
-                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (unknown shared hook file)");
+                _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (unknown shared hook file)");
                 hasDrift = true;
                 continue;
             }
 
-            if (!File.Exists(fullPath))
+            if (!_files.FileExists(fullPath))
             {
                 foreach (SquadOwnedBlockEntry entry in block.Entries)
                 {
-                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (missing)");
+                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (missing)");
                 }
 
                 if (block.Entries.Count == 0)
                 {
-                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (missing)");
+                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} (missing)");
                 }
 
                 hasDrift = true;
@@ -959,11 +985,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             string currentJson;
             try
             {
-                currentJson = File.ReadAllText(fullPath);
+                currentJson = _files.ReadAllText(fullPath);
             }
             catch (Exception ex) when (FileFailure.Is(ex))
             {
-                AnsiConsole.MarkupLine(
+                _console.Ansi.MarkupLine(
                     $"  [red]fail[/] Owned block drift: {fileLabel} (unreadable: {Markup.Escape(ex.Message)})");
                 hasDrift = true;
                 continue;
@@ -984,7 +1010,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
             {
                 foreach (SquadOwnedBlockEntry entry in block.Entries)
                 {
-                    AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
+                    _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(entry.Container)} (unparsable)");
                 }
 
                 hasDrift = true;
@@ -993,7 +1019,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
 
             foreach (SquadHookDrift drift in drifts)
             {
-                AnsiConsole.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
+                _console.Ansi.MarkupLine($"  [red]fail[/] Owned block drift: {fileLabel} {Markup.Escape(drift.Location)} ({Markup.Escape(drift.Reason)})");
                 hasDrift = true;
             }
         }
@@ -1002,7 +1028,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         {
             int entryCount = receipt.Blocks.Sum(block => block.Entries.Count);
             string entryWord = entryCount == 1 ? "entry" : "entries";
-            AnsiConsole.MarkupLine($"  [green]ok[/] Owned blocks: {receipt.Blocks.Count} blocks, {entryCount} {entryWord} healthy");
+            _console.Ansi.MarkupLine($"  [green]ok[/] Owned blocks: {receipt.Blocks.Count} blocks, {entryCount} {entryWord} healthy");
         }
 
         return hasDrift;

@@ -27,12 +27,16 @@ namespace KyberWeave.Arbiter.Hooks;
 /// <param name="hostConfig">Loads the project's configuration, for the budget it sets and whether it turns the Arbiter off.</param>
 /// <param name="process">The operator's home.</param>
 /// <param name="clock">The clock the budget window is measured on.</param>
+/// <param name="state">Opens the ledgers whose dispatch headers the command allow-list reads.</param>
+/// <param name="files">Probes for the <c>.git</c> entry that marks a repository root.</param>
 public sealed class WorkerGuard(
     IWorkerBudgetStore budgets,
     IRunCheckout checkouts,
     IHostConfigLoader hostConfig,
     IProcessEnvironment process,
-    TimeProvider clock) : IWorkerGuard
+    TimeProvider clock,
+    IArbiterStateFactory state,
+    IFileSystem files) : IWorkerGuard
 {
     /// <summary>The rule id a stray write is refused under.</summary>
     public const string CheckoutRuleId = WorkerGuardRules.CheckoutRuleId;
@@ -219,19 +223,14 @@ public sealed class WorkerGuard(
     /// The ledger events that can name this call's dispatch: the project's and the user-level project ledger's,
     /// when they are readable. Anything unreadable leaves the dispatch unknown, so every list applies.
     /// </summary>
-    private static IReadOnlyList<ArbiterLedgerEvent> LedgerEvents(string cwd, string home)
+    private IReadOnlyList<ArbiterLedgerEvent> LedgerEvents(string cwd, string home)
     {
         List<ArbiterLedgerEvent> events = [];
         foreach (string directory in LedgerDirectories(cwd, home))
         {
             try
             {
-                if (!File.Exists(Path.Combine(directory, InFlightLedger.FileName)))
-                {
-                    continue;
-                }
-
-                events.AddRange(new InFlightLedger(directory).ReadAll());
+                events.AddRange(state.OpenLedger(directory).ReadAll());
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -243,27 +242,27 @@ public sealed class WorkerGuard(
     }
 
     /// <summary>The project and user-level directories one repository's ledger may sit in.</summary>
-    private static IReadOnlyList<string> LedgerDirectories(string cwd, string home)
+    private IReadOnlyList<string> LedgerDirectories(string cwd, string home)
     {
         string root = RepositoryRootOf(cwd);
         List<string> directories = [Path.Combine(root, "artifacts", "arbiter")];
         if (!string.IsNullOrWhiteSpace(home))
         {
             directories.Add(Path.Combine(
-                home, ".kyber-weave", "arbiter", "projects", ArbiterHookDecisionEngine.ProjectRootKey(root)));
+                home, ".kyber-weave", "arbiter", "projects", ArbiterHookDecisionEngine.ProjectRootKey(root, process.CurrentDirectory)));
         }
 
         return [.. directories.Distinct(StringComparer.Ordinal)];
     }
 
     /// <summary>The nearest ancestor holding <c>.git</c>, or the working directory when no ancestor does.</summary>
-    private static string RepositoryRootOf(string cwd)
+    private string RepositoryRootOf(string cwd)
     {
-        string full = Path.GetFullPath(cwd);
+        string full = Path.GetFullPath(cwd, process.CurrentDirectory);
         for (DirectoryInfo? directory = new(full); directory is not null; directory = directory.Parent)
         {
-            if (Directory.Exists(Path.Combine(directory.FullName, ".git"))
-                || File.Exists(Path.Combine(directory.FullName, ".git")))
+            string git = Path.Combine(directory.FullName, ".git");
+            if (files.DirectoryExists(git) || files.FileExists(git))
             {
                 return directory.FullName;
             }

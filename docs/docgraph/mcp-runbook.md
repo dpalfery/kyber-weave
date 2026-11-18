@@ -15,7 +15,7 @@ decided-by:
   - adr/0085-tasks-carry-a-difficulty-and-one-technology-and-a-hook-inserts-the-task-prompt
 code-refs:
   - CodeGraphFreshness
-  - CodeGraphProvisioner
+  - CodeGraphIndexProvisioner
   - CorpusProvenance
   - DocsTools
   - DrainingStreamServerTransport
@@ -31,7 +31,7 @@ code-refs:
   - McpWiringInspector
   - McpWiringReceipt
   - McpWiringRepairer
-  - RepositoryDoctor
+  - RepositoryDoctorService
 ---
 
 # Running the DocGraph MCP server

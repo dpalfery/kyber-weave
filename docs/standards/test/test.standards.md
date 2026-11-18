@@ -5,7 +5,7 @@ doc-type: coding-standard
 status: current
 technology: test
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 decided-by:
   - adr/0047-kyberdash-self-spawns-through-one-guarded-chokepoint
 ---
@@ -24,9 +24,15 @@ would otherwise have to re-argue in review.
 
 ### Stack
 
-**xUnit**, split into three projects:
+**xUnit**, split into these projects:
 
-- `tests/KyberWeave.Tests` — the unit suite. The full run must finish in 120 seconds or less
+- One unit test project per product project that holds logic, named `<Project>.Tests`:
+  `KyberWeave.Application.Tests`, `Hooks.Tests`, `Kernel.Tests`, `Mcp.Tests`, `Arbiter.Tests`,
+  `Cli.Tests` and `Data.Tests`. A test sits in the project of the class it tests, runs in
+  memory, and uses the helpers in `tests/KyberWeave.Testing`. `Domain` holds data only and
+  `Contracts` holds interfaces, so neither has one. The full run of every unit project, plus the
+  content, policy and architecture projects (`KyberWeave.Unit.slnf` lists them), must finish in 120
+  seconds or less
   ([the budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)), and
   the speed rules below are how a test keeps it there.
 - `tests/KyberWeave.Integration.Tests` — the safety net: a test that performs a real Squad
@@ -36,11 +42,46 @@ would otherwise have to re-argue in review.
   durability switch, prepared installs, release fakes, console capture, path helpers and
   shared fixtures). It holds no tests.
 
-The class lists `tests/KyberWeave.Tests` and `tests/KyberWeave.Integration.Tests` both keep the
-namespace root they use for routing (`KyberWeave.Tests` and `KyberWeave.Integration.Tests`), so a
-fully-qualified class name names one test in one project.
+The classes in the content and policy projects keep the `KyberWeave.Tests` namespace root and the
+integration classes keep `KyberWeave.Integration.Tests`, so a fully-qualified class name names one
+test in one project.
 
 Assertions are xUnit's. This repository does not take NSubstitute or FluentAssertions.
+
+### Three kinds of test
+
+| Kind | Project | What it does | When it runs |
+|---|---|---|---|
+| **Unit** | `<Project>.Tests` for the code under test | Runs in memory over the shared fakes; touches no disk, starts no program, reads no environment variable, reads no real clock and opens no socket | Locally, and in every developer, task-gate and council run |
+| **Integration** | `tests/KyberWeave.Integration.Tests` | Runs an adapter's contract suite against the real resource, or smoke-tests a whole flow with real adapters | CI only, in its own required job |
+| **Content** | `tests/KyberWeave.Content.Tests` | Checks the shipped agents, skills, standards, documents and workflows, read through the corpus seam | With the unit projects, inside the same 120 seconds |
+
+A content test writes nothing and starts no program, so it is not an integration test. It is not a
+unit test either: the shipped corpus is its subject and cannot be faked (D10). A test of how
+*product code* handles content uses fixture content in memory and lives in the unit project of that
+code.
+
+### The seams and their fakes
+
+Every outside resource is reached through one interface, a seam, in `src/KyberWeave.Contracts`. Its
+adapter is the only product code allowed to call the resource, and it lives in `src/KyberWeave.Data`
+(or `src/KyberWeave.Kernel` for the low-level file-system and process work). The fake lives in
+[`tests/KyberWeave.Testing`](../../../tests/KyberWeave.Testing/AGENTS.md), **one fake per
+interface**. [`docs/reference/seams.md`](../../reference/seams.md) is the register of each seam, its
+adapter, its fake and the sealed framework types allowed through with a reason.
+
+Every fake is kept honest by a **contract suite**: an abstract test class in `KyberWeave.Testing`
+that runs against the fake in the owning unit project and against the adapter in
+`KyberWeave.Integration.Tests`. A behaviour the fake cannot reproduce is a failing contract test,
+not a silent difference. The in-memory file system is the hardest of these: `InMemoryFileSystem`
+reproduces atomic rename, exclusive create, case-insensitive but case-preserving names, links and
+their resolution, deletion without following links, enumeration, and fault injection at the Nth
+operation. A unit test that depends on a file-system behaviour must first add it to the contract
+suite.
+
+A test that needs any of that takes the fake from `KyberWeave.Testing` and never builds a local
+copy. A test root is derived from the fake's in-memory root or the test temp root and is
+platform-qualified: never a POSIX literal such as `/kw/work`, so the same test runs on Windows.
 
 ### Which project a test belongs in
 
@@ -49,8 +90,9 @@ One rule, and it is checkable by reading the test:
 - **`tests/KyberWeave.Integration.Tests`** holds a test that performs a real Squad deployment, starts
   a real program (git, the CLI, `dotnet`, `sqlite3`, node, bun), or needs a real file system beyond
   its own small scratch folder.
-- **`tests/KyberWeave.Tests`** holds everything else. Its full run is the 120-second unit suite, so
-  a real deployment or a real child program in it is a defect, not a slow test to tolerate.
+- **The unit project of the code under test** holds everything else. The unit projects' full run is the
+  120-second suite, so a real deployment or a real child program in one is a defect, not a slow test to
+  tolerate.
 
 **New behaviour gets an in-memory unit test written against an interface.** If the behaviour depends
 on the disk, the clock or another program, the seam is an interface the test replaces: a file-system
@@ -63,10 +105,10 @@ one), write the unit test against it, and keep the real-disk or real-program tes
 project. A new test in the unit project that reaches the real disk or spawns a process will be moved
 at review.
 
-The integration project is the safety net: CI runs it on every pull request in its own job, and a
-developer agent does not run it. The review council's `integration-test` gate is marked
-`full-suite: true`, so a developer's `review gates` run refuses it (`KW-REVIEW-033`) the same way it
-refuses the unit `test` gate.
+The integration project is the safety net: CI runs it on every pull request in its own required job.
+Developer agents, task gates and the review council's gates run unit and content projects only, so
+there is no integration gate in `.kyber-weave/kyber-weave.yml` and `scripts/fast-loop.sh --touched`
+only reports that an integration class was touched.
 
 ### A test name is an assertion
 
@@ -140,7 +182,7 @@ its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinne
   short tokens code parses or emits (`STATUS:` values, `PLAN_FILE:`, `TASK_GATE:`, rule ids, flags).
   Assert a token against its C# constant where one exists.
 - **Meaning is graded by Jev.** Each rule is one entry in the rule catalog,
-  [`tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml`](../../../tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml):
+  [`tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml`](../../../tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml):
   a one-sentence `statement`, the `stated-in` files that must state it, at least one negative `control`
   that must be judged not to, and, where an old rule must not come back, a `retired` statement with the
   files it must stay `absent-from` and an `example` the grader must recognise. The worker rule map's ids
@@ -149,9 +191,12 @@ its words ([ADR 0073](../../adr/0073-prose-rules-are-graded-by-meaning-not-pinne
 - **No phrase pins, forbidden-phrase pins or hash pins on prose.** A test that asserts a sentence, or a
   word from one, breaks on every rewording and says nothing about whether the rule is still stated.
 
-**Where the remaining wording checks live.** Classes that still assert the text of skills, agents and
-instructions are in [`tests/KyberWeave.PromptContent.Tests`](../../../tests/KyberWeave.PromptContent.Tests/AGENTS.md),
-not in `tests/KyberWeave.Tests`, so the product suite measures behaviour only. They are scheduled to become
+**Where the remaining wording checks live.** Classes that check the shipped content (the text of skills,
+agents and instructions, and the shape of standards and documents) are content tests in
+[`tests/KyberWeave.Content.Tests`](../../../tests/KyberWeave.Content.Tests/AGENTS.md), not unit tests and not
+integration tests: they read the content through the corpus seam (`ICorpusSource`), write nothing and start no
+program, so they run with the unit projects. A test of how product code handles content uses fixture content
+in memory and lives in the unit project of that code. They are scheduled to become
 eval-style checks, so do not add new wording pins there. The repository-policy project
 (`tests/KyberWeave.RepoPolicy.Tests`) keeps the checks on scripts, workflows, gate configuration and docs.
 
@@ -184,7 +229,7 @@ instead of a grade; if an absent-from file keeps drawing warnings, drop it and s
 endpoint's origin:
 
 ```bash
-KW_PROSE_GRADE=1 dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj \
+KW_PROSE_GRADE=1 dotnet test tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj \
   -c Release --filter "FullyQualifiedName~ProseRuleGradingTests"
 ```
 
@@ -237,7 +282,7 @@ Tests avoid redundant disk extraction, file copying, and YAML/Markdown parsing t
 
 ### Internals are in scope
 
-`InternalsVisibleTo` exposes `KyberWeave.Core` internals here, so helpers like link
+`InternalsVisibleTo` exposes the product projects' internals here, so helpers like link
 normalization, vocabulary parsing, and docs-root detection are tested directly. Marking a
 helper `internal` is not a reason to test it only through a command.
 
@@ -290,8 +335,8 @@ two static audits (below) keep the list of such sites honest.
 6. **Never start the dashboard from a test.** Use the e2e boot seams in `dash/e2e/harness-collection-boot.ts` and `dash/e2e/factory-replay-boot.ts`.
 
 **The allow-list (.NET and repo scripts).** `ProcessSpawnSitesTests` in
-`tests/KyberWeave.RepoPolicy.Tests/ProcessSpawnSitesTests.cs` scans three roots:
-`tests/KyberWeave.Tests`, `tests/KyberWeave.RepoPolicy.Tests` (C# and shell), and `src/` (C#).
+`tests/KyberWeave.RepoPolicy.Tests/ProcessSpawnSitesTests.cs` scans every test project and
+`tests/KyberWeave.Testing` (C# and shell), and `src/` (C#).
 It matches `Process.Start`, `new Process`, `new ProcessStartInfo`, `ProcessRunner.Run`,
 `ProcessRunner.RunInteractive`, and `BuildStartInfo`.
 `tests/KyberWeave.RepoPolicy.Tests/Fixtures/spawn-sites-allowlist.json` keys each entry by
@@ -332,18 +377,17 @@ format check, then report. Run these `dotnet` commands directly from the reposit
 **No dev agent runs the full test suite**: the review council's `test` gate and CI run it. Whoever
 runs it, person or agent, times it and reports the number: it must finish in 120 seconds or less
 ([the .NET test budget](../../../AGENTS.md#the-net-unit-suite-completes-in-120-seconds-or-less)).
-The integration project (`tests/KyberWeave.Integration.Tests`) is not part of that budget: CI and the
-council's `integration-test` gate run it, and a developer agent does not run it (except when
-explicitly asked to reproduce a CI failure by running the reported class).
+The integration project (`tests/KyberWeave.Integration.Tests`) is not part of that budget: CI runs it
+as its own required job, and no developer agent, task gate or council gate runs it.
 
 ```bash
-dotnet build tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release
-dotnet test tests/KyberWeave.Tests/KyberWeave.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
+dotnet build tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release
+dotnet test tests/KyberWeave.<Project>.Tests/KyberWeave.<Project>.Tests.csproj -c Release --no-build --filter "FullyQualifiedName~<Class>"
 dotnet format KyberWeave.sln whitespace --verify-no-changes -v minimal
 dotnet format KyberWeave.sln style --verify-no-changes --severity warn -v minimal
 ```
 
-A class in the integration project builds and runs the same way, against its own project:
+A person reproducing a failing CI integration class runs it the same way, against its own project:
 
 ```bash
 dotnet build tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj -c Release
@@ -357,10 +401,10 @@ two verbs, `whitespace` and `style`, because the council runs both as blocking g
 (`format-whitespace` and `format-style` in [`.kyber-weave/kyber-weave.yml`](../../../.kyber-weave/kyber-weave.yml));
 a test file that fails either is a finding the council raises and no test catches.
 
-A **full run** is any run of the whole product suite. A bare `dotnet test` (with or without options such as
-`-c Release`), a solution target such as `dotnet test KyberWeave.sln`, a directory, or the `KyberWeave.Tests` project or its
-`.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter` and `--treenode-filter`, in the `=` form too, or any
-`--filter`). `dotnet run` is full when any `--project`, `--project=` or `-p` names `KyberWeave.Tests`, even beside
+A **full run** is any run of the whole unit suite. A bare `dotnet test` (with or without options such as
+`-c Release`), a solution target such as `dotnet test KyberWeave.sln` or `dotnet test --solution KyberWeave.Unit.slnf`, a directory, or
+a unit test project or its `.dll` runner is full, unless it carries a narrowing flag (`-class`, `-method`, `-trait`, `-treenode-filter` and `--treenode-filter`, in the `=` form too, or any
+`--filter`). `dotnet run` is full when any `--project`, `--project=` or `-p` names a unit test project, even beside
 another project, and no narrowing flag appears; otherwise it is partial. `--artifacts-path` takes a value.
 `npm test`, `npm t`, `npm run test` and `npm run-script test` with no positional word after `--` are full under any
 `--prefix` (none, relative, absolute, or the tray UI directory), and so is `cargo test` with no positional filter.
@@ -374,7 +418,7 @@ may use. `npm run test:related` and `dotnet build` are never full runs. When a s
 it full. A command wrapped in a shell string (`sh -c '...'`) is not parsed. The refusal lives in the commands
 themselves, not in a wrapper: `kyber-weave review gates` refuses a gate marked `full-suite: true` unless the
 caller passes `--council` or stdin is a terminal (blocking failure `KW-REVIEW-033`, exit 1, nothing started),
-and `scripts/fast-loop.sh --full`, `--scoped` and `--regenerate` exit 89 from a non-interactive shell. Only the
+and `scripts/fast-loop.sh --full` and `--scoped` exit 89 from a non-interactive shell. Only the
 `code-reviewer` council and CI pass `--council`. The full-run definition above is the rule; the docs previously
 exposed it as a `classify` verb on the retired watchdog script, and that verb is gone with the script, so read
 this section as the reference.
@@ -405,13 +449,13 @@ The real closure is a per-harness shell hook that sees each shell call before it
 During task execution and active development, use the direct xUnit assembly runner with class filtering. MSBuild project evaluation and incremental dependency checks add multi-second overhead to every `dotnet test` invocation:
 
 ```bash
-dotnet tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll -class "<namespace>.<Class>"
+dotnet tests/KyberWeave.<Project>.Tests/bin/Release/net10.0/KyberWeave.<Project>.Tests.dll -class "<namespace>.<Class>"
 ```
 
 `-class` matches the fully qualified name: a short class name runs zero tests and exits 0, so read
 the total and treat zero as nothing verified.
 
-When the build used `--artifacts-path <dir>` with `-c Release`, the direct runner reads `<dir>/bin/KyberWeave.Tests/release/KyberWeave.Tests.dll` (the configuration is lowercase there) instead of `tests/KyberWeave.Tests/bin/Release/net10.0/KyberWeave.Tests.dll`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
+When the build used `--artifacts-path <dir>` with `-c Release`, the direct runner reads `<dir>/bin/KyberWeave.<Project>.Tests/release/KyberWeave.<Project>.Tests.dll` (the configuration is lowercase there) instead of `tests/KyberWeave.<Project>.Tests/bin/Release/net10.0/KyberWeave.<Project>.Tests.dll`; in your own isolated worktree without that flag the `bin/Release` command above is correct.
 
 - **Build once, test many (`--no-build`)**: Compile the test project once before iteration. Subsequent targeted test executions against non-code or single-class edits run directly via the compiled assembly runner or pass `--no-build` to bypass redundant MSBuild restore and rebuild evaluation.
 - **Reserve the full suite for the review council and CI**: Running the complete test suite across all classes is reserved for the review council's `test` gate, which runs it on the integrated head in the first full review, and for CI. No dev agent runs it, and a cross-cutting change is no exception. At task end, run only the test classes the task touched: the classes the task packet's runner command names, plus any other test class that references a symbol the task changed. If no class covers the change, run none and report `TESTS: total=0` with the reason, because zero tests run is not zero failures. If the change reaches shared test infrastructure (fixtures, base classes and shared helpers, meaning anything referenced by more than one test class, which `codegraph_explore` on the type shows; and test-project build settings, which every test class depends on), run a targeted set: the classes that reference what changed or, for a change every class depends on, a few representative classes. Name what you did not run; the council and CI cover it.

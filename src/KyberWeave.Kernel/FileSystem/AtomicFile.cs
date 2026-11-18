@@ -70,6 +70,23 @@ public static class AtomicFile
         Write(path, writeThroughSymlink, temporaryPath => File.WriteAllBytes(temporaryPath, content));
     }
 
+    /// <summary>Writes bytes atomically, optionally forcing the temporary's bytes to the device before the rename.</summary>
+    /// <param name="path">The file to create or replace.</param>
+    /// <param name="content">The complete bytes the file ends up holding.</param>
+    /// <param name="writeThroughSymlink">True to replace the file a symbolic link at <paramref name="path"/> points to, keeping the link.</param>
+    /// <param name="flushToDisk">True to write through the operating system's cache and flush the file to the device, so a crash after the rename cannot lose the content.</param>
+    public static void WriteAllBytes(string path, byte[] content, bool writeThroughSymlink, bool flushToDisk)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (!flushToDisk)
+        {
+            WriteAllBytes(path, content, writeThroughSymlink);
+            return;
+        }
+
+        Write(path, writeThroughSymlink, temporaryPath => WriteFlushed(temporaryPath, content));
+    }
+
     /// <summary>
     /// Writes <paramref name="content"/> to <paramref name="path"/> atomically as UTF-8 without a
     /// byte-order mark.
@@ -81,6 +98,38 @@ public static class AtomicFile
     {
         ArgumentNullException.ThrowIfNull(content);
         Write(path, writeThroughSymlink: false, temporaryPath => File.WriteAllText(temporaryPath, content, PlainUtf8));
+    }
+
+    /// <summary>Writes text atomically, optionally forcing the temporary's bytes to the device before the rename.</summary>
+    /// <param name="path">The file to create or replace.</param>
+    /// <param name="content">The text, written as UTF-8 without a byte-order mark.</param>
+    /// <param name="flushToDisk">True to write through the operating system's cache and flush the file to the device, so a crash after the rename cannot lose the content.</param>
+    public static void WriteAllText(string path, string content, bool flushToDisk)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (!flushToDisk)
+        {
+            WriteAllText(path, content);
+            return;
+        }
+
+        Write(
+            path,
+            writeThroughSymlink: false,
+            temporaryPath => WriteFlushed(temporaryPath, PlainUtf8.GetBytes(content)));
+    }
+
+    private static void WriteFlushed(string temporaryPath, byte[] content)
+    {
+        using FileStream stream = new(
+            temporaryPath,
+            FileMode.CreateNew,
+            FileAccess.Write,
+            FileShare.None,
+            4096,
+            FileOptions.WriteThrough);
+        stream.Write(content);
+        stream.Flush(flushToDisk: true);
     }
 
     private static void Write(string path, bool writeThroughSymlink, Action<string> writeTemporary)

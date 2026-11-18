@@ -279,10 +279,10 @@ has a name. The .NET tests read files under `docs/`,
 `products/`, `.kyber-weave/`, `.github/`, `scripts/`, and a few under `dash/`, so no path
 set can prove them irrelevant.
 
-`build-test` runs the unit project (`tests/KyberWeave.Tests`) plus the policy, prose and layer
-projects. `integration-test`, displayed as **Integration tests**, runs
+`build-test` runs every unit project, the content tests, the policy tests and the architecture test
+(`KyberWeave.Unit.slnf` lists them). `integration-test`, displayed as **Integration tests**, runs
 `tests/KyberWeave.Integration.Tests` — the real Squad deployments, real child programs and
-file-system work — unconditionally on every pull request, and `CI Summary` requires both. The split exists so the
+file-system work — on every pull request, docs-only ones included, and `CI Summary` requires both. The split exists so the
 unit job can finish inside its 120-second budget; development agents do not run the integration
 project. `squad-filesystem-contract` keeps its macOS and Windows legs and runs the same project with
 a `SquadDeploymentState` filter.

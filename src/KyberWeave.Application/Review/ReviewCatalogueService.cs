@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -12,10 +13,16 @@ namespace KyberWeave.Application.Review;
 /// <param name="configs">Loads the host's configuration.</param>
 /// <param name="lister">Lists the repository files the project roots are detected over.</param>
 /// <param name="files">Reads the files a gate's condition names.</param>
+/// <param name="paths">Resolves the path the caller spelled.</param>
+/// <param name="environment">Names the working directory a relative path resolves against.</param>
+/// <param name="templates">Answers whether the build ships a standard template for a technology.</param>
 public sealed class ReviewCatalogueService(
     IConfigLoadService configs,
     IRepositoryFileLister lister,
-    IFileSystem files) : IReviewCatalogueService
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment,
+    IKyberStandardsTemplates templates) : IReviewCatalogueService
 {
     /// <inheritdoc />
     public ReviewCommandResult Run(
@@ -30,7 +37,7 @@ public sealed class ReviewCatalogueService(
         string root;
         try
         {
-            root = Path.GetFullPath(request.Path);
+            root = paths.GetFullPath(request.Path, environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
                                        or System.Security.SecurityException)
@@ -41,11 +48,11 @@ public sealed class ReviewCatalogueService(
                 $"Cannot resolve path '{request.Path}': {ex.Message}",
                 "kyber-weave.yml",
                 request.Path));
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
         }
 
         if (!configs.TryLoad(root, request.Config, report, out KyberWeaveConfig config, out _))
-            return ReviewCommandResult.Reported(1, report);
+            return ReviewCommandResultFactory.Reported(1, report);
 
         // A host may declare a technology no template ships: `docs init` scaffolds it as stubs. Its gates are
         // reported as not shipped, not refused, because the technology is the host's own choice.
@@ -58,8 +65,8 @@ public sealed class ReviewCatalogueService(
 
         foreach (string technology in technologies)
         {
-            if (!KyberStandardsTemplates.TryGet(technology, out _) && !declared.Contains(technology))
-                return ReviewCommandResult.Refused(UnknownTechnologyMessage(technology));
+            if (!templates.TryGet(technology, out _) && !declared.Contains(technology))
+                return ReviewCommandResultFactory.Refused(UnknownTechnologyMessage(technology));
         }
 
         ReviewGatesPlan plan = ReviewCataloguePlanner.Plan(
@@ -96,14 +103,14 @@ public sealed class ReviewCatalogueService(
     /// <summary>
     /// The unknown-technology message for <paramref name="technology"/>, with the nearest-match
     /// hint. The hint comes from <c>StringDistance.Nearest</c>, but
-    /// <see cref="KyberStandardsTemplates.Render"/> is the public surface that owns the message,
+    /// <see cref="IKyberStandardsTemplates.Render"/> is the public surface that owns the message,
     /// so the hint is harvested from its failure rather than reimplemented where it could drift.
     /// </summary>
-    private static string UnknownTechnologyMessage(string technology)
+    private string UnknownTechnologyMessage(string technology)
     {
         try
         {
-            KyberStandardsTemplates.Render(technology, "kyber-weave", "1970-01-01");
+            templates.Render(technology, "kyber-weave", "1970-01-01");
         }
         catch (ArgumentException ex)
         {

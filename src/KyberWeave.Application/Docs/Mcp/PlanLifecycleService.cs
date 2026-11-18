@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -19,7 +20,9 @@ public sealed class PlanLifecycleService(
     IPlanFinalizeService finalize,
     IPlanCloseoutService closeout,
     IRepositoryFileStore files,
-    TimeProvider timeProvider) : IPlanLifecycleService
+    TimeProvider timeProvider,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IPlanLifecycleService
 {
     private const string ArchiveRefusalNext =
         "next: send these findings to docs-dev as one closeout dispatch (harvest and Closeout mapping). " +
@@ -92,7 +95,7 @@ public sealed class PlanLifecycleService(
             return false;
         }
 
-        PlanPathResolution resolution = new PlanFileResolver(_repositoryRoot, config, files).Resolve(planFile, _repositoryRoot);
+        PlanPathResolution resolution = new PlanFileResolver(_repositoryRoot, config, files, paths, environment).Resolve(planFile, _repositoryRoot);
         if (!resolution.Found)
         {
             string message = resolution.Ambiguous

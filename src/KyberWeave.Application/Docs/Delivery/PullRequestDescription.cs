@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.FileSystem;
 
@@ -29,14 +31,20 @@ public static partial class PullRequestDescription
     private static readonly string[] AlwaysShown = ["not-verified", "decisions", "pending-review", "follow-ups", "notes"];
 
     /// <summary>The embedded description template, comment included.</summary>
-    public static string Template { get; } = ReadTemplate();
+    /// <param name="resources">Reads the template embedded in this assembly.</param>
+    public static string Template(IEmbeddedResources resources)
+    {
+        ArgumentNullException.ThrowIfNull(resources);
+        return resources.ReadAllText(ResourceName);
+    }
 
     /// <summary>The paths, relative to the repository root, where GitHub reads a default pull request template, in the order it looks.</summary>
     public static IReadOnlyList<string> HostTemplateLocations { get; } =
         ["pull_request_template.md", "docs/pull_request_template.md", ".github/pull_request_template.md"];
 
     /// <summary>Reads the host's default pull request template, matching the file name case-insensitively, or null when it has none or none can be read.</summary>
-    public static string? ReadHostTemplate(string repoRoot) => ReadHostTemplate(repoRoot, DeliveryFile.ReadAllText).Text;
+    public static string? ReadHostTemplate(IRepositoryFileStore files, string repoRoot) =>
+        ReadHostTemplate(files, repoRoot, files.ReadAllTextBounded).Text;
 
     /// <summary>
     /// Reads the host's default pull request template through <paramref name="read"/>. A candidate that cannot be read is
@@ -44,11 +52,13 @@ public static partial class PullRequestDescription
     /// through a symbolic link is treated the same way, because a link can point outside the repository and the template's
     /// lines are published in the pull request.
     /// </summary>
+    /// <param name="files">The file store the folders are listed and checked through.</param>
     /// <param name="repoRoot">The repository root.</param>
     /// <param name="read">Reads one template file.</param>
-    /// <param name="listFolder">Lists a folder's files; the file system when null. A seam for a folder that cannot be listed.</param>
-    internal static HostTemplate ReadHostTemplate(string repoRoot, Func<string, string> read, Func<string, IEnumerable<string>>? listFolder = null)
+    /// <param name="listFolder">Lists a folder's files; the file store when null. A seam for a folder that cannot be listed.</param>
+    internal static HostTemplate ReadHostTemplate(IRepositoryFileStore files, string repoRoot, Func<string, string> read, Func<string, IEnumerable<string>>? listFolder = null)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(read);
         List<string> unreadable = [];
@@ -58,10 +68,10 @@ public static partial class PullRequestDescription
             try
             {
                 string folder = Path.Combine(repoRoot, Path.GetDirectoryName(location) ?? string.Empty);
-                if (!Directory.Exists(folder))
+                if (!files.DirectoryExists(folder))
                     continue;
 
-                match = (listFolder ?? (static path => Directory.EnumerateFiles(path)))(folder)
+                match = (listFolder ?? files.GetFiles)(folder)
                     .FirstOrDefault(file => string.Equals(Path.GetFileName(file), Path.GetFileName(location), StringComparison.OrdinalIgnoreCase));
             }
             catch (Exception exception) when (FileFailure.Is(exception))
@@ -74,7 +84,7 @@ public static partial class PullRequestDescription
             if (match is null)
                 continue;
 
-            if (!DocsRootPath.IsContainedFile(repoRoot, Path.GetRelativePath(repoRoot, match), []))
+            if (!files.IsContainedFile(repoRoot, Path.GetRelativePath(repoRoot, match), []))
             {
                 unreadable.Add(location);
                 continue;
@@ -98,11 +108,14 @@ public static partial class PullRequestDescription
     internal sealed record HostTemplate(string? Text, IReadOnlyList<string> Unreadable);
 
     /// <summary>The description for <paramref name="content"/>, in the host's template when one is given, otherwise in the standard format.</summary>
-    public static string Render(PullRequestContent content, string? hostTemplate = null)
+    /// <param name="resources">Reads the embedded standard template.</param>
+    /// <param name="content">What the description reports.</param>
+    /// <param name="hostTemplate">The host's own template, or null for the standard format.</param>
+    public static string Render(IEmbeddedResources resources, PullRequestContent content, string? hostTemplate = null)
     {
         ArgumentNullException.ThrowIfNull(content);
         Dictionary<string, string?> values = Values(content);
-        List<Section> standard = Sections(Template);
+        List<Section> standard = Sections(Template(resources));
 
         List<(string Heading, string Body)> output = [];
         if (string.IsNullOrWhiteSpace(hostTemplate))
@@ -236,14 +249,6 @@ public static partial class PullRequestDescription
             Match token = Token().Match(content);
             sections.Add(new Section(heading, content, token.Success ? token.Groups["name"].Value : null));
         }
-    }
-
-    private static string ReadTemplate()
-    {
-        using Stream stream = typeof(PullRequestDescription).Assembly.GetManifestResourceStream(ResourceName)
-                              ?? throw new InvalidOperationException($"The embedded resource '{ResourceName}' is missing.");
-        using StreamReader reader = new(stream);
-        return reader.ReadToEnd();
     }
 
     [GeneratedRegex(@"<!--.*?-->", RegexOptions.Singleline | RegexOptions.CultureInvariant)]

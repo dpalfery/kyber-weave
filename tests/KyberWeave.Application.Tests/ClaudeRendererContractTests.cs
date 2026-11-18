@@ -1,0 +1,1261 @@
+using KyberWeave.Testing.Squad;
+using System.Text;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Parsing;
+using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Core.Squad.Validation;
+using KyberWeave.Tests.Corpus;
+using Xunit;
+using YamlDotNet.RepresentationModel;
+using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
+
+namespace KyberWeave.Tests;
+
+/// <summary>
+/// Renders the real canonical Squad source (<c>products/kyber-squad</c>) through
+/// <see cref="SquadRendererRegistry"/> with <see cref="ClaudeRenderer"/> and validates the result
+/// against Claude Code's documented subagent and skill contracts.
+/// </summary>
+/// <remarks>
+/// Validates that canonical agents lower to Claude subagents at <c>.claude/agents/&lt;name&gt;.md</c>
+/// and skills lower to <c>.claude/skills/&lt;name&gt;/SKILL.md</c>. Verifies profile-declared
+/// shared-identity suppression, explicit tool allow-listing, model resolution from <c>models.yml</c>,
+/// and structured degradation accounting for <c>safety-narrowed</c> and
+/// <c>permission-not-expressible</c> codes.
+///
+/// <para>
+/// <strong>Primary-agent entry point:</strong> A primary agent with <c>fallback: role-skill</c>
+/// and profile <c>no-primary-agent: skill</c> renders as both a subagent file at
+/// <c>.claude/agents/&lt;name&gt;.md</c> and an entry-point skill at
+/// <c>.claude/skills/&lt;name&gt;/SKILL.md</c>, invoked as <c>/&lt;name&gt;</c> in the main conversation.
+/// The subagent file is kept for enforced invocation (<c>claude --agent &lt;name&gt;</c>).
+/// The skill frontmatter contains exactly <c>name</c>, <c>description</c>, and <c>license</c>;
+/// its body matches the canonical agent body verbatim. The entry-point skill and its resources
+/// share degradation records with the agent. Under profile <c>no-primary-agent: omit</c>,
+/// no entry-point skill is emitted, and the agent's existing records remain unchanged.
+/// </para>
+/// </remarks>
+public sealed class ClaudeRendererContractTests : IDisposable
+{
+
+    private static string ProductRoot => CanonicalSquadTree.Shared.ProductRoot;
+
+    private static readonly string[] SkillFrontmatterKeys = ["name", "description", "license"];
+    private static readonly string[] PrimaryAgentDegradationCodes = ["permission-not-expressible", "role-skill-fallback"];
+
+    /// <summary>
+    /// Claude Code's built-in tool vocabulary, transcribed from code.claude.com/docs/en/sub-agents
+    /// on 2026-08-23. A tool outside this set would be silently ignored by the harness, turning
+    /// an intended grant into a missing capability at runtime. <c>Agent(roster)</c> forms are
+    /// validated separately because the roster is agent-specific.
+    /// </summary>
+    private static readonly string[] DocumentedClaudeTools =
+    [
+        "TodoWrite",
+        "Skill",
+        "Read",
+        "Grep",
+        "Glob",
+        "Edit",
+        "Write",
+        "NotebookEdit",
+        "Bash",
+        "PowerShell",
+        "WebFetch",
+        "WebSearch",
+        "Agent",
+        "mcp__codegraph__*",
+        "mcp__kw-docs__*",
+        "mcp__context7__*"
+    ];
+
+    /// <summary>
+    /// The capability→tool lowering this suite pins. Declared independently of the renderer
+    /// so a change to either side has to be made deliberately in both.
+    /// <c>network.publish</c> is absent because no built-in publish tool exists.
+    /// <c>delegate</c> is handled separately so a non-empty
+    /// <see cref="SquadAgent.DelegatesTo"/> can emit <c>Agent(roster)</c>.
+    /// </summary>
+    private static readonly (string Capability, string[] Tools)[] CapabilityToolContract =
+    [
+        ("filesystem.read", ["Read"]),
+        ("filesystem.search", ["Grep", "Glob"]),
+        ("filesystem.write", ["Edit", "Write", "NotebookEdit"]),
+        ("process.execute", ["Bash", "PowerShell"]),
+        ("network.read", ["WebFetch", "WebSearch"]),
+    ];
+
+    /// <summary>
+    /// The nested-roster sentence for the <c>permission-not-expressible</c> record in omit mode.
+    /// Declared independently of <c>ClaudeRenderer.BuildDegradationRecords</c> so a change
+    /// to either side has to be made deliberately in both. When <c>delegate: allow</c>
+    /// and the agent's roster is non-empty, this text (with <c>&lt;Roster&gt;</c> replaced by the
+    /// comma-joined delegation list) is emitted in both skill and omit modes.
+    /// </summary>
+    private const string OmitModeNestedRosterSentenceTemplate =
+        "Claude Code ignores Agent(roster) parentheses when this definition " +
+        "runs as a nested subagent; the permitted delegation roster is not enforced " +
+        "for nested Task/Agent spawns. Roster: ";
+
+    public void Dispose()
+    {
+        // No disposable state: the suite only reads the checked-in corpus. IDisposable is
+        // implemented per the test-coding-standard so adding fixtures later has a home.
+    }
+
+    [Fact]
+    public async Task RenderAsync_Claude_RendersTheRealCanonicalCorpus()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        Dictionary<string, SquadAgent> agentsByName = source.Agents.ToDictionary(a => a.Name, StringComparer.Ordinal);
+        foreach (SquadAgent agent in source.Agents)
+        {
+            SquadDeploymentFile file = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".claude/agents/{agent.Name}.md");
+
+            (YamlMappingNode frontmatter, string body) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                agent.Name);
+            Assert.Equal(agent.Name, RequireScalar(frontmatter, "name", agent.Name));
+            Assert.True(
+                string.Equals(agent.Description, RequireScalar(frontmatter, "description", agent.Name), StringComparison.Ordinal),
+                $"Agent '{agent.Name}' description mismatch.");
+
+            // The conductor names no profile: it runs on whatever model the main session started
+            // with, so its file carries no model key at all.
+            if (string.IsNullOrWhiteSpace(agent.ModelProfile))
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' names no model profile and must omit 'model'.");
+                continue;
+            }
+
+            // Model resolution: verify against loaded ModelProfiles. Every assertion names
+            // the agent so a failure identifies the offender out of the 21-agent corpus.
+            SquadModelProfile modelProfile = source.ModelProfiles.Profiles[agent.ModelProfile];
+            if (modelProfile.HarnessModels.TryGetValue("claude", out string? claudeHarnessModel))
+            {
+                if (string.Equals(claudeHarnessModel, "inherit", StringComparison.Ordinal))
+                {
+                    Assert.False(
+                        frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                        $"Agent '{agent.Name}' should omit 'model' (claude harness override is inherit).");
+                }
+                else
+                {
+                    Assert.True(
+                        string.Equals(claudeHarnessModel, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
+                        $"Agent '{agent.Name}' model mismatch: expected '{claudeHarnessModel}'.");
+                }
+            }
+            else if (!string.Equals(modelProfile.Default, "inherit", StringComparison.Ordinal))
+            {
+                Assert.True(
+                    string.Equals(modelProfile.Default, RequireScalar(frontmatter, "model", agent.Name), StringComparison.Ordinal),
+                    $"Agent '{agent.Name}' model mismatch: expected '{modelProfile.Default}'.");
+            }
+            else
+            {
+                Assert.False(
+                    frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+                    $"Agent '{agent.Name}' should omit 'model' (profile default is inherit).");
+            }
+
+            // 'tools' is where the capability lattice lands on Claude. Omitting the key
+            // inherits every subagent tool, so assert presence and both directions of the mapping.
+            SquadCapabilityProfile capProfile = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            IReadOnlyList<string> tools = RequireSequence(frontmatter, "tools", agent.Name);
+            Assert.All(tools, tool => Assert.True(IsDocumentedClaudeTool(tool), $"Agent '{agent.Name}' tool '{tool}' is not in the documented vocabulary."));
+            Assert.True(
+                tools.Distinct(StringComparer.Ordinal).Count() == tools.Count,
+                $"Agent '{agent.Name}' has duplicate tool entries: {string.Join(", ", tools)}.");
+
+            foreach ((string capability, string[] mapped) in CapabilityToolContract)
+            {
+                bool allowed = capProfile.Permissions.TryGetValue(capability, out SquadPermissionDecision decision) &&
+                               decision == SquadPermissionDecision.Allow;
+                foreach (string tool in mapped)
+                {
+                    Assert.True(
+                        allowed == tools.Contains(tool, StringComparer.Ordinal),
+                        $"Agent '{agent.Name}' capability '{capability}' allowed={allowed} tool '{tool}'.");
+                }
+            }
+
+            // TodoWrite and Skill lower from no capability, so every agent keeps them.
+            Assert.Contains("TodoWrite", tools);
+            Assert.Contains("Skill", tools);
+
+            bool delegateAllowed = capProfile.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                                   delegateDecision == SquadPermissionDecision.Allow;
+            if (delegateAllowed)
+            {
+                if (agent.DelegatesTo.Count > 0)
+                {
+                    string expectedAgentTool = $"Agent({string.Join(", ", agent.DelegatesTo)})";
+                    Assert.Contains(
+                        tools,
+                        tool => string.Equals(tool, expectedAgentTool, StringComparison.Ordinal));
+                }
+                else
+                {
+                    Assert.Contains("Agent", tools);
+                }
+            }
+            else
+            {
+                Assert.DoesNotContain(tools, tool => tool.StartsWith("Agent", StringComparison.Ordinal));
+            }
+
+            // MCP is two rules. kw-docs follows the file-read entitlement alone, the pure
+            // orchestrator included; codegraph and context7 keep the orchestrator carve-out.
+            bool grantsKyberWeave =
+                SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Claude);
+            Assert.True(
+                grantsKyberWeave == tools.Contains("mcp__kw-docs__*", StringComparer.Ordinal),
+                $"Agent '{agent.Name}' (capability profile '{agent.CapabilityProfile}') should "
+                + $"{(grantsKyberWeave ? "carry" : "withhold")} 'mcp__kw-docs__*'.");
+
+            bool grantsOrchestratorExcluded =
+                SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(source, agent, SquadTarget.Claude);
+            foreach (string mcpTool in new[] { "mcp__codegraph__*", "mcp__context7__*" })
+            {
+                Assert.True(
+                    grantsOrchestratorExcluded == tools.Contains(mcpTool, StringComparer.Ordinal),
+                    $"Agent '{agent.Name}' mcpTool '{mcpTool}'.");
+            }
+
+            // Exact comparison: the renderer appends the normalized body verbatim, so a
+            // duplicated or padded body must fail, and the message names the offender.
+            string expectedAgentBody = TestSquadCorpus
+                .ExpectedBodyText(SquadTarget.Claude, agent)
+                .Replace("\r\n", "\n", StringComparison.Ordinal);
+            if (!expectedAgentBody.EndsWith('\n'))
+            {
+                expectedAgentBody += "\n";
+            }
+
+            Assert.True(
+                string.Equals(expectedAgentBody, body, StringComparison.Ordinal),
+                $"Agent '{agent.Name}' body mismatch.");
+        }
+
+        // Concrete lowerings verification against loaded profiles
+        SquadCapabilityProfile architectProfile = source.CapabilityProfiles.Profiles["architect"];
+        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, architectProfile.Permissions["process.execute"]);
+        AssertTools(result, "architect", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell", "WebFetch", "WebSearch", "Agent(platform-researcher, research-agent)"]);
+
+        SquadCapabilityProfile docProfile = source.CapabilityProfiles.Profiles["documentation"];
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["filesystem.write"]);
+        Assert.Equal(SquadPermissionDecision.Allow, docProfile.Permissions["process.execute"]);
+        AssertTools(result, "docs-dev", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Edit", "Write", "NotebookEdit", "Bash", "PowerShell"]);
+
+        SquadCapabilityProfile investigatorProfile = source.CapabilityProfiles.Profiles["investigator"];
+        Assert.Equal(SquadPermissionDecision.Allow, investigatorProfile.Permissions["process.execute"]);
+        AssertTools(result, "bug-crusher-investigator", ["TodoWrite", "Skill", "Read", "mcp__codegraph__*", "mcp__kw-docs__*", "mcp__context7__*", "Grep", "Glob", "Bash", "PowerShell", "WebFetch", "WebSearch"]);
+
+        // Degradations: 'ask' capabilities produce safety-narrowed; allowed network.publish
+        // and delegate-allow rosters produce permission-not-expressible. An agent may carry
+        // both records, and one permission-not-expressible record may combine both causes.
+        string[] expectedSafetyNarrowed = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                return prof.Permissions.Values.Any(decision => decision == SquadPermissionDecision.Ask);
+            })
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        string[] expectedPermissionNotExpressible = source.Agents
+            .Where(a =>
+            {
+                SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[a.CapabilityProfile];
+                bool publishAllowed = prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                                      publishDecision == SquadPermissionDecision.Allow;
+                bool rosterLimited = prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                                     delegateDecision == SquadPermissionDecision.Allow &&
+                                     a.DelegatesTo.Count > 0;
+                return publishAllowed || rosterLimited;
+            })
+            .Select(a => a.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.NotEmpty(expectedSafetyNarrowed);
+        Assert.NotEmpty(expectedPermissionNotExpressible);
+
+        IReadOnlyList<SquadDegradationRecord> safetyNarrowed = result.Degradations
+            .Where(d => string.Equals(d.Code, "safety-narrowed", StringComparison.Ordinal))
+            .ToArray();
+        IReadOnlyList<SquadDegradationRecord> permissionNotExpressible = result.Degradations
+            .Where(d => string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal))
+            .ToArray();
+
+        Assert.Equal(
+            expectedSafetyNarrowed,
+            safetyNarrowed.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+        Assert.Equal(
+            expectedPermissionNotExpressible,
+            permissionNotExpressible.Select(d => d.CanonicalIdentity).OrderBy(n => n, StringComparer.Ordinal));
+
+        foreach (SquadDegradationRecord degradation in permissionNotExpressible)
+        {
+            SquadAgent agent = agentsByName[degradation.CanonicalIdentity];
+            SquadCapabilityProfile prof = source.CapabilityProfiles.Profiles[agent.CapabilityProfile];
+            if (prof.Permissions.TryGetValue("network.publish", out SquadPermissionDecision publishDecision) &&
+                publishDecision == SquadPermissionDecision.Allow)
+            {
+                Assert.Contains(
+                    "network.publish",
+                    degradation.Details,
+                    StringComparison.Ordinal);
+            }
+
+            if (prof.Permissions.TryGetValue("delegate", out SquadPermissionDecision delegateDecision) &&
+                delegateDecision == SquadPermissionDecision.Allow &&
+                agent.DelegatesTo.Count > 0)
+            {
+                Assert.Contains(
+                    "Roster:",
+                    degradation.Details,
+                    StringComparison.Ordinal);
+            }
+        }
+
+        Assert.All(result.Degradations, degradation => Assert.True(
+            degradation.Code is "safety-narrowed" or "permission-not-expressible" or "capability-not-isolable" or "role-skill-fallback",
+            $"Degradation for '{degradation.CanonicalIdentity}' has an unexpected code '{degradation.Code}'."));
+    }
+
+    /// <summary>
+    /// Pins the Claude model of the primary agent by value. The corpus test only checks that
+    /// the renderer echoes <c>models.yml</c>, so a wrong tier there still passes it. On
+    /// <c>haiku</c> the conductor answered from its own reads instead of delegating to
+    /// <c>architect</c>, then reached for the Skill tool where the Agent tool was needed.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ConductorRunsOnTheSessionModel()
+    {
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".claude/agents/conductor.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            "conductor");
+        Assert.False(
+            frontmatter.Children.ContainsKey(new YamlScalarNode("model")),
+            "The conductor names no profile, so it must render no model and run on the session's.");
+    }
+
+    /// <summary>
+    /// Pins the operator-selected Haiku 5.5 model for Claude's fast authoring workers.
+    /// </summary>
+    [Theory]
+    [InlineData("dev-easy")]
+    public async Task RenderAsync_Claude_FastProfileWorkersRunOnHaiku55(string agent)
+    {
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{agent}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agent);
+        Assert.Equal("claude-haiku-5-5", RequireScalar(frontmatter, "model", agent));
+    }
+
+    /// <summary>
+    /// Pins the Claude model of the <c>product-owner</c> planning specialist by value (issue #286).
+    /// Resolves to <c>opus</c> on Claude, providing exact parity with <c>architect</c>.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ProductOwnerRunsOnArchitectModel()
+    {
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == ".claude/agents/product-owner.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            "product-owner");
+        Assert.Equal("opus", RequireScalar(frontmatter, "model", "product-owner"));
+    }
+
+    /// <summary>
+    /// Pins Sonnet 5.5 for Claude's general workers without changing planning membership.
+    /// </summary>
+    [Theory]
+    [InlineData("devops")]
+    [InlineData("dev-medium")]
+    [InlineData("docs-dev")]
+    public async Task RenderAsync_Claude_GeneralProfileWorkersRunOnSonnet55(string agent)
+    {
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{agent}.md");
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agent);
+        Assert.Equal("claude-sonnet-5-5", RequireScalar(frontmatter, "model", agent));
+    }
+
+    /// <summary>
+    /// Confines Haiku 5.5 to Claude's fast workers and verifies every fast worker gets that pin.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_OnlyFastWorkersRunOnHaiku55()
+    {
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        HashSet<string> fastAgentPaths = new(StringComparer.Ordinal)
+        {
+            ".claude/agents/bug-crusher.md",
+            ".claude/agents/dev-easy.md",
+            ".claude/agents/platform-researcher.md",
+            ".claude/agents/research-agent.md"
+        };
+        SquadDeploymentFile[] agentFiles = result.Files
+            .Where(f => f.RelativePath.StartsWith(".claude/agents/", StringComparison.Ordinal)
+                && f.RelativePath.EndsWith(".md", StringComparison.Ordinal)
+                && f.RelativePath.Count(c => c == '/') == 2)
+            .ToArray();
+        Assert.Equal(fastAgentPaths.Count, agentFiles.Count(file => fastAgentPaths.Contains(file.RelativePath)));
+
+        foreach (SquadDeploymentFile file in agentFiles)
+        {
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+                Encoding.UTF8.GetString(file.Content.Span),
+                file.RelativePath);
+
+            // The conductor is the one agent with no profile, and so the one file with no model
+            // key; it runs on the session's model and cannot be on Haiku.
+            if (!frontmatter.Children.ContainsKey(new YamlScalarNode("model")))
+            {
+                Assert.Equal(".claude/agents/conductor.md", file.RelativePath);
+                continue;
+            }
+
+            string model = RequireScalar(frontmatter, "model", file.RelativePath);
+            if (fastAgentPaths.Contains(file.RelativePath))
+            {
+                Assert.Equal("claude-haiku-5-5", model);
+            }
+            else
+            {
+                Assert.DoesNotContain("haiku", model, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+    }
+
+
+    /// <summary>
+    /// Row (b): Project scope renders the primary agent as both a subagent and an entry-point
+    /// skill, each with its resource closure, under the same degradation records.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ExposesThePrimaryAgentAsAnEntryPointSkillBesideItsSubagent()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Subagent file is present (Q1).
+        Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{primaryAgent.Name}.md");
+
+        // Entry-point skill is present with exact frontmatter key set: {name, description, license}.
+        SquadDeploymentFile skillFile = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/skills/{primaryAgent.Name}/SKILL.md");
+        (YamlMappingNode skillFrontmatter, string skillBody) = SplitFrontmatter(
+            Encoding.UTF8.GetString(skillFile.Content.Span),
+            primaryAgent.Name);
+
+        Assert.Equal(
+            SkillFrontmatterKeys.OrderBy(k => k, StringComparer.Ordinal),
+            skillFrontmatter.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(n => n.Value)
+                .OrderBy(v => v, StringComparer.Ordinal));
+
+        Assert.Equal(primaryAgent.Name, RequireScalar(skillFrontmatter, "name", primaryAgent.Name));
+        string expectedDescription = string.Join(" ", TestSquadCorpus
+            .ExpectedRenderText(SquadTarget.Claude, primaryAgent.Description)
+            .Split(
+                ['\r', '\n'],
+                StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        Assert.Equal(expectedDescription, RequireScalar(skillFrontmatter, "description", primaryAgent.Name));
+        Assert.Equal("MIT", RequireScalar(skillFrontmatter, "license", primaryAgent.Name));
+
+        // Body matches normalized canonical agent body, with the harness token resolved.
+        string expectedAgentBody = TestSquadCorpus
+            .ExpectedRenderText(SquadTarget.Claude, primaryAgent.InstructionBody)
+            .Replace("\r\n", "\n", StringComparison.Ordinal);
+        if (!expectedAgentBody.EndsWith('\n'))
+        {
+            expectedAgentBody += "\n";
+        }
+        Assert.Equal(expectedAgentBody, skillBody);
+
+        // Resources are projected beside the skill.
+        foreach (SquadResource resource in primaryAgent.Resources)
+        {
+            SquadDeploymentFile resourceFile = Assert.Single(
+                result.Files,
+                f => f.RelativePath == $".claude/skills/{primaryAgent.Name}/{resource.RelativePath}");
+            ReadOnlySpan<byte> expectedBytes =
+                Encoding.UTF8.GetBytes(TestSquadCorpus.ExpectedRenderText(SquadTarget.Claude, resource.Content));
+            Assert.True(expectedBytes.SequenceEqual(resourceFile.Content.Span));
+        }
+
+        // Exactly one role-skill-fallback record.
+        SquadDegradationRecord roleSkillFallback = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+        Assert.Equal(primaryAgent.Name, roleSkillFallback.OutputIdentity);
+        Assert.Equal(primaryAgent.BodyDigest, roleSkillFallback.InstructionDigest);
+        Assert.Contains($"/{primaryAgent.Name}", roleSkillFallback.Details, StringComparison.Ordinal);
+        Assert.Contains(primaryAgent.Fallback, roleSkillFallback.Details, StringComparison.Ordinal);
+        Assert.Contains("no-primary-agent: skill", roleSkillFallback.Details, StringComparison.Ordinal);
+
+        // Exactly one permission-not-expressible record.
+        SquadDegradationRecord permissionNotExpressible = Assert.Single(
+            result.Degradations,
+            d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible");
+        Assert.Equal(primaryAgent.Name, permissionNotExpressible.OutputIdentity);
+        Assert.Equal(primaryAgent.BodyDigest, permissionNotExpressible.InstructionDigest);
+
+        // Check capability-decision pairs in details.
+        SquadCapabilityProfile agentCapProfile = source.CapabilityProfiles.Profiles[primaryAgent.CapabilityProfile];
+        foreach (string capability in source.CapabilityProfiles.Capabilities)
+        {
+            string decision = agentCapProfile.Permissions.TryGetValue(capability, out SquadPermissionDecision perm)
+                ? perm switch
+                {
+                    SquadPermissionDecision.Allow => "allow",
+                    SquadPermissionDecision.Ask => "ask",
+                    SquadPermissionDecision.Deny => "deny",
+                    _ => throw new InvalidOperationException($"Unexpected permission decision '{perm}'.")
+                }
+                : "deny";
+            Assert.Contains($"{capability}: {decision}", permissionNotExpressible.Details, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("Roster:", permissionNotExpressible.Details, StringComparison.Ordinal);
+        Assert.Contains($"/{primaryAgent.Name}", permissionNotExpressible.Details, StringComparison.Ordinal);
+        Assert.Contains("MCP", permissionNotExpressible.Details, StringComparison.Ordinal);
+        Assert.Contains($"claude --agent {primaryAgent.Name}", permissionNotExpressible.Details, StringComparison.Ordinal);
+
+        // No other codes for this agent.
+        Assert.Equal(
+            PrimaryAgentDegradationCodes,
+            result.Degradations
+                .Where(d => d.CanonicalIdentity == primaryAgent.Name)
+                .Select(d => d.Code)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(c => c, StringComparer.Ordinal));
+
+        // Check all relative Markdown links in skill body resolve to emitted files.
+        const string linkPattern = @"\[([^\]]+)\]\(([^)]+)\)";
+        foreach (System.Text.RegularExpressions.Match match in System.Text.RegularExpressions.Regex.Matches(skillBody, linkPattern))
+        {
+            string link = match.Groups[2].Value;
+            if (!link.StartsWith("http", StringComparison.OrdinalIgnoreCase) && !link.StartsWith('#'))
+            {
+                string expectedPath = Path.Combine($".claude/skills/{primaryAgent.Name}", link).Replace("\\", "/", StringComparison.Ordinal);
+                Assert.Contains(
+                    result.Files,
+                    f => f.RelativePath == expectedPath);
+            }
+        }
+
+        // At most one record per (Target, CanonicalIdentity, Code).
+        var recordKeys = result.Degradations
+            .Select(d => (d.Target, d.CanonicalIdentity, d.Code))
+            .ToList();
+        Assert.Equal(recordKeys.Count, recordKeys.Distinct().Count());
+
+        // No Details contains "widening".
+        Assert.DoesNotContain(
+            result.Degradations,
+            d => d.Details != null && d.Details.Contains("widening", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Row (c): Global scope renders the primary agent entry-point skill under <c>skills/</c>
+    /// instead of <c>.claude/skills/</c>, and the subagent under <c>agents/</c>.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_GlobalScopePlacesTheEntryPointSkillUnderSkills()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+        SquadRenderRequest request = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Global).Prepared(CanonicalSquadTree.Shared);
+
+        SquadRenderResult result = await registry.RenderAsync(request);
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // Skill file is under skills/ without .claude prefix.
+        Assert.Single(
+            result.Files,
+            f => f.RelativePath == $"skills/{primaryAgent.Name}/SKILL.md");
+
+        // Resources are also under skills/ without .claude prefix.
+        foreach (SquadResource resource in primaryAgent.Resources)
+        {
+            Assert.Single(
+                result.Files,
+                f => f.RelativePath == $"skills/{primaryAgent.Name}/{resource.RelativePath}");
+        }
+
+        // Subagent file is under agents/ without .claude prefix.
+        Assert.Single(
+            result.Files,
+            f => f.RelativePath == $"agents/{primaryAgent.Name}.md");
+
+        // No .claude/ paths.
+        Assert.DoesNotContain(result.Files, f => f.RelativePath.StartsWith(".claude/", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Row (d): The no-primary-agent setting switches only the entry-point skill. Both skill and
+    /// omit modes keep the agent file identical, and differ only in whether the skill and its
+    /// resources are emitted.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_NoPrimaryAgentValueSwitchesOnlyTheEntryPointSkill()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+
+        SquadRendererRegistry registry = CanonicalSquadTree.Shared.Registry([new ClaudeRenderer()]);
+
+        // Render with skill mode (default).
+        SquadRenderRequest skillRequest = new SquadRenderRequest(
+            SourceDirectory: ProductRoot,
+            Targets: [SquadTarget.Claude],
+            Scope: SquadDeploymentScope.Project).Prepared(CanonicalSquadTree.Shared);
+        SquadRenderResult skillResult = await registry.RenderAsync(skillRequest);
+        Assert.True(skillResult.Success);
+
+        // Render with omit mode.
+        {
+            var omitFixture = ClaudeNoPrimaryAgentFixture.Create("omit");
+            SquadRenderRequest omitRequest = new SquadRenderRequest(
+                SourceDirectory: omitFixture.ProductRoot,
+                Targets: [SquadTarget.Claude],
+                Scope: SquadDeploymentScope.Project).Prepared(omitFixture.Tree);
+            SquadRenderResult omitResult = await registry.RenderAsync(omitRequest);
+            Assert.True(omitResult.Success);
+
+            // Omit mode has no .claude/skills/<name>/ paths.
+            Assert.DoesNotContain(
+                omitResult.Files,
+                f => f.RelativePath.StartsWith($".claude/skills/{primaryAgent.Name}/", StringComparison.Ordinal));
+
+            // All omit-mode paths appear in skill mode.
+            foreach (SquadDeploymentFile omitFile in omitResult.Files)
+            {
+                Assert.Contains(skillResult.Files, sf => sf.RelativePath == omitFile.RelativePath);
+            }
+
+            // Skill-mode paths minus omit-mode paths equal exactly the skill and its resources.
+            HashSet<string> skillPaths = new(skillResult.Files.Select(f => f.RelativePath));
+            HashSet<string> omitPaths = new(omitResult.Files.Select(f => f.RelativePath));
+            skillPaths.ExceptWith(omitPaths);
+
+            string[] expectedSkillPaths = new string[1 + primaryAgent.Resources.Count];
+            expectedSkillPaths[0] = $".claude/skills/{primaryAgent.Name}/SKILL.md";
+            for (int i = 0; i < primaryAgent.Resources.Count; i++)
+            {
+                expectedSkillPaths[i + 1] = $".claude/skills/{primaryAgent.Name}/{primaryAgent.Resources[i].RelativePath}";
+            }
+
+            Assert.Equal(
+                expectedSkillPaths.OrderBy(p => p, StringComparer.Ordinal),
+                skillPaths.OrderBy(p => p, StringComparer.Ordinal));
+
+            // Agent file bytes are identical.
+            SquadDeploymentFile skillAgentFile = Assert.Single(
+                skillResult.Files,
+                f => f.RelativePath == $".claude/agents/{primaryAgent.Name}.md");
+            SquadDeploymentFile omitAgentFile = Assert.Single(
+                omitResult.Files,
+                f => f.RelativePath == $".claude/agents/{primaryAgent.Name}.md");
+            Assert.True(skillAgentFile.Content.Span.SequenceEqual(omitAgentFile.Content.Span));
+
+            // Omit mode: one permission-not-expressible (no role-skill-fallback, no omitted).
+            IReadOnlyList<SquadDegradationRecord> omitPermissionNotExpressible = omitResult.Degradations
+                .Where(d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "permission-not-expressible")
+                .ToArray();
+            Assert.Single(omitPermissionNotExpressible);
+
+            // Omit mode has exactly today's permission-not-expressible record: the nested-roster
+            // sentence only, no entry-point sentence, no network.publish clause.
+            string expectedOmitDetails = OmitModeNestedRosterSentenceTemplate + string.Join(", ", primaryAgent.DelegatesTo) + ".";
+            Assert.Equal(expectedOmitDetails, omitPermissionNotExpressible[0].Details, StringComparer.Ordinal);
+
+            // Omit mode has no role-skill-fallback.
+            Assert.DoesNotContain(
+                omitResult.Degradations,
+                d => d.CanonicalIdentity == primaryAgent.Name && d.Code == "role-skill-fallback");
+        }
+    }
+
+    /// <summary>
+    /// Row (e): The renderer throws when a canonical skill has the same name as the primary agent,
+    /// before any file is produced.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_ThrowsWhenACanonicalSkillOccupiesTheEntryPointIdentity()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent primaryAgent = Assert.Single(source.Agents,
+            a => a.Name == "conductor");
+
+        {
+            var collisionFixture = PiPrimaryIdentityCollisionFixture.Create(primaryAgent.Name);
+            ClaudeRenderer renderer = new();
+            SquadRenderRequest request = new SquadRenderRequest(
+                SourceDirectory: collisionFixture.ProductRoot,
+                Targets: [SquadTarget.Claude],
+                Scope: SquadDeploymentScope.Project).Prepared(collisionFixture.Tree);
+
+            SquadRenderValidationException ex = await Assert.ThrowsAsync<SquadRenderValidationException>(
+                () => renderer.RenderAsync(request));
+            Assert.Contains(primaryAgent.Name, ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// Row (f): Regression guard. The loader rejects unsupported no-primary-agent values,
+    /// so this test passes before implementation and documents that the renderer also fails closed.
+    /// RED waived.
+    /// </summary>
+    [Fact]
+    public async Task RenderAsync_Claude_FailsClosedOnAnUnsupportedNoPrimaryAgentValue()
+    {
+        {
+            var renameFixture = ClaudeNoPrimaryAgentFixture.Create("rename");
+            ClaudeRenderer renderer = new();
+            SquadRenderRequest request = new SquadRenderRequest(
+                SourceDirectory: renameFixture.ProductRoot,
+                Targets: [SquadTarget.Claude],
+                Scope: SquadDeploymentScope.Project).Prepared(renameFixture.Tree);
+
+            SquadSourceValidationException ex = await Assert.ThrowsAsync<SquadSourceValidationException>(() => renderer.RenderAsync(request));
+            Assert.Contains("no-primary-agent", ex.Message, StringComparison.Ordinal);
+        }
+    }
+
+    /// <summary>
+    /// An orchestrator whose own capability profile denies <c>filesystem.read</c> renders a note
+    /// that names <c>mcp__kw-docs__*</c> among the withheld wildcards and gives the read denial
+    /// as the reason.
+    /// </summary>
+    /// <remarks>
+    /// The shipped corpus lets the orchestrator profile read, so
+    /// <see cref="RenderAsync_Claude_GrantsKyberWeaveToThePureOrchestratorAndWithholdsTheOtherTwo"/>
+    /// exercises the note's grant branch and the deny branch had no test at all: a receipt that
+    /// kept the two-server withholding list, or kept the routing-only reason, described a grant the
+    /// subagent file does not make — the false claim the note exists to prevent.
+    ///
+    /// The entitlement half is read from <see cref="SquadMcpGrantProjection"/> rather than from the
+    /// renderer, so the fixture is proven to reach the deny branch instead of agreeing with
+    /// whatever the renderer did. The wording is the contract under test and is therefore pinned
+    /// as a literal: a drifted reason is a changed claim in the one place a review or a
+    /// <c>squad doctor</c> run reads without re-deriving the rule.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Claude_WithholdsKyberWeaveFromAnOrchestratorThatCannotRead()
+    {
+        McpDeclarationSquadTree fixture =
+            McpDeclarationSquadTree.WithFileReadDeniedOrchestrator();
+        SquadSource source = fixture.Tree.Load();
+
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            SquadMcpGrantProjection.PureOrchestratorProfile,
+            conductor.CapabilityProfile);
+        Assert.False(
+            SquadMcpGrantProjection.GrantsKyberWeave(source, conductor, SquadTarget.Claude),
+            "The fixture's orchestrator profile still allows filesystem.read, so the render reaches "
+            + "the granting branch and the denial this test pins is never exercised.");
+
+        SquadRenderResult result = await fixture.Tree.Registry([new ClaudeRenderer()])
+            .RenderAsync(new SquadRenderRequest(
+                fixture.ProductRoot,
+                [SquadTarget.Claude],
+                SquadDeploymentScope.Project).Prepared(fixture.Tree));
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        // The note states what the subagent file withholds, so the file has to withhold all three:
+        // a receipt naming a server the tools list still carries is the same falsehood reversed.
+        IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
+        Assert.DoesNotContain("mcp__kw-docs__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__codegraph__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__context7__*", conductorTools, StringComparer.Ordinal);
+
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, conductor.Name, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+
+        // The withholding list names kw-docs beside the two carve-out servers: the grant branch
+        // omits the third wildcard, so its absence would recreate the defect this pins.
+        Assert.Contains(
+            "no mcp__codegraph__*, mcp__context7__*, mcp__kw-docs__*",
+            record.Details,
+            StringComparison.Ordinal);
+
+        // The reason follows the same branch: read denial is why the third server is lost, while
+        // the routing-only phrasing describes an orchestrator that still carries it.
+        Assert.Contains(
+            "because this agent's capability profile does not allow filesystem.read",
+            record.Details,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "because a role that only routes work has no use for code-graph or library lookups",
+            record.Details,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The pure orchestrator is granted <c>kw-docs</c> and keeps its withholding on
+    /// <c>codegraph</c> and <c>context7</c>.
+    /// </summary>
+    /// <remarks>
+    /// <c>kw-docs</c> carries <c>docs_get_coding_standard_for_technology</c> — the tool that hands an agent the
+    /// standards it must follow — so withholding it from the role that assigns work withheld it
+    /// from the one role that decides which standards apply to whom. The other two servers keep
+    /// the carve-out: a role that only routes work has no use for code-graph or library lookups.
+    ///
+    /// The expectation comes from <see cref="SquadMcpGrantProjection"/>, never from the renderer,
+    /// so a re-added exclusion fails here rather than agreeing with itself.
+    /// </remarks>
+    [Fact]
+    public async Task RenderAsync_Claude_GrantsKyberWeaveToThePureOrchestratorAndWithholdsTheOtherTwo()
+    {
+        SquadSource source = TestSquadCorpus.CanonicalSource;
+        SquadAgent conductor = Assert.Single(source.Agents, agent => agent.Name == "conductor");
+        Assert.Equal(
+            SquadMcpGrantProjection.PureOrchestratorProfile,
+            conductor.CapabilityProfile);
+
+        SquadRenderResult result = await TestSquadCorpus.GetProjectRenderAsync(SquadTarget.Claude);
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+
+        IReadOnlyList<string> conductorTools = RenderedTools(result, conductor.Name);
+        Assert.Contains("mcp__kw-docs__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__codegraph__*", conductorTools, StringComparer.Ordinal);
+        Assert.DoesNotContain("mcp__context7__*", conductorTools, StringComparer.Ordinal);
+
+        // Every other entitled agent keeps all three, so the change widened the orchestrator and
+        // silently narrowed nobody.
+        foreach (SquadAgent agent in source.Agents.Where(candidate => candidate.Name != conductor.Name))
+        {
+            IReadOnlyList<string> tools = RenderedTools(result, agent.Name);
+            Assert.True(
+                SquadMcpGrantProjection.GrantsKyberWeave(source, agent, SquadTarget.Claude)
+                    == tools.Contains("mcp__kw-docs__*", StringComparer.Ordinal),
+                $"Agent '{agent.Name}' kw-docs wildcard does not follow the source-computed "
+                + "entitlement.");
+            foreach (string wildcard in new[] { "mcp__codegraph__*", "mcp__context7__*" })
+            {
+                Assert.True(
+                    SquadMcpGrantProjection.GrantsOrchestratorExcludedServers(
+                        source,
+                        agent,
+                        SquadTarget.Claude) == tools.Contains(wildcard, StringComparer.Ordinal),
+                    $"Agent '{agent.Name}' wildcard '{wildcard}' does not follow the "
+                    + "source-computed entitlement.");
+            }
+        }
+
+        // The receipt states what the subagent file is denied and nothing about what it carries:
+        // naming a granted server as withheld is a false claim in the one place a review or a
+        // `squad doctor` run reads without re-deriving the rule.
+        SquadDegradationRecord record = Assert.Single(
+            result.Degradations,
+            d => string.Equals(d.CanonicalIdentity, conductor.Name, StringComparison.Ordinal) &&
+                 string.Equals(d.Code, "permission-not-expressible", StringComparison.Ordinal));
+        Assert.NotNull(record.Details);
+        Assert.Contains("mcp__codegraph__", record.Details, StringComparison.Ordinal);
+        Assert.Contains("mcp__context7__", record.Details, StringComparison.Ordinal);
+        Assert.DoesNotContain("mcp__kw-docs__", record.Details, StringComparison.Ordinal);
+    }
+
+    // Shell guard wiring (KW-ARB-SHELL-001). The architect's agent file carries a PreToolUse entry on
+    // Bash and PowerShell at Project and Global scope. No other file carries that matcher.
+
+    private const string ShellMatcher = "^(Bash|PowerShell)$";
+    private const string TaskDispatchMatcher = "^(Agent|Task)$";
+    private const string SubagentHandbackMatcher = "^SubagentHandback$";
+    private const int ShellHookTimeoutSeconds = 5;
+
+    private static async Task<SquadRenderResult> RenderClaudeArbiterAsync(
+        string sourceDirectory,
+        SquadDeploymentScope scope,
+        SquadArbiterWiring? wiring)
+    {
+        string home = Path.Combine(CanonicalSquadTree.Shared.Files.Root, "home");
+        return await new ClaudeRenderer().RenderAsync(new SquadRenderRequest(
+            SourceDirectory: sourceDirectory,
+            Targets: [SquadTarget.Claude],
+            Scope: scope,
+            GlobalRoots: new SquadGlobalRoots(_ => null, home),
+            Arbiter: wiring).Prepared(CanonicalSquadTree.Shared));
+    }
+
+    private static YamlMappingNode ArchitectFrontmatter(SquadRenderResult result, string relativePath)
+    {
+        SquadDeploymentFile file = Assert.Single(result.Files, f => f.RelativePath == relativePath);
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), "architect");
+        return frontmatter;
+    }
+
+    private static YamlMappingNode HooksOf(YamlMappingNode frontmatter)
+    {
+        Assert.True(
+            frontmatter.Children.TryGetValue(new YamlScalarNode("hooks"), out YamlNode? hooks),
+            "The agent file carries no hooks mapping.");
+        return Assert.IsType<YamlMappingNode>(hooks);
+    }
+
+    private static YamlSequenceNode EventEntries(YamlMappingNode hooks, string phase)
+    {
+        Assert.True(
+            hooks.Children.TryGetValue(new YamlScalarNode(phase), out YamlNode? entries),
+            $"The hooks mapping carries no {phase} entries.");
+        return Assert.IsType<YamlSequenceNode>(entries);
+    }
+
+    /// <summary>Asserts one hook entry is the shell matcher with the single expected command, typed and timed like every Arbiter hook.</summary>
+    private static void AssertShellHook(YamlMappingNode entry, string command)
+    {
+        Assert.Equal(ShellMatcher, RequireScalar(entry, "matcher", "architect"));
+        YamlSequenceNode inner = Assert.IsType<YamlSequenceNode>(entry.Children[new YamlScalarNode("hooks")]);
+        YamlMappingNode hook = Assert.Single(inner.Children.OfType<YamlMappingNode>());
+        Assert.Equal("command", RequireScalar(hook, "type", "architect"));
+        Assert.Equal(command, RequireScalar(hook, "command", "architect"));
+        Assert.Equal(
+            ShellHookTimeoutSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            RequireScalar(hook, "timeout", "architect"));
+    }
+
+    /// <summary>
+    /// Whether a rendered Markdown file carries YAML frontmatter. Reference documents an agent ships beside its
+    /// definition (for example under <c>agents/architect/references/</c>) are plain Markdown with no frontmatter,
+    /// so the hook scans read only the files that can hold hooks and every other file is left out.
+    /// </summary>
+    private static bool HasFrontmatter(SquadDeploymentFile file) =>
+        file.RelativePath.EndsWith(".md", StringComparison.Ordinal)
+        && Encoding.UTF8.GetString(file.Content.Span).StartsWith("---\n", StringComparison.Ordinal);
+
+    private static bool CarriesShellMatcher(YamlMappingNode frontmatter)
+    {
+        if (!frontmatter.Children.TryGetValue(new YamlScalarNode("hooks"), out YamlNode? hooks)
+            || hooks is not YamlMappingNode hookMap
+            || !hookMap.Children.TryGetValue(new YamlScalarNode("PreToolUse"), out YamlNode? preToolUse)
+            || preToolUse is not YamlSequenceNode entries)
+        {
+            return false;
+        }
+
+        return entries.Children.OfType<YamlMappingNode>().Any(entry =>
+            entry.Children.TryGetValue(new YamlScalarNode("matcher"), out YamlNode? matcher)
+            && matcher is YamlScalarNode { Value: ShellMatcher });
+    }
+
+    [Fact]
+    public async Task RenderAsync_ProjectArchitectAgentFile_CarriesTheShellGuardBesideItsDispatchHooks()
+    {
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            SquadDeploymentScope.Project,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        YamlMappingNode hooks = HooksOf(ArchitectFrontmatter(result, ".claude/agents/architect.md"));
+
+        YamlSequenceNode preToolUse = EventEntries(hooks, "PreToolUse");
+        YamlMappingNode shell = Assert.Single(
+            preToolUse.Children.OfType<YamlMappingNode>(),
+            entry => string.Equals(RequireScalar(entry, "matcher", "architect"), ShellMatcher, StringComparison.Ordinal));
+        AssertShellHook(shell, "kyber-weave-arbiter hook --harness claude --caller architect");
+
+        Assert.Contains(
+            preToolUse.Children.OfType<YamlMappingNode>(),
+            entry => string.Equals(RequireScalar(entry, "matcher", "architect"), TaskDispatchMatcher, StringComparison.Ordinal));
+        YamlSequenceNode postToolUse = EventEntries(hooks, "PostToolUse");
+        Assert.Contains(
+            postToolUse.Children.OfType<YamlMappingNode>(),
+            entry => string.Equals(RequireScalar(entry, "matcher", "architect"), TaskDispatchMatcher, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RenderAsync_GlobalArchitectAgentFile_CarriesExactlyOneShellGuardHook()
+    {
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            SquadDeploymentScope.Global,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        YamlMappingNode hooks = HooksOf(ArchitectFrontmatter(result, "agents/architect.md"));
+
+        Assert.Single(hooks.Children);
+        YamlMappingNode shell = Assert.Single(EventEntries(hooks, "PreToolUse").Children.OfType<YamlMappingNode>());
+        AssertShellHook(shell, ArbiterHookWiring.HookCommandLine(SquadTarget.Claude, "architect", SquadDeploymentScope.Global));
+    }
+
+    [Theory]
+    [InlineData(SquadDeploymentScope.Project)]
+    [InlineData(SquadDeploymentScope.Global)]
+    public async Task RenderAsync_ShellMatcher_ReachesOnlyTheArchitectFile(SquadDeploymentScope scope)
+    {
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            scope,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        string expected = scope == SquadDeploymentScope.Global ? "agents/architect.md" : ".claude/agents/architect.md";
+
+        List<string> carriers = [];
+        foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
+        {
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
+            if (CarriesShellMatcher(frontmatter))
+            {
+                carriers.Add(file.RelativePath);
+            }
+        }
+
+        Assert.Equal(new[] { expected }, carriers.ToArray());
+    }
+
+    [Theory]
+    [InlineData(SquadDeploymentScope.Project, true)]
+    [InlineData(SquadDeploymentScope.Global, false)]
+    public async Task RenderAsync_ArbiterDisabled_CarriesTheDispatchHookOnlyAtProjectScope(
+        SquadDeploymentScope scope,
+        bool dispatchHooks)
+    {
+        // Prompt insertion is not an Arbiter action, so a project render installs the dispatch hook for the
+        // dispatchers even with the Arbiter off. A global install reads no project configuration, so it installs none.
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            scope,
+            new SquadArbiterWiring(Enabled: false, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        int carriers = 0;
+        foreach (SquadDeploymentFile file in result.Files.Where(HasFrontmatter))
+        {
+            (YamlMappingNode frontmatter, _) = SplitFrontmatter(Encoding.UTF8.GetString(file.Content.Span), file.RelativePath);
+            bool carriesHooks = frontmatter.Children.ContainsKey(new YamlScalarNode("hooks"));
+            if (carriesHooks)
+            {
+                carriers++;
+                Assert.Contains("kyber-weave-arbiter hook", Encoding.UTF8.GetString(file.Content.Span), StringComparison.Ordinal);
+            }
+        }
+
+        if (dispatchHooks)
+        {
+            Assert.True(carriers > 0, "A project render with the Arbiter off must install the dispatch hook.");
+        }
+        else
+        {
+            Assert.Equal(0, carriers);
+        }
+    }
+
+    [Fact]
+    public async Task RenderAsync_GlobalSettingsArbiterBlock_IsByteIdenticalToItsPreShellGuardRender()
+    {
+        // The shell guard lives in the agent file alone. The user-level settings block keeps the three entries it
+        // carried before, byte for byte, plus the worker guard on the file-writing tools.
+        SquadRenderResult result = await RenderClaudeArbiterAsync(
+            ProductRoot,
+            SquadDeploymentScope.Global,
+            new SquadArbiterWiring(Enabled: true, HookTimeoutSeconds: ShellHookTimeoutSeconds));
+
+        Assert.True(result.Success, string.Join("; ", result.Errors));
+        Assert.NotNull(result.Blocks);
+        SquadRenderedBlock block = Assert.Single(
+            result.Blocks!,
+            candidate => candidate.Target == "claude" && candidate.RelativePath == "settings.json");
+
+        const string hooks = "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter hook --harness claude --scope global\",\"timeout\":5}]";
+        string[] expected =
+        [
+            "PreToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
+            "PreToolUse {\"matcher\":\"" + SubagentHandbackMatcher + "\",\"hooks\":" + hooks + "}",
+            "PreToolUse {\"matcher\":\"*\",\"hooks\":" +
+            "[{\"type\":\"command\",\"command\":\"kyber-weave-arbiter worker-guard --harness claude\",\"timeout\":5}]}",
+            "PostToolUse {\"matcher\":\"^(Agent|Task)$\",\"hooks\":" + hooks + "}",
+        ];
+
+        Assert.Equal(
+            expected,
+            block.Entries.Select(entry => $"{entry.Container} {entry.Entry.ToJsonString()}").ToArray());
+    }
+
+    private static bool IsDocumentedClaudeTool(string tool) =>
+        DocumentedClaudeTools.Contains(tool, StringComparer.Ordinal) ||
+        (tool.StartsWith("Agent(", StringComparison.Ordinal) && tool.EndsWith(')'));
+
+    private static void AssertTools(SquadRenderResult result, string agentName, string[] expected)
+    {
+        Assert.Equal(expected, RenderedTools(result, agentName));
+    }
+
+    /// <summary>The <c>tools</c> sequence a rendered Claude subagent carries.</summary>
+    private static IReadOnlyList<string> RenderedTools(SquadRenderResult result, string agentName)
+    {
+        SquadDeploymentFile file = Assert.Single(
+            result.Files,
+            f => f.RelativePath == $".claude/agents/{agentName}.md");
+
+        (YamlMappingNode frontmatter, _) = SplitFrontmatter(
+            Encoding.UTF8.GetString(file.Content.Span),
+            agentName);
+        return RequireSequence(frontmatter, "tools", agentName);
+    }
+
+    private static IReadOnlyList<string> RequireSequence(YamlMappingNode node, string key, string identity)
+    {
+        if (!node.Children.TryGetValue(new YamlScalarNode(key), out YamlNode? value))
+        {
+            string presentKeys = string.Join(", ", node.Children.Keys
+                .OfType<YamlScalarNode>()
+                .Select(existing => existing.Value ?? "<null>"));
+            throw new InvalidOperationException(
+                $"'{identity}' frontmatter is missing required key '{key}'. Present keys: {presentKeys}.");
+        }
+
+        YamlSequenceNode sequence = Assert.IsType<YamlSequenceNode>(value);
+        return sequence.Children
+            .Select(child => Assert.IsType<YamlScalarNode>(child).Value
+                ?? throw new InvalidOperationException($"'{identity}' key '{key}' has a null sequence entry."))
+            .ToArray();
+    }
+}
+
+/// <summary>
+/// Copies the real <c>products/kyber-squad</c> corpus and modifies the <c>no-primary-agent</c>
+/// value in the <c>role-skill</c> fallback profile to a different value (e.g., "omit" or an
+/// unsupported value like "rename"), so contract tests can validate rendering behavior under
+/// different profile configurations without editing the canonical corpus.
+/// </summary>
+internal sealed class ClaudeNoPrimaryAgentFixture
+{
+
+
+    internal CanonicalSquadTree Tree { get; } = CanonicalSquadTree.Create();
+
+    internal string ProductRoot => Tree.ProductRoot;
+
+    internal static ClaudeNoPrimaryAgentFixture Create(string noPrimaryAgentValue)
+    {
+        ClaudeNoPrimaryAgentFixture fixture = new();
+
+        string fallbacksPath = Path.Combine(fixture.ProductRoot, "profiles", "fallbacks.yml");
+        string original = fixture.Tree.Files.ReadAllText(fallbacksPath);
+
+        // Replace "no-primary-agent: skill" with "no-primary-agent: <value>"
+        string mutated = original.Replace(
+            "no-primary-agent: skill",
+            $"no-primary-agent: {noPrimaryAgentValue}",
+            StringComparison.Ordinal);
+
+        if (string.Equals(original, mutated, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Expected '{fallbacksPath}' to contain 'no-primary-agent: skill' to replace.");
+        }
+
+        fixture.Tree.Files.WriteAllText(fallbacksPath, mutated);
+        return fixture;
+    }
+
+}

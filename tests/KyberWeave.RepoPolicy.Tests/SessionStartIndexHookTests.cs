@@ -1,4 +1,5 @@
 using System.Text.Json;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -11,6 +12,8 @@ namespace KyberWeave.Tests;
 public sealed class SessionStartIndexHookTests
 {
     private const string Ensure = "kyber-weave doctor --ensure";
+
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     /// <summary>Hook file, the JSON property that holds its command, and the session-start event key it must sit under.</summary>
     public static TheoryData<string, string, string> JsonHooks => new()
@@ -65,7 +68,7 @@ public sealed class SessionStartIndexHookTests
     [MemberData(nameof(Shims))]
     public void ShimSpawnsDoctorEnsureDetachedWithAnErrorListener(string file)
     {
-        string text = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, file));
+        string text = Corpus.ReadText(file);
 
         Assert.Contains("\"kyber-weave\", [\"doctor\", \"--ensure\", \".\"]", text, StringComparison.Ordinal);
         Assert.Contains("detached: true", text, StringComparison.Ordinal);
@@ -76,7 +79,7 @@ public sealed class SessionStartIndexHookTests
     }
 
     private static JsonDocument Load(string file) =>
-        JsonDocument.Parse(File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, file)));
+        JsonDocument.Parse(Corpus.ReadText(file));
 
     private static string FindCommand(string file, string property, string eventKey)
     {

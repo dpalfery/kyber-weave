@@ -1,5 +1,8 @@
+using KyberWeave.Tests.Configuration;
+
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 
@@ -25,6 +28,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class TaskGatesRepositoryConfigTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The configuration file's own top-level <c>onboarding</c> key, as the loader does not model it yet.</summary>
     private const string OnboardingKey = "onboarding";
 
@@ -141,14 +146,13 @@ public sealed class TaskGatesRepositoryConfigTests
 
     private static KyberWeaveConfig Load()
     {
-        return KyberWeaveConfigLoader.Load(KyberWeaveTestPaths.ToolRoot);
+        return ConfigFileReader.Load(Corpus.Root);
     }
 
     private static YamlMappingNode LoadRoot()
     {
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml");
         YamlStream stream = new();
-        using (StreamReader reader = new(path))
+        using (StringReader reader = new(Corpus.ReadText(".kyber-weave/kyber-weave.yml")))
         {
             stream.Load(reader);
         }

@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Facts;
@@ -19,7 +20,10 @@ public sealed class ArbiterSectionsCommand(
     IFileTextFacts fileText,
     IArbiterRepositoryLocator locator,
     IFileStatReader fileStats,
-    IArbiterSectionSelectionService sections) : Command<ArbiterSectionsSettings>
+    IArbiterSectionSelectionService sections,
+    IPathResolver paths,
+    IProcessEnvironment environment,
+    IAnsiConsole console) : Command<ArbiterSectionsSettings>
 {
     /// <summary>Prints each section's id, its line range and title. Exits 2 on a usage error, and 1 when the document is missing.</summary>
     public override int Execute(CommandContext context, ArbiterSectionsSettings settings, CancellationToken cancellationToken)
@@ -32,17 +36,17 @@ public sealed class ArbiterSectionsCommand(
 
         // The same containment and size cap as the served tool: a path outside the repository root, or a symbolic link
         // out of it, is refused the way the tool refuses it, and an oversized document is not read.
-        string root = locator.FindGitRoot(System.IO.Path.GetFullPath("."));
+        string root = locator.FindGitRoot(paths.GetFullPath(".", environment.CurrentDirectory));
         string? full = fileText.ResolveContainedFile(root, settings.Path);
         if (full is null)
         {
-            AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
+            console.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' was not found under the repository root.[/]");
             return 1;
         }
 
         if (fileStats.GetLength(full) > SectionSelector.MaxDocumentBytes)
         {
-            AnsiConsole.MarkupLine($"[red]The document is larger than {SectionSelector.MaxDocumentBytes} bytes.[/]");
+            console.MarkupLine($"[red]The document is larger than {SectionSelector.MaxDocumentBytes} bytes.[/]");
             return 1;
         }
 
@@ -52,25 +56,25 @@ public sealed class ArbiterSectionsCommand(
             .GetResult();
         if (selection.FailedSafe && selection.Selected.Count == 0)
         {
-            AnsiConsole.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' could not be read.[/]");
+            console.MarkupLine($"[red]The document '{Markup.Escape(settings.Path)}' could not be read.[/]");
             return 1;
         }
 
         foreach (DocumentSection section in selection.Selected)
         {
-            AnsiConsole.MarkupLine(
+            console.MarkupLine(
                 $"{Markup.Escape(section.Id)}  {section.StartLine}-{section.EndLine}  {Markup.Escape(section.Title)}");
         }
 
-        AnsiConsole.MarkupLine($"[grey]{selection.Selected.Count} section(s) listed.[/]");
+        console.MarkupLine($"[grey]{selection.Selected.Count} section(s) listed.[/]");
         return 0;
     }
 
     /// <summary>Prints a usage error on one line, as the other Arbiter commands do, and returns the usage exit code, 2.</summary>
-    private static int UsageError(string message)
+    private int UsageError(string message)
     {
-        CommandHelpers.WriteUnfolded(() =>
-            AnsiConsole.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
+        CommandHelpers.WriteUnfolded(console, () =>
+            console.MarkupLine($"[red]kyber-weave arbiter: error: {Markup.Escape(message)}[/]"));
         return 2;
     }
 

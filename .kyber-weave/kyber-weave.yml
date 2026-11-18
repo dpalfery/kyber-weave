@@ -67,56 +67,83 @@ review:
       include: &net-test-paths ["**/*.cs", "**/*.csproj", "**/*.props", "**/*.targets", "**/*.sln*", "**/NuGet.config", "**/.editorconfig", "global.json", ".kyber-weave/kyber-weave.yml", "apm.yml", ".apm/**", "products/**", "REVIEW.md", "scripts/**"]
       run: [dotnet, build, KyberWeave.sln, -c, Release, --no-incremental, -nr:false, -p:UseSharedCompilation=false]
       blocking: true
-    # coverlet.MTP writes Cobertura under artifacts/coverage so GateRunner can populate
-    # the coverage floor. xUnit 4 uses Microsoft Testing Platform, whose coverage
-    # extension uses `--coverlet` instead of VSTest's `--collect` data-collector option.
-    # `--no-build` because the `build` gate above already produced these binaries in
-    # Release. Without it every run re-links the test project, and the gate evidence
-    # would come from binaries the suite did not actually gate.
+    # The whole unit side in one run: KyberWeave.Unit.slnf lists every project that is not the integration project
+    # (the unit projects, the architecture, content and repository-policy tests). `--no-build` because the `build`
+    # gate above already produced these binaries in Release. Without it every run re-links the test projects,
+    # and the gate evidence would come from binaries the suite did not actually gate.
     # Runs `dotnet test` directly, as every gate does: with KyberDash's jobs and OTLP receiver running
     # in-process in C# there are no recursive Node spawners to reap, and running directly keeps the
     # Roslyn/MSBuild build servers warm. `full-suite: true` below is what reserves this gate for the
     # council and CI, so nothing needs to wrap the command to enforce that.
     - id: test
       include: *net-test-paths
-      run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --coverlet, --coverlet-output-format, cobertura, --results-directory, artifacts/coverage]
+      run: [dotnet, test, --solution, KyberWeave.Unit.slnf, -c, Release, --no-build]
       timeout-seconds: 900
       # Full-suite gates run only for the review council or CI; a dev agent's run is refused.
       full-suite: true
       blocking: true
-    # Integration tests: real Squad deployments, real child programs, and file-system work
-    # beyond a test's own scratch folder. They live in their own project so the unit `test`
-    # gate above stays inside its two-minute budget. `full-suite: true` keeps it out of a
-    # developer agent's run: CI is the safety net that runs it on every pull request, and a
-    # person at a terminal (or the council with --council) can run it too.
-    - id: integration-test
-      include: *net-test-paths
-      run: [dotnet, test, tests/KyberWeave.Integration.Tests/KyberWeave.Integration.Tests.csproj, -c, Release, --no-build]
-      timeout-seconds: 900
-      full-suite: true
-      blocking: true
+    # There is no integration-test gate: the integration project (tests/KyberWeave.Integration.Tests)
+    # is the safety net that CI runs as its own required job, and neither a developer nor the council's
+    # test gates run it (requirement 7.3).
     # The repository-policy tests (tests/KyberWeave.RepoPolicy.Tests): scripts, workflows, this
-    # file, docs and source scans. A gate of their own so `test` coverage stays a measure of
-    # product code. Same paths as `build` and `test`, which is when they ran before they moved,
+    # file, docs and source scans. Same paths as `build` and `test`, which is when they ran before they moved,
     # and the reason `--no-build` is safe: whatever selects this gate also selects `build`.
     # Runs `dotnet test` directly; this run takes about 30 seconds.
     - id: test-policy
       include: *net-test-paths
       run: [dotnet, test, tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj, -c, Release, --no-build]
       blocking: true
-    # The prompt-content tests (tests/KyberWeave.PromptContent.Tests): assertions on the wording of
-    # skills, agents and instructions, moved out of `test` so that gate measures behaviour. Same
-    # paths as `test-policy`, so it takes the same `--no-build` coupling to `build`.
-    - id: test-prompt
+    # The content tests (tests/KyberWeave.Content.Tests): checks of the shipped agents, skills,
+    # standards and documents, read through the corpus seam, moved out of `test` so that gate
+    # measures behaviour. Same paths as `test-policy`, so it takes the same `--no-build` coupling
+    # to `build`.
+    - id: test-content
       include: *net-test-paths
-      run: [dotnet, test, tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj, -c, Release, --no-build]
+      run: [dotnet, test, tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    # The unit test projects, one per product project, and the architecture test that pins the layering.
+    # They are in-memory (the unit-test standard), so unlike `test` they are not
+    # full-suite gates: a developer's `review gates` run executes them. KyberWeave.Integration.Tests
+    # is never run by any gate; CI's "Integration tests" job runs it.
+    # Same paths and the same `--no-build` coupling to `build` as `test-content`.
+    - id: test-unit-application
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    - id: test-unit-cli
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Cli.Tests/KyberWeave.Cli.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    - id: test-unit-data
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Data.Tests/KyberWeave.Data.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    - id: test-unit-kernel
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Kernel.Tests/KyberWeave.Kernel.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    - id: test-unit-mcp
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Mcp.Tests/KyberWeave.Mcp.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    - id: test-unit-arbiter
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Arbiter.Tests/KyberWeave.Arbiter.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    - id: test-unit-hooks
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj, -c, Release, --no-build]
+      blocking: true
+    - id: test-unit-architecture
+      include: *net-test-paths
+      run: [dotnet, test, tests/KyberWeave.Architecture.Tests/KyberWeave.Architecture.Tests.csproj, -c, Release, --no-build]
       blocking: true
     # `-c Release --no-build` on every `dotnet run` below. Omitting them built the CLI a
     # sixth time, in Debug, once per gate — the single largest avoidable cost in the suite
     # and invisible in the report, which records one line per gate regardless. The build
     # gate above is what makes `--no-build` safe; that coupling is why it stays here.
     - id: skill-validate
-      include: &skill-authoring-paths [".apm/skills/kyber-docs-authoring/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-authoring-paths [".apm/skills/kyber-docs-authoring/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-authoring]
       blocking: true
     - id: skill-lint
@@ -136,7 +163,7 @@ review:
     # per skill, one per verb, or a new skill is discoverable to an agent but
     # never gated.
     - id: skill-validate-cli
-      include: &skill-cli-paths [".apm/skills/kyber-weave-cli/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-cli-paths [".apm/skills/kyber-weave-cli/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-cli]
       blocking: true
     - id: skill-lint-cli
@@ -150,7 +177,7 @@ review:
     # The integrity-review skill moved out of .apm's retired
     # `doc-corpus-integrity-review` directory to its Kyber-Docs name.
     - id: skill-validate-integrity-review
-      include: &skill-integrity-paths [".apm/skills/kyber-docs-integrity-review/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-integrity-paths [".apm/skills/kyber-docs-integrity-review/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-integrity-review]
       blocking: true
     - id: skill-lint-integrity-review
@@ -164,7 +191,7 @@ review:
     # The onboarding-and-assessment skill moved out of Squad's `second-brain`
     # directory to its Kyber-Docs home under .apm/skills.
     - id: skill-validate-onboarding-and-assessment
-      include: &skill-onboarding-paths [".apm/skills/kyber-docs-onboarding-and-assessment/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-onboarding-paths [".apm/skills/kyber-docs-onboarding-and-assessment/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-docs-onboarding-and-assessment]
       blocking: true
     - id: skill-lint-onboarding-and-assessment
@@ -182,7 +209,7 @@ review:
     # than a Kyber-Weave product surface: it drives `kyber-weave doctor` and never runs
     # `codegraph` itself, so the gates below pin its trigger wording like any other skill.
     - id: skill-validate-codegraph
-      include: &skill-codegraph-paths [".apm/skills/codegraph/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-codegraph-paths [".apm/skills/codegraph/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/codegraph]
       blocking: true
     - id: skill-lint-codegraph
@@ -194,7 +221,7 @@ review:
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, scan, .apm/skills/codegraph, --fail-on, critical]
       blocking: true
     - id: skill-validate-model-profile
-      include: &skill-model-profile-paths [".apm/skills/kyber-weave-model-profile/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-model-profile-paths [".apm/skills/kyber-weave-model-profile/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kyber-weave-model-profile]
       blocking: true
     - id: skill-lint-model-profile
@@ -208,7 +235,7 @@ review:
     # The onboarding skill walks a new user through the whole setup, so its command examples
     # and per-harness tables are gated like the other skills' surfaces.
     - id: skill-validate-kw-onboarding
-      include: &skill-kw-onboarding-paths [".apm/skills/kw-onboarding/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-kw-onboarding-paths [".apm/skills/kw-onboarding/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/kw-onboarding]
       blocking: true
     - id: skill-lint-kw-onboarding
@@ -222,7 +249,7 @@ review:
     # The spec-conductor skill orchestrates delivery of an existing specification bundle, so
     # its trigger wording and command examples are gated like the other skills' surfaces.
     - id: skill-validate-spec-conductor
-      include: &skill-spec-conductor-paths [".apm/skills/spec-conductor/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**"]
+      include: &skill-spec-conductor-paths [".apm/skills/spec-conductor/**", "src/KyberWeave.Cli/**", "src/KyberWeave.Domain/Skills/**", "src/KyberWeave.Application/Skills/**"]
       run: [dotnet, run, --project, src/KyberWeave.Cli, -c, Release, --no-build, --, skill, validate, .apm/skills/spec-conductor]
       blocking: true
     - id: skill-lint-spec-conductor
@@ -380,14 +407,14 @@ review:
   # against the tree before it is used, and a change nothing covers skips the gate with
   # KW-REVIEW-026 rather than running a filter that matches nothing and exits 0.
   test-map:
-    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+    "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
     "src/KyberWeave.Core/Configuration/ReviewConfigLoader.cs":
       - KyberWeave.Tests.ReviewTaskGatesConfigTests
       - KyberWeave.Tests.ReviewGateKeysConfigTests
     "src/KyberWeave.Core/Review/TestClassMapping.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
-    "src/KyberWeave.Data/Arbiter/Facts/GateReportFacts.cs":
+    "src/KyberWeave.Application/Arbiter/Facts/GateReportFacts.cs":
       - KyberWeave.Tests.Arbiter.ArbiterGateReportRuleTests
     "src/KyberWeave.Domain/Squad/Rendering/SquadWorkerBaselineInjector.cs":
       - KyberWeave.Tests.SquadWorkerBaselineInjectionTests
@@ -422,17 +449,53 @@ review:
         # No {changed}: the command reads the change against its base itself, so naming the changed
         # files would scan them twice and still miss a suppression added to an unlisted file.
         run: [kyber-weave, review, suppressions, "."]
-      - &dotnet-tests
-        id: tests
-        # The unit classes this change covers, resolved by `review gates` from `review.test-map` and
-        # the `<Stem>Tests` name convention, in tests/KyberWeave.Tests. Declared after `dotnet-build`
-        # because `--no-build` reuses the artifacts directory that gate writes, so these classes run
-        # against the binaries it produced. A change whose coverage lives only in the integration
-        # project runs no class here: that suite belongs to CI, not to a developer agent.
-        # A change no class covers skips this gate with KW-REVIEW-026: a filter that matches nothing
-        # exits 0, and would afterwards read as tests that ran and passed.
+      # The unit and content test projects, run whole: each is in-memory, so a developer agent may run it
+      # (requirement 7.3). The integration project (tests/KyberWeave.Integration.Tests) is deliberately not
+      # listed: CI runs it as its own required job. `--no-build` reuses the artifacts directory `dotnet-build` writes.
+      - &dotnet-unit-application
+        id: unit-tests-application
         include: *net-paths
-        run: [dotnet, test, tests/KyberWeave.Tests/KyberWeave.Tests.csproj, -c, Release, --no-build, --filter, "{tests}", --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        run: [dotnet, test, tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-cli
+        id: unit-tests-cli
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Cli.Tests/KyberWeave.Cli.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-data
+        id: unit-tests-data
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Data.Tests/KyberWeave.Data.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-kernel
+        id: unit-tests-kernel
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Kernel.Tests/KyberWeave.Kernel.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-mcp
+        id: unit-tests-mcp
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Mcp.Tests/KyberWeave.Mcp.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-arbiter
+        id: unit-tests-arbiter
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Arbiter.Tests/KyberWeave.Arbiter.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-hooks
+        id: unit-tests-hooks
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-architecture
+        id: unit-tests-architecture
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Architecture.Tests/KyberWeave.Architecture.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
+        timeout: 600
+      - &dotnet-unit-content
+        id: unit-tests-content
+        include: *net-paths
+        run: [dotnet, test, tests/KyberWeave.Content.Tests/KyberWeave.Content.Tests.csproj, -c, Release, --no-build, --artifacts-path, ".agent_scratchpad/{task}/artifacts"]
         timeout: 600
 
     # The three file kinds no language gate selects. A task that edits only a workflow, a shell
@@ -533,7 +596,15 @@ review:
       - *fmt-style
       - *dotnet-build
       - *suppressions
-      - *dotnet-tests
+      - *dotnet-unit-application
+      - *dotnet-unit-cli
+      - *dotnet-unit-data
+      - *dotnet-unit-kernel
+      - *dotnet-unit-mcp
+      - *dotnet-unit-arbiter
+      - *dotnet-unit-hooks
+      - *dotnet-unit-architecture
+      - *dotnet-unit-content
       - *dash-typecheck
       - *dash-lint
       - *cargo-fmt

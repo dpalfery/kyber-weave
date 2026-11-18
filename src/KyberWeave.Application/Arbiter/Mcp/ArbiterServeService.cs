@@ -35,7 +35,8 @@ public sealed class ArbiterServeService(
     IFileTextFacts files,
     ICommentTriageFactory triage,
     IArbiterSectionSelectionService sections,
-    TimeProvider clock) : IArbiterServeService
+    TimeProvider clock,
+    IIdGenerator ids) : IArbiterServeService
 {
     private const string Harness = "serve";
     private const string UnidentifiedCaller = "unidentified";
@@ -165,7 +166,7 @@ public sealed class ArbiterServeService(
             pending.Add(new PendingEvaluation(classification.Caller ?? UnidentifiedCaller, target, prompt, unit.Refute));
         }
 
-        HookContext hookContext = new(context.RepoRoot, () => ArbiterRecordId.New(clock.GetUtcNow()), context.Log);
+        HookContext hookContext = new(context.RepoRoot, () => ids.NewSortableId(clock.GetUtcNow()), context.Log);
         ArbiterModelBlock? retarget = null;
         foreach (PendingEvaluation item in pending)
         {
@@ -394,7 +395,7 @@ public sealed class ArbiterServeService(
         // The effective rules, so a host override of the comment rule's shadow state is the one the service honours.
         // A root whose configuration cannot be loaded uses the shipped rules and no bot logins: the fail-safe answer.
         (KyberWeaveConfig? config, _) = Load();
-        IReadOnlyList<ArbiterRule> rules = config?.Arbiter.Rules ?? ArbiterConfig.ProductDefaults.Rules;
+        IReadOnlyList<ArbiterRule> rules = config?.Arbiter.Rules ?? ArbiterConfigDefaults.Product.Rules;
         string ruleSet = ArbiterProvenance.RuleSetHash(rules);
         if (summary)
         {

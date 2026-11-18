@@ -1,4 +1,5 @@
 using KyberWeave.Core.Processes;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -15,7 +16,9 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class RemovedAgentNameRepoGuardTests
 {
-    private static string RepoRoot => KyberWeaveTestPaths.ToolRoot;
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private static string RepoRoot => Corpus.Root;
 
     /// <summary>The fourteen agents the removal deletes, as <c>RemovedAgentMap</c> lists them.</summary>
     private static readonly string[] RemovedAgentNames =
@@ -44,8 +47,8 @@ public sealed class RemovedAgentNameRepoGuardTests
     private static readonly string[] ExemptPaths =
     [
         "src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs",
-        "src/KyberWeave.Domain/Review/Catalogue/GateCatalogueRenderer.cs",
-        "src/KyberWeave.Domain/Review/Catalogue/RemovedAgentMap.cs"
+        "src/KyberWeave.Application/Review/Catalogue/GateCatalogueRenderer.cs",
+        "src/KyberWeave.Application/Review/Catalogue/RemovedAgentMap.cs"
     ];
 
     [Fact]
@@ -55,7 +58,7 @@ public sealed class RemovedAgentNameRepoGuardTests
         [
             .. TrackedSourceFiles()
                 .Where(path => !ExemptPaths.Contains(path, StringComparer.Ordinal))
-                .Where(path => RemovedAgentNames.Any(name => NamesWordBounded(File.ReadAllText(FullPath(path)), name)))
+                .Where(path => RemovedAgentNames.Any(name => NamesWordBounded(Corpus.ReadText(path), name)))
                 .Order(StringComparer.Ordinal)
         ];
 
@@ -77,7 +80,7 @@ public sealed class RemovedAgentNameRepoGuardTests
     private static List<string> TrackedFiles()
     {
         List<string> tracked = [];
-        using StdioSession session = new("git", ["-C", RepoRoot, "ls-files", "-z"], TimeSpan.FromSeconds(60));
+        using StdioSession session = new("git", ["-C", RepoRoot, "ls-files", "-z"], TimeSpan.FromSeconds(60), TimeProvider.System);
         while (true)
         {
             string line;
@@ -119,7 +122,4 @@ public sealed class RemovedAgentNameRepoGuardTests
     }
 
     private static bool IsNameCharacter(char value) => char.IsLetterOrDigit(value) || value is '-' or '_';
-
-    private static string FullPath(string relativePath) =>
-        Path.Combine(RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
 }

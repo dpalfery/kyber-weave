@@ -7,11 +7,11 @@ owner: dpalfery
 last-reviewed: 2026-11-17
 code-refs:
   - KyberWeaveConfig
-  - KyberWeaveConfigLoader
+  - KyberWeaveConfigDiagnosticCodes
   - OntologyConfig
   - SquadConfig
   - ArbiterConfigLoader
-  - ReviewConfigLoader
+  - ReviewConfigParser
   - ConfigRegConfig
   - ReviewConfig
   - TaskGateResolver
@@ -811,7 +811,7 @@ follows are in [the review council architecture](code-review/architecture.md#the
 ```yaml
 review:
   test-map:
-    "src/KyberWeave.Core/Review/TaskGateSelection.cs":
+    "src/KyberWeave.Application/Review/TaskGateSelectionService.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
 ```
 

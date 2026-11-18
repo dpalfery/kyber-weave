@@ -19,7 +19,4 @@ public static class WorkerRosters
 
     /// <summary>The rosters a host may select, in the order a diagnostic lists them.</summary>
     public static IReadOnlyList<string> All { get; } = [Tiered];
-
-    /// <summary>True when <paramref name="value"/> is the roster a host may select.</summary>
-    public static bool IsKnown(string? value) => string.Equals(value?.Trim(), Tiered, StringComparison.Ordinal);
 }

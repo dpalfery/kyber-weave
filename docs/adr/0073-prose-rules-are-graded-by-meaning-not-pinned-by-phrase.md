@@ -46,7 +46,7 @@ answers the Arbiter's questions through `SystemOneClient`
    `delegates-to`, reference resolution, baseline injection, single-home markers, word budgets, and
    the short tokens code parses or emits are asserted exactly, against a code constant where one exists.
 2. **Meaning is graded by Jev against one rule catalog.**
-   `tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml` lists each rule once: a one-sentence
+   `tests/KyberWeave.Content.Tests/Fixtures/prose-rules/catalog.yml` lists each rule once: a one-sentence
    statement, the files that must state it, negative controls, and a retired opposite where an old
    rule must not return. The worker rule map's ids are catalog ids, so there is one rule list.
    `ProseRuleCatalogTests` checks the catalog offline on every build; `ProseRuleGradingTests` asks one
