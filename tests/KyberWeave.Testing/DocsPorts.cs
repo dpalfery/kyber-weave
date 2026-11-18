@@ -2,15 +2,18 @@ using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
+using KyberWeave.Core.CodeGraph;
 using KyberWeave.Core.Docs.Analysis.Persistence;
 using KyberWeave.Core.Docs.Scaffolding;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.CodeGraph;
 using KyberWeave.Data.Docs.Analysis.Embeddings;
 using KyberWeave.Data.Docs.Closeout;
 using KyberWeave.Data.Docs.FileSystem;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Host;
 using KyberWeave.Data.Paths;
+using KyberWeave.Data.Review;
 
 namespace KyberWeave.Tests;
 
@@ -34,6 +37,18 @@ internal static class DocsPorts
     /// <summary>Opens analysis caches over the real disk and the real <c>sqlite3</c>, for a test that runs them on a temporary checkout.</summary>
     internal static readonly IAnalysisPersistenceFactory AnalysisPersistence =
         new SqliteAnalysisPersistenceFactory(Disk, Paths, Environment, Process, CacheSafety);
+
+    /// <summary>The CodeGraph index of a temporary checkout, read through the real <c>sqlite3</c> and git.</summary>
+    /// <param name="repositoryRoot">The checkout root.</param>
+    internal static CodeGraphResolverAdapter CodeGraph(string repositoryRoot) =>
+        (CodeGraphResolverAdapter)new CodeGraphPortsFactory(Disk, Paths, Environment, Process, Staleness).ForRepository(repositoryRoot).Resolver;
+
+    /// <summary>The CodeGraph index at <paramref name="databasePath"/>, read through the real <c>sqlite3</c>.</summary>
+    /// <param name="databasePath">The index file.</param>
+    internal static CodeGraphResolverAdapter CodeGraphAt(string databasePath) =>
+        new(databasePath, Disk, Paths, Environment, Process, Staleness);
+
+    private static readonly CodeGraphIndexStaleness Staleness = new(Disk, new ProcessProgramRunner());
 
     /// <summary>Opens the analysis cache of a temporary checkout over the real disk and the real <c>sqlite3</c>.</summary>
     /// <param name="repositoryRoot">The checkout root.</param>

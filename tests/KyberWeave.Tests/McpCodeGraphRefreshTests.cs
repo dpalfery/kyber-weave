@@ -311,7 +311,7 @@ public sealed class McpCodeGraphRefreshTests : IDisposable
                 Environment.NewLine + "stop-on-tool-failure: false" + Environment.NewLine);
         }
 
-        DocsTools tools = ScaffoldedTools(Root, () => CodeGraphResolverAdapter.ForRepository(Root));
+        DocsTools tools = ScaffoldedTools(Root, () => DocsPorts.CodeGraph(Root));
 
         string response = tools.Explore("anything");
 

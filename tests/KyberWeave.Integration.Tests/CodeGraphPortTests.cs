@@ -79,7 +79,7 @@ public class CodeGraphPortTests
         fixture.IndexRoute("GET /api/adapter/ping");
         fixture.IndexFile("3-Domain/Adapter/Symbol.cs");
 
-        ICodeGraphResolver adapter = new CodeGraphResolverAdapter(fixture.DatabasePath);
+        ICodeGraphResolver adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
 
         Assert.True(adapter.IsAvailable);
         Assert.NotEmpty(adapter.ResolveSymbol("AdapterSymbol"));
@@ -99,7 +99,7 @@ public class CodeGraphPortTests
         fixture.IndexMethod("Count", "src/Adapter/Sums.cs", 26, 30);
         fixture.IndexSymbol("Sums", "src/Adapter/Sums.cs", 5, 40);
 
-        ICodeGraphSymbolEnumerator adapter = new CodeGraphResolverAdapter(fixture.DatabasePath);
+        ICodeGraphSymbolEnumerator adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
         IReadOnlyList<CodeGraphNode> methods = adapter.NodesOfKind("method");
 
         Assert.Equal(2, methods.Count);
