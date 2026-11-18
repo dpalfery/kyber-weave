@@ -34,9 +34,9 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         | azure | Azure resource definitions | 12 |
         """;
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _services.Dispose();
 
     // ---------------------------------------------------------------- parser
 
@@ -275,7 +275,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     {
         FakeProvider provider = new(_ => ("belongs", 0.95));
 
-        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
+        (List<ReviewFinding> findings, var matched) = await _services.DecisionSteps.MatchOverridesAsync(
             Model(provider), SeverityOverrideRules.Parse(Table), [Finding("model-placement/wrong-folder", ReviewSeverity.Minor)]);
 
         ReviewFinding graded = Assert.Single(findings);
@@ -288,7 +288,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public async Task AnUnsureAnswerChangesNothing()
     {
-        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
+        (List<ReviewFinding> findings, var matched) = await _services.DecisionSteps.MatchOverridesAsync(
             Model(new FakeProvider(_ => ("belongs", 0.6))), SeverityOverrideRules.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
 
         Assert.Equal(ReviewSeverity.Minor, Assert.Single(findings).Severity);
@@ -302,7 +302,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 160).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
+        await _services.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
 
         Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("20 comparison(s) skipped", model.SummaryLine([]), StringComparison.Ordinal);
@@ -320,7 +320,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
             .. Enumerable.Range(0, 10).Select(index => Finding($"model-placement/c{index}", ReviewSeverity.Critical)),
         ];
 
-        (List<ReviewFinding> graded, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrideRules.Parse(Table), findings);
+        (List<ReviewFinding> graded, _) = await _services.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrideRules.Parse(Table), findings);
 
         Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.All(graded.Skip(150), finding => Assert.Equal(SeverityOverrides.ModelSource, finding.OverrideSource));
@@ -337,7 +337,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(0, ReviewVerdictRules.MaxFindingsPerStep + 100).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
+        await _services.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
 
         Assert.Equal(ReviewVerdictRules.MaxQuestionsPerStep, provider.Calls);
         Assert.Contains("100 finding(s) left out of the comparison", model.SummaryLine([]), StringComparison.Ordinal);
@@ -350,7 +350,7 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         ReviewDecisionSession model = Model(provider);
         ReviewFinding[] many = [.. Enumerable.Range(1, 6).Select(index => Finding($"model-placement/x{index}", ReviewSeverity.Minor))];
 
-        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
+        (List<ReviewFinding> findings, var matched) = await _services.DecisionSteps.MatchOverridesAsync(model, SeverityOverrideRules.Parse(Table), many);
 
         Assert.All(findings, finding => Assert.Equal(ReviewSeverity.Minor, finding.Severity));
         Assert.Empty(matched);
@@ -361,9 +361,9 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
     [Fact]
     public async Task ProviderNoneAsksNothing()
     {
-        ReviewDecisionSession model = ReviewTestServices.DecisionModel(new NoneProvider(), ArbiterConfigDefaults.Product.Rules, LogDirectory, TimeProvider.System);
+        ReviewDecisionSession model = _services.DecisionModel(new NoneProvider(), ArbiterConfigDefaults.Product.Rules, LogDirectory);
 
-        (List<ReviewFinding> findings, var matched) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
+        (List<ReviewFinding> findings, var matched) = await _services.DecisionSteps.MatchOverridesAsync(
             model, SeverityOverrideRules.Parse(Table), [Finding("model-placement/x", ReviewSeverity.Minor)]);
 
         Assert.Equal(ReviewSeverity.Minor, Assert.Single(findings).Severity);
@@ -376,9 +376,9 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         SeverityOverrides overrides = SeverityOverrideRules.Parse(Table);
         ReviewFinding finding = Finding("model-placement/x", ReviewSeverity.Minor);
 
-        (List<ReviewFinding> confident, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
+        (List<ReviewFinding> confident, _) = await _services.DecisionSteps.MatchOverridesAsync(
             Model(new FakeProvider(state => ("belongs", state.Contains("XML doc", StringComparison.Ordinal) ? 0.99 : 0.9))), overrides, [finding]);
-        (List<ReviewFinding> tied, _) = await ReviewTestServices.DecisionSteps.MatchOverridesAsync(
+        (List<ReviewFinding> tied, _) = await _services.DecisionSteps.MatchOverridesAsync(
             Model(new FakeProvider(_ => ("belongs", 0.9))), overrides, [finding]);
 
         Assert.Equal("SO-2", Assert.Single(confident).Override);
@@ -391,12 +391,12 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
         FakeProvider provider = new(_ => ("belongs", 0.99));
         ReviewFinding cited = Finding("model-placement/x", ReviewSeverity.Major) with { Override = "SO-1" };
 
-        await ReviewTestServices.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrideRules.Parse(Table), [cited]);
+        await _services.DecisionSteps.MatchOverridesAsync(Model(provider), SeverityOverrideRules.Parse(Table), [cited]);
         Assert.Equal(0, provider.Calls);
 
         ReviewFinding overridden = Finding("a/minor", ReviewSeverity.Minor) with { Override = "SO-9", OverrideSource = SeverityOverrides.SeatSource };
         FakeProvider nitpicker = new(_ => ("nitpick", 0.99));
-        (List<ReviewFinding> kept, var nitpicks) = await ReviewTestServices.DecisionSteps.DropNitpicksAsync(Model(nitpicker), [overridden]);
+        (List<ReviewFinding> kept, var nitpicks) = await _services.DecisionSteps.DropNitpicksAsync(Model(nitpicker), [overridden]);
         Assert.Single(kept);
         Assert.Empty(nitpicks);
         Assert.Equal(0, nitpicker.Calls);
@@ -404,10 +404,10 @@ public sealed class ReviewSeverityOverrideTests : IDisposable
 
     // ---------------------------------------------------------------- helpers
 
-    private string LogDirectory => Path.Combine(_temp.Path, "artifacts", "arbiter");
+    private string LogDirectory => Path.Combine(_services.Root, "artifacts", "arbiter");
 
     private ReviewDecisionSession Model(IArbiterProvider provider) =>
-        ReviewTestServices.DecisionModel(provider, ArbiterConfigDefaults.Product.Rules, LogDirectory, TimeProvider.System);
+        _services.DecisionModel(provider, ArbiterConfigDefaults.Product.Rules, LogDirectory);
 
     private static string Section(params string[] rows) =>
         "## Severity overrides\n\n| Id | Finding class | Severity | Applies to | Why |\n|---|---|---|---|---|\n" + string.Join('\n', rows) + "\n";

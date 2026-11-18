@@ -34,6 +34,7 @@ public sealed class InMemoryReviewServices : IDisposable
         Time = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
         Files = files ?? new InMemoryFileSystem(Time, caseSensitive);
         Root = Path.Combine(Files.RootPath, "work");
+        Files.CreateDirectory(Root);
         Paths = new FakePathResolver(Files);
         Environment = new FakeProcessEnvironment(
             currentDirectory: Root,

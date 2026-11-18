@@ -9,19 +9,20 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class CoverageCollectorTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
 
-    /// <summary>Deletes the test's temporary directory.</summary>
+    /// <summary>Releases the services.</summary>
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     [Fact]
     public void ReadCoberturaScalesLineRateToAPercent()
     {
-        string path = Path.Combine(_temp.Path, "coverage.cobertura.xml");
-        File.WriteAllText(path, """
+        string path = Path.Combine(_services.Root, "coverage.cobertura.xml");
+        _services.Files.CreateDirectory(_services.Root);
+        _services.Files.WriteAllText(path, """
             <?xml version="1.0" encoding="utf-8"?>
             <coverage line-rate="0.875" branch-rate="0.5" version="1.9">
               <packages>
@@ -35,7 +36,7 @@ public sealed class CoverageCollectorTests : IDisposable
             </coverage>
             """);
 
-        CoverageResult? coverage = ReviewTestServices.Coverage.ReadFile(path);
+        CoverageResult? coverage = _services.Coverage.ReadFile(path);
 
         Assert.NotNull(coverage);
         Assert.Equal(87.5, coverage.FileLinePercent);
@@ -49,19 +50,19 @@ public sealed class CoverageCollectorTests : IDisposable
     [Fact]
     public void ReadAllListsEveryReportTheRunWroteWithoutDisplacingTheFloorsReport()
     {
-        DateTime started = DateTime.UtcNow;
-        string dotnet = WriteReport(
+        // The clock stamps each file as it is written: the stale report comes first, then the run starts.
+        _ = WriteReport(Path.Combine("TestResults", "old", "coverage.cobertura.xml"), "0.1");
+        _services.Time.Advance(TimeSpan.FromHours(1));
+        DateTime started = _services.Time.GetUtcNow().UtcDateTime;
+        _ = WriteReport(
             Path.Combine("artifacts", "coverage", "run", "coverage.cobertura.290926173725831.xml"),
             "0.8");
-        string vitest = WriteReport(Path.Combine("artifacts", "coverage-dash", "cobertura-coverage.xml"), "0.6");
-        string stale = WriteReport(Path.Combine("TestResults", "old", "coverage.cobertura.xml"), "0.1");
-        File.SetLastWriteTimeUtc(stale, started.AddHours(-1));
         // The vitest report is the newer, as the ts-test gate runs after the .NET one.
-        File.SetLastWriteTimeUtc(dotnet, started.AddSeconds(1));
-        File.SetLastWriteTimeUtc(vitest, started.AddSeconds(2));
+        _services.Time.Advance(TimeSpan.FromSeconds(1));
+        _ = WriteReport(Path.Combine("artifacts", "coverage-dash", "cobertura-coverage.xml"), "0.6");
 
-        IReadOnlyList<CoverageReport> reports = ReviewTestServices.Coverage.ReadAll(_temp.Path, started);
-        CoverageResult? floor = ReviewTestServices.Coverage.ReadNewest(_temp.Path, started);
+        IReadOnlyList<CoverageReport> reports = _services.Coverage.ReadAll(_services.Root, started);
+        CoverageResult? floor = _services.Coverage.ReadNewest(_services.Root, started);
 
         string[] expected =
         [
@@ -93,9 +94,9 @@ public sealed class CoverageCollectorTests : IDisposable
 
     private string WriteReport(string relativePath, string lineRate)
     {
-        string path = Path.Combine(_temp.Path, relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, $"""
+        string path = Path.Combine(_services.Root, relativePath);
+        _services.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _services.Files.WriteAllText(path, $"""
             <?xml version="1.0" encoding="utf-8"?>
             <coverage line-rate="{lineRate}" version="1.9"><packages /></coverage>
             """);

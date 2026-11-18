@@ -1,4 +1,5 @@
 using KyberWeave.Cli.Commands.Review;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
@@ -16,9 +17,14 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
 {
     private static readonly DateOnly Today = new(2026, 8, 20);
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
 
-    public void Dispose() => _temp.Dispose();
+    public void Dispose() => _services.Dispose();
+
+    private void DotnetSucceeds() =>
+        _services.Processes.Script(
+            "dotnet",
+            new ProcessRunResult(0, string.Empty, TimedOut: false) { StandardOutput = "10.0.0", StandardError = string.Empty });
 
     private static ReviewGate DashGate(string[] run, bool blocking = true) =>
         new("dash-gate", run, blocking, 900, AppliesWhen: new ReviewGateAppliesWhen(["dash/**"]));
@@ -67,9 +73,11 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void WithoutChangedPathsEveryGateRunsAndTheBaseIsAbsent()
     {
-        GateReport report = ReviewTestServices.Gates.Run(
+        DotnetSucceeds();
+
+        GateReport report = _services.Gates.Run(
             Config(DashGate(["dotnet", "--version"]), new ReviewGate("build", ["dotnet", "--version"])),
-            _temp.Path);
+            _services.Root);
 
         Assert.All(report.Gates, gate => Assert.Null(gate.NotApplicableReason));
         Assert.All(report.Gates, gate => Assert.True(gate.Passed));
@@ -79,9 +87,9 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void ANonMatchingGateIsNotExecutedAndReportsItsReason()
     {
-        GateReport report = ReviewTestServices.Gates.Run(
+        GateReport report = _services.Gates.Run(
             Config(DashGate(["definitely-missing-gate-binary-xyz", "--version"])),
-            _temp.Path,
+            _services.Root,
             changedPaths: ["src/Foo.cs"],
             baseRef: "main");
 
@@ -92,6 +100,7 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
 
         // A run would have failed to start the missing binary; a skip never starts it.
         Assert.DoesNotContain("could not start", gate.Summary, StringComparison.Ordinal);
+        Assert.Empty(_services.Processes.Calls);
         Assert.False(gate.Passed);
         Assert.Equal("KW-REVIEW-026", ReviewGateOutcome.NotApplicable);
     }
@@ -99,9 +108,11 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void AMatchingGateRuns()
     {
-        GateReport report = ReviewTestServices.Gates.Run(
+        DotnetSucceeds();
+
+        GateReport report = _services.Gates.Run(
             Config(DashGate(["dotnet", "--version"])),
-            _temp.Path,
+            _services.Root,
             changedPaths: ["dash/src/x.ts"],
             baseRef: "main");
 
@@ -133,9 +144,11 @@ public sealed class ReviewGateApplicabilityTests : IDisposable
     [Fact]
     public void GateReportsRoundTripTheBaseAndTheReason()
     {
-        GateReport report = ReviewTestServices.Gates.Run(
+        DotnetSucceeds();
+
+        GateReport report = _services.Gates.Run(
             Config(new ReviewGate("build", ["dotnet", "--version"])),
-            _temp.Path,
+            _services.Root,
             baseRef: "main");
 
         GateReport reread = ReviewJson.ReadGates(ReviewJson.Write(report));

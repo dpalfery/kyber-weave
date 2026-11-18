@@ -17,11 +17,11 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class ReviewDuplicatesTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
 
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
         GC.SuppressFinalize(this);
     }
 
@@ -37,13 +37,13 @@ public class ReviewDuplicatesTests : IDisposable
 
     private void Write(string relativePath, string content)
     {
-        string full = Path.Combine(_temp.Path, relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, content);
+        string full = Path.Combine(_services.Root, relativePath);
+        _services.Files.CreateDirectory(Path.GetDirectoryName(full)!);
+        _services.Files.WriteAllText(full, content);
     }
 
     private int LineCount(string relativePath) =>
-        File.ReadAllLines(Path.Combine(_temp.Path, relativePath)).Length;
+        _services.Files.ReadLines(Path.Combine(_services.Root, relativePath)).Count();
 
     private static CodeGraphNode Method(string name, string file, int startLine, int endLine) =>
         Node("method", name, file, startLine, endLine);
@@ -52,8 +52,8 @@ public class ReviewDuplicatesTests : IDisposable
         new($"id-{kind}-{name}-{startLine}", kind, name, $"N.{name}", file, "csharp", startLine, endLine);
 
     private DuplicateReport Detect(IReadOnlyList<CodeGraphNode> nodes, int minimumLines = 4) =>
-        ReviewTestServices.Duplicates.Detect(
-            _temp.Path,
+        _services.Duplicates.Detect(
+            _services.Root,
             nodes,
             new ReviewDuplicates(minimumLines),
             ".codegraph/codegraph.db",
@@ -212,10 +212,10 @@ public class ReviewDuplicatesTests : IDisposable
     public void ASymbolInAFileReachedThroughASymbolicLinkIsUnreadableAndNeverCompared()
     {
         Write("A.cs", Body);
-        string outside = Path.Combine(_temp.Path, "outside", "B.cs");
-        Directory.CreateDirectory(Path.GetDirectoryName(outside)!);
-        File.WriteAllText(outside, Body);
-        File.CreateSymbolicLink(Path.Combine(_temp.Path, "B.cs"), outside);
+        string outside = Path.Combine(_services.Root, "outside", "B.cs");
+        _services.Files.CreateDirectory(Path.GetDirectoryName(outside)!);
+        _services.Files.WriteAllText(outside, Body);
+        _services.Files.CreateFileLink(Path.Combine(_services.Root, "B.cs"), outside);
 
         DuplicateReport report = Detect([Method("Total", "A.cs", 1, 7), Method("Total", "B.cs", 1, 7)]);
 
@@ -300,8 +300,8 @@ public class ReviewDuplicatesTests : IDisposable
             Method("Total", "A.cs", 1, 7),
             Method("Sum", "B.cs", 1, 7));
 
-        DuplicateReport report = ReviewTestServices.Duplicates.Analyze(
-            _temp.Path, graph, graph, ReviewDuplicates.Default);
+        DuplicateReport report = _services.Duplicates.Analyze(
+            _services.Root, graph, graph, ReviewDuplicates.Default);
 
         Assert.True(report.IndexAvailable);
         Assert.Single(report.Clusters);
@@ -314,8 +314,8 @@ public class ReviewDuplicatesTests : IDisposable
         // duplicate-implementation lens skips on the first and reports clean on the second.
         UnavailableGraph graph = new();
 
-        DuplicateReport report = ReviewTestServices.Duplicates.Analyze(
-            _temp.Path, graph, graph, ReviewDuplicates.Default);
+        DuplicateReport report = _services.Duplicates.Analyze(
+            _services.Root, graph, graph, ReviewDuplicates.Default);
 
         Assert.False(report.IndexAvailable);
         Assert.Equal(graph.UnavailableReason, report.UnavailableReason);

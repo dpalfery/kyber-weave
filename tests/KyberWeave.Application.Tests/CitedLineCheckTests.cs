@@ -10,19 +10,19 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class CitedLineCheckTests : IDisposable
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
     private readonly string _root;
 
     public CitedLineCheckTests()
     {
-        _root = Path.Combine(_temp.Path, "repo");
-        Directory.CreateDirectory(_root);
+        _root = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(_root);
     }
 
-    /// <summary>Deletes the temporary repository and the file beside it.</summary>
+    /// <summary>Releases the services.</summary>
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     /// <summary>
@@ -34,7 +34,7 @@ public sealed class CitedLineCheckTests : IDisposable
     {
         WriteOutsideTheRepository("outside.cs", "int a;\nint b;\n");
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("../outside.cs", line: 99, excerpt: "int b;"));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("../outside.cs", line: 99, excerpt: "int b;"));
 
         Assert.Equal(CitedLineKind.Unverified, result.Kind);
         Assert.NotNull(result.Reason);
@@ -46,9 +46,9 @@ public sealed class CitedLineCheckTests : IDisposable
     public void ARootedPathIsNeverReadToMoveAFinding()
     {
         WriteOutsideTheRepository("outside.cs", "int a;\nint b;\n");
-        string rooted = Path.Combine(_temp.Path, "outside.cs");
+        string rooted = Path.Combine(_services.Root, "outside.cs");
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding(rooted, line: 99, excerpt: "int b;"));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding(rooted, line: 99, excerpt: "int b;"));
 
         Assert.Equal(CitedLineKind.Unverified, result.Kind);
         Assert.NotNull(result.Reason);
@@ -59,7 +59,7 @@ public sealed class CitedLineCheckTests : IDisposable
     [Fact]
     public void AMissingFileIsNotReadAsAMoveAndDoesNotThrow()
     {
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("src/Missing.cs", line: 99, excerpt: "int b;"));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("src/Missing.cs", line: 99, excerpt: "int b;"));
 
         Assert.Equal(CitedLineKind.Unverified, result.Kind);
         Assert.NotNull(result.Reason);
@@ -72,7 +72,7 @@ public sealed class CitedLineCheckTests : IDisposable
     {
         WriteRepositoryFile("src/Foo.cs", "a\nb\nc\n");
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("src/Foo.cs", line: 99, excerpt: null));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("src/Foo.cs", line: 99, excerpt: null));
 
         Assert.Equal(CitedLineKind.Unresolved, result.Kind);
         Assert.NotNull(result.Reason);
@@ -88,7 +88,7 @@ public sealed class CitedLineCheckTests : IDisposable
     {
         WriteRepositoryFile("src/Foo.cs", "int a;\n    int total = 0;\n  return total;\n");
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(
+        CitedLineResult result = _services.CitedLines.Check(
             _root,
             Finding("src/Foo.cs", line: 99, excerpt: "\n   int total = 0;\n   return total;\n"));
 
@@ -106,7 +106,7 @@ public sealed class CitedLineCheckTests : IDisposable
     {
         WriteRepositoryFile("src/Foo.cs", "int a;\nint b;\n");
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("src/Foo.cs", line: 0, excerpt: "int b;"));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("src/Foo.cs", line: 0, excerpt: "int b;"));
 
         Assert.Equal(CitedLineKind.Relocated, result.Kind);
         Assert.Equal(2, result.Finding.Line);
@@ -118,7 +118,7 @@ public sealed class CitedLineCheckTests : IDisposable
     {
         WriteRepositoryFile("src/Foo.cs", "a\nb\n");
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("src/Foo.cs", line: -3, excerpt: null));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("src/Foo.cs", line: -3, excerpt: null));
 
         Assert.Equal(CitedLineKind.Unresolved, result.Kind);
     }
@@ -132,7 +132,7 @@ public sealed class CitedLineCheckTests : IDisposable
     {
         WriteRepositoryFile("src/Foo.cs", "int a;\n");
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("src/\0Foo.cs", line: 99, excerpt: "int a;"));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("src/\0Foo.cs", line: 99, excerpt: "int a;"));
 
         Assert.Equal(CitedLineKind.Unverified, result.Kind);
         Assert.NotNull(result.Reason);
@@ -152,7 +152,7 @@ public sealed class CitedLineCheckTests : IDisposable
         int total = checked((int)ReviewSeatInput.MaxFileBytes + bytesOverTheCap);
         WriteRepositoryFile("src/Big.cs", Head + new string('/', total - Head.Length));
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("src/Big.cs", line: 99, excerpt: "int b;"));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("src/Big.cs", line: 99, excerpt: "int b;"));
 
         Assert.Equal(expected, result.Kind);
         if (expected == CitedLineKind.Unverified)
@@ -178,7 +178,7 @@ public sealed class CitedLineCheckTests : IDisposable
         WriteRepositoryFile("src/Foo.cs", "first\n" + anchor + "\nlast\n");
         string excerpt = string.Join('\n', Enumerable.Repeat(anchor, lines));
 
-        CitedLineResult result = ReviewTestServices.CitedLines.Check(_root, Finding("src/Foo.cs", line: 99, excerpt: excerpt));
+        CitedLineResult result = _services.CitedLines.Check(_root, Finding("src/Foo.cs", line: 99, excerpt: excerpt));
 
         Assert.Equal(relocated ? CitedLineKind.Relocated : CitedLineKind.Unresolved, result.Kind);
         if (!relocated)
@@ -202,12 +202,12 @@ public sealed class CitedLineCheckTests : IDisposable
     private void WriteRepositoryFile(string relativePath, string content)
     {
         string path = Path.Combine(_root, relativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content);
+        _services.Files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _services.Files.WriteAllText(path, content);
     }
 
     private void WriteOutsideTheRepository(string name, string content)
     {
-        File.WriteAllText(Path.Combine(_temp.Path, name), content);
+        _services.Files.WriteAllText(Path.Combine(_services.Root, name), content);
     }
 }
