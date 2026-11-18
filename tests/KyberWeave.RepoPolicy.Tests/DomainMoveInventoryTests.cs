@@ -71,6 +71,22 @@ public sealed class DomainMoveInventoryTests
     }
 
     [Fact]
+    public void EveryCoreDocsSourceFileIsAccountedFor()
+    {
+        string text = Corpus.ReadText(InventoryPath);
+        string[] files = [.. Corpus.EnumerateFiles("src/KyberWeave.Core.Docs", "*.cs")
+            .Select(path => Path.GetFileName(path))];
+
+        Assert.NotEmpty(files);
+        string[] missing = [.. files.Where(name => !text.Contains(name, StringComparison.Ordinal))];
+
+        Assert.True(
+            missing.Length == 0,
+            "Every file of Core.Docs must be named in the inventory, because task 2.2 scopes its deletions "
+            + "from this document: " + string.Join(", ", missing));
+    }
+
+    [Fact]
     public void TheInventoryCountsAddUp()
     {
         List<string> lines = [.. Lines()];

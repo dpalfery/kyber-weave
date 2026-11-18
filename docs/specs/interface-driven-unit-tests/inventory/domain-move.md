@@ -243,7 +243,7 @@ type moves.
 | `Data` | 66 | take a `Contracts` interface, or the caller itself moves to `Application` (the deployment services do) |
 | `Contracts` | 36 | narrow the signature to a Domain record, or move the interface to `Application` (finding, below) |
 | `Core` | 14 | take a `Contracts` interface, or delete the static locator (task 2.2) |
-| `Core.Docs` | 0 | none left: its three files named only `KyberWeaveConfig`, which is data and stays |
+| `Core.Docs` | 0 | no caller; its own four files are deleted under task 2.2 (below) |
 | `Cli` | 76 | none: `Cli` references `Application` |
 | `Mcp` | 4 | none: `Mcp` references `Application` |
 | `Arbiter` | 2 | none: `Arbiter` references `Application` |
@@ -256,6 +256,24 @@ type moves.
 | `tests/KyberWeave.RepoPolicy.Tests` | 2 | none |
 
 
+
+### `src/KyberWeave.Core.Docs` — no Domain caller, four files to delete
+
+The project has four `.cs` files and none names a Domain logic type: `PlanPathResolver.cs`,
+`LegacyPorts.cs`, `PacketTestCommand.cs`, `PlanTaskTarget.cs`. Two of them are exactly what task 2.2
+must delete, and this inventory is the place that says so:
+
+- `LegacyPorts.cs` holds `static readonly IRepositoryFileStore Files = new PhysicalRepositoryFileStore()`
+  — a `Data` adapter in a static field, which is also the proof that `Core.Docs` references `Data`
+  today. Task 2.2 removes that reference and the class.
+- `PlanTaskTarget.cs` and `PacketTestCommand.cs` each build
+  `new PlanTaskTargetService(new PlanTaskService(LegacyPorts.Files), …)` in a static field. Task 2.2
+  deletes those statics, and their callers take the services by injection (requirement 1.5).
+- `PlanPathResolver.cs` has the same shape with `new PhysicalRepositoryFileStore()` and goes with them.
+
+So `Core.Docs` reaches the moved Domain logic only after task 2.2 rewires it, not before. The table row
+above counts callers of Domain logic, which is why it is zero; the four files are still work, and task
+2.2 owns them.
 
 ### src/KyberWeave.Data (66 files)
 
