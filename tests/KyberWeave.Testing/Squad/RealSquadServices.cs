@@ -109,5 +109,5 @@ public static class RealSquadServices
     /// <param name="archives">Writes the archives.</param>
     /// <returns>The packager.</returns>
     public static FileSquadPackager Packager(ISquadArchiveWriter archives) =>
-        new(archives, SourceLoader(), CompanionSkills());
+        new(archives, SourceLoader(), CompanionSkills(), new PhysicalFileSystem(), new ProcessEnvironment(), new SystemIdGenerator());
 }

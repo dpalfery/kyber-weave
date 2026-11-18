@@ -38,7 +38,7 @@ public sealed class SquadRetiredSkillsTests
             Schema: "kyber-squad.receipt/v1",
             Scope: SquadDeploymentScope.Project,
             TargetRoot: ".",
-            InstalledAtUtc: DateTimeOffset.UtcNow,
+            InstalledAtUtc: new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero),
             Degradations: [],
             Files: [new SquadOwnedFile("skills/my-second-brainstorm/notes.md", "0".PadRight(64, '0'), "claude", Adopted: false)]);
 

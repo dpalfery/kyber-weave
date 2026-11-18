@@ -47,7 +47,10 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadPackager>(sp => new FileSquadPackager(
             sp.GetRequiredService<ISquadArchiveWriter>(),
             sp.GetRequiredService<ISquadSourceLoader>(),
-            sp.GetRequiredService<ISquadCompanionSkills>()));
+            sp.GetRequiredService<ISquadCompanionSkills>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<IDevinImportOverlapInspector>(sp => new DevinImportOverlap(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),

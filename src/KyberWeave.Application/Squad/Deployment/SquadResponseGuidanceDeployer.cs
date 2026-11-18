@@ -1,4 +1,6 @@
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
 using System.Security.Cryptography;
 
 namespace KyberWeave.Core.Squad.Deployment;
@@ -50,8 +52,6 @@ namespace KyberWeave.Core.Squad.Deployment;
 /// </remarks>
 public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeployer
 {
-    private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
-
     /// <summary>The file name Squad owns beneath the home state root.</summary>
     public const string FileName = "response-guidance.md";
 
@@ -59,6 +59,9 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
 
     private readonly string _homeStateRoot;
     private readonly Func<byte[]> _readDefault;
+    private readonly IWritableFileSystem _files;
+    private readonly IFileSystemPathSemantics _semantics;
+    private readonly IIdGenerator _ids;
 
     /// <param name="homeStateRoot">
     ///     The home state root, <c>&lt;home&gt;/.kyber-weave</c>. Fully qualified, because every path
@@ -77,7 +80,30 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
     ///     ships.
     /// </param>
     public SquadResponseGuidanceDeployer(string homeStateRoot, Func<byte[]>? readDefault)
+        : this(
+            homeStateRoot,
+            readDefault,
+            new PhysicalFileSystem(),
+            SquadFileSystemPathSemantics.Instance,
+            new SystemIdGenerator())
     {
+    }
+
+    /// <param name="homeStateRoot">The home state root, as the public constructor documents it.</param>
+    /// <param name="readDefault">The shipped default reader, as the two-argument constructor documents it.</param>
+    /// <param name="files">The file system the guidance file is read from and written to.</param>
+    /// <param name="semantics">The path rules that keep the guidance file inside the home state root.</param>
+    /// <param name="ids">The source of the staging file's unique name.</param>
+    public SquadResponseGuidanceDeployer(
+        string homeStateRoot,
+        Func<byte[]>? readDefault,
+        IWritableFileSystem files,
+        IFileSystemPathSemantics semantics,
+        IIdGenerator ids)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(semantics);
+        ArgumentNullException.ThrowIfNull(ids);
         ArgumentException.ThrowIfNullOrWhiteSpace(homeStateRoot);
         if (!Path.IsPathFullyQualified(homeStateRoot))
             throw new ArgumentException(
@@ -86,6 +112,9 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
 
         _homeStateRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(homeStateRoot));
         _readDefault = readDefault ?? ReadDefaultContent;
+        _files = files;
+        _semantics = semantics;
+        _ids = ids;
     }
 
     /// <summary>
@@ -134,7 +163,7 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
         string path;
         try
         {
-            path = SquadPathPolicy.ResolveFile(_homeStateRoot, FileName, Semantics);
+            path = SquadPathPolicy.ResolveFile(_homeStateRoot, FileName, _semantics);
         }
         catch (Exception exception) when (IsDegradableFailure(exception))
         {
@@ -161,10 +190,10 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
 
         try
         {
-            if (!File.Exists(path))
+            if (!_files.FileExists(path))
                 return WriteAndVerify(path, shipped, shippedDigest, record, warnings);
 
-            string currentDigest = Digest(File.ReadAllBytes(path));
+            string currentDigest = Digest(_files.ReadAllBytes(path));
 
             // Already the bytes this release ships: nothing to write, and recording them cannot lose
             // anything an operator wrote, whatever the receipt currently claims.
@@ -202,7 +231,7 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
     ///     back as those bytes. The read back is what lets the caller record a digest as a fact rather
     ///     than an intention.
     /// </summary>
-    private static SquadHomeFile? WriteAndVerify(
+    private SquadHomeFile? WriteAndVerify(
         string path,
         byte[] shipped,
         string shippedDigest,
@@ -210,7 +239,7 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
         ICollection<string> warnings)
     {
         WriteShippedDefault(path, shipped);
-        if (string.Equals(Digest(File.ReadAllBytes(path)), shippedDigest, StringComparison.Ordinal))
+        if (string.Equals(Digest(_files.ReadAllBytes(path)), shippedDigest, StringComparison.Ordinal))
             return record;
 
         warnings.Add(
@@ -233,22 +262,22 @@ public sealed class SquadResponseGuidanceDeployer : ISquadResponseGuidanceDeploy
     ///     interrupted write leaves the previous file whole rather than truncated. A truncated
     ///     guidance file would read back as an operator edit and be preserved forever.
     /// </summary>
-    private static void WriteShippedDefault(string path, byte[] content)
+    private void WriteShippedDefault(string path, byte[] content)
     {
         string? directory = Path.GetDirectoryName(path);
         if (directory is not null)
-            Directory.CreateDirectory(directory);
+            _files.CreateDirectory(directory);
 
-        string staged = $"{path}.{Guid.NewGuid():N}.tmp";
+        string staged = $"{path}.{_ids.NewGuid():N}.tmp";
         try
         {
-            File.WriteAllBytes(staged, content);
-            File.Move(staged, path, overwrite: true);
+            _files.WriteAllBytes(staged, content);
+            _files.MoveFile(staged, path, overwrite: true);
         }
         finally
         {
-            if (File.Exists(staged))
-                File.Delete(staged);
+            if (_files.FileExists(staged))
+                _files.DeleteFile(staged);
         }
     }
 

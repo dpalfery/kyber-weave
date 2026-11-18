@@ -99,7 +99,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadGlobalRootResolver>(sp => EnvironmentSquadGlobalRoots.Create(
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISquadFileAccess>()));
-        services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>()));
+        services.TryAddSingleton<ISquadModelPresetStore>(sp => new SquadModelPresetStore(sp.GetRequiredService<ISquadUserPaths>(), sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<ISquadSourceLoader>(sp => new SquadSourceLoader(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),
@@ -128,7 +128,11 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IFileSystemPathSemantics>(),
             sp.GetRequiredService<ILease>(),
             sp.GetRequiredService<IIdGenerator>()));
-        services.TryAddSingleton<ISquadResponseGuidanceStore>(sp => new SquadResponseGuidanceReader(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<ISquadResponseGuidanceStore>(sp => new SquadResponseGuidanceReader(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IFileSystemPathSemantics>(),
+            sp.GetRequiredService<IIdGenerator>()));
         services.TryAddSingleton<ISquadInstanceLinkSync>(sp => new SquadInstanceLinkSync(
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IPathResolver>(),

@@ -11,7 +11,8 @@ namespace KyberWeave.Application.Tests.Squad.Deployment;
 /// <summary>
 /// The Squad state migration over an in-memory file system, a simulated lease table and a fake clock: what it
 /// copies, what it refuses, what it reports when another writer holds the root, and what it does with state
-/// it cannot read. The same behaviour runs against a real disk in the legacy-state tests of the unit project.
+/// it cannot read. The legacy-state rules (which root a receipt binds to, what a home copy blocks) are in
+/// <c>SquadStateMigrationTests</c>, over the same in-memory state.
 /// </summary>
 public sealed class SquadStateMigrationInMemoryTests
 {
