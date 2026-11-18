@@ -117,7 +117,8 @@ public sealed class DocsInitProvisionTests : IDisposable
                 3,
                 [new DoctorCheck("codegraph.binary", false, "codegraph is missing", "install codegraph")]),
         };
-        DocsInitCommand command = DocsTestCommands.Init(doctor);
+        Spectre.Console.Testing.TestConsole console = new();
+        DocsInitCommand command = DocsTestCommands.Init(doctor, console);
         DocsInitSettings settings = new()
         {
             Path = _repo.Path,
@@ -126,11 +127,10 @@ public sealed class DocsInitProvisionTests : IDisposable
             Provision = true,
         };
 
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-            command.Execute(null!, settings, CancellationToken.None));
+        int exit = command.Execute(null!, settings, CancellationToken.None);
 
-        Assert.Equal(3, execution.Result);
-        Assert.Contains("codegraph.binary", execution.Output, StringComparison.Ordinal);
+        Assert.Equal(3, exit);
+        Assert.Contains("codegraph.binary", console.Output, StringComparison.Ordinal);
     }
 
     /// <summary>

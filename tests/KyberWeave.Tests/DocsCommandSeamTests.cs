@@ -1,3 +1,5 @@
+using KyberWeave.Cli.Commands;
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -116,8 +118,7 @@ public sealed class DocsCommandSeamTests
         _configs,
         clock,
         _console,
-        _paths,
-        _environment);
+        Plans());
 
     private DocsCloseoutCommand Closeout(RecordingCloseout closeout, TimeProvider clock) => new(
         closeout,
@@ -125,8 +126,14 @@ public sealed class DocsCommandSeamTests
         _configs,
         clock,
         _console,
+        Plans());
+
+    private PlanArguments Plans() => new(
+        new ArbiterRepoRoot(_files, _paths, _environment),
+        _files,
         _paths,
-        _environment);
+        _environment,
+        _console);
 
     private sealed class RecordingCloseout : IPlanCloseoutService
     {

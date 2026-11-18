@@ -13,7 +13,8 @@ public sealed class ArbiterPlanCommand(
     IArbiterPlanService plans,
     IRepositoryFileStore files,
     IKyberWeaveConfigRepository configs,
-    IAnsiConsole console) : Command<ArbiterSettings>
+    IAnsiConsole console,
+    PlanArguments planArguments) : Command<ArbiterSettings>
 {
     /// <summary>
     /// Parses the plan file named by the positional path and prints its tasks,
@@ -29,8 +30,8 @@ public sealed class ArbiterPlanCommand(
     public override int Execute(CommandContext context, ArbiterSettings settings, CancellationToken cancellationToken)
     {
         DiagnosticReport report = new();
-        string root = PlanArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
-        if (!PlanArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config, configs), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
+        string root = planArguments.RepositoryRootFor(settings.Path, settings.WorkingDirectory);
+        if (!planArguments.TryResolve(root, PlanArguments.ConfigForResolving(root, settings.Config, configs), files, settings.Path, settings.WorkingDirectory, "arbiter plan", report, out string relative))
         {
             CommandHelpers.Finish(console, report, settings, "arbiter plan", "Task");
             return 1;

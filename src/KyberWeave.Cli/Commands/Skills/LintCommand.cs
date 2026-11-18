@@ -21,7 +21,7 @@ public sealed class LintSettings : AnalysisSettings
     public bool Explain { get; set; }
 }
 
-public sealed class LintCommand(ISkillGovernanceService skills) : Command<LintSettings>
+public sealed class LintCommand(ISkillGovernanceService skills, IAnsiConsole ansi) : Command<LintSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, LintSettings settings, CancellationToken cancellationToken)
@@ -32,23 +32,23 @@ public sealed class LintCommand(ISkillGovernanceService skills) : Command<LintSe
 
         if (settings.Explain && ReportRenderer.IsHuman(settings.ParsedFormat))
         {
-            AnsiConsole.WriteLine();
+            ansi.WriteLine();
             foreach (Skill skill in set.Skills)
             {
                 DescriptionScore score = DescriptionScorer.Score(skill);
                 string name = skill.Frontmatter.Name ?? skill.DirectoryName;
                 string color = score.Total >= settings.MinDescriptionScore ? "green" : "yellow";
-                AnsiConsole.MarkupLine($"[bold]{Markup.Escape(name)}[/] — routing score [{color}]{score.Total}/100[/]");
+                ansi.MarkupLine($"[bold]{Markup.Escape(name)}[/] — routing score [{color}]{score.Total}/100[/]");
                 Table t = new Table().Border(TableBorder.Minimal);
                 t.AddColumn("Dimension"); t.AddColumn("Score"); t.AddColumn("Detail");
                 foreach (ScoreComponent c in score.Components)
                     t.AddRow(Markup.Escape(c.Name), $"{c.Points}/{c.MaxPoints}", Markup.Escape(c.Detail));
-                AnsiConsole.Write(t);
-                AnsiConsole.WriteLine();
+                ansi.Write(t);
+                ansi.WriteLine();
             }
         }
 
-        CommandHelpers.Finish(report, settings, "skill lint", "Skill");
+        CommandHelpers.Finish(ansi, report, settings, "skill lint", "Skill");
         // Lint errors (name collisions) gate; warnings do not fail by default.
         return report.HasErrors ? 1 : 0;
     }

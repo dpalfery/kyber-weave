@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Credentials;
@@ -25,6 +26,7 @@ public sealed class ArbiterUninstallCommand(
     IArbiterConfigResolver configs,
     ICredentialStore credentials,
     IFileSystem files,
+    IPathResolver paths,
     IAnsiConsole console) : Command<ArbiterUninstallSettings>
 {
     /// <inheritdoc />
@@ -67,14 +69,14 @@ public sealed class ArbiterUninstallCommand(
         if (settings.Project)
         {
             scope = SquadDeploymentScope.Project;
-            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.PathOption)
+            root = FullPath(string.IsNullOrWhiteSpace(settings.PathOption)
                 ? (string.IsNullOrWhiteSpace(settings.Path) ? "." : settings.Path)
                 : settings.PathOption);
         }
         else if (settings.Global)
         {
             scope = SquadDeploymentScope.Global;
-            root = Path.GetFullPath(string.IsNullOrWhiteSpace(settings.Path) || string.Equals(settings.Path, ".", StringComparison.Ordinal)
+            root = FullPath(string.IsNullOrWhiteSpace(settings.Path) || string.Equals(settings.Path, ".", StringComparison.Ordinal)
                 ? environment.HomeDirectory
                 : settings.Path);
         }
@@ -82,8 +84,8 @@ public sealed class ArbiterUninstallCommand(
         {
             if (!string.IsNullOrWhiteSpace(settings.Path) && !string.Equals(settings.Path, ".", StringComparison.Ordinal))
             {
-                string candidate = Path.GetFullPath(settings.Path);
-                string home = Path.GetFullPath(environment.HomeDirectory);
+                string candidate = FullPath(settings.Path);
+                string home = FullPath(environment.HomeDirectory);
                 if (string.Equals(candidate, home, StringComparison.Ordinal))
                 {
                     scope = SquadDeploymentScope.Global;
@@ -122,7 +124,7 @@ public sealed class ArbiterUninstallCommand(
             else
             {
                 scope = SquadDeploymentScope.Global;
-                root = Path.GetFullPath(environment.HomeDirectory);
+                root = FullPath(environment.HomeDirectory);
             }
         }
 
@@ -190,6 +192,8 @@ public sealed class ArbiterUninstallCommand(
             $"from [bold]{Markup.Escape(root)}[/].[/]");
         return 0;
     }
+
+    private string FullPath(string path) => paths.GetFullPath(path, environment.CurrentDirectory);
 
     /// <summary>Runs the command without cancellation; the entry-point tests use this.</summary>
     public int Execute(CommandContext context, ArbiterUninstallSettings settings)

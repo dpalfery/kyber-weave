@@ -1,3 +1,5 @@
+using KyberWeave.Cli.Commands;
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
@@ -56,12 +58,28 @@ public sealed class DocsCommandOutputSeamTests
             provider.GetRequiredService<IDocumentSourceFactory>(),
             provider.GetRequiredService<IPathResolver>(),
             _console,
-            _standardError).Execute(null!, settings, CancellationToken.None);
+            _standardError,
+            Plans(provider),
+            new ArbiterRepoRoot(
+                provider.GetRequiredService<IFileSystem>(),
+                provider.GetRequiredService<IPathResolver>(),
+                provider.GetRequiredService<IProcessEnvironment>())).Execute(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains(Root, _configs.LoadedRoots, StringComparer.Ordinal);
         Assert.Contains(KyberWeaveConfigDiagnosticCodes.LoadError, _console.Output, StringComparison.Ordinal);
     }
+
+    private PlanArguments Plans(IServiceProvider provider) => Plans(
+        provider.GetRequiredService<IPathResolver>(),
+        provider.GetRequiredService<IProcessEnvironment>());
+
+    private PlanArguments Plans(IPathResolver paths, IProcessEnvironment environment) => new(
+        new ArbiterRepoRoot(_files, paths, environment),
+        _files,
+        paths,
+        environment,
+        _console);
 
     [Fact]
     public void TasksReportsAConflictingModePairOnItsConsole()
@@ -76,8 +94,7 @@ public sealed class DocsCommandOutputSeamTests
             files: new InMemoryRepositoryFileStore(_files),
             configs: _configs,
             console: _console,
-            paths: new FakePathResolver(_files),
-            environment: new FakeProcessEnvironment(currentDirectory: WorkingDirectory)).Execute(null!, settings, CancellationToken.None);
+            plans: Plans(new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: WorkingDirectory))).Execute(null!, settings, CancellationToken.None);
 
         Assert.Equal(1, exit);
         Assert.Contains(DocsTasksCommand.ConflictingModes, _console.Output, StringComparison.Ordinal);

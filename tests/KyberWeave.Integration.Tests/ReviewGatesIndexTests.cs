@@ -1,6 +1,7 @@
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Review;
 using KyberWeave.Core.Processes;
+using KyberWeave.Data.Host;
 using KyberWeave.Tests.Fakes;
 using Spectre.Console;
 using Spectre.Console.Cli;
@@ -14,8 +15,7 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 /// <remarks>
 ///     <para>
-///         The command takes its CodeGraph child through <see cref="ReviewGatesCommand.Executor" />, the same seam
-///         <c>doctor --ensure</c> exposes, so no real <c>codegraph</c> runs. Each gate writes a marker into the
+///         The command takes its CodeGraph child through <see cref="ReviewGatesCommand" />'s bounded process executor, so no real <c>codegraph</c> runs. Each gate writes a marker into the
 ///         repository's git configuration when it starts; a case that must stop before any gate proves it by finding
 ///         no marker there.
 ///     </para>
@@ -142,7 +142,7 @@ public sealed class ReviewGatesIndexTests : IDisposable
     /// <summary>Runs <c>review gates</c> over the repository with the scripted CodeGraph seam, writing the report to --out.</summary>
     private CapturedConsoleExecution<int> Run(ScriptedProcessExecutor executor)
     {
-        CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(ReviewTestServices.ReviewGates, executor)));
+        CommandApp app = new(new SeamRegistrar(new ReviewGatesCommand(ReviewTestServices.ReviewGates, new SystemConsole(), AnsiConsole.Console, executor)));
         app.Configure(configuration =>
         {
             configuration.SetApplicationName("kyber-weave");

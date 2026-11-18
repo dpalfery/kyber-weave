@@ -1,8 +1,11 @@
+using KyberWeave.Cli.Commands;
+using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Brief;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Spectre.Console.Testing;
 using Xunit;
 
@@ -45,8 +48,20 @@ public sealed class SquadBriefCommandTests
         Assert.Equal(string.Empty, Ansi());
     }
 
-    private SquadBriefCommand Command(ISquadBriefBuilder builder) =>
-        new(builder, new FakeKyberWeaveConfigRepository(), new SquadConsole(_ansi, _streams), new FakeProcessEnvironment());
+    private SquadBriefCommand Command(ISquadBriefBuilder builder)
+    {
+        InMemoryFileSystem files = new();
+        FakePathResolver paths = new(files);
+        FakeProcessEnvironment environment = new();
+        ArbiterRepoRoot roots = new(files, paths, environment);
+        return new(
+            builder,
+            new FakeKyberWeaveConfigRepository(),
+            new SquadConsole(_ansi, _streams),
+            environment,
+            new PlanArguments(roots, files, paths, environment, _ansi),
+            roots);
+    }
 
     private string Ansi() => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
 
