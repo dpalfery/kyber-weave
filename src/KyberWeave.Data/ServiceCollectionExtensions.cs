@@ -55,11 +55,8 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
         services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
-        services.TryAddSingleton<ICoverageReportSource>(_ => new FileCoverageReportSource());
-        services.TryAddSingleton<IContainedFileReader>(_ => new FileContainedFileReader());
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
         services.TryAddSingleton<IReviewDecisionCacheStore>(_ => new FileReviewDecisionCacheStore());
-        services.TryAddSingleton<ICitedSourceFiles>(_ => new FileCitedSourceFiles());
         services.TryAddSingleton<ITestClassSources>(_ => new FileTestClassSources());
         services.TryAddSingleton<IKyberWeaveConfigRepository>(sp => new FileKyberWeaveConfigRepository(sp.GetRequiredService<IRepositoryTreeProbe>()));
         services.TryAddSingleton<IRepositoryToolSettings>(sp => new ConfigFileToolSettings(sp.GetRequiredService<IKyberWeaveConfigRepository>()));

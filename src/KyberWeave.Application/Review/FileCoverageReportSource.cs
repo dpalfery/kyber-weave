@@ -5,7 +5,8 @@ using KyberWeave.Core.Review;
 namespace KyberWeave.Data.Review;
 
 /// <summary>Reads Cobertura coverage reports from the file system.</summary>
-public sealed class FileCoverageReportSource : ICoverageReportSource
+/// <param name="files">The file system the reports are found and read through.</param>
+public sealed class FileCoverageReportSource(IFileSystem files) : ICoverageReportSource
 {
     /// <summary>
     /// Returns the newest Cobertura report written at or after <paramref name="notBeforeUtc"/>,
@@ -22,13 +23,12 @@ public sealed class FileCoverageReportSource : ICoverageReportSource
         ];
 
         string? newest = roots
-            .Where(Directory.Exists)
-            .SelectMany(root => Directory.EnumerateFiles(root, "*.xml", SearchOption.AllDirectories))
+            .SelectMany(Reports)
             .Where(CoberturaReport.IsReportName)
-            .Select(path => new FileInfo(path))
-            .Where(info => info.LastWriteTimeUtc >= notBeforeUtc.AddSeconds(-1))
-            .OrderByDescending(info => info.LastWriteTimeUtc)
-            .Select(info => info.FullName)
+            .Select(path => (Path: path, Written: files.GetLastWriteTimeUtc(path)))
+            .Where(report => report.Written >= notBeforeUtc.AddSeconds(-1))
+            .OrderByDescending(report => report.Written)
+            .Select(report => report.Path)
             .FirstOrDefault();
 
         return newest is null ? null : ReadFile(newest);
@@ -55,18 +55,16 @@ public sealed class FileCoverageReportSource : ICoverageReportSource
         ];
 
         List<CoverageReport> reports = [];
-        foreach (FileInfo info in roots
-            .Where(Directory.Exists)
-            .SelectMany(root => Directory.EnumerateFiles(root, "*.xml", SearchOption.AllDirectories))
+        foreach (string path in roots
+            .SelectMany(Reports)
             .Where(CoberturaReport.IsReportName)
-            .Select(path => new FileInfo(path))
-            .Where(info => info.LastWriteTimeUtc >= notBeforeUtc.AddSeconds(-1)))
+            .Where(path => files.GetLastWriteTimeUtc(path) >= notBeforeUtc.AddSeconds(-1)))
         {
-            CoverageResult? coverage = ReadFile(info.FullName);
+            CoverageResult? coverage = ReadFile(path);
             if (coverage is null)
                 continue;
 
-            string relative = Path.GetRelativePath(workingDirectory, info.FullName).Replace('\\', '/');
+            string relative = Path.GetRelativePath(workingDirectory, path).Replace('\\', '/');
             reports.Add(new CoverageReport(relative, coverage));
         }
 
@@ -80,11 +78,36 @@ public sealed class FileCoverageReportSource : ICoverageReportSource
 
         try
         {
-            return CoberturaReport.Parse(XDocument.Load(path));
+            using Stream stream = files.OpenRead(path);
+            return CoberturaReport.Parse(XDocument.Load(stream));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or System.Xml.XmlException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Every <c>*.xml</c> file under <paramref name="root"/>, one directory at a time so no folder name is skipped: a
+    /// run's Coverlet report sits under <c>artifacts/coverage</c>, which the file system's tree walk leaves out.
+    /// </summary>
+    private IEnumerable<string> Reports(string root)
+    {
+        if (!files.DirectoryExists(root))
+            yield break;
+
+        foreach (FileSystemEntry entry in files.EnumerateEntries(root))
+        {
+            if (entry.IsDirectory)
+            {
+                foreach (string nested in Reports(entry.Path))
+                    yield return nested;
+            }
+            else if (Path.GetExtension(entry.Path).Equals(
+                ".xml", OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            {
+                yield return entry.Path;
+            }
         }
     }
 }
