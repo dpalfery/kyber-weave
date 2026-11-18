@@ -67,6 +67,14 @@ public abstract class ProcessEnvironmentContractTests
     [Fact]
     public void ItAnswersNullForAVariableThatIsNotSet() =>
         Assert.Null(CreateEnvironment().GetVariable(Facts.AbsentVariableName));
+
+    [Fact]
+    public void ItRefusesANullVariableName() =>
+        Assert.Throws<ArgumentNullException>(() => CreateEnvironment().GetVariable(null!));
+
+    [Fact]
+    public void AnEmptyVariableNameHasNoValue() =>
+        Assert.Null(CreateEnvironment().GetVariable(string.Empty));
 }
 
 /// <summary>The answers a <see cref="IProcessEnvironment" /> is expected to give in a contract run.</summary>

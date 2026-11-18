@@ -31,4 +31,15 @@ public sealed class FakeProcessEnvironmentTests
         Assert.Equal(OperatingSystemKind.Unknown, environment.OperatingSystem);
         Assert.True(environment.IsInputRedirected);
     }
+
+    [Fact]
+    public void ItRefusesANullDirectory()
+    {
+        Assert.Throws<ArgumentNullException>(() => new FakeProcessEnvironment(currentDirectory: null!));
+        Assert.Throws<ArgumentNullException>(() => new FakeProcessEnvironment(homeDirectory: (string)null!));
+        Assert.Throws<ArgumentNullException>(() => new FakeProcessEnvironment(tempDirectory: null!));
+        Assert.Throws<ArgumentNullException>(() => new FakeProcessEnvironment(userName: null!));
+        Assert.Throws<ArgumentNullException>(() => new FakeProcessEnvironment(machineName: null!));
+        Assert.Throws<ArgumentNullException>(() => new FakeProcessEnvironment((Func<string>)null!));
+    }
 }

@@ -91,5 +91,9 @@ public sealed class FakeProcessEnvironment : IProcessEnvironment
     public bool IsInputRedirected { get; }
 
     /// <inheritdoc />
-    public string? GetVariable(string name) => _readVariable?.Invoke(name);
+    public string? GetVariable(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        return name.Length == 0 ? null : _readVariable?.Invoke(name);
+    }
 }
