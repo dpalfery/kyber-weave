@@ -225,7 +225,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PathContainment` (`Hooks/PathContainment.cs`) | paths | 2.5 |
 | `GateCatalogueRenderer` (`Review/Catalogue/GateCatalogueRenderer.cs`) | file system | 2.5 |
 | `ProjectRootDetection` (`Review/Catalogue/ProjectRootDetection.cs`) | file system | 2.5 |
-| `GateRunService` (`Review/GateRunService.cs`) | paths, clock | 4.3 |
 | `PlanTaskTargetService` (`Review/PlanTaskTargetService.cs`) | file system, paths | 4.3 |
 | `ReviewCatalogueService` (`Review/ReviewCatalogueService.cs`) | paths | 4.3 |
 | `ReviewCycleService` (`Review/ReviewCycleService.cs`) | paths | 4.3 |
