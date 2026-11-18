@@ -5,7 +5,7 @@ doc-type: reference
 status: current
 component: DocGraph
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 decided-by:
   - adr/0010-keywords-prefix-coverage-and-oov-idf
 lead: frontmatter
@@ -230,6 +230,18 @@ code-ref lists. `KW-DOC-DRIFT-001` also applies to symbols listed under `section
 See [ADR 0046](adr/0046-docs-explore-section-answer.md) for how
 `docs_answer_question_from_repo_documentation` selects one leaf, reports confidence, and caps
 returned prose.
+
+## Verifying the shipped content
+
+The ontology is a claim about the content this repository ships, so it is checked. Content tests in
+[`tests/KyberWeave.Content.Tests`](../tests/KyberWeave.Content.Tests/AGENTS.md) read the shipped
+agents, skills, standards, documents and workflows through the read-only corpus seam
+(`ICorpusSource`) and check declared identity, structure and protocol tokens. They write nothing and
+start no program, so they run with the unit projects. They do not pin prose wording
+([ADR 0073](adr/0073-prose-rules-are-graded-by-meaning-not-pinned-by-phrase.md)).
+
+A test of how *product code* handles a document is not a content test: it uses fixture content in
+memory and lives in the unit project of that code.
 
 ## Configuring the ontology
 

@@ -1,11 +1,12 @@
 ---
-id: specs/interface-driven-unit-tests/inventory/data
+id: archive/specs/interface-driven-unit-tests/inventory/data
 title: Inventory of concrete dependencies, Data
 doc-type: reference
-status: draft
+status: archived
 owner: dpalfery
-last-reviewed: 2026-11-17
+last-reviewed: 2026-11-18
 component: CI Pipelines
+documentation-impact: no-design-change
 ---
 
 # Inventory of concrete dependencies: Data
@@ -513,3 +514,24 @@ Depth caveats, stated honestly:
 (4) replace the three `SquadStateStore` constructor dependencies with `ISquadStateStore`; (5) swap the 8 clock reads
 and 12 process calls onto the `TimeProvider`, `IProcessRunner` and `IProgramRunner` ports that already exist. Steps
 1–3 alone remove roughly 900 of the ~1,200 non-adapter resource sites.
+
+## Decisions
+
+| ID | Question | Answer / decision | Status |
+|---|---|---|---|
+| INV-1 | What does this inventory record? | The class-by-class evidence the specification was written from. It is not current guidance; the seams register carries the outcome. | Closed |
+
+## Design harvest
+
+Documentation waiver — nothing survives from this document, because it is the evidence read when the
+specification was written, not a design decision or an operational rule.
+
+## Closeout mapping
+
+| ID | Destination | Documentation impact | Status |
+|---|---|---|---|
+| INV-1 | [Seams register](../../../../reference/seams.md) | no-design-change | archived |
+| INV-1 | [Kyber-Squad architecture](../../../../kyber-squad/architecture.md) | no-design-change | archived |
+| INV-1 | [Kyber Arbiter architecture](../../../../kyber-arbiter/architecture.md) | no-design-change | archived |
+| INV-1 | [Documentation ontology](../../../../documentation-ontology.md) | no-design-change | archived |
+| INV-1 | [Review council architecture](../../../../code-review/architecture.md) | no-design-change | archived |
