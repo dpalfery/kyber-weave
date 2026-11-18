@@ -92,6 +92,17 @@ public sealed class ArbiterHarnessGatingSeamsTests
         Assert.DoesNotContain(report.Rows, row => row.Token == "kilo");
     }
 
+    /// <summary>Every seam the report reads through is required, so a missing one fails at construction, not on a read.</summary>
+    [Fact]
+    public void TheConstructorRefusesAMissingSeam()
+    {
+        FakeSquadStateStore store = StoreOwning("plugin/kyber-arbiter.ts");
+        Assert.Throws<ArgumentNullException>(() =>
+            new ArbiterHarnessGating(store, new FakeSquadGlobalRootResolver(Home), new NoClaudeHooks(), _files, new NoDeployment(), null!, _environment));
+        Assert.Throws<ArgumentNullException>(() =>
+            new ArbiterHarnessGating(store, new FakeSquadGlobalRootResolver(Home), new NoClaudeHooks(), _files, new NoDeployment(), _paths, null!));
+    }
+
     private ArbiterHarnessGating Gating(FakeSquadStateStore store) =>
         new(store, new FakeSquadGlobalRootResolver(Home), new NoClaudeHooks(), _files, new NoDeployment(), _paths, _environment);
 

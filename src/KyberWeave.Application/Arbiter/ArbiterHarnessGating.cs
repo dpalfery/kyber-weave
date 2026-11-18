@@ -71,6 +71,13 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
         IPathResolver paths,
         IProcessEnvironment environment)
     {
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentNullException.ThrowIfNull(roots);
+        ArgumentNullException.ThrowIfNull(claudeHooks);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(uninstaller);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         _store = store;
         _roots = roots;
         _claudeHooks = claudeHooks;
