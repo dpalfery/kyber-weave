@@ -1,3 +1,4 @@
+using KyberWeave.Cli.Commands;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
@@ -10,6 +11,7 @@ using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
+using Spectre.Console.Rendering;
 using Spectre.Console.Testing;
 using Xunit;
 
@@ -117,6 +119,26 @@ public sealed class ArbiterConsoleSeamTests
     }
 
     /// <summary>
+    /// A width lifted for one write is restored on the console it was lifted from, even when the console a caller holds
+    /// starts naming a different console during the write. Restoring through the caller instead would leave the first
+    /// console unfolded at <see cref="int.MaxValue"/> and overwrite the second one's width.
+    /// </summary>
+    [Fact]
+    public void WriteUnfolded_RestoresTheWidthOfTheConsoleItLifted_WhenTheConsoleSwitchesMidWrite()
+    {
+        TestConsole first = new();
+        first.Profile.Width = 80;
+        TestConsole second = new();
+        second.Profile.Width = 100;
+        SwitchingConsole console = new(first);
+
+        CommandHelpers.WriteUnfolded(console, () => console.Use(second));
+
+        Assert.Equal(80, first.Profile.Width);
+        Assert.Equal(100, second.Profile.Width);
+    }
+
+    /// <summary>
     /// Every Arbiter command the composition registers writes its output to the console the root registered. Resolution
     /// alone would not prove that: a command that still called the static console resolves just as well, so each one is
     /// run and its own output is read back.
@@ -188,6 +210,30 @@ public sealed class ArbiterConsoleSeamTests
 
     /// <summary>A repository path that exists nowhere, so every command takes its not-found path.</summary>
     private const string NoRepository = "/kw/none";
+
+    /// <summary>A console a test points at one <see cref="TestConsole"/> and then another, mid-write.</summary>
+    private sealed class SwitchingConsole(TestConsole first) : IAnsiConsole
+    {
+        private IAnsiConsole _current = first;
+
+        internal void Use(IAnsiConsole next) => _current = next;
+
+        public Profile Profile => _current.Profile;
+
+        public IAnsiConsoleCursor Cursor => _current.Cursor;
+
+        public IAnsiConsoleInput Input => _current.Input;
+
+        public IExclusivityMode ExclusivityMode => _current.ExclusivityMode;
+
+        public RenderPipeline Pipeline => _current.Pipeline;
+
+        public void Clear(bool home) => _current.Clear(home);
+
+        public void Write(IRenderable renderable) => _current.Write(renderable);
+
+        public void WriteAnsi(Action<AnsiWriter> action) => _current.WriteAnsi(action);
+    }
 
     /// <summary>A configuration resolver that answers with the product defaults and reads nothing.</summary>
     private sealed class FixedArbiterConfigs : IArbiterConfigResolver

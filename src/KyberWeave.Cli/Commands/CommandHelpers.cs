@@ -155,15 +155,18 @@ public static class CommandHelpers
         ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(write);
 
-        int originalWidth = console.Profile.Width;
-        console.Profile.Width = int.MaxValue;
+        // The profile is read once: the console a caller holds may name a different console by the time the write
+        // returns, and restoring through it would leave this one unfolded and overwrite that one's width.
+        Profile profile = console.Profile;
+        int originalWidth = profile.Width;
+        profile.Width = int.MaxValue;
         try
         {
             write();
         }
         finally
         {
-            console.Profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
+            profile.Width = originalWidth > 0 ? originalWidth : ConsoleWidth.Default;
         }
     }
 
