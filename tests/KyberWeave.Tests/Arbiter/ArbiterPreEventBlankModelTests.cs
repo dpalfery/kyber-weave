@@ -64,7 +64,7 @@ public sealed class ArbiterPreEventBlankModelTests : IDisposable
         new NoGitFacts(),
         new PlanFacts(),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
         TimeProvider.System);
 

@@ -114,7 +114,7 @@ internal static class ArbiterEvaluatorFixtures
             new PassThroughGitFacts(),
             planReader ?? new PlanFacts(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
             new Clock(FixedNow),
             secondaryTriggers);

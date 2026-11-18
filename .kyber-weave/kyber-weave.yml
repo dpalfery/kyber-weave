@@ -387,7 +387,7 @@ review:
       - KyberWeave.Tests.ReviewGateKeysConfigTests
     "src/KyberWeave.Core/Review/TestClassMapping.cs":
       - KyberWeave.Tests.TaskGateSelectionTests
-    "src/KyberWeave.Data/Arbiter/Facts/GateReportFacts.cs":
+    "src/KyberWeave.Application/Arbiter/Facts/GateReportFacts.cs":
       - KyberWeave.Tests.Arbiter.ArbiterGateReportRuleTests
     "src/KyberWeave.Domain/Squad/Rendering/SquadWorkerBaselineInjector.cs":
       - KyberWeave.Tests.SquadWorkerBaselineInjectionTests

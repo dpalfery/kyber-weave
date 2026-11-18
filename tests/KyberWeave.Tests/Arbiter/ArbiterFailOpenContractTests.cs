@@ -50,7 +50,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         git ?? new ChangedPaths("src/a.cs"),
         new RealPlanReader(_root),
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
         TimeProvider.System);
 
@@ -218,7 +218,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
             Core.Review.ReviewJson.Write(new Core.Review.GateReport(
                 Core.Review.GateReport.CurrentSchema, [new Core.Review.GateResult("build", true, 0, "pass")])));
 
-        Assert.True(new GateReportFacts().Agrees($"TASK_GATE: PASS report={report}", _root));
+        Assert.True(RealGateReportFacts.Create().Agrees($"TASK_GATE: PASS report={report}", _root));
     }
 
     [Fact]

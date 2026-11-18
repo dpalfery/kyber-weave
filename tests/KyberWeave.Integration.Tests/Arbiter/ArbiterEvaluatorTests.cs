@@ -185,7 +185,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             gitFacts ?? new PassThroughGitFacts(),
             planReader ?? new PassThroughPlanReader(),
             modelTargets ?? new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
             new FixedClock(fixedNow),
             modelTargetsDirectory: modelTargetsDirectory);
@@ -354,7 +354,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
         KyberWeaveConfig config = ConfigWith([

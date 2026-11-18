@@ -120,7 +120,7 @@ public sealed class ArbiterShortcutRuleTests : IDisposable
             gitFacts ?? new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
             new FixedClock(Now),
             SecondaryTriggers.For);

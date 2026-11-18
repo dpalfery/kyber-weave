@@ -167,7 +167,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            new GateReportFacts(),
+            RealGateReportFacts.Create(),
             new FileArbiterStateFactory(),
             new FixedClock(Now),
             (_, _) => []);

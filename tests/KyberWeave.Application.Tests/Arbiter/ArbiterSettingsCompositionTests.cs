@@ -22,5 +22,6 @@ public sealed class ArbiterSettingsCompositionTests
         _ = Assert.IsType<FileArbiterUserOverrideWriter>(provider.GetRequiredService<IArbiterUserOverrideWriter>());
         _ = Assert.IsType<FileArbiterModelTargetsReader>(provider.GetRequiredService<IArbiterModelTargetsReader>());
         _ = Assert.IsType<FileTextFacts>(provider.GetRequiredService<IFileTextFacts>());
+        _ = Assert.IsType<GateReportFacts>(provider.GetRequiredService<IGateReportFacts>());
     }
 }
