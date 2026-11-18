@@ -212,6 +212,44 @@ public sealed class ArbiterKeyResolutionTests
     }
 
     [Fact]
+    public void MacWriteRejectsANonAsciiKeyBeforeRunningSecurity()
+    {
+        FakeCredentialProcessRunner runner = new();
+        MacKeychainCredentialStore store = new(runner);
+
+        ArgumentException exception = Assert.Throws<ArgumentException>(
+            () => store.Write("https://api.typesafe.ai", "sk-ünïcø∂é"));
+
+        Assert.Empty(runner.Calls);
+        Assert.Contains("ASCII", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void MacReadRejectsAnOriginWithALineBreakBeforeRunningSecurity()
+    {
+        FakeCredentialProcessRunner runner = new();
+        MacKeychainCredentialStore store = new(runner);
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read("https://kyber-weave\ncontract.invalid"));
+
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
+    public void LinuxRejectsALineBreakInTheOriginOrKeyBeforeRunningSecretTool()
+    {
+        FakeCredentialProcessRunner runner = new();
+        SecretServiceCredentialStore store = new(runner);
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Read("https://kyber-weave\ncontract.invalid"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write("https://kyber-weave\rcontract.invalid", "sk-contract"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Delete("https://kyber-weave\ncontract.invalid"));
+        _ = Assert.ThrowsAny<ArgumentException>(() => store.Write("https://api.typesafe.ai", "line-one\nline-two"));
+
+        Assert.Empty(runner.Calls);
+    }
+
+    [Fact]
     public void MacReadUsesExactArgvAndReturnsTrimmedStdout()
     {
         FakeCredentialProcessRunner runner = new();

@@ -11,8 +11,9 @@ component: CI Pipelines
 # Seams, adapters and the exceptions they keep
 
 Every outside resource the product touches — the disk, a child process, the environment, the
-console, the clock, identifiers, a lease, an embedded resource, configuration and the shipped
-content a test reads — is reached through one interface, called a **seam**. This page is the
+console, the clock, identifiers, a lease, an embedded resource, configuration, the operating
+system's credential store and the shipped content a test reads — is reached through one
+interface, called a **seam**. This page is the
 register the interface-driven unit tests specification requires: the seams, the adapters that
 implement them, the fake and contract suite that prove each adapter, every class still calling a
 resource directly and the task that converts it, and the sealed framework types allowed through
@@ -42,6 +43,7 @@ counted. Counts are lower bounds: one line can hold two calls.
 | Lease | `ILease` (`Contracts/Host`) | Acquire a named cross-process lease with a timeout; release from any thread | `MutexLease` (`KyberWeave.Data`, `Host/MutexLease.cs`); the lock-file variant is `FileCodeGraphIndexWorkspace` (`Data/Doctor/FileCodeGraphIndexWorkspace.cs`) | `InProcessLease` (`Fakes/InProcessLease.cs`) | `LeaseContractTests`: fake in `KyberWeave.Tests/Lease/InProcessLeaseContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/MutexLeaseContractTests.cs` |
 | Embedded resource | `IEmbeddedResources` (`Contracts/Host`) | Read a named manifest resource as a stream or UTF-8 text | `AssemblyEmbeddedResources` (`KyberWeave.Data`, `Host/AssemblyEmbeddedResources.cs`) | `FakeEmbeddedResources` (`Fakes/FakeEmbeddedResources.cs`) | `EmbeddedResourceContractTests`: fake in `KyberWeave.Tests/EmbeddedResources/FakeEmbeddedResourcesContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/AssemblyEmbeddedResourcesContractTests.cs` |
 | Configuration | `IKyberWeaveConfigRepository` (`Contracts/Repositories`) | Load and try-load the repository's and the user's host configuration; find the config path | `FileKyberWeaveConfigRepository` (`KyberWeave.Application`, `Configuration/FileKyberWeaveConfigRepository.cs`) over `IRepositoryTreeProbe` (`KyberWeave.Application`, `Review/FileRepositoryTreeProbe.cs`), `IFileSystem`, `IPathResolver` and `IProcessEnvironment` | `FakeKyberWeaveConfigRepository` (`Fakes/FakeKyberWeaveConfigRepository.cs`) | `KyberWeaveConfigRepositoryContractTests`: fake in `KyberWeave.Tests/Configuration/FakeKyberWeaveConfigRepositoryContractTests.cs`, adapter over the in-memory file system in `KyberWeave.Tests/Configuration/InMemoryFileKyberWeaveConfigRepositoryContractTests.cs`, and over the real disk in `KyberWeave.Integration.Tests/Contracts/FileKyberWeaveConfigRepositoryContractTests.cs` |
+| Credentials | `ICredentialStore` (`KyberWeave.Domain`, `Arbiter/Credentials/ICredentialStore.cs`) | Read, write and delete one named secret per endpoint origin; a missing entry reads as null; deleting an absent entry succeeds; a store may refuse a key it cannot carry, and every key it accepts reads back unchanged; an origin or key with a line break is refused on every store | `OperatingSystemCredentialStore` picks `WindowsCredentialStore`, `MacKeychainCredentialStore` or `SecretServiceCredentialStore` (`KyberWeave.Data`, `Arbiter/Credentials/`) | `FakeCredentialStore` (`Fakes/FakeCredentialStore.cs`) | `CredentialStoreContractTests`: fake in `KyberWeave.Tests/Credentials/FakeCredentialStoreContractTests.cs`, adapter in `KyberWeave.Integration.Tests/Contracts/OperatingSystemCredentialStoreContractTests.cs`, which skips where the host has no usable store |
 | Shipped content (tests) | `ICorpusSource` (`tests/KyberWeave.Testing/Corpus/ICorpusSource.cs`) | Read the shipped agents, skills, standards, documents and workflows by relative path, contained in the corpus; host name-case rule | `CheckoutCorpusSource` (`tests/KyberWeave.Testing/Corpus/CheckoutCorpusSource.cs`), a test adapter over this checkout | `InMemoryCorpusSource` (`tests/KyberWeave.Testing/Corpus/InMemoryCorpusSource.cs`) | `CorpusSourceContractTests`: both against the adapter and the fake in `KyberWeave.RepoPolicy.Tests/CorpusSourceContractTests.cs` |
 
 Notes.
@@ -53,6 +55,10 @@ Notes.
   so a content test says what it reads instead of walking the tree for the repository root.
 - The configuration row is the one seam without a shared fake and contract suite. Task 2.3 converts
   its 23 callers and is where both belong.
+- The credential store's integration run skips only when the host has no usable store. A read-only
+  probe turns the typed unavailable failures into a skip, and every other failure fails the run. A
+  probe that wrote would hide an adapter that writes but reads back wrong, because it would look
+  unavailable and every contract test would skip.
 - An adapter is thin: it translates the call and holds no decision the logic should make. Where an
   adapter does hold policy (the file-system adapter's skip list, the process adapter's missing-
   executable mapping), that is noted below rather than hidden.
@@ -96,9 +102,10 @@ task's list.
 | `ProcessRunnerCredentialProcessRunner` | Process | `KyberWeave.Data` | `Arbiter/Credentials/ProcessRunnerCredentialProcessRunner.cs` | The credential process runner over `IProcessRunner` |
 | `ProcessSquadHarnessLauncher` | Process | `KyberWeave.Data` | `Squad/Instances/ProcessSquadHarnessLauncher.cs` | Starts the interactive harness; builds its start information through the static `SquadHarnessLauncher` |
 | `ProcessExecutor` | Process | `KyberWeave.Cli` | `Commands/Squad/Infrastructure/IProcessExecutor.cs` | The CLI's `IProcessExecutor` role view |
-| `MacKeychainCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security`, through `ICredentialProcessRunner` |
-| `SecretServiceCredentialStore` | Process (`ICredentialStore` role view) | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool`, through `ICredentialProcessRunner` |
-| `WindowsCredentialStore` | Credentials (`ICredentialStore`) | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; the only code that calls the native credential API; task 4.10 adds its fake and contract suite |
+| `MacKeychainCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/MacKeychainCredentialStore.cs` | Invokes `security` through `ICredentialProcessRunner`, so it reaches the process seam too. `Write` refuses a non-ASCII key: `security` prints such a password as hex, so it would not read back |
+| `SecretServiceCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/SecretServiceCredentialStore.cs` | Invokes `secret-tool` through `ICredentialProcessRunner`, so it reaches the process seam too |
+| `WindowsCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/WindowsCredentialStore.cs` | P/Invoke `advapi32`, gated on Windows; the only code that calls the native credential API |
+| `OperatingSystemCredentialStore` | Credentials | `KyberWeave.Data` | `Arbiter/Credentials/OperatingSystemCredentialStore.cs` | Picks the store the platform offers from `IProcessEnvironment.OperatingSystem`; calls no credential resource itself |
 | `ProcessEnvironment` | Environment and platform | `KyberWeave.Data` | `Host/ProcessEnvironment.cs` | The environment and platform adapter |
 | `SystemIdGenerator` | Identifiers | `KyberWeave.Data` | `Host/SystemIdGenerator.cs` | GUIDs, random tokens and temp names |
 | `SystemConsole` | Console | `KyberWeave.Data` | `Host/SystemConsole.cs` | Console output, error and input |
@@ -109,10 +116,15 @@ task's list.
 | `FileKyberWeaveConfigRepository` | Configuration | `KyberWeave.Application` | `Configuration/FileKyberWeaveConfigRepository.cs` | Configuration load and try-load over the tree, file-system, path and environment seams |
 | `CheckoutCorpusSource` | Shipped content (tests) | `KyberWeave.Testing` | `Corpus/CheckoutCorpusSource.cs` | The test-side adapter over this checkout |
 
-`ICredentialStore` is a product interface, not one of the eleven seams. Two of its adapters are
-process-backed and reach the process seam through `ICredentialProcessRunner`; the Windows adapter
-calls the native credential API through P/Invoke and no seam covers it. It is listed here so that
-the gap is visible, not to claim a Credentials seam that the design does not define.
+The credential seam's interface is the one seam still outside `Contracts`: it lives in
+`KyberWeave.Domain/Arbiter/Credentials/ICredentialStore.cs`, under the namespace
+`KyberWeave.Core.Arbiter.Credentials`. The domain-move inventory schedules that file for
+`Contracts` with the phase-2 layer work; until then this register names where it actually is.
+The two process-backed stores reach the process seam through `ICredentialProcessRunner`, and the
+Windows store is the only code that calls the native credential API. Every caller takes
+`ICredentialStore`, or a `Func<ICredentialStore>` where building the store at call time is
+deliberate: a host with no keychain absorbs the construction failure there instead of failing
+startup.
 
 The process seam has one sanctioned escape that is not an adapter: a class may build a
 `ProcessStartInfo` and hand it to `IProcessRunner`, `IProcessExecutor`, `IProgramRunner` or a
