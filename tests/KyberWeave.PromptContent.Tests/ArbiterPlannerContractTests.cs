@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -10,17 +11,16 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ArbiterPlannerContractTests
 {
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
 
     private static string ArchitectPrincipal =>
-        File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect.md"));
+        Corpus.ReadText("products/kyber-squad/agents/architect.md");
 
     private static string EscalationReference =>
-        File.ReadAllText(Path.Combine(ProductRoot, "agents", "architect", "references", "arbiter-escalation.md"));
+        Corpus.ReadText("products/kyber-squad/agents/architect/references/arbiter-escalation.md");
 
     private static string ProductOwnerContract =>
-        File.ReadAllText(Path.Combine(ProductRoot, "agents", "product-owner.md"));
+        Corpus.ReadText("products/kyber-squad/agents/product-owner.md");
 
     private static string ArchitectContract =>
         ArchitectPrincipal + "\n" + EscalationReference;

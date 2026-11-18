@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -15,6 +16,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class TieredRosterConductorContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ConductorPath = "products/kyber-squad/agents/conductor.md";
 
     private const string BugCrusherPath = "products/kyber-squad/agents/bug-crusher.md";
@@ -373,8 +376,7 @@ public sealed class TieredRosterConductorContractTests
         Assert.DoesNotContain("test-dev", bugCrusher, StringComparison.Ordinal);
     }
 
-    private static string Read(string relativePath) =>
-        File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath));
+    private static string Read(string relativePath) => Corpus.ReadText(relativePath);
 
     private static int CountInSurface(string phrase) =>
         ConductorSurface.Sum(path => Read(path).Split(phrase, StringSplitOptions.None).Length - 1);

@@ -15,9 +15,10 @@ repository-policy project, which this one sits beside.
 - These checks are scheduled to become eval-style: a model grades whether the content states a
   rule, and the wording pins go away. Do not add new wording pins for behaviour that an eval would
   cover. Prose rules belong in the prose rule catalog (`tests/KyberWeave.Tests/Fixtures/prose-rules/catalog.yml`).
-- The project references no product assembly. It links `KyberWeaveTestPaths` from
-  `KyberWeave.Tests` to find the repository root. Classes keep the `KyberWeave.Tests` namespace, so
-  a fully-qualified class name means the same test in either project.
+- The project references no product assembly. It reads shipped content through the corpus seam
+  (`KyberWeave.Tests.Corpus.ICorpusSource`, whose checkout implementation finds the repository root
+  once) in the shared test library, `KyberWeave.Testing`. Classes keep the `KyberWeave.Tests`
+  namespace, so a fully-qualified class name means the same test in either project.
 - It runs as its own CI step (`Test (prompt content)`), and in `scripts/fast-loop.sh` whenever a
   change is more than C# under `src/` or `tests/KyberWeave.Tests/`.
 - To run one class, build once and filter, running `dotnet` directly from the repository root. A filter
