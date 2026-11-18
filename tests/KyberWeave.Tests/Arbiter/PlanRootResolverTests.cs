@@ -70,6 +70,21 @@ public sealed class PlanRootResolverTests
     }
 
     [Fact]
+    public void Resolve_TwoWorktreesHoldThePlan_AndOnePlansMetadataCannotBeRead_KeepsTheHookRoot()
+    {
+        WritePlan(OtherWorktree, "# Older\n");
+        WritePlan(Worktree, "# Newer\n");
+        _files.FailWhen(
+            operation => operation.Name == nameof(IFileSystem.GetLastWriteTimeUtc)
+                && operation.Path == $"{OtherWorktree}/docs/plans/task.md",
+            new UnauthorizedAccessException("denied"));
+
+        string root = Resolver().Resolve(HookRoot, Prompt(), _ => [HookRoot, OtherWorktree, Worktree]);
+
+        Assert.Equal(HookRoot, root);
+    }
+
+    [Fact]
     public void TheHostRegistersTheResolverWithTheFileAndPathSeamsItReads()
     {
         IPlanRootResolver resolver = ArbiterTestServices.Get<IPlanRootResolver>();

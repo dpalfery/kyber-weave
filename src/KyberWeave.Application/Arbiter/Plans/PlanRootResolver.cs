@@ -84,9 +84,18 @@ public sealed class PlanRootResolver(
             return namedHolding[0];
         }
 
-        return holding
-            .OrderByDescending(worktree => files.GetLastWriteTimeUtc(planPaths.Resolve(planFile, worktree)!))
-            .First();
+        try
+        {
+            return holding
+                .OrderByDescending(worktree => files.GetLastWriteTimeUtc(planPaths.Resolve(planFile, worktree)!))
+                .First();
+        }
+        catch (Exception exception) when (FileFailure.Is(exception))
+        {
+            // A copy whose metadata cannot be read cannot be compared with the others, so no copy is picked and
+            // the hook's own directory stands.
+            return hookRoot;
+        }
     }
 
     private bool Holds(string root, string planFile)
