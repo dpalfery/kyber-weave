@@ -16,9 +16,17 @@ public sealed class FileTextFactsOverSeamsTests
 
     private readonly InMemoryFileSystem _files = new();
     private readonly FakePathResolver _paths;
-    private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/kw/work");
+    private readonly FakeProcessEnvironment _environment;
 
-    public FileTextFactsOverSeamsTests() => _paths = new FakePathResolver(_files);
+    public FileTextFactsOverSeamsTests()
+    {
+        _paths = new FakePathResolver(_files);
+        // The environment's case rule is the file system's, so a case-divergent containment answer is the one the
+        // volume would give rather than an artefact of two defaults that disagree.
+        _environment = new FakeProcessEnvironment(
+            currentDirectory: "/kw/work",
+            isFileSystemCaseInsensitive: !_files.CaseSensitive);
+    }
 
     private FileTextFacts Facts() => new(new InMemoryRepositoryFileStore(_files), _paths, _environment);
 

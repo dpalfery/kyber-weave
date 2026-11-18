@@ -19,12 +19,16 @@ public sealed class GateReportFactsOverSeamsTests
     private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 11, 13, 10, 0, 0, TimeSpan.Zero));
     private readonly InMemoryFileSystem _files;
     private readonly FakePathResolver _paths;
-    private readonly FakeProcessEnvironment _environment = new(currentDirectory: "/kw/work");
+    private readonly FakeProcessEnvironment _environment;
 
     public GateReportFactsOverSeamsTests()
     {
         _files = new InMemoryFileSystem(_clock);
         _paths = new FakePathResolver(_files);
+        // The environment's case rule is the file system's, so the two seams agree about the world under test.
+        _environment = new FakeProcessEnvironment(
+            currentDirectory: "/kw/work",
+            isFileSystemCaseInsensitive: !_files.CaseSensitive);
     }
 
     private GateReportFacts Facts() => new(new InMemoryRepositoryFileStore(_files), _paths, _environment);
@@ -81,6 +85,14 @@ public sealed class GateReportFactsOverSeamsTests
     {
         Assert.Null(Facts().Agrees("TASK_GATE: PASS report=a\0b", Root));
         Assert.Null(Facts().TryReadFile("a\0b"));
+    }
+
+    [Fact]
+    public void AClaimInAnotherCaseIsTheSameReportOnACaseInsensitiveFileSystem()
+    {
+        _ = Write(ReportPath, Passing());
+
+        Assert.True(Facts().Agrees(Claim("/REPO/artifacts/task-gate.json"), Root));
     }
 
     [Fact]

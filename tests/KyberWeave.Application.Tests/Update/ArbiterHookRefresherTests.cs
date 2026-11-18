@@ -1,5 +1,6 @@
 using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
@@ -67,6 +68,38 @@ public sealed class ArbiterHookRefresherTests
     }
 
     [Fact]
+    public void ARefreshTheLifecycleThrowsFromIsCountedAndLogged()
+    {
+        ArbiterHookRefresher refresher = new(
+            new FakeProcessEnvironment(homeDirectory: "/kw/home", readVariable: _ => null),
+            new NoUserConfig(),
+            _configs,
+            new ThrowingLifecycle(_state, new InvalidOperationException("the renderer crashed")),
+            _state,
+            _files,
+            new FakeMcpWiringService(),
+            _log.Add);
+
+        ArbiterHookRefreshResult result = refresher.Refresh([EnabledProject]);
+
+        Assert.Equal(0, result.Refreshed);
+        Assert.Equal(1, result.Failed);
+        Assert.Contains(_log, line => line.Contains("the renderer crashed", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void AProjectRootTheConfigRepositoryCannotReadIsSkippedWithAWarning()
+    {
+        // A name no file system can take: the repository reports it as a file failure, the same answer it gives a
+        // project whose configuration cannot be read.
+        ArbiterHookRefreshResult result = Refresher().Refresh(["a\0b"]);
+
+        Assert.Empty(_lifecycle.Updates);
+        Assert.Equal(1, result.Failed);
+        Assert.Contains(_log, line => line.Contains("skipping arbiter hook refresh", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AnEmptyRootAndAWhitespaceRootAreSkipped()
     {
         ArbiterHookRefreshResult result = Refresher().Refresh([string.Empty, " "]);
@@ -88,5 +121,22 @@ public sealed class ArbiterHookRefresherTests
         }
 
         public IReadOnlyList<string> ReadGlobalTargets(string home) => [];
+    }
+
+    /// <summary>A lifecycle whose every call throws, so the refresh's fault answer is what the test sees.</summary>
+    private sealed class ThrowingLifecycle(ISquadStateStore state, Exception failure) : ISquadLifecycleService
+    {
+        public ISquadStateStore StateStore { get; } = state;
+
+        public IReadOnlyList<SquadTarget> EffectiveInstallTargets(SquadInstallRequest request) => throw failure;
+
+        public Task<SquadLifecycleResult> InstallAsync(SquadInstallRequest request, CancellationToken cancellationToken = default) =>
+            throw failure;
+
+        public Task<SquadLifecycleResult> UpdateAsync(SquadUpdateRequest request, CancellationToken cancellationToken = default) =>
+            throw failure;
+
+        public Task<SquadLifecycleResult> UninstallAsync(SquadUninstallRequest request, CancellationToken cancellationToken = default) =>
+            throw failure;
     }
 }

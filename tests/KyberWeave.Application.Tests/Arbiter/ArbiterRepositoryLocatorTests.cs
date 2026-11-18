@@ -17,7 +17,12 @@ public sealed class ArbiterRepositoryLocatorTests
     private const string WorkingDirectory = "/kw/work";
 
     private readonly InMemoryFileSystem _files = new();
-    private readonly FakeProcessEnvironment _environment = new(currentDirectory: WorkingDirectory);
+
+    public ArbiterRepositoryLocatorTests() =>
+        _environment = new FakeProcessEnvironment(
+            currentDirectory: WorkingDirectory,
+            isFileSystemCaseInsensitive: !_files.CaseSensitive);
+    private readonly FakeProcessEnvironment _environment;
 
     private ArbiterRepositoryLocator Locator(GitOutcome? gitOutcome = null) =>
         new(

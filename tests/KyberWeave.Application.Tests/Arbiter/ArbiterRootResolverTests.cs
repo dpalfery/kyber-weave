@@ -17,7 +17,12 @@ public sealed class ArbiterRootResolverTests
     private readonly InMemoryFileSystem _files = new();
 
     private ArbiterRootResolver Resolver() =>
-        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: WorkingDirectory));
+        new(
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(
+                currentDirectory: WorkingDirectory,
+                isFileSystemCaseInsensitive: !_files.CaseSensitive));
 
     [Fact]
     public void TheWorkingDirectoryIsTheRootWhenNothingNamesOne()
