@@ -120,11 +120,9 @@ public sealed class PhysicalRepositoryFileStore : IRepositoryFileStore
     /// <inheritdoc />
     public IEnumerable<RepositoryEntry> EnumerateEntries(string directory)
     {
-        foreach (FileSystemInfo entry in new DirectoryInfo(directory).EnumerateFileSystemInfos(
-                     "*",
-                     new EnumerationOptions { IgnoreInaccessible = false, AttributesToSkip = 0 }))
+        foreach (FileSystemEntry entry in _inner.EnumerateEntries(directory))
         {
-            yield return new RepositoryEntry(entry.FullName, (entry.Attributes & FileAttributes.Directory) != 0, entry.LinkTarget is not null);
+            yield return new RepositoryEntry(entry.Path, entry.IsDirectory, entry.IsLink);
         }
     }
 
