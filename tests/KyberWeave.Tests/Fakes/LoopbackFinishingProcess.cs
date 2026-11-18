@@ -79,12 +79,15 @@ internal sealed class LoopbackFinishingProcess
         using SelfUpdater updater = new(
             _handler,
             child,
+            new KyberWeave.Data.Hooks.PhysicalFileSystem(),
+            new KyberWeave.Data.Paths.PhysicalPathResolver(new KyberWeave.Data.Hooks.PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _readEnvironment),
+            new KyberWeave.Cli.Update.SelfUpdateSystem(),
             _log,
-            _readEnvironment,
-            _runProcess,
-            _canWriteDirectory,
-            _captureProcess,
-            _arbiterHookRefresher,
+            runProcess: _runProcess,
+            canWriteDirectory: _canWriteDirectory,
+            captureProcess: _captureProcess,
+            arbiterHookRefresher: _arbiterHookRefresher,
             finishingProcess: null,
             arbiterTargets: _arbiterTargets);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions(

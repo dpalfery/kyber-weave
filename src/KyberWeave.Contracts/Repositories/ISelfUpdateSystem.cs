@@ -39,6 +39,19 @@ public interface ISelfUpdateSystem
     /// <param name="windows">Whether the archive is a Windows <c>.zip</c> rather than a <c>.tar.gz</c>.</param>
     void ExtractArchive(string archivePath, string destinationDirectory, bool windows);
 
+    /// <summary>Copies a file, so a binary can be backed up before replacement and restored when a later commit fails.</summary>
+    /// <param name="sourcePath">The file to copy.</param>
+    /// <param name="destinationPath">Where the copy goes.</param>
+    /// <param name="overwrite">True to replace an existing destination; false to fail when one is there.</param>
+    /// <remarks>
+    /// The physical adapter carries the source's permissions, so a restored binary is still executable. An in-memory
+    /// fake models content only; the executable bit is proven against the real adapter.
+    /// </remarks>
+    /// <exception cref="FileNotFoundException">The source does not exist.</exception>
+    /// <exception cref="IOException">The copy could not be made.</exception>
+    /// <exception cref="UnauthorizedAccessException">The process may not read the source or write the destination.</exception>
+    void CopyFile(string sourcePath, string destinationPath, bool overwrite);
+
     /// <summary>Replaces an installed binary with an extracted one, keeping the old image until the new one is in place on Windows.</summary>
     /// <param name="extractedBinaryPath">The new binary.</param>
     /// <param name="destinationPath">The installed binary to replace.</param>

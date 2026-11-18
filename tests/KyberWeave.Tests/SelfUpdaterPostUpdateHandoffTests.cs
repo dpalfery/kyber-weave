@@ -7,6 +7,8 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Paths;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
@@ -676,9 +678,12 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: readEnvironment),
+            new SelfUpdateSystem(),
             record.Log.Add,
-            readEnvironment,
-            spawn,
+            runProcess: spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
             arbiterTargets: UpdateTestServices.Targets(readEnvironment),

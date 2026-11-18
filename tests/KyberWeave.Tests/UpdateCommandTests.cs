@@ -7,6 +7,9 @@ using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Commands.Update;
 using KyberWeave.Cli.Update;
@@ -692,8 +695,11 @@ public sealed class UpdateCommandTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _ => null),
+            new SelfUpdateSystem(),
             log.Add,
-            _ => null,
             captureProcess: (_, _) => QuietSuccess,
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
@@ -720,7 +726,15 @@ public sealed class UpdateCommandTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_install.Path, "kyber-weave-mcp"));
         List<string> log = [];
 
-        using SelfUpdater updater = new(handler, host, log.Add, _ => null, captureProcess: (_, _) => QuietSuccess);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _ => null),
+            new SelfUpdateSystem(),
+            log.Add,
+            captureProcess: (_, _) => QuietSuccess);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(1, outcome.ExitCode);
@@ -935,7 +949,14 @@ public sealed class UpdateCommandTests : IDisposable
         Directory.CreateDirectory(Path.Combine(_install.Path, ".kyber-weave-arbiter.new"));
         List<string> log = [];
 
-        using SelfUpdater updater = new SelfUpdater(handler, host, log.Add, _ => null);
+        using SelfUpdater updater = new(
+            handler,
+            host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new ProcessEnvironment(),
+            new SelfUpdateSystem(),
+            log.Add);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(1, outcome.ExitCode);
@@ -974,8 +995,11 @@ public sealed class UpdateCommandTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _ => null),
+            new SelfUpdateSystem(),
             log.Add,
-            _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
@@ -1009,8 +1033,11 @@ public sealed class UpdateCommandTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _ => null),
+            new SelfUpdateSystem(),
             log.Add,
-            _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
@@ -1089,9 +1116,12 @@ public sealed class UpdateCommandTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: readEnvironment),
+            new SelfUpdateSystem(),
             log.Add,
-            readEnvironment,
-            runProcess,
+            runProcess: runProcess,
             captureProcess: (_, _) => QuietSuccess,
             finishingProcess: loopback.Invoke);
         _lastChild = loopback;
@@ -1243,9 +1273,12 @@ public sealed class UpdateCommandTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: readEnvironment),
+            new SelfUpdateSystem(),
             log.Add,
-            readEnvironment,
-            runProcess,
+            runProcess: runProcess,
             captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
         _lastChild = loopback;
@@ -1852,9 +1885,12 @@ public sealed class UpdateCommandTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: readEnvironment),
+            new SelfUpdateSystem(),
             log.Add,
-            readEnvironment,
-            runProcess,
+            runProcess: runProcess,
             captureProcess: captureProcess,
             finishingProcess: loopback.Invoke);
         return updater.Run(options);
@@ -1986,8 +2022,11 @@ public sealed class UpdateCommandTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
-            _ => { },
-            readEnvironment,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: readEnvironment),
+            new SelfUpdateSystem(),
+            log: _ => { },
             canWriteDirectory: canWriteDirectory,
             captureProcess: (_, _) => QuietSuccess,
             finishingProcess: loopback.Invoke);

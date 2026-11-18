@@ -53,7 +53,9 @@ internal sealed class GitHubReleaseClient : IDisposable
         _latestApi = new Uri(_origin.ApiRoot, $"repos/{Owner}/{Repo}/releases/latest");
         _releasesApi = new Uri(_origin.ApiRoot, $"repos/{Owner}/{Repo}/releases");
 
-        _client = new HttpClient(handler, disposeHandler: true)
+        // The handler outlives one update: a host supplies one for the process, and the service disposes the one it
+        // creates per run. Disposing it with this client would break every later update in the same process.
+        _client = new HttpClient(handler, disposeHandler: false)
         {
             Timeout = TimeSpan.FromMinutes(5)
         };
