@@ -11,7 +11,7 @@ impact-components: [CI Pipelines, KyberSquad, KyberArbiter, DocGraph, ReviewCoun
 
 # Interface-driven unit tests specification
 
-**Status:** Draft, awaiting owner approval of requirements, design and tasks.
+**Status:** Approved by dpalfery, 2026-11-17 (requirements, design and tasks).
 
 Completes decision D5 of the layered-refactor completion specification: every product behaviour is
 testable by an in-memory unit test written against interfaces, outside resources sit behind a small
