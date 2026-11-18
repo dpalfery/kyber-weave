@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Commands.Review;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Tests;
@@ -103,9 +104,17 @@ internal static class CommandAppFixture
     /// The one place a command app is assembled: the application name, whether parsing is strict,
     /// and the branches to register.
     /// </summary>
-    private static CommandApp Build(bool strictParsing, params Action<IConfigurator>[] branches)
+    private static CommandApp Build(bool strictParsing, params Action<IConfigurator>[] branches) =>
+        Build(null, null, strictParsing, branches);
+
+    /// <summary>
+    /// The same assembly over a container whose first registrations a test chooses, so a command-driving case
+    /// can run over in-memory seams: every application registration uses <c>TryAdd</c> and keeps what was added first.
+    /// </summary>
+    private static CommandApp Build(Action<IServiceCollection>? configure, IAnsiConsole? console, bool strictParsing, params Action<IConfigurator>[] branches)
     {
         ServiceCollection services = [];
+        configure?.Invoke(services);
         services.AddSingleton<IMcpDeclarationReader, McpDeclarationReader>();
         _ = services.AddWeaveApplication();
         services.TryAddSingleton<IRepositoryToolSettings, ConfigFileToolSettings>();
@@ -113,6 +122,9 @@ internal static class CommandAppFixture
         app.Configure(config =>
         {
             config.SetApplicationName(ApplicationName);
+
+            if (console is not null)
+                config.ConfigureConsole(console);
 
             if (strictParsing)
                 config.UseStrictParsing();
@@ -148,4 +160,22 @@ internal static class CommandAppFixture
 
     private static void ReviewSuppressionsBranch(IConfigurator config) =>
         config.AddBranch("review", review => { review.AddCommand<ReviewSuppressionsCommand>("suppressions"); });
+
+    /// <summary><see cref="DocsInit()"/> over a container whose first registrations the test chooses.</summary>
+    /// <param name="configure">Registers the seams the case replaces.</param>
+    /// <param name="console">The console the app and its commands write to.</param>
+    public static CommandApp DocsInit(Action<IServiceCollection> configure, IAnsiConsole console) =>
+        Build(configure, console, strictParsing: false, DocsInitBranch);
+
+    /// <summary><see cref="DocsStandardsMigrate()"/> over a container whose first registrations the test chooses.</summary>
+    /// <param name="configure">Registers the seams the case replaces.</param>
+    /// <param name="console">The console the app and its commands write to.</param>
+    public static CommandApp DocsStandardsMigrate(Action<IServiceCollection> configure, IAnsiConsole console) =>
+        Build(configure, console, strictParsing: true, DocsStandardsMigrateBranch);
+
+    /// <summary><see cref="DocsStandardsDiff()"/> over a container whose first registrations the test chooses.</summary>
+    /// <param name="configure">Registers the seams the case replaces.</param>
+    /// <param name="console">The console the app and its commands write to.</param>
+    public static CommandApp DocsStandardsDiff(Action<IServiceCollection> configure, IAnsiConsole console) =>
+        Build(configure, console, strictParsing: true, DocsStandardsDiffBranch);
 }

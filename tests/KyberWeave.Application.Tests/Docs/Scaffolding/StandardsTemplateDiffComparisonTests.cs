@@ -1,37 +1,29 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Scaffolding;
+using KyberWeave.Tests;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Scaffolding;
 
 /// <summary>
 /// The standards diff shows what a host folder is missing, what only the host has, and what
 /// differs from the template. It changes nothing, and it treats owner, status and
 /// last-reviewed as host choices rather than differences.
 /// </summary>
-public class DocsStandardsDiffCommandTests : IDisposable
+public class StandardsTemplateDiffComparisonTests
 {
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-        GC.SuppressFinalize(this);
-    }
+    private readonly MemoryDocsHost _host = new();
 
     private static readonly IKyberStandardsTemplates Templates = ShippedKyberStandards.Templates;
 
     private static readonly OntologyConfig Declared = new() { Technologies = ["csharp"] };
 
-    private string PathOf(string relative) =>
-        Path.Combine(_temp.Path, relative.Replace('/', Path.DirectorySeparatorChar));
+    private string PathOf(string relative) => _host.InRepo(relative);
 
-    private void Write(string relative, string content)
-    {
-        string full = PathOf(relative);
-        Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-        File.WriteAllText(full, content);
-    }
+    private void Write(string relative, string content) => _host.WriteInRepo(relative, content);
+
+    private StandardsTemplateDiff Diff(OntologyConfig ontology) =>
+        new(_host.Files, _host.Repo, ontology, _host.Paths, _host.Environment, Templates);
 
     [Fact]
     public void ItReportsMissingChangedAndHostOnlyFiles()
@@ -42,7 +34,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
         Write("6-Docs/standards/csharp/csharp.standards.md", changed);
         Write("6-Docs/standards/csharp/extra.md", "host-owned note");
 
-        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, Declared).Run();
+        StandardsDiffResult result = Diff(Declared).Run();
 
         StandardsFolderDiff folder = Assert.Single(result.Folders);
         Assert.Equal("csharp", folder.Name);
@@ -62,7 +54,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
             .Replace("\nlast-reviewed: 2026-08-16\n", "\nlast-reviewed: 2026-11-16\n", StringComparison.Ordinal);
         Write("6-Docs/standards/csharp/csharp.standards.md", host);
 
-        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, Declared).Run();
+        StandardsDiffResult result = Diff(Declared).Run();
 
         Assert.DoesNotContain("csharp.standards.md", Assert.Single(result.Folders).Changed);
     }
@@ -78,7 +70,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
                 template!);
         }
 
-        StandardsFolderDiff folder = Assert.Single(DocsPorts.StandardsDiff(_temp.Path, Declared).Run().Folders);
+        StandardsFolderDiff folder = Assert.Single(Diff(Declared).Run().Folders);
 
         Assert.Empty(folder.Missing);
         Assert.Empty(folder.Changed);
@@ -97,7 +89,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
         string host = standard! + "\nstatus: review needed\n";
         Write("6-Docs/standards/csharp/csharp.standards.md", host);
 
-        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, Declared).Run();
+        StandardsDiffResult result = Diff(Declared).Run();
 
         Assert.Contains("csharp.standards.md", Assert.Single(result.Folders).Changed);
     }
@@ -116,61 +108,10 @@ public class DocsStandardsDiffCommandTests : IDisposable
         };
         Write("handbook/standards/csharp/csharp.standards.md", "# ours\n");
 
-        StandardsFolderDiff folder = Assert.Single(DocsPorts.StandardsDiff(_temp.Path, twoRoots).Run().Folders);
+        StandardsFolderDiff folder = Assert.Single(Diff(twoRoots).Run().Folders);
 
         Assert.Equal("handbook", folder.Root);
         Assert.Contains("csharp.rules.md", folder.Missing);
-    }
-
-    /// <summary>
-    /// A standards file the process may not read is a diagnosable refusal, not a stack trace:
-    /// the command names the failure and exits 1.
-    /// </summary>
-    [Fact]
-    public void AnUnreadableStandardIsRefusedWithADiagnostic()
-    {
-        string configPath = PathOf(".kyber-weave/kyber-weave.yml");
-        Directory.CreateDirectory(Path.GetDirectoryName(configPath)!);
-        File.WriteAllText(
-            configPath,
-            "ontology:\n  docs-root: 6-Docs\n  technologies:\n    - csharp\n");
-        Write("6-Docs/standards/csharp/csharp.standards.md", "---\nid: standards/csharp\n---\n");
-        string standard = PathOf("6-Docs/standards/csharp/csharp.standards.md");
-
-        if (!TryMakeUnreadable(standard))
-            Assert.Skip("An unreadable file needs a POSIX mode, so this case cannot be arranged here.");
-
-        try
-        {
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
-                CommandAppFixture.DocsStandardsDiff().Run(["docs", "standards", "diff", _temp.Path]));
-
-            Assert.Equal(1, execution.Result);
-            Assert.Contains("could not be read", execution.Output, StringComparison.Ordinal);
-        }
-        finally
-        {
-            RestoreReadable(standard);
-        }
-    }
-
-    /// <summary>Clears a file's read bits, answering false on a platform that has none.</summary>
-    private static bool TryMakeUnreadable(string path)
-    {
-        if (OperatingSystem.IsWindows())
-            return false;
-
-        File.SetUnixFileMode(path, UnixFileMode.None);
-        return true;
-    }
-
-    /// <summary>Puts a file's read bits back so the temporary tree can be disposed.</summary>
-    private static void RestoreReadable(string path)
-    {
-        if (OperatingSystem.IsWindows())
-            return;
-
-        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
     }
 
     /// <summary>
@@ -193,7 +134,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
     public void ANameThatIsNotDeclaredIsRefusedWithTheNearestMatch()
     {
         ArgumentException error = Assert.Throws<ArgumentException>(() =>
-            DocsPorts.StandardsDiff(_temp.Path, Declared).Run("cshar"));
+            Diff(Declared).Run("cshar"));
 
         Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
     }
@@ -204,7 +145,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
         OntologyConfig two = new() { Technologies = ["csharp", "python"] };
         Write("6-Docs/standards/csharp/csharp.standards.md", "x");
 
-        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, two).Run();
+        StandardsDiffResult result = Diff(two).Run();
 
         Assert.Single(result.Folders);
         Assert.Equal("csharp", result.Folders[0].Name);
