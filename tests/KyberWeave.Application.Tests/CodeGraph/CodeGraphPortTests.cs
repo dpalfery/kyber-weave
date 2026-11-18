@@ -1,19 +1,19 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Export;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
-using KyberWeave.Data.CodeGraph;
 using KyberWeave.Domain.CodeGraph;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// T3 — pluggable CodeGraph port contract. Drift, export, and indexing must accept
 /// <see cref="ICodeGraphResolver"/> so tests and hosts can inject deterministic fakes.
-/// Authored RED in task 1a; GREEN implements the port without changing contract intent.
+/// The adapter over a real index is proved in <c>CodeGraphAdapterSqliteTests</c> in the integration project.
 /// </summary>
 public class CodeGraphPortTests
 {
@@ -63,51 +63,13 @@ public class CodeGraphPortTests
             ("ExportTarget", Node("ExportTarget", "src/ExportTarget.cs", 1, kind: "class", id: "node-export-1")));
 
         DocumentSet set = DocumentSetWithCodeRef("ExportTarget");
-        using TempDirectory output = new TempDirectory();
+        InMemoryFileSystem files = new();
+        string output = Path.Combine(files.Root, "export");
 
-        DocGraphExportResult result = RealDocGraphExporter.Create(resolver).Export(set, output.Path);
-        string[] edges = File.ReadAllLines(result.EdgesPath);
+        DocGraphExportResult result = new DocGraphExporter(resolver, files).Export(set, output);
+        string[] edges = files.ReadAllText(result.EdgesPath).Split('\n', StringSplitOptions.RemoveEmptyEntries);
 
         Assert.Contains(edges, e => e.Contains("REFERENCES", StringComparison.Ordinal) && e.Contains("node-export-1", StringComparison.Ordinal));
-    }
-
-    [Fact]
-    public void CodeGraphResolverAdapterPreservesResolveByNameRouteAndHasFilesUnder()
-    {
-        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
-        fixture.IndexSymbol("AdapterSymbol", "3-Domain/Adapter/Symbol.cs", 7);
-        fixture.IndexRoute("GET /api/adapter/ping");
-        fixture.IndexFile("3-Domain/Adapter/Symbol.cs");
-
-        ICodeGraphResolver adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
-
-        Assert.True(adapter.IsAvailable);
-        Assert.NotEmpty(adapter.ResolveSymbol("AdapterSymbol"));
-        Assert.NotEmpty(adapter.ResolveRoute("GET /api/adapter/ping"));
-        Assert.True(adapter.HasFilesUnder("3-Domain/Adapter"));
-        Assert.NotEmpty(adapter.CandidateNames("Adapt"));
-        Assert.Contains("GET /api/adapter/ping", adapter.AllRoutes());
-    }
-
-    [Fact]
-    public void AdapterReadsEndLinesAndEnumeratesByKind()
-    {
-        // Guards the SELECT: duplicate detection needs the whole span, and a node with no
-        // end line has no body to compare, so losing the column would silently empty the gate.
-        using CodeGraphFixtureDb fixture = new CodeGraphFixtureDb();
-        fixture.IndexMethod("Total", "src/Adapter/Sums.cs", 10, 24);
-        fixture.IndexMethod("Count", "src/Adapter/Sums.cs", 26, 30);
-        fixture.IndexSymbol("Sums", "src/Adapter/Sums.cs", 5, 40);
-
-        ICodeGraphSymbolEnumerator adapter = DocsPorts.CodeGraphAt(fixture.DatabasePath);
-        IReadOnlyList<CodeGraphNode> methods = adapter.NodesOfKind("method");
-
-        Assert.Equal(2, methods.Count);
-        CodeGraphNode total = methods.Single(m => m.Name == "Total");
-        Assert.Equal(10, total.StartLine);
-        Assert.Equal(24, total.EndLine);
-        Assert.Equal(15, total.LineSpan);
-        Assert.Empty(adapter.NodesOfKind("interface"));
     }
 
     private static DocumentSet DocumentSetWithCodeRef(string symbol) =>

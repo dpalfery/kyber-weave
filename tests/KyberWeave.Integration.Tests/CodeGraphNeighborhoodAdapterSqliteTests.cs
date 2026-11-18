@@ -6,21 +6,11 @@ using Xunit;
 namespace KyberWeave.Integration.Tests;
 
 /// <summary>
-/// T05 RED — CodeGraph neighborhood traversal is optional and batch-oriented. Existing
-/// resolvers remain valid; adapters that expose neighborhoods preload them with the nodes.
+/// The CodeGraph resolver adapter loads nodes and edges from a real sqlite index once, and answers a batched
+/// neighborhood query with a degree cap. These need the sqlite3 program and a database file.
 /// </summary>
-public sealed class CodeGraphNeighborhoodPortTests
+public sealed class CodeGraphNeighborhoodAdapterSqliteTests
 {
-    [Fact]
-    public void ICodeGraphNeighborhoodProviderIsOptionalForExistingResolvers()
-    {
-        ICodeGraphResolver resolver = FakeCodeGraphResolver.WithSymbols(
-            ("Known", Node("known", "Known")));
-
-        Assert.IsNotAssignableFrom<ICodeGraphNeighborhoodProvider>(resolver);
-        Assert.Single(resolver.ResolveSymbol("Known"));
-    }
-
     [Fact]
     public void CodeGraphResolverAdapterLoadsNodesAndEdgesBeforeTheIndexIsRemoved()
     {
@@ -67,7 +57,4 @@ public sealed class CodeGraphNeighborhoodPortTests
         IReadOnlyList<CodeGraphEdge> inclusive = provider.GetEdges(["id-Hub", "id-First", "id-Second"], maxDegree: 2);
         Assert.Equal(2, inclusive.Count);
     }
-
-    private static CodeGraphNode Node(string id, string name) =>
-        new(id, "class", name, name, $"src/{name}.cs", "csharp", 1);
 }
