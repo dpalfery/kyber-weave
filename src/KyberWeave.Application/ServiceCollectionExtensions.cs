@@ -25,6 +25,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -137,6 +138,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();
+        services.TryAddSingleton<IGitChangeReader>(sp => new GitChangeReader(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<IReviewEvidenceService, ReviewEvidenceService>();
         services.TryAddSingleton<IReviewWorkTreeService, ReviewWorkTreeService>();
         services.TryAddSingleton<ISuppressionScanService, SuppressionScanService>();

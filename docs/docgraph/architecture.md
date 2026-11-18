@@ -13,7 +13,7 @@ decided-by:
   - adr/0062-the-docs-server-refreshes-codegraph-and-fails-its-tools
 code-refs:
   - CodeGraphFreshness
-  - CodeGraphProvisioner
+  - CodeGraphIndexProvisioner
   - CorpusProvenance
   - DocumentLoader
   - DocumentCorpus
