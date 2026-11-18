@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Facts;
@@ -20,6 +21,8 @@ public sealed class ArbiterSectionsCommand(
     IArbiterRepositoryLocator locator,
     IFileStatReader fileStats,
     IArbiterSectionSelectionService sections,
+    IPathResolver paths,
+    IProcessEnvironment environment,
     IAnsiConsole console) : Command<ArbiterSectionsSettings>
 {
     /// <summary>Prints each section's id, its line range and title. Exits 2 on a usage error, and 1 when the document is missing.</summary>
@@ -33,7 +36,7 @@ public sealed class ArbiterSectionsCommand(
 
         // The same containment and size cap as the served tool: a path outside the repository root, or a symbolic link
         // out of it, is refused the way the tool refuses it, and an oversized document is not read.
-        string root = locator.FindGitRoot(System.IO.Path.GetFullPath("."));
+        string root = locator.FindGitRoot(paths.GetFullPath(".", environment.CurrentDirectory));
         string? full = fileText.ResolveContainedFile(root, settings.Path);
         if (full is null)
         {

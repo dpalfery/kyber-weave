@@ -129,7 +129,7 @@ public sealed class ReviewGatesCommand(
         settings.TaskSlug,
         settings.Fix,
         settings.Red,
-        ReportRenderer.IsHuman(settings.ParsedFormat),
+        ReportRenderer.IsHuman(settings.FormatFor(ansi)),
         !standard.IsInputRedirected);
 
     private void WriteClientInputError(string message)

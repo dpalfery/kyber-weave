@@ -170,7 +170,7 @@ internal sealed class SquadRunCommand : Command<SquadRunSettings>
                 settings.Args,
                 _options.GetEnv ?? _environment.GetVariable,
                 _options.FindOnPath ?? (name => _launcher.FindOnPath(name, _options.GetEnv)),
-                OperatingSystem.IsWindows());
+                _environment.OperatingSystem == OperatingSystemKind.Windows);
         }
         catch (FileNotFoundException ex)
         {

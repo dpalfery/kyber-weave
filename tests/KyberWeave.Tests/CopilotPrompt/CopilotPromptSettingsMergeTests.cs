@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Domain.CopilotPrompt;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Data.Paths;
 using KyberWeave.Kernel.FileSystem;
@@ -65,7 +66,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
 
     private CapturedConsoleExecution<int> Install(CopilotPromptSettings settings, bool interactive = true)
     {
-        CopilotPromptInstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
         return ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
     }
 
@@ -87,7 +88,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
               }
             }
             """);
-        CopilotPromptInstallCommand command = new(NewEnvironment(interactive: true), files, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive: true), files, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
@@ -485,7 +486,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_NoHomeDirectory_RefusesAndWritesNothing()
     {
         DetectFlavour(VsCodeFlavour.Stable);
-        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false, new PhysicalPathResolver(new PhysicalFileSystem()), Home), DoctorTestServices.Files, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
+        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false, new PhysicalPathResolver(new PhysicalFileSystem()), Home), DoctorTestServices.Files, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
@@ -508,11 +509,11 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_RefusesANullFileSystemAtConstruction()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptInstallCommand((IDoctorFileSystem)null!, ShippedCopilotPrompt.Resources, new FakeProcessEnvironment(), new PhysicalPathResolver(new PhysicalFileSystem()), SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptInstallCommand((IDoctorFileSystem)null!, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, new FakeProcessEnvironment(), new PhysicalPathResolver(new PhysicalFileSystem()), SquadTestCommands.ProcessCapturedConsole()));
 
         Assert.Equal("files", exception.ParamName);
         _ = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptInstallCommand(NewEnvironment(interactive: true), null!, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole()));
+            () => new CopilotPromptInstallCommand(NewEnvironment(interactive: true), null!, new PhysicalFileSystem(), ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole()));
     }
 
     [Fact]

@@ -1,5 +1,6 @@
-using KyberWeave.Contracts.Services;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Providers;
@@ -21,6 +22,8 @@ public sealed class ArbiterCommentCommand(
     ICommentTriageFactory triageFactory,
     IArbiterConfigResolver configs,
     IArbiterDryRunService dryRun,
+    IPathResolver paths,
+    IProcessEnvironment environment,
     IAnsiConsole console) : Command<ArbiterCommentSettings>
 {
     /// <summary>
@@ -51,7 +54,7 @@ public sealed class ArbiterCommentCommand(
             return UsageError("--path is required.");
         }
 
-        string root = System.IO.Path.GetFullPath(settings.Root);
+        string root = paths.GetFullPath(settings.Root, environment.CurrentDirectory);
         // The same containment the served tool applies: a cited path that leaves the root is refused, not read. The check
         // and the triage read use one root, the --root the settings name, so a path cannot pass one and fail the other.
         if (!settings.Summary && fileText.ResolveWithinRoot(root, settings.Path) is null)

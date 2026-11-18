@@ -54,6 +54,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
 {
     private readonly CopilotPromptEnvironment? _environment;
     private readonly IDoctorFileSystem _files;
+    private readonly IWritableFileSystem _writer;
     private readonly IEmbeddedResources _resources;
     private readonly IProcessEnvironment? _processEnvironment;
     private readonly IPathResolver? _paths;
@@ -62,17 +63,20 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     /// <summary>Creates the command over the file-system, embedded-resource, environment and console seams the container resolves.</summary>
     public CopilotPromptInstallCommand(
         IDoctorFileSystem files,
+        IWritableFileSystem writer,
         IEmbeddedResources resources,
         IProcessEnvironment processEnvironment,
         IPathResolver paths,
         SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(resources);
         ArgumentNullException.ThrowIfNull(processEnvironment);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(console);
         _files = files;
+        _writer = writer;
         _resources = resources;
         _processEnvironment = processEnvironment;
         _paths = paths;
@@ -83,14 +87,17 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
     internal CopilotPromptInstallCommand(
         CopilotPromptEnvironment environment,
         IDoctorFileSystem files,
+        IWritableFileSystem writer,
         IEmbeddedResources resources,
         SquadConsole console)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(writer);
         ArgumentNullException.ThrowIfNull(resources);
         ArgumentNullException.ThrowIfNull(console);
         _environment = environment;
         _files = files;
+        _writer = writer;
         _resources = resources;
         _console = console;
     }
@@ -197,9 +204,9 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         try
         {
             // The prompt file goes first, so VS Code never reads a setting that points at a file that is not there yet.
-            AtomicFile.WriteAllText(promptPath, CopilotPromptFile.EmbeddedText(_resources));
+            _writer.WriteAllTextAtomic(promptPath, CopilotPromptFile.EmbeddedText(_resources));
             foreach ((string file, byte[] document) in writes)
-                AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
+                CopilotPromptCommandSupport.WriteThroughLinks(_writer, environment.Paths, file, document);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException
             or ArgumentException or NotSupportedException or System.Security.SecurityException)
@@ -365,7 +372,7 @@ public sealed class CopilotPromptUninstallCommand : Command<CopilotPromptSetting
         {
             // The settings go first, so a setting never points at a prompt file this command has already deleted.
             foreach ((string file, byte[] document) in removals)
-                AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
+                CopilotPromptCommandSupport.WriteThroughLinks(_writer, environment.Paths, file, document);
             if (promptInstalled)
                 _writer.DeleteFile(promptPath);
         }
@@ -507,6 +514,32 @@ public sealed class CopilotPromptStatusCommand : Command<CopilotPromptSettings>
 internal static class CopilotPromptCommandSupport
 {
     private const string Prefix = "kyber-weave squad copilot-prompt";
+
+    /// <summary>The most links one write follows before it reports a loop, as the framework's own resolution does.</summary>
+    private const int MaxLinkHops = 63;
+
+    /// <summary>
+    /// Replaces the file a chain of symbolic links ends at, so the link a person keeps their settings behind survives. A
+    /// link whose final target is missing is followed to the path it names, which the write then creates.
+    /// </summary>
+    /// <param name="writer">Reads links and writes the file.</param>
+    /// <param name="paths">Resolves a relative link against the directory that holds it.</param>
+    /// <param name="file">The settings file as the person has it, possibly a link.</param>
+    /// <param name="document">The bytes the file ends up holding.</param>
+    /// <exception cref="IOException">The links loop.</exception>
+    internal static void WriteThroughLinks(IWritableFileSystem writer, IPathResolver paths, string file, byte[] document)
+    {
+        string target = file;
+        for (int hops = 0; writer.GetLinkTarget(target) is { } link; hops++)
+        {
+            if (hops >= MaxLinkHops)
+                throw new IOException($"Too many levels of symbolic links at '{file}'.");
+
+            target = paths.GetFullPath(link, Path.GetDirectoryName(target) ?? target);
+        }
+
+        writer.WriteAllBytesAtomic(target, document);
+    }
 
     /// <summary>The environment a person's terminal runs in: their home, their roaming app data, and whether they can answer a prompt.</summary>
     internal static CopilotPromptEnvironment EnvironmentOf(IProcessEnvironment environment, IPathResolver paths, SquadConsole console) => EnvironmentFrom(

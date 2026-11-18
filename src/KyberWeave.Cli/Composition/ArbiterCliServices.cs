@@ -16,13 +16,10 @@ internal static class ArbiterCliServices
     /// <summary>Registers the host's Arbiter choices with <c>TryAdd</c>, so a test's own registration wins.</summary>
     /// <param name="services">The collection to populate.</param>
     /// <returns>The same collection, for chaining.</returns>
-    /// <remarks>
-    /// The console is the process-wide <see cref="AnsiConsole.Console"/>, read here at startup: this is a composition
-    /// root, the one place allowed to reach a resource while it wires the adapters.
-    /// </remarks>
+    /// <remarks>The console is the shared forwarding one from <see cref="CliConsoleServices"/>.</remarks>
     internal static IServiceCollection AddArbiterCliServices(this IServiceCollection services)
     {
-        services.TryAddSingleton<IAnsiConsole>(_ => new ForwardingAnsiConsole(() => AnsiConsole.Console));
+        _ = services.AddCliConsole();
         services.TryAddSingleton<IArbiterKeyInput, ConsoleArbiterKeyInput>();
         services.TryAddSingleton<ArbiterRepoRoot>();
         services.TryAddSingleton<PlanArguments>();

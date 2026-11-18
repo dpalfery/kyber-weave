@@ -208,14 +208,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `ArbiterAuditCommand` (`Commands/Arbiter/ArbiterAuditCommand.cs`) | paths | 4.5 |
-| `ArbiterCommentCommand` (`Commands/Arbiter/ArbiterCommentCommand.cs`) | file system, paths | 4.5 |
-| `ArbiterSectionsCommand` (`Commands/Arbiter/ArbiterSectionsCommand.cs`) | file system, paths | 4.5 |
-| `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
-| `RunDeliverCommand` (`Commands/Run/RunDeliverCommand.cs`) | paths | 4.5 |
-| `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system | 4.5 |
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
-| `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
 #### KyberWeave.Data (72 classes)
 
