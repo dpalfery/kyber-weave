@@ -13,6 +13,7 @@ using KyberWeave.Domain.CopilotPrompt;
 using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -24,6 +25,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadPackAndReleaseTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private readonly TempDirectory _temp = new();
 
     public void Dispose() => _temp.Dispose();
@@ -181,7 +184,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     [Fact]
     public void Pack_Apm_CanonicalSourceShipsTaskGateAndNoRetiredTaskReviewer()
     {
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "task-gate-inventory");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
@@ -198,7 +201,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     [Fact]
     public void Pack_Apm_CanonicalSourceShipsNoRetiredSecondBrain()
     {
-        string productRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string productRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         string archivePath = SquadPacker.PackApm(productRoot, _temp.Path, "no-second-brain");
         using ZipArchive archive = ZipFile.OpenRead(archivePath);
         List<string> entryNames = archive.Entries.Select(entry => entry.FullName).ToList();
@@ -546,21 +549,20 @@ public sealed class SquadPackAndReleaseTests : IDisposable
         }
 
         // Also assert that project files do not declare EmbeddedResource or Content targeting products/kyber-squad
-        string toolRoot = KyberWeaveTestPaths.ToolRoot;
         string[] projectFilePaths =
         [
-            Path.Combine(toolRoot, "src", "KyberWeave.Cli", "KyberWeave.Cli.csproj"),
-            Path.Combine(toolRoot, "src", "KyberWeave.Core", "KyberWeave.Core.csproj"),
-            Path.Combine(toolRoot, "src", "KyberWeave.Core.Docs", "KyberWeave.Core.Docs.csproj"),
-            Path.Combine(toolRoot, "src", "KyberWeave.Core.Squad", "KyberWeave.Core.Squad.csproj"),
-            Path.Combine(toolRoot, "src", "KyberWeave.Mcp", "KyberWeave.Mcp.csproj"),
-            Path.Combine(toolRoot, "src", "KyberWeave.Domain", "KyberWeave.Domain.csproj"),
+            "src/KyberWeave.Cli/KyberWeave.Cli.csproj",
+            "src/KyberWeave.Core/KyberWeave.Core.csproj",
+            "src/KyberWeave.Core.Docs/KyberWeave.Core.Docs.csproj",
+            "src/KyberWeave.Core.Squad/KyberWeave.Core.Squad.csproj",
+            "src/KyberWeave.Mcp/KyberWeave.Mcp.csproj",
+            "src/KyberWeave.Domain/KyberWeave.Domain.csproj",
             .. LayerPropsFiles("KyberWeave.Domain")
         ];
 
         foreach (string projPath in projectFilePaths)
         {
-            XDocument projDoc = XDocument.Load(projPath);
+            XDocument projDoc = XDocument.Parse(Corpus.ReadText(projPath));
 
             foreach (XElement element in projDoc.Descendants("EmbeddedResource").Concat(projDoc.Descendants("Content")))
             {
@@ -775,11 +777,8 @@ public sealed class SquadPackAndReleaseTests : IDisposable
     /// project file, so a layer can gain an embedded resource without every agent editing the same
     /// project file. Those files declare resources too, so the corpus scan has to read them.
     /// </summary>
-    private static string[] LayerPropsFiles(string project)
-    {
-        string areas = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", project, "Areas");
-        return Directory.Exists(areas) ? Directory.GetFiles(areas, "*.props") : [];
-    }
+    private static string[] LayerPropsFiles(string project) =>
+        [.. Corpus.EnumerateFiles($"src/{project}/Areas", "*.props", recursive: false)];
 
     private static bool IsTextFile(string entryName) =>
         TextFileExtensions.Contains(
@@ -815,7 +814,7 @@ public sealed class SquadPackAndReleaseTests : IDisposable
             fixture.Write("KyberWeave.sln", "Microsoft Visual Studio Solution File, Format Version 12.00");
 
             // Copy product source from real repo if available, or write all 21 agents and 24 skills
-            string realSquadSource = System.IO.Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+            string realSquadSource = System.IO.Path.Combine(Corpus.Root, "products", "kyber-squad");
             if (Directory.Exists(realSquadSource))
             {
                 CopyDirectory(realSquadSource, System.IO.Path.Combine(fixture.Path, "products", "kyber-squad"));

@@ -5,6 +5,7 @@ using KyberWeave.Mcp;
 using KyberWeave.Tests.Fakes;
 using ModelContextProtocol.Server;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -23,8 +24,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadToolchainRosterGuardTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     [Fact]
     public void ShippedToolchainRosterGrantsEveryToolTheKyberWeaveMcpServerExposes()

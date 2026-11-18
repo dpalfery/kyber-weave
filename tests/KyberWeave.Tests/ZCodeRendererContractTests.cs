@@ -6,6 +6,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -38,8 +39,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class ZCodeRendererContractTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>
     /// The capability→tool lowering this suite pins, transcribed independently from plan
@@ -1208,9 +1211,11 @@ internal sealed class ZCodeResourceRootCollisionFixture : IDisposable
 
 internal static class ZCodeFixtureFiles
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     internal static void CopyCanonicalCorpus(string destinationDirectory)
     {
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         Directory.CreateDirectory(destinationDirectory);
         foreach (string sourcePath in Directory.EnumerateFiles(canonicalRoot, "*", SearchOption.AllDirectories))
         {

@@ -4,6 +4,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -13,8 +14,10 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadBriefMapTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>
     ///     A renamed or removed reference file or heading fails here with the exact name to fix in
@@ -32,14 +35,14 @@ public sealed class SquadBriefMapTests
             string directory = SquadReferenceLocator.InSource(ProductRoot, agent);
             foreach (BriefFileRule rule in map.FilesOf(agent)!)
             {
-                string path = Path.Combine(directory, rule.File);
-                if (!File.Exists(path))
+                string path = CorpusPath(Path.Combine(directory, rule.File));
+                if (!Corpus.Exists(path))
                 {
                     problems.Add($"briefs.yml names file '{rule.File}' for agent '{agent}', but {path} does not exist.");
                     continue;
                 }
 
-                HashSet<string> present = MarkdownSections.Split(File.ReadAllText(path))
+                HashSet<string> present = MarkdownSections.Split(Corpus.ReadText(path))
                     .Where(section => section.Heading is not null)
                     .Select(section => MarkdownSections.Normalize(section.Heading!))
                     .ToHashSet(StringComparer.Ordinal);
@@ -52,6 +55,10 @@ public sealed class SquadBriefMapTests
         Assert.True(problems.Count == 0, string.Join(Environment.NewLine, problems));
     }
 
+    /// <summary>Turns an absolute path inside the corpus into the corpus-relative path the seam reads by.</summary>
+    private static string CorpusPath(string absolutePath) =>
+        Path.GetRelativePath(Corpus.Root, absolutePath).Replace('\\', '/');
+
     /// <summary>The shipped reference files all reach a brief: none sits beside the mapped ones unlisted.</summary>
     [Fact]
     public void EveryReferenceFileOfAMappedAgentIsInTheMap()
@@ -62,7 +69,8 @@ public sealed class SquadBriefMapTests
         foreach (string agent in map.Agents)
         {
             string[] mapped = [.. map.FilesOf(agent)!.Select(rule => rule.File)];
-            unlisted.AddRange(Directory.EnumerateFiles(SquadReferenceLocator.InSource(ProductRoot, agent))
+            unlisted.AddRange(Corpus.EnumerateFiles(
+                    CorpusPath(SquadReferenceLocator.InSource(ProductRoot, agent)), recursive: false)
                 .Select(file => Path.GetFileName(file))
                 .Where(name => !mapped.Contains(name, StringComparer.Ordinal))
                 .Select(name => $"{agent}/references/{name} is not in briefs.yml, so no brief carries it."));

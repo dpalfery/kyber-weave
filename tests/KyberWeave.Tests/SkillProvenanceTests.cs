@@ -3,6 +3,7 @@ using KyberWeave.Core.Skills.Model;
 using KyberWeave.Core.Skills.Parsing;
 using KyberWeave.Core.Skills.Security;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -15,6 +16,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SkillProvenanceTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly HashSet<string> ProvenanceCodes = new(StringComparer.Ordinal)
     {
         "KW-SKILL-SEC-030",
@@ -25,7 +28,7 @@ public sealed class SkillProvenanceTests
     [Fact]
     public void EveryApmSkillDeclaresNestedProvenanceMetadata()
     {
-        string skillsRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, ".apm", "skills");
+        string skillsRoot = Path.Combine(Corpus.Root, ".apm", "skills");
 
         Assert.Empty(SkillProvenanceIssues(skillsRoot));
     }

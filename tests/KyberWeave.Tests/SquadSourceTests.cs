@@ -6,13 +6,16 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Validation;
 using Xunit;
 using Xunit.Sdk;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
 public sealed class SquadSourceTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     private const string NormalizedArchitectBody = "You are architect.\nPlan first.\n";
     private const string NormalizedArchitectBodySha256 =
@@ -307,13 +310,8 @@ public sealed class SquadSourceTests
     [Fact]
     public void ModelProfilesSchemaDeclaresAPiHarnessModelField()
     {
-        string schemaPath = Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "products",
-            "kyber-squad",
-            "schemas",
-            "model-profiles.schema.json");
-        using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        using JsonDocument schema = JsonDocument.Parse(
+            Corpus.ReadText("products/kyber-squad/schemas/model-profiles.schema.json"));
         JsonElement harnessModelFields = schema.RootElement
             .GetProperty("properties")
             .GetProperty("profiles")

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 using KyberWeave.Core.Review;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -11,6 +12,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReviewLensCatalogueTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const int ExpectedLensCount = 17;
 
     /// <summary>
@@ -24,14 +27,7 @@ public sealed class ReviewLensCatalogueTests
     [Fact]
     public void TheCatalogueNamesTheLensesTheCodeReviewSkillLists()
     {
-        string skill = File.ReadAllText(Path.Combine(
-            KyberWeaveTestPaths.ToolRoot,
-            "products",
-            "kyber-squad",
-            "skills",
-            "code-review",
-            "references",
-            "first-review.md"));
+        string skill = Corpus.ReadText("products/kyber-squad/skills/code-review/references/first-review.md");
 
         string[] listed = LensRow.Matches(skill)
             .Select(match => match.Groups["name"].Value)

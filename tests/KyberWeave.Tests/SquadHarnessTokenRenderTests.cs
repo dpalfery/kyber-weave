@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -27,6 +28,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadHarnessTokenRenderTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The placeholder the canonical corpus carries where a harness name belongs.</summary>
     private const string Placeholder = "{{harness}}";
 
@@ -41,7 +44,7 @@ public sealed class SquadHarnessTokenRenderTests
     private const string ProbeAgentName = "conductor";
 
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     public static TheoryData<SquadTarget> ShippedTargets()
     {

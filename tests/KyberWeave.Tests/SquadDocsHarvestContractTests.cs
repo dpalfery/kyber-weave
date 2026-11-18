@@ -10,6 +10,7 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -23,23 +24,21 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadDocsHarvestContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly Regex LiteralDocsPathRegex =
         new(@"(?<![\w<.-])docs/", RegexOptions.Compiled);
 
-    private static string ToolRoot => KyberWeaveTestPaths.ToolRoot;
+    private static string ToolRoot => Corpus.Root;
 
     private static string ProductRoot =>
         Path.Combine(ToolRoot, "products", "kyber-squad");
 
-    private static string ReadProduct(params string[] relative)
-    {
-        return File.ReadAllText(Path.Combine([ProductRoot, .. relative]));
-    }
+    private static string ReadProduct(params string[] relative) =>
+        Corpus.ReadText($"products/kyber-squad/{string.Join('/', relative)}");
 
-    private static string ReadRepo(params string[] relative)
-    {
-        return File.ReadAllText(Path.Combine([ToolRoot, .. relative]));
-    }
+    private static string ReadRepo(params string[] relative) =>
+        Corpus.ReadText(string.Join('/', relative));
 
     private static string DocsDevDescription()
     {
@@ -374,7 +373,7 @@ public sealed class SquadDocsHarvestContractTests
 
         foreach (string relative in portableFiles)
         {
-            string text = File.ReadAllText(Path.Combine(ProductRoot, relative));
+            string text = Corpus.ReadText($"products/kyber-squad/{relative.Replace('\\', '/')}");
             Assert.False(
                 LiteralDocsPathRegex.IsMatch(text),
                 $"Portable file '{relative}' carries a literal docs/ path; resolve it through Config Reg.");

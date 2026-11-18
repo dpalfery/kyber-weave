@@ -1,4 +1,5 @@
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -15,16 +16,16 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class WorkerRuleSingleHomeTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     /// <summary>The developer agents whose failure-loop text the rule map moves to the rework reference.</summary>
     private static readonly string[] FailureLoopAgents = ["dev-easy", "dev-medium", "dev-hard", "devops"];
 
-    private static string ToolRoot => KyberWeaveTestPaths.ToolRoot;
+    private const string ProductRoot = "products/kyber-squad";
 
-    private static string ProductRoot => Path.Combine(ToolRoot, "products", "kyber-squad");
+    private const string AgentsRoot = "products/kyber-squad/agents";
 
-    private static string AgentsRoot => Path.Combine(ProductRoot, "agents");
-
-    private static string RuleMapPath => Path.Combine(ToolRoot, "docs", "kyber-squad", "worker-rule-map.md");
+    private const string RuleMapPath = "docs/kyber-squad/worker-rule-map.md";
 
     /// <summary>
     ///     The cleanupcode pass is removed from the squad (ADR 0074): it never exits on the reference
@@ -49,7 +50,7 @@ public sealed class WorkerRuleSingleHomeTests
     public void InspectCodeAndItsSkillAreAbsentFromTheSquad()
     {
         Assert.False(
-            Directory.Exists(Path.Combine(ProductRoot, "skills", "resharper-clt")),
+            Corpus.EnumerateDirectories($"{ProductRoot}/skills").Contains($"{ProductRoot}/skills/resharper-clt"),
             "The resharper-clt skill was removed with InspectCode (ADR 0075).");
 
         string[] skillNamed = AgentsContaining("resharper-clt");
@@ -95,11 +96,11 @@ public sealed class WorkerRuleSingleHomeTests
     public void TheRuleMapRecordsAHomeForEveryRuleThatMoved()
     {
         Assert.True(
-            File.Exists(RuleMapPath),
+            Corpus.Exists(RuleMapPath),
             $"The rule map must live at '{RuleMapPath}'. Task T49 writes it before T50, one row per " +
             "removed sentence, and it is what stops the text growing back.");
 
-        string map = File.ReadAllText(RuleMapPath);
+        string map = Corpus.ReadText(RuleMapPath);
         Assert.Contains("task-gate/references/rework.md", map, StringComparison.Ordinal);
         Assert.Contains("cleanupcode", map, StringComparison.OrdinalIgnoreCase);
     }
@@ -127,10 +128,10 @@ public sealed class WorkerRuleSingleHomeTests
     public void TheRuleMapNamesTheDeliveryExecutionHome()
     {
         Assert.True(
-            File.Exists(RuleMapPath),
+            Corpus.Exists(RuleMapPath),
             $"The rule map must live at '{RuleMapPath}'.");
 
-        string map = File.ReadAllText(RuleMapPath);
+        string map = Corpus.ReadText(RuleMapPath);
         Assert.Contains("delivery-execution", map, StringComparison.Ordinal);
     }
 
@@ -139,8 +140,8 @@ public sealed class WorkerRuleSingleHomeTests
     {
         return
         [
-            .. Directory.GetFiles(AgentsRoot, "*.md", SearchOption.AllDirectories)
-                .Where(path => File.ReadAllText(path).Contains(text, StringComparison.OrdinalIgnoreCase))
+            .. Corpus.EnumerateFiles(AgentsRoot, "*.md")
+                .Where(path => Corpus.ReadText(path).Contains(text, StringComparison.OrdinalIgnoreCase))
                 .Select(Path.GetFileName)
                 .OfType<string>()
                 .Order(StringComparer.Ordinal)
@@ -149,8 +150,8 @@ public sealed class WorkerRuleSingleHomeTests
 
     private static string ReadProductFile(string relativePath)
     {
-        string path = Path.Combine(ProductRoot, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Assert.True(File.Exists(path), $"Expected the canonical product file at '{path}'.");
-        return File.ReadAllText(path);
+        string path = $"{ProductRoot}/{relativePath}";
+        Assert.True(Corpus.Exists(path), $"Expected the canonical product file at '{path}'.");
+        return Corpus.ReadText(path);
     }
 }

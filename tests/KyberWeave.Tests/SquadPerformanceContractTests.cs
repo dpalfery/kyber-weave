@@ -1,4 +1,5 @@
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -11,6 +12,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SquadPerformanceContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ConductorAgentPath = "products/kyber-squad/agents/conductor.md";
 
     /// <summary>
@@ -323,14 +326,13 @@ public sealed class SquadPerformanceContractTests
 
     private static string ReadRepoFile(string relativePath)
     {
-        string fullPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath);
         try
         {
-            return File.ReadAllText(fullPath);
+            return Corpus.ReadText(relativePath);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            Assert.Fail($"Failed to read expected repository file '{relativePath}' at '{fullPath}': {ex.Message}");
+            Assert.Fail($"Failed to read expected repository file '{relativePath}': {ex.Message}");
             return string.Empty;
         }
     }

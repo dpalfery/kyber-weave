@@ -3,6 +3,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Xunit;
 using YamlDotNet.Core;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -13,6 +14,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class ReviewConfigTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static ReviewConfig Load(string yaml) =>
         KyberWeaveConfigLoader.LoadFromYaml(yaml).Review;
 
@@ -354,7 +357,7 @@ public class ReviewConfigTests
     [Fact]
     public void ThisRepositorysOwnReviewConfigurationLoadsCleanlyWithStrictPolicy()
     {
-        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(KyberWeaveTestPaths.ToolRoot);
+        KyberWeaveConfigLoadResult result = KyberWeaveConfigLoader.TryLoad(Corpus.Root);
 
         Assert.True(result.Success, result.Error);
         ReviewConfig review = result.Config!.Review;
@@ -364,7 +367,7 @@ public class ReviewConfigTests
         Assert.All(review.Gates, g => Assert.NotEmpty(g.Run));
         Assert.Equal(ReviewStrictness.Strict, review.Policy.Strictness);
 
-        string configText = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, ".kyber-weave", "kyber-weave.yml"));
+        string configText = Corpus.ReadText(".kyber-weave/kyber-weave.yml");
         Assert.DoesNotContain("always-human", configText, StringComparison.Ordinal);
         Assert.DoesNotContain("max-reviewable-lines", configText, StringComparison.Ordinal);
     }

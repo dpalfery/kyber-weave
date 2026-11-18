@@ -1,5 +1,6 @@
 using KyberWeave.Core.Review;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -9,8 +10,9 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class ReviewGatesCycleReferenceTests
 {
-    private static readonly string SkillRoot = Path.Combine(
-        KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "skills", "code-review");
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
+    private const string SkillRoot = "products/kyber-squad/skills/code-review";
 
     [Theory]
     [InlineData(false, "references/first-review.md")]
@@ -20,6 +22,6 @@ public sealed class ReviewGatesCycleReferenceTests
         string reference = ReviewGateReporting.CycleReference(verifier);
 
         Assert.Equal(expected, reference);
-        Assert.True(File.Exists(Path.Combine(SkillRoot, reference.Replace('/', Path.DirectorySeparatorChar))), reference);
+        Assert.True(Corpus.Exists($"{SkillRoot}/{reference}"), reference);
     }
 }

@@ -11,6 +11,7 @@ using Markdig;
 using Markdig.Syntax;
 using Markdig.Syntax.Inlines;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -28,6 +29,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class PullRequestSkillConsolidationTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string CombinedSkill = "create-pull-request";
     private const string ReviewSkill = "pr-review-fix-comments";
     private const string RetiredSkill = "create-pull-request-github";
@@ -105,8 +108,9 @@ public sealed class PullRequestSkillConsolidationTests
         new("mcp_azuredevops_m_", RegexOptions.None, ["skills", "agents"], "one host's MCP server-name prefix")
     ];
 
-    private static string ProductRoot =>
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+    private const string ProductRootRelativePath = "products/kyber-squad";
+
+    private static string ProductRoot => Path.Combine(Corpus.Root, ProductRootRelativePath);
 
     public static TheoryData<SquadTarget, SquadDeploymentScope> RenderTargets()
     {
@@ -132,7 +136,8 @@ public sealed class PullRequestSkillConsolidationTests
         Assert.DoesNotContain(source.Skills, skill => skill.Name == RetiredSkill);
         Assert.DoesNotContain(source.Bundle.SkillNames, name => name == RetiredSkill);
         Assert.False(
-            Directory.Exists(Path.Combine(ProductRoot, "skills", RetiredSkill)),
+            Corpus.EnumerateDirectories($"{ProductRootRelativePath}/skills")
+                .Contains($"{ProductRootRelativePath}/skills/{RetiredSkill}"),
             $"The retired skill directory 'skills/{RetiredSkill}' still exists.");
 
         using TempDirectory temp = new();
@@ -166,10 +171,10 @@ public sealed class PullRequestSkillConsolidationTests
     {
         SquadSource source = SquadSourceLoader.Load(ProductRoot);
         SquadSkill skill = Assert.Single(source.Skills, candidate => candidate.Name == skillName);
-        string skillDirectory = Path.Combine(ProductRoot, "skills", skillName);
+        string skillDirectory = $"{ProductRootRelativePath}/skills/{skillName}";
 
-        string[] onDisk = Directory.EnumerateFiles(skillDirectory, "*", SearchOption.AllDirectories)
-            .Select(path => Path.GetRelativePath(skillDirectory, path).Replace(Path.DirectorySeparatorChar, '/'))
+        string[] onDisk = Corpus.EnumerateFiles(skillDirectory)
+            .Select(path => path[(skillDirectory.Length + 1)..])
             .Where(path => !string.Equals(path, "SKILL.md", StringComparison.Ordinal))
             .Order(StringComparer.Ordinal)
             .ToArray();
@@ -225,7 +230,7 @@ public sealed class PullRequestSkillConsolidationTests
                     string.Equals(file.RelativePath, expectedPath, StringComparison.Ordinal));
                 Assert.True(rendered is not null, $"'{expectedPath}' was not rendered beside '{principal.RelativePath}'.");
 
-                string sourceText = await File.ReadAllTextAsync(Path.Combine(ProductRoot, "skills", skillName, resource));
+                string sourceText = Corpus.ReadText($"{ProductRootRelativePath}/skills/{skillName}/{resource}");
                 Assert.Equal(Encoding.UTF8.GetBytes(NormalizeLineEndings(sourceText)), rendered.Content);
             }
         }
@@ -262,7 +267,7 @@ public sealed class PullRequestSkillConsolidationTests
             Assert.True(
                 links.Contains(provider, StringComparer.Ordinal),
                 $"{skillName} § Provider Selection does not link '{provider}'; found [{string.Join(", ", links)}].");
-            Assert.True(File.Exists(Path.Combine(ProductRoot, "skills", skillName, provider)));
+            Assert.True(Corpus.Exists($"{ProductRootRelativePath}/skills/{skillName}/{provider}"));
         }
     }
 
@@ -305,9 +310,9 @@ public sealed class PullRequestSkillConsolidationTests
     [InlineData("azure-devops")]
     public void ProviderFileMeetsTheSharedContractAndCitesSources(string provider)
     {
-        string path = Path.Combine(ProductRoot, "skills", CombinedSkill, "providers", provider + ".md");
-        Assert.True(File.Exists(path), $"Provider file 'providers/{provider}.md' is missing.");
-        Section[] sections = H2Sections(File.ReadAllText(path));
+        string path = $"{ProductRootRelativePath}/skills/{CombinedSkill}/providers/{provider}.md";
+        Assert.True(Corpus.Exists(path), $"Provider file 'providers/{provider}.md' is missing.");
+        Section[] sections = H2Sections(Corpus.ReadText(path));
 
         string[] required = provider == "github"
             ? [.. ProviderContractHeadings, "Helper scripts"]
@@ -343,11 +348,10 @@ public sealed class PullRequestSkillConsolidationTests
         foreach (string scope in new[] { "skills", "agents", "standards" })
         {
             HostFactRule[] rules = HostFactRules.Where(rule => rule.Scopes.Contains(scope, StringComparer.Ordinal)).ToArray();
-            foreach (string file in Directory.EnumerateFiles(Path.Combine(ProductRoot, scope), "*", SearchOption.AllDirectories)
+            foreach (string relativePath in Corpus.EnumerateFiles($"{ProductRootRelativePath}/{scope}")
                          .Order(StringComparer.Ordinal))
             {
-                string relativePath = Path.GetRelativePath(ProductRoot, file).Replace(Path.DirectorySeparatorChar, '/');
-                string[] lines = File.ReadAllLines(file);
+                string[] lines = Corpus.ReadText(relativePath).ReplaceLineEndings("\n").Split('\n');
                 for (int index = 0; index < lines.Length; index++)
                 {
                     foreach (HostFactRule rule in rules)

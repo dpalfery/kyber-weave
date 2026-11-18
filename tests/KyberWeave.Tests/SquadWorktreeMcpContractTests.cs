@@ -1,6 +1,7 @@
 using System.Reflection;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -22,6 +23,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadWorktreeMcpContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private const string ConductorAgentPath = "products/kyber-squad/agents/conductor.md";
 
     /// <summary>
@@ -36,9 +39,8 @@ public sealed class SquadWorktreeMcpContractTests
 
     private static string ReadRepoFile(string relativePath)
     {
-        string fullPath = Path.Combine(KyberWeaveTestPaths.ToolRoot, relativePath);
-        Assert.True(File.Exists(fullPath), $"Expected file at '{fullPath}' does not exist.");
-        return File.ReadAllText(fullPath);
+        Assert.True(Corpus.Exists(relativePath), $"Expected file at '{relativePath}' does not exist.");
+        return Corpus.ReadText(relativePath);
     }
 
     /// <summary>

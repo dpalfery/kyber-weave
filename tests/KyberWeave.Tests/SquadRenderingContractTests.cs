@@ -5,6 +5,7 @@ using KyberWeave.Core.Squad.Parsing;
 using KyberWeave.Core.Squad.Rendering;
 using Xunit;
 using YamlDotNet.RepresentationModel;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -23,8 +24,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SquadRenderingContractTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     [Fact]
     public async Task RenderAsync_Copilot_RendersTheRealCanonicalCorpus()
@@ -252,6 +255,8 @@ public sealed class SquadRenderingContractTests
 /// </summary>
 internal sealed class ResourceBearingSquadFixture : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     internal const string AgentName = "bug-crusher-investigator";
     internal const string SkillName = "azure-cli";
     internal const string AgentLink = "[Agent runbook](bug-crusher-investigator/references/runbook.md)";
@@ -321,7 +326,7 @@ internal sealed class ResourceBearingSquadFixture : IDisposable
     private static ResourceBearingSquadFixture CreateBase()
     {
         ResourceBearingSquadFixture fixture = new();
-        string canonicalRoot = Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        string canonicalRoot = Path.Combine(Corpus.Root, "products", "kyber-squad");
         CopyDirectory(canonicalRoot, fixture.ProductRoot);
         return fixture;
     }

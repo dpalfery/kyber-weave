@@ -8,6 +8,7 @@ using KyberWeave.Tests.Fixtures;
 using Xunit;
 using YamlDotNet.RepresentationModel;
 using static KyberWeave.Tests.Fakes.SquadRenderedOutput;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -26,8 +27,10 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class OpenCodeRendererContractTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string ProductRoot =
-        Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad");
+        Path.Combine(Corpus.Root, "products", "kyber-squad");
 
     /// <summary>
     /// OpenCode's built-in permission vocabulary, grounded in OpenCode runtime agent

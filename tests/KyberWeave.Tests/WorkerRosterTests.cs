@@ -5,6 +5,7 @@ using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 using YamlDotNet.Core;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -16,6 +17,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class WorkerRosterTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string[] RemovedAgents =
     [
         "azure-reader", "csharp-dev", "dal-dev", "github-devops", "go-dev", "maui-dev", "pulumi-dev",
@@ -66,7 +69,7 @@ public sealed class WorkerRosterTests
     {
         string[] agentFiles = Directory
             .EnumerateFiles(
-                Path.Combine(KyberWeaveTestPaths.ToolRoot, "products", "kyber-squad", "agents"),
+                Path.Combine(Corpus.Root, "products", "kyber-squad", "agents"),
                 "*.md",
                 SearchOption.TopDirectoryOnly)
             .Select(path => Path.GetFileNameWithoutExtension(path))

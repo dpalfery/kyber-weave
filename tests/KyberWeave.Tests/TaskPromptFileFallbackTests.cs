@@ -3,6 +3,7 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
+using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -17,6 +18,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class TaskPromptFileFallbackTests : IDisposable
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private readonly DocFixture _fixture = DocsTaskPromptToolTests.Ready();
 
     public void Dispose() => _fixture.Dispose();
@@ -142,7 +145,7 @@ public sealed class TaskPromptFileFallbackTests : IDisposable
         Assert.True(result.Built, result.Refusal);
         Assert.StartsWith($"{TaskPromptService.ScratchFolder}/", result.PromptFile!, StringComparison.Ordinal);
 
-        string gitignore = File.ReadAllText(Path.Combine(KyberWeaveTestPaths.ToolRoot, ".gitignore"));
+        string gitignore = Corpus.ReadText(".gitignore");
         Assert.Contains($"{TaskPromptService.ScratchFolder}/", gitignore, StringComparison.Ordinal);
     }
 }
