@@ -240,7 +240,7 @@ type moves.
 
 | Project | Files | Route |
 |---|---|---|
-| `Data` | 66 | take a `Contracts` interface, or the caller itself moves to `Application` (the deployment services do) |
+| `Data` | 65 | take a `Contracts` interface, or the caller itself moves to `Application` (the deployment services do) |
 | `Contracts` | 36 | narrow the signature to a Domain record, or move the interface to `Application` (finding, below) |
 | `Core` | 14 | take a `Contracts` interface, or delete the static locator (task 2.2) |
 | `Core.Docs` | 0 | no caller; its own four files are deleted under task 2.2 (below) |
@@ -275,7 +275,16 @@ So `Core.Docs` reaches the moved Domain logic only after task 2.2 rewires it, no
 above counts callers of Domain logic, which is why it is zero; the four files are still work, and task
 2.2 owns them.
 
-### src/KyberWeave.Data (66 files)
+### The one same-name definition the scan found
+
+A file that **declares** a type of the same name is not a caller of Domain's type, so it takes no
+route here:
+
+| file | name it declares | what to do |
+|---|---|---|
+| `src/KyberWeave.Data/FileSystem/DocsRootPath.cs` | `DocsRootPath` | It declares its own `internal static class DocsRootPath`, as `src/KyberWeave.Domain/FileSystem/DocsRootPath.cs` does. Reconcile the two definitions under the folder task that moves `DocsRootPath` (2.5.6); do not add an injection point to this file. |
+
+### src/KyberWeave.Data (65 files)
 
 | file | Domain logic it names | route |
 |---|---|---|
@@ -305,7 +314,6 @@ above counts callers of Domain logic, which is why it is zero; the four files ar
 | `Docs/SparseLexicalCandidateSource.cs` | `LexicalSimilarity` | Contracts interface |
 | `Doctor/ConfigFileToolSettings.cs` | `KyberWeaveConfigLoadResult` | Contracts interface |
 | `Doctor/FileCodeGraphIndexWorkspace.cs` | `CodeGraphIndexRules` | Contracts interface |
-| `FileSystem/DocsRootPath.cs` | `DocsRootPath` | Contracts interface |
 | `Hooks/ConventionTestClassResolver.cs` | `PathContainment` | Contracts interface |
 | `Hooks/YamlHooksConfigSource.cs` | `HooksConfigMerger`, `HooksConfigPath` | Contracts interface |
 | `Review/FileCitedSourceFiles.cs` | `DocsRootPath` | Contracts interface |

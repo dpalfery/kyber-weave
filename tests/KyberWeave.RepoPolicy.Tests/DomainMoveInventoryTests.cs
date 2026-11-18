@@ -28,6 +28,10 @@ public sealed class DomainMoveInventoryTests
         @"^\*\*Interface-only, the whole file moves to `Contracts` \(.*?\):\*\*\s*(?<files>.*)$",
         RegexOptions.CultureInvariant);
 
+    private static readonly Regex CallerRow = new(
+        @"^\| `(?<path>[^`]+\.cs)` \| (?<names>[^|]*) \| (?<route>[^|]*) \|$",
+        RegexOptions.CultureInvariant);
+
     private static readonly Regex Backticked = new(@"`(?<value>[^`]+)`", RegexOptions.CultureInvariant);
 
     private static string[] Lines() =>
@@ -84,6 +88,53 @@ public sealed class DomainMoveInventoryTests
             missing.Length == 0,
             "Every file of Core.Docs must be named in the inventory, because task 2.2 scopes its deletions "
             + "from this document: " + string.Join(", ", missing));
+    }
+
+    [Fact]
+    public void NoCallerRowNamesAFileThatDeclaresTheSameType()
+    {
+        List<string> violations = [];
+        string project = string.Empty;
+
+        foreach (string line in Lines())
+        {
+            if (line.StartsWith("### src/", StringComparison.Ordinal))
+            {
+                project = line[4..].Split(' ')[0];
+                continue;
+            }
+
+            if (!line.StartsWith("### ", StringComparison.Ordinal))
+            {
+                // keep the project of a caller table; a new heading ends it
+            }
+            else
+            {
+                project = string.Empty;
+            }
+
+            if (project.Length == 0)
+                continue;
+
+            Match row = CallerRow.Match(line);
+            if (!row.Success)
+                continue;
+
+            string relative = $"{project}/{row.Groups["path"].Value}";
+            HashSet<string> declared = [.. Declarations(relative).Select(declaration => declaration.Name)];
+            string[] named = [.. Backticked.Matches(row.Groups["names"].Value)
+                .Select(match => match.Groups["value"].Value)];
+
+            foreach (string name in named.Where(declared.Contains))
+            {
+                violations.Add($"{relative} declares `{name}` itself, so it is not a caller of it");
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "A file that declares a type of the same name defines it; it cannot take that type through an "
+            + "interface. List it as a duplicate definition instead.\n" + string.Join("\n", violations));
     }
 
     [Fact]
