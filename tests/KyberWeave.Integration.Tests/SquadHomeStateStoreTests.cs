@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using Xunit;
+using KyberWeave.Tests.Fakes;
 
 namespace KyberWeave.Integration.Tests;
 
@@ -259,7 +260,7 @@ public sealed class SquadHomeStateStoreTests
         Directory.CreateSymbolicLink(alias, root);
         SquadStateStore store = StoreFor(home);
 
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(alias, SquadDeploymentScope.Project, AgentFile(SquadDeploymentScope.Project, "alpha.toml", "alpha")));
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
@@ -280,7 +281,7 @@ public sealed class SquadHomeStateStoreTests
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
 
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(root, SquadDeploymentScope.Global, AgentFile(SquadDeploymentScope.Global, "alpha.toml", "alpha")));
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(
@@ -300,7 +301,7 @@ public sealed class SquadHomeStateStoreTests
         string root = Path.Combine(fixture.Path, "project");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(root, SquadDeploymentScope.Project, AgentFile(SquadDeploymentScope.Project, "alpha.toml", "alpha")));
         string receiptPath = store.ResolveReceiptPath(root, SquadDeploymentScope.Project);
         JsonObject document = JsonNode.Parse(File.ReadAllText(receiptPath, Encoding.UTF8))!.AsObject();
@@ -329,7 +330,7 @@ public sealed class SquadHomeStateStoreTests
         string root = Path.Combine(fixture.Path, "target");
         Directory.CreateDirectory(root);
         SquadStateStore store = StoreFor(home);
-        new SquadTransaction(store).Execute(
+        RealSquadDeployment.Transaction(store).Execute(
             Install(root, scope, AgentFile(scope, "alpha.toml", "alpha")));
         string homeStore = Path.Combine(PhysicalPathOf(home), ".kyber-weave");
         Assert.True(
@@ -346,7 +347,7 @@ public sealed class SquadHomeStateStoreTests
             replaceManaged: false,
             new FixedTimeProvider(InstalledAt.AddDays(1)));
 
-        Exception? failure = Record.Exception(() => new SquadTransaction(
+        Exception? failure = Record.Exception(() => RealSquadDeployment.Transaction(
             store,
             new FailAtStepObserver(SquadTransactionStepKind.FileStaged)).Execute(update));
 
@@ -443,14 +444,14 @@ public sealed class SquadHomeStateStoreTests
         SquadDeploymentPlan contenderPlan)
     {
         using LeaseHoldingObserver holder = new LeaseHoldingObserver(SquadTransactionStepKind.IntentWritten);
-        Task active = BlockedTransaction.Start(() => new SquadTransaction(store, holder).Execute(activePlan));
+        Task active = BlockedTransaction.Start(() => RealSquadDeployment.Transaction(store, holder).Execute(activePlan));
         try
         {
             BlockedTransaction.WaitForStep(
                 holder.Reached,
                 active,
                 "The active transaction did not reach its durable intent, so it never held a lease.");
-            return Record.Exception(() => new SquadTransaction(store).Execute(contenderPlan));
+            return Record.Exception(() => RealSquadDeployment.Transaction(store).Execute(contenderPlan));
         }
         finally
         {

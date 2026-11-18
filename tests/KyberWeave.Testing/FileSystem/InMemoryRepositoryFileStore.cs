@@ -151,6 +151,9 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public Stream OpenExclusive(string path) => _fs.OpenExclusive(path);
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) => _fs.OpenGuarded(path);
+
+    /// <inheritdoc />
     public Stream OpenAppendShared(string path) => _fs.OpenAppendShared(path);
 
     /// <inheritdoc />
@@ -161,6 +164,12 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
 
     /// <inheritdoc />
     public void DeleteTreeNoFollow(string directoryPath) => _fs.DeleteTreeNoFollow(directoryPath);
+
+    /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) => _fs.DeleteEmptyDirectory(directoryPath);
+
+    /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) => _fs.FlushDirectory(directoryPath);
 
     /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) => _fs.CreateFileLink(linkPath, targetPath);

@@ -55,6 +55,59 @@ public sealed class MutexLeaseContractTests : LeaseContractTests
     }
 
     [Fact]
+    public void WaitsNoLongerThanOneTimeoutInTotalForASameProcessHolderAndThenAnotherProcess()
+    {
+        MutexLease lease = new();
+        string name = $"kyber-weave-contract-lease-{Guid.NewGuid():N}";
+        TimeSpan timeout = TimeSpan.FromMilliseconds(800);
+        IDisposable first = lease.Acquire(name, GenerousTimeout);
+
+        // Another owner is already queued on the system mutex, so when the first holder lets go it is that owner, not
+        // the request below, that takes it.
+        using ManualResetEventSlim foreignHolds = new(initialState: false);
+        using ManualResetEventSlim foreignRelease = new(initialState: false);
+        Thread foreign = new(() =>
+        {
+            using Mutex mutex = new(initiallyOwned: false, name);
+            bool held = mutex.WaitOne(TimeSpan.FromSeconds(30));
+            foreignHolds.Set();
+            _ = foreignRelease.Wait(TimeSpan.FromSeconds(30));
+            if (held)
+            {
+                mutex.ReleaseMutex();
+            }
+        })
+        {
+            IsBackground = true
+        };
+        foreign.Start();
+
+        // A thread parked in a wait is the observable sign that it is queued on the mutex.
+        SpinWait.SpinUntil(
+            () => foreign.ThreadState.HasFlag(ThreadState.WaitSleepJoin),
+            TimeSpan.FromSeconds(30));
+        Thread release = new(() =>
+        {
+            Thread.Sleep(600);
+            first.Dispose();
+        });
+        System.Diagnostics.Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
+        release.Start();
+
+        // The request queues behind the first holder inside the process, then meets a mutex the other owner holds:
+        // the two waits together must stay within the one timeout it was given.
+        _ = Assert.Throws<LeaseTimeoutException>(() => lease.Acquire(name, timeout));
+
+        clock.Stop();
+        foreignRelease.Set();
+        release.Join();
+        foreign.Join();
+        Assert.True(foreignHolds.IsSet, "The other owner never took the mutex.");
+        // One timeout is about 800 ms in total; the old double wait was about 1400 ms.
+        Assert.True(clock.Elapsed < TimeSpan.FromMilliseconds(1200), $"The request waited {clock.Elapsed}.");
+    }
+
+    [Fact]
     public void TakesALeaseAbandonedByItsOwner()
     {
         string name = $"kyber-weave-contract-lease-{Guid.NewGuid():N}";

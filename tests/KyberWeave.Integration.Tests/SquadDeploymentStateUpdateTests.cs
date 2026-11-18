@@ -209,7 +209,7 @@ public sealed class SquadDeploymentStateUpdateTests : SquadDeploymentStateTestBa
             false,
             new FixedTimeProvider(InstalledAt));
 
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         SquadReceipt receipt = Assert.IsType<SquadReceipt>(store.ReadReceipt(
             fixture.Path,

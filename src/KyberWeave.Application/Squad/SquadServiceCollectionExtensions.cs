@@ -51,7 +51,8 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IWritableFileSystem>(),
             sp.GetRequiredService<IFileSystemPathSemantics>(),
             sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<ILease>()));
         services.TryAddSingleton<ISquadStateMigration>(sp => new SquadStateMigration(
             sp.GetRequiredService<ISquadStateStore>(),
             sp.GetRequiredService<ISquadUserPaths>(),

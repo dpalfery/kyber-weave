@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
@@ -17,7 +18,8 @@ public sealed class InMemorySquadState
 
     /// <summary>Creates a state over a file system and lease host of its own.</summary>
     /// <param name="leaseHost">The simulated machine whose lease table the migration contends in; a new one when null.</param>
-    public InMemorySquadState(InProcessLeaseHost? leaseHost = null)
+    /// <param name="storeLease">The lease the store takes for registry writes; one on the lease host when null.</param>
+    public InMemorySquadState(InProcessLeaseHost? leaseHost = null, ILease? storeLease = null)
     {
         Files = new InMemoryFileSystem(caseSensitive: true);
         string home = Path.GetFullPath("/kw/home");
@@ -30,9 +32,19 @@ public sealed class InMemorySquadState
         Environment = new FakeProcessEnvironment(currentDirectory: Path.GetFullPath("/kw/work"));
         Time = new FakeTimeProvider(Start);
         LeaseHost = leaseHost ?? new InProcessLeaseHost();
-        Store = new SquadStateStore(UserPaths, Files, Semantics, Paths, Environment);
+
+        // A held registry lease is waited for only briefly: an in-memory test must not sit out the product's ten seconds.
+        Store = new SquadStateStore(
+            UserPaths,
+            Files,
+            Semantics,
+            Paths,
+            Environment,
+            storeLease ?? new InProcessLease(LeaseHost),
+            TimeSpan.FromMilliseconds(200));
         Migration = new SquadStateMigration(Store, UserPaths, Files, Semantics, new InProcessLease(LeaseHost), Time);
         Layout = new SquadStateTestLayout(Store, Files, Semantics);
+        Planner = new SquadDeploymentPlanner(Files, Semantics, Paths);
     }
 
     /// <summary>Gets the file system everything reads and writes.</summary>
@@ -64,6 +76,15 @@ public sealed class InMemorySquadState
 
     /// <summary>Gets where the state lives and how a test writes into it.</summary>
     public SquadStateTestLayout Layout { get; }
+
+    /// <summary>Gets the deployment planner over the in-memory file system.</summary>
+    public SquadDeploymentPlanner Planner { get; }
+
+    /// <summary>Builds a deployment transaction over the in-memory file system, lease host and path rules.</summary>
+    /// <param name="observer">Told of each durable step; none when null.</param>
+    /// <returns>A new transaction.</returns>
+    public SquadTransaction Transaction(ISquadTransactionObserver? observer = null) =>
+        new(Store, Files, Semantics, new InProcessLease(LeaseHost), new FakeIdGenerator(), observer);
 
     /// <summary>Creates a project directory and returns its canonical path.</summary>
     /// <param name="name">The directory name under the projects folder.</param>

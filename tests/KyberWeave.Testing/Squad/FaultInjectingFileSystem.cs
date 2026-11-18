@@ -16,6 +16,7 @@ namespace KyberWeave.Testing.Squad;
 public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWritableFileSystem
 {
     private int _killAt;
+    private bool _killed;
 
     /// <summary>Gets how many seam calls this wrapper has seen.</summary>
     public int OperationCount { get; private set; }
@@ -25,7 +26,11 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
     public void KillAt(int ordinal) => _killAt = ordinal;
 
     /// <summary>Clears the plan, as restarting a process does; the disk survives.</summary>
-    public void Restart() => _killAt = 0;
+    public void Restart()
+    {
+        _killAt = 0;
+        _killed = false;
+    }
 
     private T Do<T>(string name, string? path, Func<T> operation)
     {
@@ -42,8 +47,16 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
     private void Enter(string name, string? path)
     {
         int number = ++OperationCount;
+
+        // A killed process runs no more code, so its cleanup handlers must not reach the disk either.
+        if (_killed)
+        {
+            throw new SquadCrashInjectedException($"The process is dead; operation {number} ({name} '{path}') was refused.");
+        }
+
         if (number == _killAt)
         {
+            _killed = true;
             throw new SquadCrashInjectedException($"The process was killed at operation {number} ({name} '{path}').");
         }
     }
@@ -147,6 +160,9 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
     public Stream OpenWriteNew(string path) => Do(nameof(OpenWriteNew), path, () => inner.OpenWriteNew(path));
 
     /// <inheritdoc />
+    public Stream OpenGuarded(string path) => Do(nameof(OpenGuarded), path, () => inner.OpenGuarded(path));
+
+    /// <inheritdoc />
     public Stream OpenExclusive(string path) => Do(nameof(OpenExclusive), path, () => inner.OpenExclusive(path));
 
     /// <inheritdoc />
@@ -162,6 +178,14 @@ public sealed class FaultInjectingFileSystem(IWritableFileSystem inner) : IWrita
     /// <inheritdoc />
     public void DeleteTreeNoFollow(string directoryPath) =>
         Do(nameof(DeleteTreeNoFollow), directoryPath, () => inner.DeleteTreeNoFollow(directoryPath));
+
+    /// <inheritdoc />
+    public void DeleteEmptyDirectory(string directoryPath) =>
+        Do(nameof(DeleteEmptyDirectory), directoryPath, () => inner.DeleteEmptyDirectory(directoryPath));
+
+    /// <inheritdoc />
+    public void FlushDirectory(string directoryPath) =>
+        Do(nameof(FlushDirectory), directoryPath, () => inner.FlushDirectory(directoryPath));
 
     /// <inheritdoc />
     public void CreateFileLink(string linkPath, string targetPath) =>

@@ -120,7 +120,7 @@ public sealed class SquadInstanceLinkSyncUnitTests
     [Fact]
     public void LeaseHeldByAPeerRefusesTheSyncBeforeAnythingChanges()
     {
-        using IDisposable peer = new InProcessLease(_leases).Acquire(_sync.GetMutexName(Instance), TimeSpan.Zero);
+        using IDisposable peer = new InProcessLease(_leases).Hold(_sync.GetMutexName(Instance));
 
         _ = Assert.Throws<LeaseTimeoutException>(() => Sync());
 

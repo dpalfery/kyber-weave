@@ -43,7 +43,7 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
@@ -80,7 +80,7 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
         string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
         File.SetUnixFileMode(path, UnixFileMode.None);
 
@@ -118,7 +118,7 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         DriftOwnedEntry(fixture.Path, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
 
@@ -151,7 +151,7 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         File.Delete(Path.Combine(fixture.Path, ".cursor", "hooks.json"));
 
@@ -185,7 +185,7 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         DriftOwnedEntry(fixture.Path, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
 
@@ -227,7 +227,7 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
         string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
         File.SetUnixFileMode(path, UnixFileMode.None);
 
@@ -269,7 +269,7 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
 
         File.Delete(Path.Combine(fixture.Path, ".cursor", "hooks.json"));
 
@@ -439,7 +439,7 @@ public sealed class SquadOwnedBlockStatusTests
             new FixedTimeProvider(InstalledAt),
             globalRoots: globalRoots,
             blocks: [GlobalHooksBlock(SquadTarget.Cursor), GlobalHooksBlock(SquadTarget.Codex)]);
-        new SquadTransaction(store).Execute(plan);
+        RealSquadDeployment.Transaction(store).Execute(plan);
         return new GlobalBlockDeployment(store, globalRoots, home);
     }
 

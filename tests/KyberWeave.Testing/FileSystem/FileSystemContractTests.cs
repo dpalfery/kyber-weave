@@ -139,6 +139,23 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     [Fact]
+    public void DeleteEmptyDirectoryRemovesAnEmptyDirectoryAndRefusesOneWithContent()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string empty = At(root, "empty");
+        files.CreateDirectory(empty);
+        string full = At(root, "full");
+        files.CreateDirectory(full);
+        string kept = WriteFile(files, full, "kept.txt", "x");
+
+        files.DeleteEmptyDirectory(empty);
+        _ = Assert.ThrowsAny<IOException>(() => files.DeleteEmptyDirectory(full));
+
+        Assert.False(files.DirectoryExists(empty));
+        Assert.True(files.FileExists(kept));
+    }
+
+    [Fact]
     public void DeleteTreeNoFollowRemovesADanglingLinkItself()
     {
         IWritableFileSystem files = Starting(out string root);
@@ -579,6 +596,52 @@ public abstract class FileSystemContractTests : IDisposable
 
         _ = Assert.Throws<IOException>(() => files.OpenExclusive(path));
         _ = Assert.Throws<IOException>(() => files.OpenAppendShared(path));
+    }
+
+    [Fact]
+    public void OpenGuardedReadsTheFileAndRefusesAnExclusiveOpenWhileHeld()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "journal.txt", "held");
+
+        using (Stream guard = files.OpenGuarded(path))
+        {
+            using StreamReader reader = new(guard);
+            Assert.Equal("held", reader.ReadToEnd());
+            _ = Assert.Throws<IOException>(() => files.OpenExclusive(path));
+        }
+
+        Assert.Equal("held", files.ReadAllText(path));
+        files.OpenExclusive(path).Dispose();
+    }
+
+    [Fact]
+    public void OpenGuardedRefusesAMissingFile()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.ThrowsAny<IOException>(() => files.OpenGuarded(At(root, "absent.txt")));
+    }
+
+    [Fact]
+    public void FlushDirectoryAcceptsAnExistingDirectoryAfterARenameIntoIt()
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string source = At(root, "source.txt");
+        files.WriteAllText(source, "content");
+        files.MoveFile(source, At(root, "published.txt"));
+
+        files.FlushDirectory(root);
+
+        Assert.Equal("content", files.ReadAllText(At(root, "published.txt")));
+    }
+
+    [Fact]
+    public void FlushDirectoryRefusesAMissingDirectory()
+    {
+        IWritableFileSystem files = Starting(out string root);
+
+        _ = Assert.ThrowsAny<IOException>(() => files.FlushDirectory(At(root, "absent")));
     }
 
     [Fact]
