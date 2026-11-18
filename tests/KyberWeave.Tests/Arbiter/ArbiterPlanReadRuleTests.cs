@@ -220,7 +220,7 @@ public sealed class ArbiterPlanReadRuleTests
             $"the conductor rules file must live at '{ConductorRulesPath}'.");
         string[] ids =
         [
-            .. Lines(ConductorRulesPath)
+            .. CorpusLines.Split(Corpus.ReadText(ConductorRulesPath))
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())
@@ -229,16 +229,5 @@ public sealed class ArbiterPlanReadRuleTests
         Assert.Equal(21, ids.Length);
         Assert.Contains(PlanReadRule, ids);
         Assert.Equal("delegate", Rule().Trigger);
-    }
-
-    /// <summary>The file's lines, as <see cref="File.ReadAllLines(string)"/> would return them.</summary>
-    /// <param name="path">The corpus-relative path of the file.</param>
-    /// <returns>One entry per line, without its terminator.</returns>
-    private static string[] Lines(string path)
-    {
-        string text = Corpus.ReadText(path);
-        string[] lines = text.Split('\n');
-        int count = text.EndsWith('\n') ? lines.Length - 1 : lines.Length;
-        return [.. lines[..count].Select(line => line.TrimEnd('\r'))];
     }
 }

@@ -54,7 +54,7 @@ public sealed class ArbiterSectionAndCommentRuleTests
     [Fact]
     public void TheSectionTrimRuleIsDeclaredForEachSectionCandidate()
     {
-        string[] lines = Lines(RoleRulesPaths[0]);
+        string[] lines = CorpusLines.Split(Corpus.ReadText(RoleRulesPaths[0]));
         int start = Array.FindIndex(lines, line => line.Trim() == $"- id: {TrimRule}");
         Assert.True(start >= 0, $"{TrimRule} is not declared in conductor.arbiter-rules.yml.");
         int end = Array.FindIndex(lines, start + 1, line => line.TrimStart().StartsWith("- id: ", StringComparison.Ordinal));
@@ -103,16 +103,5 @@ public sealed class ArbiterSectionAndCommentRuleTests
         {
             Assert.Contains(id, ids);
         }
-    }
-
-    /// <summary>The file's lines, as <see cref="File.ReadAllLines(string)"/> would return them.</summary>
-    /// <param name="path">The corpus-relative path of the file.</param>
-    /// <returns>One entry per line, without its terminator.</returns>
-    private static string[] Lines(string path)
-    {
-        string text = Corpus.ReadText(path);
-        string[] lines = text.Split('\n');
-        int count = text.EndsWith('\n') ? lines.Length - 1 : lines.Length;
-        return [.. lines[..count].Select(line => line.TrimEnd('\r'))];
     }
 }

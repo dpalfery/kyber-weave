@@ -515,7 +515,7 @@ public sealed class ArbiterGateReportRuleTests
         string[] ids =
         [
             .. RoleRulesPaths
-                .SelectMany(Lines)
+                .SelectMany(path => CorpusLines.Split(Corpus.ReadText(path)))
                 .Select(line => line.Trim())
                 .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
                 .Select(line => line["- id: ".Length..].Trim())
@@ -545,16 +545,5 @@ public sealed class ArbiterGateReportRuleTests
             int.TryParse(declared, out int count),
             $"The first line of the shipped rules file must state its count as a number. Read: '{declared}'.");
         return count;
-    }
-
-    /// <summary>The file's lines, as <see cref="File.ReadAllLines(string)"/> would return them.</summary>
-    /// <param name="path">The corpus-relative path of the file.</param>
-    /// <returns>One entry per line, without its terminator.</returns>
-    private static string[] Lines(string path)
-    {
-        string text = Corpus.ReadText(path);
-        string[] lines = text.Split('\n');
-        int count = text.EndsWith('\n') ? lines.Length - 1 : lines.Length;
-        return [.. lines[..count].Select(line => line.TrimEnd('\r'))];
     }
 }
