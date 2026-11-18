@@ -54,8 +54,7 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<IBoundedProcessExecutor>(),
             sp.GetRequiredService<IConsoleProcessLauncher>(),
-            sp.GetRequiredService<IUpdateFileModes>(),
-            sp.GetRequiredService<IIdGenerator>()));
+            sp.GetRequiredService<IUpdateFileModes>()));
         services.TryAddSingleton<ISquadPackager>(sp => new FileSquadPackager(sp.GetRequiredService<ISquadArchiveWriter>()));
         services.TryAddSingleton<ISquadSkillShadowing, FileSquadSkillShadowing>();
         services.TryAddSingleton<IDevinImportOverlapInspector, FileDevinImportOverlapInspector>();

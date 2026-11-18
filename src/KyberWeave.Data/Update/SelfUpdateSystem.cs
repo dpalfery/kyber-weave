@@ -8,10 +8,11 @@ namespace KyberWeave.Cli.Update;
 /// <summary>The processes, files and archives the self-update touches: starts children, probes the install directory and replaces binaries.</summary>
 /// <remarks>
 /// It holds the bounds and the choice of which seam runs each step, and calls no resource itself. Files go through
-/// <see cref="IWritableFileSystem"/>, bounded captures through <see cref="IBoundedProcessExecutor"/>, probe names
-/// through <see cref="IIdGenerator"/> and entry paths through <see cref="IPathResolver"/>. The two things those seams
-/// cannot express are named adapters: a child that shares this console (<see cref="IConsoleProcessLauncher"/>) and
-/// permission bits (<see cref="IUpdateFileModes"/>).
+/// <see cref="IWritableFileSystem"/>, bounded captures through <see cref="IBoundedProcessExecutor"/> and entry paths
+/// through <see cref="IPathResolver"/>. The two things those seams
+/// cannot express are named adapters: a child that shares this console (<see cref="IConsoleProcessLauncher"/>, which
+/// also runs the hand-off rehearsal so the hand-off's own start path is the one rehearsed) and permission bits
+/// (<see cref="IUpdateFileModes"/>).
 /// </remarks>
 internal sealed class SelfUpdateSystem : ISelfUpdateSystem
 {
@@ -36,38 +37,35 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
     /// <summary>The bound for the pre-swap rehearsal, which runs the installed command with <c>--version</c> and must return at once.</summary>
     private static readonly TimeSpan RehearsalTimeout = TimeSpan.FromSeconds(30);
 
+    private const string ProbeFileName = ".kyber-weave-update-probe";
+
     private readonly IWritableFileSystem _files;
     private readonly IBoundedProcessExecutor _processes;
     private readonly IConsoleProcessLauncher _console;
-    private readonly IIdGenerator _ids;
     private readonly ReleaseArchiveExtractor _extractor;
     private readonly BinaryReplacer _replacer;
 
     /// <summary>Creates the system over its seams.</summary>
     /// <param name="files">Every file the update reads, stages, moves or deletes.</param>
     /// <param name="paths">Decides where an archive entry may be written.</param>
-    /// <param name="processes">Runs the bounded verbs whose output is captured, and the output-discarding rehearsal.</param>
-    /// <param name="console">Runs the steps that write to this console.</param>
+    /// <param name="processes">Runs the bounded verbs whose output is captured.</param>
+    /// <param name="console">Runs the steps that write to this console, and the hand-off with its rehearsal.</param>
     /// <param name="modes">Reads and sets the permission bits of an installed binary.</param>
-    /// <param name="ids">Names the probe file.</param>
     public SelfUpdateSystem(
         IWritableFileSystem files,
         IPathResolver paths,
         IBoundedProcessExecutor processes,
         IConsoleProcessLauncher console,
-        IUpdateFileModes modes,
-        IIdGenerator ids)
+        IUpdateFileModes modes)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(paths);
         ArgumentNullException.ThrowIfNull(processes);
         ArgumentNullException.ThrowIfNull(console);
         ArgumentNullException.ThrowIfNull(modes);
-        ArgumentNullException.ThrowIfNull(ids);
         _files = files;
         _processes = processes;
         _console = console;
-        _ids = ids;
         _extractor = new ReleaseArchiveExtractor(files, new ArchiveEntryPlanner(paths), modes);
         _replacer = new BinaryReplacer(files, modes, processes);
     }
@@ -107,41 +105,41 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
     }
 
     /// <inheritdoc />
-    public int StartFinishingProcess(string fileName, IReadOnlyList<string> arguments, bool discardOutput)
-    {
-        if (!discardOutput)
-            return _console.Run(fileName, arguments, FinishUpdateTimeout);
-
-        // The rehearsal's output is discarded: the capturing executor drains both pipes and the result is dropped.
-        ProcessStartInfo child = new(fileName)
-        {
-            UseShellExecute = false,
-            RedirectStandardInput = true,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        foreach (string argument in arguments)
-            child.ArgumentList.Add(argument);
-
-        return _processes.Run(child, string.Empty, RehearsalTimeout).ExitCode;
-    }
+    public int StartFinishingProcess(string fileName, IReadOnlyList<string> arguments, bool discardOutput) =>
+        _console.Run(
+            fileName,
+            arguments,
+            discardOutput ? RehearsalTimeout : FinishUpdateTimeout,
+            discardOutput);
 
     /// <inheritdoc />
     public bool CanWriteDirectory(string directory)
     {
+        string probe = Path.Combine(directory, ProbeFileName);
         try
         {
-            string probe = Path.Combine(directory, ".kyber-weave-update-" + _ids.NewGuid().ToString("N"));
+            // A probe a killed update left is removed first, so it never reads as an unwritable directory.
+            _files.DeleteFile(probe);
             using (_files.OpenWriteNew(probe))
             {
             }
 
-            _files.DeleteFile(probe);
             return true;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             return false;
+        }
+        finally
+        {
+            try
+            {
+                _files.DeleteFile(probe);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A probe that cannot be removed is removed by the next probe.
+            }
         }
     }
 

@@ -19,7 +19,6 @@ public static class RealSelfUpdateSystem
             new PhysicalPathResolver(disk),
             new KernelBoundedProcessExecutor(),
             new ProcessConsoleLauncher(),
-            new UnixUpdateFileModes(),
-            new KyberWeave.Data.Host.SystemIdGenerator());
+            new UnixUpdateFileModes());
     }
 }

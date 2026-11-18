@@ -1,6 +1,8 @@
 using KyberWeave.Testing.Update;
+using System.Diagnostics;
 using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
+using KyberWeave.Core.Processes;
 using Xunit;
 
 namespace KyberWeave.Integration.Tests.Contracts;
@@ -95,5 +97,30 @@ public sealed class SelfUpdateSystemContractTests : IDisposable
         Assert.Equal("new", _files.ReadAllText(destination));
         Assert.True(File.GetUnixFileMode(destination).HasFlag(UnixFileMode.UserExecute));
         Assert.Equal([destination], Directory.EnumerateFileSystemEntries(install));
+    }
+
+    [Fact]
+    public void AnArchiveMadeBySystemTarAsTheReleaseWorkflowDoesExtractsWithItsExecutableBit()
+    {
+        if (OperatingSystem.IsWindows())
+            return;
+
+        string packed = Path.Combine(_root, "packed");
+        _files.CreateDirectory(packed);
+        string image = Path.Combine(packed, "kyber-weave");
+        _files.WriteAllText(image, "binary");
+        File.SetUnixFileMode(image, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.OtherRead);
+        string archive = Path.Combine(_root, "kyber-weave-linux-x64.tar.gz");
+        ProcessStartInfo tar = new("tar") { UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        foreach (string argument in new[] { "-C", packed, "-czf", archive, "kyber-weave" })
+            tar.ArgumentList.Add(argument);
+
+        ProcessResult made = ProcessRunner.Run(tar, string.Empty, TimeSpan.FromSeconds(30));
+        Assert.Equal(0, made.ExitCode);
+
+        _system.ExtractArchive(archive, Path.Combine(_root, "extract"), windows: false);
+
+        Assert.Equal("binary", _files.ReadAllText(Path.Combine(_root, "extract", "kyber-weave")));
+        Assert.True(File.GetUnixFileMode(Path.Combine(_root, "extract", "kyber-weave")).HasFlag(UnixFileMode.UserExecute));
     }
 }

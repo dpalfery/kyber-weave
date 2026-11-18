@@ -32,8 +32,7 @@ public sealed class SelfUpdateSystemTests
             new FakePathResolver(_files),
             _processes,
             _console,
-            _modes,
-            new FakeIdGenerator());
+            _modes);
         _files.CreateDirectory(Work);
         _files.CreateDirectory(Install);
     }
@@ -187,7 +186,51 @@ public sealed class SelfUpdateSystemTests
             () => _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false));
 
         Assert.Equal("old", _files.ReadAllText(Destination));
-        Assert.False(_files.FileExists(Destination + ".old"));
+        Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
+    }
+
+    [Fact]
+    public void AFailedMoveOffTheWindowsPathLeavesNoStagingFileEither()
+    {
+        _files.WriteAllText(Destination, "old");
+        _files.WriteAllText(Work + "/kyber-weave", "new");
+        _files.FailWhen(
+            operation => operation.Name == nameof(_files.MoveFile) && operation.Path?.EndsWith(".new", StringComparison.Ordinal) == true,
+            new IOException("denied"));
+
+        _ = Assert.Throws<IOException>(
+            () => _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: false, macOs: false));
+
+        Assert.Equal("old", _files.ReadAllText(Destination));
+        Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
+    }
+
+    [Fact]
+    public void ARecoveryAfterAStopBetweenTheTwoWindowsMovesInstallsTheNewImageAndDropsTheOldOne()
+    {
+        _files.WriteAllText(Destination + ".old", "old");
+        _files.WriteAllText(Work + "/kyber-weave", "new");
+
+        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
+
+        Assert.Equal("new", _files.ReadAllText(Destination));
+        Assert.Equal([Destination], _files.EnumerateFiles(Install, "*", recursive: true));
+    }
+
+    [Fact]
+    public void AnOldImageThatCannotBeRemovedStaysAndTheUpdateStillSucceeds()
+    {
+        _files.WriteAllText(Destination, "old");
+        _files.WriteAllText(Work + "/kyber-weave", "new");
+        int deletesOfTheOldImage = 0;
+        _files.FailWhen(
+            operation => operation.Name == nameof(_files.DeleteFile) && operation.Path == Destination + ".old" && ++deletesOfTheOldImage == 2,
+            new IOException("locked"));
+
+        _system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: true, macOs: false);
+
+        Assert.Equal("new", _files.ReadAllText(Destination));
+        Assert.Equal("old", _files.ReadAllText(Destination + ".old"));
     }
 
     [Fact]
@@ -219,7 +262,7 @@ public sealed class SelfUpdateSystemTests
     {
         ScriptedProcessExecutor failing = new(_ => throw new TimeoutException("xattr hung"));
         SelfUpdateSystem system = new(
-            _files, new FakePathResolver(_files), failing, _console, _modes, new FakeIdGenerator());
+            _files, new FakePathResolver(_files), failing, _console, _modes);
         _files.WriteAllText(Work + "/kyber-weave", "new");
 
         system.ReplaceBinary(Work + "/kyber-weave", Destination, windows: false, macOs: true);
@@ -237,7 +280,7 @@ public sealed class SelfUpdateSystemTests
         _system.CopyFile(Install + "/source", Work + "/backup", overwrite: true);
 
         Assert.Equal("binary", _files.ReadAllText(Work + "/backup"));
-        Assert.Equal(executable, _modes.Modes[Work + "/.backup.copy"]);
+        Assert.Equal(executable, _modes.Modes[Work + "/.backup.new"]);
         Assert.Equal([Work + "/backup"], _files.EnumerateFiles(Work, "*", recursive: true));
     }
 
@@ -263,6 +306,28 @@ public sealed class SelfUpdateSystemTests
     public void AWritableDirectoryProbesTrueAndLeavesNoProbeBehind()
     {
         Assert.True(_system.CanWriteDirectory(Install));
+
+        Assert.Empty(_files.EnumerateFiles(Install, "*", recursive: false));
+    }
+
+    [Fact]
+    public void AProbeAKilledUpdateLeftDoesNotMakeTheDirectoryLookUnwritable()
+    {
+        _files.WriteAllText(Install + "/.kyber-weave-update-probe", string.Empty);
+
+        Assert.True(_system.CanWriteDirectory(Install));
+
+        Assert.Empty(_files.EnumerateFiles(Install, "*", recursive: false));
+    }
+
+    [Fact]
+    public void AProbeThatCannotBeCreatedLeavesNothingBehind()
+    {
+        _files.FailWhen(
+            operation => operation.Name == nameof(_files.OpenWriteNew),
+            new IOException("disk full"));
+
+        Assert.False(_system.CanWriteDirectory(Install));
 
         Assert.Empty(_files.EnumerateFiles(Install, "*", recursive: false));
     }
@@ -325,24 +390,24 @@ public sealed class SelfUpdateSystemTests
 
         Assert.Equal(3, _system.StartFinishingProcess("kyber-weave", ["update", "--finish-update"], discardOutput: false));
 
-        Assert.Equal(TimeSpan.FromMinutes(15), Assert.Single(_console.Runs).Timeout);
+        (string FileName, IReadOnlyList<string> Arguments, TimeSpan Timeout, bool DiscardOutput) run = Assert.Single(_console.Runs);
+        Assert.Equal(TimeSpan.FromMinutes(15), run.Timeout);
+        Assert.False(run.DiscardOutput);
         Assert.Empty(_processes.Calls);
     }
 
     [Fact]
-    public void TheRehearsalRunsBoundedByThirtySecondsAndItsOutputIsDropped()
+    public void TheRehearsalRunsTheHandOffStartPathBoundedByThirtySecondsWithItsOutputDiscarded()
     {
-        ScriptedProcessExecutor chatty = new(_ => new ProcessResult(5, "lots of output", "and errors"));
-        SelfUpdateSystem system = new(
-            _files, new FakePathResolver(_files), chatty, _console, _modes, new FakeIdGenerator());
+        _console.ExitCode = 5;
 
-        int exit = system.StartFinishingProcess("kyber-weave", ["--version"], discardOutput: true);
+        int exit = _system.StartFinishingProcess("kyber-weave", ["--version"], discardOutput: true);
 
         Assert.Equal(5, exit);
-        ProcessStartInfo call = Assert.Single(chatty.Calls);
-        Assert.True(call.RedirectStandardInput && call.RedirectStandardOutput && call.RedirectStandardError);
-        Assert.Equal([TimeSpan.FromSeconds(30)], chatty.Timeouts);
-        Assert.Empty(_console.Runs);
+        (string FileName, IReadOnlyList<string> Arguments, TimeSpan Timeout, bool DiscardOutput) run = Assert.Single(_console.Runs);
+        Assert.Equal(TimeSpan.FromSeconds(30), run.Timeout);
+        Assert.True(run.DiscardOutput);
+        Assert.Empty(_processes.Calls);
     }
 
     private string Stage(string name, byte[] bytes)

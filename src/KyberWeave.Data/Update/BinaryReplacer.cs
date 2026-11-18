@@ -41,49 +41,77 @@ internal sealed class BinaryReplacer(
         files.CreateDirectory(directory);
 
         string staging = Path.Combine(directory, "." + Path.GetFileName(destinationPath) + ".new");
-        CopyContent(extractedBinaryPath, staging);
-        if (!windows)
-            modes.Set(staging, ExecutableBits);
-
-        // Quarantine is cleared on the staging copy, before the move, not on the installed
-        // path afterwards. The move carries extended attributes with the inode, so the
-        // result is the same — but staging is the last point at which the destination is
-        // certainly not this process's own image. See ClearMacQuarantine.
-        if (macOs)
-            ClearMacQuarantine(staging);
-
-        if (windows && files.FileExists(destinationPath))
+        try
         {
-            string oldPath = destinationPath + ".old";
-            files.DeleteFile(oldPath);
-            files.MoveFile(destinationPath, oldPath, overwrite: true);
-            try
-            {
+            CopyContent(extractedBinaryPath, staging);
+            if (!windows)
+                modes.Set(staging, ExecutableBits);
+
+            // Quarantine is cleared on the staging copy, before the move, not on the installed
+            // path afterwards. The move carries extended attributes with the inode, so the
+            // result is the same — but staging is the last point at which the destination is
+            // certainly not this process's own image. See ClearMacQuarantine.
+            if (macOs)
+                ClearMacQuarantine(staging);
+
+            if (windows)
+                MoveOverOnWindows(staging, destinationPath);
+            else
                 files.MoveFile(staging, destinationPath, overwrite: true);
-            }
-            catch
-            {
-                if (files.FileExists(oldPath) && !files.FileExists(destinationPath))
-                    files.MoveFile(oldPath, destinationPath, overwrite: true);
-                throw;
-            }
+        }
+        catch
+        {
+            RemoveQuietly(staging);
+            throw;
+        }
+    }
 
-            try
-            {
-                files.DeleteFile(oldPath);
-            }
-            catch (IOException)
-            {
-                // The previous image stays locked until this process exits.
-            }
-
+    private void MoveOverOnWindows(string staging, string destinationPath)
+    {
+        string oldPath = destinationPath + ".old";
+        if (!files.FileExists(destinationPath))
+        {
+            // A stop between the two moves below left no image and the old one here. The new image takes its place and
+            // the old one, which nothing needs now, goes.
+            files.MoveFile(staging, destinationPath, overwrite: true);
+            RemoveQuietly(oldPath);
             return;
         }
 
-        files.MoveFile(staging, destinationPath, overwrite: true);
+        files.DeleteFile(oldPath);
+        files.MoveFile(destinationPath, oldPath, overwrite: true);
+        try
+        {
+            files.MoveFile(staging, destinationPath, overwrite: true);
+        }
+        catch
+        {
+            if (files.FileExists(oldPath) && !files.FileExists(destinationPath))
+                files.MoveFile(oldPath, destinationPath, overwrite: true);
+            throw;
+        }
+
+        RemoveQuietly(oldPath);
+    }
+
+    private void RemoveQuietly(string path)
+    {
+        try
+        {
+            files.DeleteFile(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The previous image stays locked until this process exits, and a staging file that cannot be removed is
+            // overwritten by the next update.
+        }
     }
 
     /// <summary>Copies a file whole: written beside the destination, then moved over it, so a stop leaves the old or the new content.</summary>
+    /// <remarks>
+    /// The copy is staged under the name <see cref="Replace"/> stages under, so a copy that a stop left behind is the file
+    /// the next update overwrites and moves, not a stray.
+    /// </remarks>
     /// <param name="sourcePath">The file to copy.</param>
     /// <param name="destinationPath">Where the copy goes.</param>
     /// <param name="overwrite">True to replace an existing destination.</param>
@@ -98,7 +126,7 @@ internal sealed class BinaryReplacer(
             throw new IOException($"The file '{destinationPath}' already exists.");
 
         string directory = Path.GetDirectoryName(destinationPath) ?? string.Empty;
-        string staging = Path.Combine(directory, "." + Path.GetFileName(destinationPath) + ".copy");
+        string staging = Path.Combine(directory, "." + Path.GetFileName(destinationPath) + ".new");
         CopyContent(sourcePath, staging);
         UnixFileMode? mode = modes.Get(sourcePath);
         if (mode is { } bits)

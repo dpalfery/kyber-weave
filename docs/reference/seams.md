@@ -250,14 +250,17 @@ Task 4.4 leaves these in `Data` outside `Squad/`, each for a named reason:
   `OpenExclusive` (a read-write open that keeps every other opener out until disposed) and
   `OpenAppendShared` (an append that other appenders and readers share), proven on the fake and on
   `PhysicalFileSystem` by the file-system contract suite.
-- `SelfUpdateSystem` is converted. It takes the file-system, path, bounded-process and identifier seams by
-  constructor, and splits the work: `ArchiveEntryPlanner` decides where an archive entry may go and refuses an
-  absolute, climbing or link-escaping one, `ReleaseArchiveExtractor` reads the archive as a stream and writes each
-  entry through the file system, and `BinaryReplacer` stages, moves and (on Windows) rolls back one binary. Two
+- `SelfUpdateSystem` is converted. It takes the file-system, path and bounded-process seams by constructor, and
+  splits the work: `ArchiveEntryPlanner` decides where an archive entry may go and refuses an absolute, climbing or
+  link-escaping one, `ReleaseArchiveExtractor` reads the archive as a stream and writes each entry through the file
+  system (a link entry is refused), and `BinaryReplacer` stages, moves and (on Windows) rolls back one binary. Two
   adapters hold what those seams cannot express: `ProcessConsoleLauncher` starts a child that shares the console
-  (a role view captures output), and `UnixUpdateFileModes` reads and sets permission bits (the file-system seam has
-  no member for them). It replaces the running binary, so requirement 10.2 applies: the crash-safety contract tests
-  for the replace and rollback flow run on the in-memory file system and on the real disk.
+  (a role view captures output), and also runs the hand-off rehearsal so it is the hand-off's own start path;
+  `UnixUpdateFileModes` reads and sets permission bits (the file-system seam has no member for them). It replaces
+  the running binary, so requirement 10.2 applies: `SelfUpdateCrashSafetyContractTests` kills the update and its
+  rollback at every file operation and runs on the in-memory file system and on the real disk. One gap stays and is
+  listed in that suite: on Windows a stop between moving the old image aside and moving the new one in leaves no
+  image at the installed path.
 - `AnalysisCacheSafety`, `SqliteAnalysisPersistence` and `CodeGraphResolverAdapter` are converted: each takes the
   file-system, path, environment and bounded-process seams by constructor, and SQLite itself stays the system
   `sqlite3` executable behind the process seam. The callers open them through `IAnalysisPersistenceFactory` and

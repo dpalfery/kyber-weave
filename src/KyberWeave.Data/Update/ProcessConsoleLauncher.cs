@@ -7,15 +7,29 @@ namespace KyberWeave.Cli.Update;
 internal sealed class ProcessConsoleLauncher : IConsoleProcessLauncher
 {
     /// <inheritdoc />
-    public int Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout)
+    public int Run(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, bool discardOutput = false)
     {
         ProcessStartInfo child = new(fileName) { UseShellExecute = false };
+        if (discardOutput)
+        {
+            child.RedirectStandardOutput = true;
+            child.RedirectStandardError = true;
+        }
+
         foreach (string argument in arguments)
             child.ArgumentList.Add(argument);
 
         using Process? started = Process.Start(child);
         if (started is null)
             throw new InvalidOperationException($"the process could not be started: {fileName}");
+
+        // Redirected output must be drained, or a child that writes a lot blocks on a full pipe. With no handler attached,
+        // the asynchronous reads discard what they read.
+        if (discardOutput)
+        {
+            started.BeginOutputReadLine();
+            started.BeginErrorReadLine();
+        }
 
         if (started.WaitForExit(timeout))
             return started.ExitCode;
