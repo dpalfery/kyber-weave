@@ -1,6 +1,7 @@
 using KyberWeave.Testing.Squad;
 using System.Text;
 using KyberWeave.Cli;
+using KyberWeave.Data.Configuration;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
@@ -8,18 +9,21 @@ using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.Fixtures;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Task 6.5 contract: Arbiter settings flow from squad install/update into rendering,
 /// unenforced targets are recorded, trust steps are printed, and squad doctor probes
 /// the Arbiter binary.
 /// </summary>
-public sealed class SquadArbiterCliTests : IDisposable
+public sealed class SquadArbiterCliTests
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemorySquadState _state = new();
+    private readonly FakeSquadRenderer _renderer = new();
+    private readonly FileKyberWeaveConfigRepository _configs;
 
-    public void Dispose() => _temp.Dispose();
+    public SquadArbiterCliTests() =>
+        _configs = new FileKyberWeaveConfigRepository(new FakeRepositoryTreeProbe(), _state.Files, _state.Paths, _state.Environment);
 
     [Fact]
     public void Install_PassesArbiterSettingsIntoRenderRequest()
@@ -27,16 +31,9 @@ public sealed class SquadArbiterCliTests : IDisposable
         string targetDir = NewDir("arbiter-install-wiring");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 1500);
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -64,18 +61,12 @@ public sealed class SquadArbiterCliTests : IDisposable
         string targetDir = NewDir("arbiter-update-wiring");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 1500);
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadStateStore stateStore = _state.Store;
         SeedDeployment(targetDir, stateStore, (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false);
+        SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -105,16 +96,10 @@ public sealed class SquadArbiterCliTests : IDisposable
         string targetDir = NewDir("arbiter-lifecycle-nohook");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadStateStore stateStore = _state.Store;
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -141,11 +126,9 @@ public sealed class SquadArbiterCliTests : IDisposable
     public async Task Lifecycle_WithArbiterEnabledGlobalScope_RecordsGlobalScopeDegradation()
     {
         string targetRoot = NewDir("arbiter-lifecycle-global");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
             TargetRoot: targetRoot,
@@ -199,16 +182,9 @@ public sealed class SquadArbiterCliTests : IDisposable
         string targetDir = NewDir("arbiter-install-opencode");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -243,16 +219,9 @@ public sealed class SquadArbiterCliTests : IDisposable
         string targetDir = NewDir("arbiter-install-trust");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        SquadInstallCommand command = SquadTestCommands.Install(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadInstallCommand command = SquadTestCommands.InMemoryInstall(_state, releaseSource, renderer, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -277,18 +246,12 @@ public sealed class SquadArbiterCliTests : IDisposable
         string targetDir = NewDir("arbiter-update-trust");
         WriteArbiterConfig(targetDir, enabled: true, timeoutMs: 3000);
 
-        using FakeSquadReleaseSource releaseSource = new();
-        FakeSquadRenderer renderer = new();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        using FakeSquadReleaseSource releaseSource = new() { Files = _state.Files };
+        FakeSquadRenderer renderer = _renderer;
+        SquadStateStore stateStore = _state.Store;
         SeedDeployment(targetDir, stateStore, (".codex/agents/architect.toml", "name = \"architect\"\n"));
 
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths: userPaths,
-            stateStore: stateStore,
-            releaseSource: releaseSource,
-            renderer: renderer,
-            isInteractive: false);
+        SquadUpdateCommand command = SquadTestCommands.InMemoryUpdate(_state, releaseSource, renderer, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -315,8 +278,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithFailure("kyber-weave-arbiter", "The 'kyber-weave-arbiter' executable is not available on PATH.");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -335,8 +297,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", "kyber-weave-arbiter 0.0.0\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -356,8 +317,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {cliVersion}\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -380,8 +340,7 @@ public sealed class SquadArbiterCliTests : IDisposable
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithMatchingArbiterProbe();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: workingDir);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: workingDir, configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -401,16 +360,16 @@ public sealed class SquadArbiterCliTests : IDisposable
         string workingDir = NewDir("arbiter-doctor-zcode-off");
         WriteArbiterConfig(workingDir, enabled: false, timeoutMs: 3000);
         WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
-        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+        _state.Files.CreateDirectory(Path.Combine(workingDir, ".zcode"));
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            userPaths,
             workingDirectory: workingDir,
-            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")));
+            globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
+            configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -426,19 +385,19 @@ public sealed class SquadArbiterCliTests : IDisposable
         string workingDir = NewDir("arbiter-doctor-zcode-on");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
         WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
-        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
-        Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
+        _state.Files.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+        _state.Files.CreateDirectory(Path.Combine(_state.Files.Root, "doctor-global-root"));
 
         string cliVersion = CliVersion();
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {cliVersion}\n");
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            userPaths,
             workingDirectory: workingDir,
-            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")));
+            globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
+            configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -457,22 +416,21 @@ public sealed class SquadArbiterCliTests : IDisposable
         string workingDir = NewDir("arbiter-doctor-zcode-global");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
         WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
-        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
-        Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
+        _state.Files.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+        _state.Files.CreateDirectory(Path.Combine(_state.Files.Root, "doctor-global-root"));
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        SquadStateStore stateStore = _state.Store;
         SeedReceipt(workingDir, stateStore, SquadDeploymentScope.Global);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {CliVersion()}\n");
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            userPaths,
             workingDirectory: workingDir,
-            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")),
-            stateStore: stateStore);
+            globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
+            configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -488,22 +446,21 @@ public sealed class SquadArbiterCliTests : IDisposable
         string workingDir = NewDir("arbiter-doctor-zcode-project-receipt");
         WriteArbiterConfig(workingDir, enabled: true, timeoutMs: 3000);
         WriteDoctorSourceWithArbiterOnlyToolchain(workingDir);
-        Directory.CreateDirectory(Path.Combine(workingDir, ".zcode"));
-        Directory.CreateDirectory(Path.Combine(_temp.Path, "doctor-global-root"));
+        _state.Files.CreateDirectory(Path.Combine(workingDir, ".zcode"));
+        _state.Files.CreateDirectory(Path.Combine(_state.Files.Root, "doctor-global-root"));
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        SquadStateStore stateStore = _state.Store;
         SeedReceipt(workingDir, stateStore, SquadDeploymentScope.Project);
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n")
             .WithProbeOutput("kyber-weave-arbiter", $"kyber-weave-arbiter {CliVersion()}\n");
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            userPaths,
             workingDirectory: workingDir,
-            globalRoots: new FixedDoctorRoot(Path.Combine(_temp.Path, "doctor-global-root")),
-            stateStore: stateStore);
+            globalRoots: new FixedDoctorRoot(Path.Combine(_state.Files.Root, "doctor-global-root")),
+            configs: _configs);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -517,19 +474,19 @@ public sealed class SquadArbiterCliTests : IDisposable
     /// <summary>Copies the Arbiter Squad fixture into the doctor's canonical-source
     /// location with a toolchain declaring only the Arbiter server, and drops the
     /// solution marker the pack-source locator keys on.</summary>
-    private static void WriteDoctorSourceWithArbiterOnlyToolchain(string workingDir)
+    private void WriteDoctorSourceWithArbiterOnlyToolchain(string workingDir)
     {
-        using ArbiterSquadFixture fixture = ArbiterSquadFixture.Create();
         string target = Path.Combine(workingDir, "products", "kyber-squad");
-        foreach (string sourceFile in Directory.GetFiles(fixture.Path, "*", SearchOption.AllDirectories))
+        string fixturePath = ArbiterSquadFixture.CreateInMemory(_state.Files).Path;
+        foreach (string sourceFile in _state.Files.EnumerateFiles(fixturePath, "*", recursive: true))
         {
-            string relative = Path.GetRelativePath(fixture.Path, sourceFile);
+            string relative = Path.GetRelativePath(fixturePath, sourceFile);
             string destination = Path.Combine(target, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(sourceFile, destination);
+            _state.Files.CreateDirectory(Path.GetDirectoryName(destination)!);
+            _state.Files.WriteAllBytes(destination, _state.Files.ReadAllBytes(sourceFile));
         }
 
-        File.WriteAllText(
+        _state.Files.WriteAllText(
             Path.Combine(target, "toolchain.yml"),
             "schema: kyber-squad.toolchain/v1\n" +
             "required-features:\n" +
@@ -539,9 +496,8 @@ public sealed class SquadArbiterCliTests : IDisposable
             "    - arbiter_evaluate_agent_dispatch_or_return\n" +
             "    - arbiter_list_effective_rules_by_trigger\n" +
             "    - arbiter_check_configuration_and_key_readiness\n" +
-            "validated-release: null\n",
-            Encoding.UTF8);
-        File.WriteAllText(Path.Combine(workingDir, "KyberWeave.sln"), string.Empty, Encoding.UTF8);
+            "validated-release: null\n");
+        _state.Files.WriteAllText(Path.Combine(workingDir, "KyberWeave.sln"), string.Empty);
     }
 
     private sealed class FixedDoctorRoot(string root) : ISquadGlobalRootResolver
@@ -554,38 +510,37 @@ public sealed class SquadArbiterCliTests : IDisposable
 
     private string NewDir(string name)
     {
-        string dir = Path.Combine(_temp.Path, name);
-        Directory.CreateDirectory(dir);
+        string dir = Path.Combine(_state.Files.Root, "work", name);
+        _state.Files.CreateDirectory(dir);
         return dir;
     }
 
-    private static void WriteArbiterConfig(string targetRoot, bool enabled, int timeoutMs)
+    private void WriteArbiterConfig(string targetRoot, bool enabled, int timeoutMs)
     {
         string configDir = Path.Combine(targetRoot, ".kyber-weave");
-        Directory.CreateDirectory(configDir);
+        _state.Files.CreateDirectory(configDir);
         string enabledText = enabled ? "true" : "false";
-        File.WriteAllText(
+        _state.Files.WriteAllText(
             Path.Combine(configDir, "kyber-weave.yml"),
-            $"arbiter:\n  enabled: {enabledText}\n  provider:\n    timeout-ms: {timeoutMs}\n",
-            Encoding.UTF8);
+            $"arbiter:\n  enabled: {enabledText}\n  provider:\n    timeout-ms: {timeoutMs}\n");
     }
 
-    private static void SeedDeployment(
+    private void SeedDeployment(
         string targetRoot,
         SquadStateStore stateStore,
         params (string RelativePath, string Content)[] files)
     {
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Project);
         string lockPath = stateStore.ResolveLockPath(targetRoot, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
 
         List<SquadOwnedFile> ownedFiles = [];
         foreach ((string relPath, string content) in files)
         {
             string fullPath = Path.Combine(targetRoot, relPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            _state.Files.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             byte[] bytes = Encoding.UTF8.GetBytes(content);
-            File.WriteAllBytes(fullPath, bytes);
+            _state.Files.WriteAllBytes(fullPath, bytes);
             string sha256 = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
             ownedFiles.Add(new SquadOwnedFile(relPath, sha256, "codex", Adopted: false));
         }
@@ -610,14 +565,14 @@ public sealed class SquadArbiterCliTests : IDisposable
             AssetDigest: "b".PadRight(64, '0'),
             Apm: new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
-        File.WriteAllText(lockPath, stateStore.SerializeLock(squadLock), Encoding.UTF8);
+        _state.Files.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt));
+        _state.Files.WriteAllText(lockPath, stateStore.SerializeLock(squadLock));
     }
 
-    private static void SeedReceipt(string targetRoot, SquadStateStore stateStore, SquadDeploymentScope scope)
+    private void SeedReceipt(string targetRoot, SquadStateStore stateStore, SquadDeploymentScope scope)
     {
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, scope);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _state.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         SquadReceipt receipt = new(
             Schema: "kyber-squad.receipt/v1",
             Scope: scope,
@@ -625,7 +580,7 @@ public sealed class SquadArbiterCliTests : IDisposable
             InstalledAtUtc: DateTimeOffset.UtcNow,
             Degradations: [],
             Files: []);
-        File.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt), Encoding.UTF8);
+        _state.Files.WriteAllText(receiptPath, stateStore.SerializeReceipt(receipt));
     }
 
     private sealed record CommandExecution(int ExitCode, string Output);

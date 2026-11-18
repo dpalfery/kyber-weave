@@ -241,7 +241,8 @@ internal static class SquadTestCommands
         SquadConsole? output = null,
         ISquadGlobalRootResolver? globalRoots = null,
         bool isInteractive = false,
-        Func<string, bool>? readAnswer = null)
+        Func<string, bool>? readAnswer = null,
+        IKyberWeaveConfigRepository? configs = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadInstallCommand(
@@ -255,7 +256,7 @@ internal static class SquadTestCommands
             new SquadTargetRootConfirmation(console),
             state.Environment,
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
-            new FakeKyberWeaveConfigRepository(),
+            configs ?? new FakeKyberWeaveConfigRepository(),
             null);
     }
 
@@ -268,7 +269,8 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         ISquadInstanceService? instances = null,
         bool isInteractive = false,
-        Func<string, bool>? readAnswer = null)
+        Func<string, bool>? readAnswer = null,
+        IKyberWeaveConfigRepository? configs = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadUpdateCommand(
@@ -284,7 +286,7 @@ internal static class SquadTestCommands
             new SquadTargetRootConfirmation(console),
             state.Environment,
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
-            new FakeKyberWeaveConfigRepository(),
+            configs ?? new FakeKyberWeaveConfigRepository(),
             null,
             null);
     }
