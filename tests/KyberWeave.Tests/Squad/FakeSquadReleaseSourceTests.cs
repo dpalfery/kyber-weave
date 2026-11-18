@@ -144,6 +144,47 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
     }
 
     [Fact]
+    public async Task AnArchiveEntryThatEscapesTheDestinationIsRefused()
+    {
+        string archivePath = await WriteArchiveAsync(
+            Path.Combine(_temp.Path, "escaping.zip"),
+            ("../evil.txt", "escaped archive content"));
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath);
+        SquadReleaseRequest request = Request("escaping-archive");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
+
+        Assert.False(File.Exists(Path.Combine(_temp.Path, "evil.txt")));
+    }
+
+    [Fact]
+    public async Task ASymbolicLinkArchiveEntryIsRefused()
+    {
+        string archivePath = await WriteArchiveAsync(
+            Path.Combine(_temp.Path, "linked.zip"),
+            ("linked.yml", "squad.yml", unchecked((int)(0xA000u << 16))));
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath);
+        SquadReleaseRequest request = Request("linked-archive");
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => source.DownloadAndExtractAsync(request));
+
+        Assert.False(File.Exists(Path.Combine(request.DestinationPath, "linked.yml")));
+    }
+
+    [Fact]
+    public async Task ADuplicateArchivePathIsRefused()
+    {
+        string archivePath = await WriteArchiveAsync(
+            Path.Combine(_temp.Path, "duplicate.zip"),
+            ("squad.yml", "first"),
+            ("squad.yml", "second"));
+        FakeSquadReleaseSource source = FakeSquadReleaseSource.FromArchive(archivePath);
+
+        await Assert.ThrowsAsync<InvalidDataException>(
+            () => source.DownloadAndExtractAsync(Request("duplicate-archive")));
+    }
+
+    [Fact]
     public async Task AFileContentPathThatEscapesTheDestinationIsRefused()
     {
         FakeSquadReleaseSource source = new()
@@ -324,6 +365,33 @@ public sealed class FakeSquadReleaseSourceTests : IDisposable
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         File.WriteAllText(path, content);
+    }
+
+    private static async Task<string> WriteArchiveAsync(
+        string archivePath,
+        params (string Name, string Content, int ExternalAttributes)[] entries)
+    {
+        await using FileStream stream = File.Create(archivePath);
+        using ZipArchive archive = new(stream, ZipArchiveMode.Create);
+        foreach ((string name, string content, int externalAttributes) in entries)
+        {
+            ZipArchiveEntry entry = archive.CreateEntry(name);
+            entry.ExternalAttributes = externalAttributes;
+            await using Stream entryStream = await entry.OpenAsync();
+            await entryStream.WriteAsync(Utf8NoBom(content));
+        }
+
+        return archivePath;
+    }
+
+    private static async Task<string> WriteArchiveAsync(
+        string archivePath,
+        params (string Name, string Content)[] entries)
+    {
+        (string Name, string Content, int ExternalAttributes)[] expanded = entries
+            .Select(static entry => (entry.Name, entry.Content, 0))
+            .ToArray();
+        return await WriteArchiveAsync(archivePath, expanded);
     }
 
     private static Dictionary<string, byte[]> Snapshot(string root)

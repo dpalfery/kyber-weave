@@ -32,8 +32,8 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
     }
 
     /// <summary>
-    /// A fake that extracts the pack archive at <paramref name="archivePath"/>, reporting the archive's own
-    /// size and digest, as the product's GitHub release source does.
+    /// A fake that extracts the pack archive at <paramref name="archivePath"/> after the same entry checks the
+    /// product's release source applies, reporting the archive's own size and digest.
     /// </summary>
     internal static FakeSquadReleaseSource FromArchive(string archivePath)
     {
@@ -117,6 +117,7 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
 
         if (ArchivePath is not null)
         {
+            ValidateArchiveEntries(ArchivePath, request.DestinationPath, cancellationToken);
             await ZipFile.ExtractToDirectoryAsync(ArchivePath, request.DestinationPath, true, cancellationToken);
 
             byte[] archiveBytes = await File.ReadAllBytesAsync(ArchivePath, cancellationToken);
@@ -169,6 +170,89 @@ public sealed class FakeSquadReleaseSource : ISquadReleaseSource
             throw new InvalidOperationException(
                 "A fake release source extracts an archive or a source directory, not both.");
         }
+    }
+
+    /// <summary>
+    /// The same entry rules the product's release adapter applies before it extracts an archive, so a unit test
+    /// cannot hand the fake an archive a real download would reject: no rooted or climbing path, no duplicate,
+    /// no symbolic link, and no path that descends through a file.
+    /// </summary>
+    private static void ValidateArchiveEntries(
+        string archivePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        using ZipArchive archive = ZipFile.OpenRead(archivePath);
+        StringComparer comparison = OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        HashSet<string> seen = new(comparison);
+        HashSet<string> files = new(comparison);
+        HashSet<string> directories = new(comparison);
+
+        foreach (ZipArchiveEntry entry in archive.Entries)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (IsSymbolicLink(entry))
+            {
+                throw new InvalidDataException(
+                    $"The Squad archive contains a symbolic link entry: '{entry.FullName}'.");
+            }
+
+            (string relativePath, bool isDirectory) = ValidateRelativePath(entry.FullName, destinationPath);
+            if (!seen.Add(relativePath))
+            {
+                throw new InvalidDataException(
+                    $"The Squad archive contains duplicate path '{relativePath}'.");
+            }
+
+            ValidateArchiveHierarchy(relativePath, isDirectory, files, directories);
+        }
+    }
+
+    private static bool IsSymbolicLink(ZipArchiveEntry entry)
+    {
+        const uint UnixFileTypeMask = 0xF000;
+        const uint UnixSymbolicLink = 0xA000;
+        uint unixMode = ((uint)entry.ExternalAttributes >> 16) & UnixFileTypeMask;
+        bool windowsReparsePoint =
+            (entry.ExternalAttributes & (int)FileAttributes.ReparsePoint) != 0;
+        return unixMode == UnixSymbolicLink || windowsReparsePoint;
+    }
+
+    private static void ValidateArchiveHierarchy(
+        string relativePath,
+        bool isDirectory,
+        HashSet<string> files,
+        HashSet<string> directories)
+    {
+        string[] segments = relativePath.Split('/');
+        for (int index = 1; index < segments.Length; index++)
+        {
+            string ancestor = string.Join('/', segments.Take(index));
+            if (files.Contains(ancestor))
+            {
+                throw new InvalidDataException(
+                    $"The Squad archive path '{relativePath}' descends through file '{ancestor}'.");
+            }
+
+            directories.Add(ancestor);
+        }
+
+        if (isDirectory)
+        {
+            directories.Add(relativePath);
+            return;
+        }
+
+        if (directories.Contains(relativePath))
+        {
+            throw new InvalidDataException(
+                $"The Squad archive path '{relativePath}' conflicts with a directory.");
+        }
+
+        files.Add(relativePath);
     }
 
     /// <summary>
