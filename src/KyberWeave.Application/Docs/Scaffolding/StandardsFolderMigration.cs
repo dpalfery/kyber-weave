@@ -1,8 +1,9 @@
 using System.Globalization;
 using System.Text;
 using System.Text.RegularExpressions;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
-using KyberWeave.Core.FileSystem;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
 
@@ -58,20 +59,43 @@ public sealed partial class StandardsFolderMigration
     /// <summary>The command a caller runs to reach this migration.</summary>
     public const string Command = DocsLayout.MigrateStandardsCommand;
 
+    private readonly IWritableFileSystem _files;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
+    private readonly IIdGenerator _ids;
     private readonly OntologyConfig _config;
     private readonly string _repoRoot;
     private readonly TimeProvider _time;
 
-    /// <summary>Creates the migration over a repository root and its ontology.</summary>
+    /// <summary>Creates the migration over the seams it reads and writes through.</summary>
+    /// <param name="files">Reads and writes the repository's files.</param>
     /// <param name="repoRoot">The repository whose standards folders are migrated.</param>
     /// <param name="config">The ontology that declares the technologies and roles.</param>
+    /// <param name="paths">Turns the repository root into a full path and checks a write's containment.</param>
+    /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
+    /// <param name="ids">Names the temporary file a stub is written through.</param>
     /// <param name="time">Supplies the date a written stub carries.</param>
-    public StandardsFolderMigration(string repoRoot, OntologyConfig config, TimeProvider? time = null)
+    public StandardsFolderMigration(
+        IWritableFileSystem files,
+        string repoRoot,
+        OntologyConfig config,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IIdGenerator ids,
+        TimeProvider? time = null)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(ids);
+        _files = files;
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
+        _paths = paths;
+        _environment = environment;
+        _ids = ids;
         _time = time ?? TimeProvider.System;
     }
 
@@ -89,20 +113,20 @@ public sealed partial class StandardsFolderMigration
             foreach (string docsRoot in _config.DocsRoots)
             {
                 string folder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
-                if (!Directory.Exists(Absolute(folder))) continue;
+                if (!_files.DirectoryExists(Absolute(folder))) continue;
 
                 string standard = DocsLayout.StandardFile(docsRoot, scope);
                 string legacy = $"{folder}/README.md";
                 string? standardText;
                 List<StandardsFolderChange> planned = [];
 
-                if (!File.Exists(Absolute(standard)))
+                if (!_files.FileExists(Absolute(standard)))
                 {
-                    if (File.Exists(Absolute(legacy)))
+                    if (_files.FileExists(Absolute(legacy)))
                     {
                         planned.Add(new StandardsFolderChange(
                             StandardsFolderChangeKind.Rename, legacy, standard));
-                        standardText = File.ReadAllText(Absolute(legacy));
+                        standardText = _files.ReadAllText(Absolute(legacy));
                     }
                     else
                     {
@@ -124,13 +148,13 @@ public sealed partial class StandardsFolderMigration
                              (DocsLayout.SkillsFile(docsRoot, scope), "skills")
                          })
                 {
-                    if (File.Exists(Absolute(path))) continue;
+                    if (_files.FileExists(Absolute(path))) continue;
                     planned.Add(new StandardsFolderChange(
                         StandardsFolderChangeKind.Add, string.Empty, path));
                 }
 
                 string arbiter = DocsLayout.ArbiterRulesFile(docsRoot, scope);
-                if (!File.Exists(Absolute(arbiter)))
+                if (!_files.FileExists(Absolute(arbiter)))
                 {
                     planned.Add(new StandardsFolderChange(
                         StandardsFolderChangeKind.Add, string.Empty, arbiter));
@@ -218,7 +242,7 @@ public sealed partial class StandardsFolderMigration
                     if (reshapedText is null || skippedRenames.Contains(change.To)) break;
 
                     string reshapeTarget = RequireWritable(change.To);
-                    AtomicFile.WriteAllText(reshapeTarget, reshapedText);
+                    _files.WriteAllTextAtomic(reshapeTarget, reshapedText);
                     VerifyStillWritable(reshapeTarget);
                     applied.Add(change);
                     break;
@@ -245,13 +269,13 @@ public sealed partial class StandardsFolderMigration
     {
         string source = RequireWritable(from);
         string target = RequireWritable(to);
-        if (File.Exists(target)) return false;
+        if (_files.FileExists(target)) return false;
 
         try
         {
-            File.Move(source, target, overwrite: false);
+            _files.MoveFile(source, target, overwrite: false);
         }
-        catch (IOException) when (File.Exists(target))
+        catch (IOException) when (_files.FileExists(target))
         {
             return false;
         }
@@ -287,23 +311,23 @@ public sealed partial class StandardsFolderMigration
     /// </remarks>
     private bool TryCreateNew(string path, byte[] content)
     {
-        if (File.Exists(path)) return false;
+        if (_files.FileExists(path)) return false;
 
         string directory = Path.GetDirectoryName(path)!;
-        string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        string temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{_ids.NewGuid():N}.tmp");
 
         try
         {
-            using (FileStream stream = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            using (Stream stream = _files.OpenWriteNew(temporary))
             {
                 stream.Write(content);
             }
 
             try
             {
-                File.Move(temporary, path, overwrite: false);
+                _files.MoveFile(temporary, path, overwrite: false);
             }
-            catch (IOException) when (File.Exists(path))
+            catch (IOException) when (_files.FileExists(path))
             {
                 return false;
             }
@@ -385,11 +409,11 @@ public sealed partial class StandardsFolderMigration
     private string? ReadOrNull(string relativePath)
     {
         string full = Absolute(relativePath);
-        if (!File.Exists(full)) return null;
+        if (!_files.FileExists(full)) return null;
 
         try
         {
-            return File.ReadAllText(full);
+            return _files.ReadAllText(full);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -422,8 +446,8 @@ public sealed partial class StandardsFolderMigration
     private string RequireWritable(string fullPath, string named)
     {
         string boundary = RepositoryBoundary.For(_repoRoot, Path.DirectorySeparatorChar);
-        string full = Path.GetFullPath(fullPath);
-        if (!RepositoryBoundary.IsWithin(full, boundary, OperatingSystem.IsWindows()))
+        string full = _paths.GetFullPath(fullPath, _repoRoot);
+        if (!RepositoryBoundary.IsWithin(full, boundary, _environment.IsFileSystemCaseInsensitive))
         {
             throw new IOException(
                 $"Refusing to write '{named}': it resolves outside the repository root, so nothing was written.");
@@ -434,14 +458,12 @@ public sealed partial class StandardsFolderMigration
                      Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
-            FileSystemInfo entry = Directory.Exists(current)
-                ? new DirectoryInfo(current)
-                : new FileInfo(current);
-            if (entry.LinkTarget is null) continue;
+            string? linkTarget = _files.GetLinkTarget(current);
+            if (linkTarget is null) continue;
 
             throw new IOException(
                 $"Refusing to write '{named}': '{current}' is the symbolic link " +
-                $"'{entry.LinkTarget}', and a migration does not write through or replace a link, " +
+                $"'{linkTarget}', and a migration does not write through or replace a link, " +
                 "so nothing was written.");
         }
 
@@ -478,11 +500,11 @@ public sealed partial class StandardsFolderMigration
     }
 
     /// <summary>Deletes a file, swallowing a cleanup failure that would take the real error's place.</summary>
-    private static void Discard(string path)
+    private void Discard(string path)
     {
         try
         {
-            File.Delete(path);
+            _files.DeleteFile(path);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
