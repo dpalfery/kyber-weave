@@ -27,7 +27,8 @@ public sealed class InMemoryCorpusSource : ICorpusSource
     /// <returns>This corpus, so a fixture can be built in one expression.</returns>
     public InMemoryCorpusSource AddBytes(string relativePath, byte[] bytes)
     {
-        _files[CorpusPath.Normalize(relativePath)] = bytes ?? throw new ArgumentNullException(nameof(bytes));
+        ArgumentNullException.ThrowIfNull(bytes);
+        _files[CorpusPath.Normalize(relativePath)] = [.. bytes];
         return this;
     }
 
@@ -49,7 +50,7 @@ public sealed class InMemoryCorpusSource : ICorpusSource
         if (!_files.TryGetValue(path, out byte[]? bytes))
             throw new FileNotFoundException($"The corpus holds no file at '{relativePath}'.", path);
 
-        return bytes;
+        return [.. bytes];
     }
 
     /// <inheritdoc />

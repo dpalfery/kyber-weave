@@ -70,6 +70,18 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void DoesNotLetACallerChangeTheStoredBytes()
+    {
+        ICorpusSource corpus = CreateCorpus();
+        byte[] original = [.. corpus.ReadBytes(SampleFile)];
+        byte[] handle = corpus.ReadBytes(SampleFile);
+
+        handle[0] ^= 0xFF;
+
+        Assert.Equal(original, corpus.ReadBytes(SampleFile));
+    }
+
+    [Fact]
     public void ReportsWhetherAFileExists()
     {
         ICorpusSource corpus = CreateCorpus();

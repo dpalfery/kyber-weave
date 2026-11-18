@@ -1,4 +1,5 @@
 using KyberWeave.Tests.Corpus;
+using Xunit;
 
 namespace KyberWeave.Tests.RepoPolicy;
 
@@ -45,4 +46,15 @@ public sealed class InMemoryCorpusSourceContractTests : CorpusSourceContractTest
 
     /// <inheritdoc />
     protected override (string Directory, string Pattern) BuildOutputProbe => ("products/kyber-squad", "*");
+
+    [Fact]
+    public void DoesNotKeepTheArrayTheFixtureSupplied()
+    {
+        byte[] supplied = System.Text.Encoding.UTF8.GetBytes("the original text");
+        ICorpusSource corpus = new InMemoryCorpusSource().AddBytes("products/sample.md", supplied);
+
+        supplied[0] = (byte)'X';
+
+        Assert.Equal("the original text", corpus.ReadText("products/sample.md"));
+    }
 }
