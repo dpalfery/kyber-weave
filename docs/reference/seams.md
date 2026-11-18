@@ -234,6 +234,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.8 |
 | `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.8 |
 | `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | 4.8 |
+| `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
 | `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | 4.8 |
 | `SelfUpdater` (`Update/SelfUpdater.cs`) | file system, paths, environment, network | 4.1 |
 | `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | 4.8 |
@@ -373,7 +374,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileSquadRenderInputReader` (`Squad/Rendering/FileSquadRenderInputReader.cs`) | file system, environment | 3.5 |
 | `SquadOperatorChannelOverlayFile` (`Squad/Rendering/SquadOperatorChannelOverlayFile.cs`) | file system | 3.5 |
 | `CopilotPromptRefresher` (`Update/CopilotPromptRefresher.cs`) | file system | 4.4 |
-| `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | file system, network | 4.4 |
 | `SelfUpdateSystem` (`Update/SelfUpdateSystem.cs`) | file system, process, identifiers | 4.4 |
 
 #### KyberWeave.Domain (26 classes)
@@ -462,8 +462,7 @@ does not yet meet that: 19 non-adapter classes open a `FileStream` directly. The
 `SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Packaging/SquadPacker.cs`, `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`, `Data/Squad/Release/GitHubSquadReleaseSource.cs`,
-`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/GitHubReleaseClient.cs` and
-`SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
+`Data/Squad/Rendering/CopilotMcpServerProbe.cs`, `Data/Update/SelfUpdateSystem.cs`, and `Mcp/CodeGraphFreshness.cs`. Each is on its task's list in the table
 above; `FileStream` is not a licence to bypass the seam.
 
 Two more framework members are used directly but are not in the exception list because a seam

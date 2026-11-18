@@ -83,7 +83,7 @@ public sealed partial class GitHubSquadReleaseSource : ISquadReleaseSource
 
     /// <summary>
     /// Reads the GitHub token from the environment, matching
-    /// <see cref="Update.GitHubReleaseClient"/>'s lookup so both release paths
+    /// <c>GitHubReleaseClient</c>'s lookup so both release paths
     /// authenticate the same anonymous-limit callers out of.
     /// </summary>
     /// <remarks>
