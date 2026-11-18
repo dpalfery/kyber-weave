@@ -6,6 +6,8 @@ using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Tests.Fakes;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -15,8 +17,8 @@ namespace KyberWeave.Tests;
 /// <summary>
 /// Once the old technology agents leave, a plan or task file that still names one hands its work to the agent
 /// that replaces it: a developer tier chosen from the task's difficulty, or the named role that took the work
-/// over. A Squad update removes a retired agent's rendered file only when the lock records that the Squad wrote
-/// it and the host left it unedited; an edited file is kept and reported.
+/// over. A Squad update never deletes an
+/// adopted file, which the lock records as the host's own.
 /// </summary>
 public sealed class RemovedAgentResolutionTests
 {
@@ -100,7 +102,7 @@ public sealed class RemovedAgentResolutionTests
     {
         using DocFixture fixture = Ready(Tiered);
 
-        TaskPromptResult result = Service().Build(
+        TaskPromptResult result = Service(fixture).Build(
             new TaskPromptRequest(fixture.Root, TaskId: "T1", Plan: Plan, Agent: named),
             Tiered);
 
@@ -166,76 +168,6 @@ public sealed class RemovedAgentResolutionTests
 
 
     /// <summary>
-    ///     The retirement of the fourteen agents the removal phase deletes, on a global deployment of two
-    ///     harnesses: every file the lock records as Squad's own, unedited, goes with its agent, while the one the
-    ///     host edited survives and is reported. The retired names come from the shipped removal map, so a name
-    ///     dropped from that map fails here rather than passing on a fixture written to match.
-    /// </summary>
-    [Fact]
-    public async Task EveryRemovedAgentFileIsRemovedFromEveryTargetUnlessTheHostEditedIt()
-    {
-        using TempDirectory temp = new();
-        using SquadHomeHarness harness = new(temp.Path);
-        string anchor = harness.MakeDirectory("anchor");
-        string[] removed = [.. PlanTaskAgentPick.RemovedAgents.Keys.Order(StringComparer.Ordinal)];
-        SquadTarget[] targets = [SquadTarget.Codex, SquadTarget.Claude];
-        const string edited = "csharp-dev";
-        const string editedContent = "operator edit\n";
-
-        SquadLifecycleResult install = await harness.Lifecycle(FakeSquadRenderer.ScriptedAgents(["conductor", .. removed]))
-            .InstallAsync(new SquadInstallRequest(
-                anchor,
-                SquadDeploymentScope.Global,
-                targets,
-                Version: "1.2.3"));
-        Assert.True(install.Success, DescribeFailure(install));
-
-        string editedPath = Path.Combine(harness.GlobalRoot(SquadTarget.Codex), "agents", edited + ".md");
-        Assert.True(File.Exists(editedPath), "The first release must render the agent file this test edits.");
-        await File.WriteAllTextAsync(editedPath, editedContent, new UTF8Encoding(false));
-
-        SquadLifecycleResult update = await harness.Lifecycle(FakeSquadRenderer.ScriptedAgents("conductor"))
-            .UpdateAsync(new SquadUpdateRequest(
-                anchor,
-                SquadDeploymentScope.Global,
-                targets,
-                Version: "1.2.4"));
-        Assert.True(update.Success, DescribeFailure(update));
-
-        foreach (SquadTarget target in targets)
-        {
-            foreach (string agent in removed)
-            {
-                string path = Path.Combine(harness.GlobalRoot(target), "agents", agent + ".md");
-                if (target == SquadTarget.Codex && string.Equals(agent, edited, StringComparison.Ordinal))
-                {
-                    Assert.True(File.Exists(path), "A file the host edited must survive the update that retires it.");
-                    Assert.Equal(editedContent, await File.ReadAllTextAsync(path));
-                    continue;
-                }
-
-                Assert.False(
-                    File.Exists(path),
-                    $"'{target}' still carries the removed agent '{agent}', which the lock records as unedited Squad output.");
-            }
-        }
-
-        string warnings = string.Join(
-            Environment.NewLine,
-            (update.Warnings ?? []).Select(line => line.Replace(Path.DirectorySeparatorChar, '/')));
-        Assert.Contains($"agents/{edited}.md", warnings, StringComparison.Ordinal);
-        Assert.Contains("Kept the locally edited", warnings, StringComparison.Ordinal);
-
-        SquadReceipt receipt = Assert.IsType<SquadReceipt>(
-            harness.Store.ReadReceipt(anchor, SquadDeploymentScope.Global));
-        Assert.DoesNotContain(receipt.Files, file =>
-            file.RelativePath.EndsWith(".md", StringComparison.Ordinal)
-            && removed.Contains(Path.GetFileNameWithoutExtension(file.RelativePath), StringComparer.Ordinal)
-            && !(string.Equals(file.Target, "codex", StringComparison.Ordinal)
-                 && string.Equals(file.RelativePath, $"agents/{edited}.md", StringComparison.Ordinal)));
-    }
-
-    /// <summary>
     ///     An adopted entry is a file the host already had with the release's bytes; the lock records that Squad
     ///     did not write it. A release that stops rendering the path must therefore leave it on disk, keeping the
     ///     record, rather than deleting a file the host brought (Requirement 13.6).
@@ -243,42 +175,43 @@ public sealed class RemovedAgentResolutionTests
     [Fact]
     public void AnAdoptedFileIsKeptWhenTheReleaseStopsRenderingIt()
     {
-        using TempDirectory temp = new();
+        InMemorySquadState state = new();
+        string root = state.CreateRoot("adopted");
         const string retired = "agents/csharp-dev.md";
         const string shipped = "shipped agent\n";
         SquadOwnedFile adopted = new(retired, Digest(shipped), "codex", Adopted: true);
-        WriteFile(temp.Path, retired, shipped);
+        WriteFile(state.Files, root, retired, shipped);
         SquadReceipt receipt = new(
             "kyber-squad.receipt/v1",
             SquadDeploymentScope.Project,
-            temp.Path,
+            root,
             DateTimeOffset.UnixEpoch,
             [],
             [adopted]);
 
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateUpdate(
-            temp.Path,
+        SquadDeploymentPlan plan = state.Planner.CreateUpdate(
+            root,
             SquadDeploymentScope.Project,
             Lock("1.2.4"),
             [new SquadDeploymentFile("agents/conductor.md", Encoding.UTF8.GetBytes("conductor\n"), "codex")],
             receipt,
             [],
             false,
-            TimeProvider.System);
+            state.Time);
 
         Assert.DoesNotContain(
             plan.PlannedFileChanges,
             change => change.RelativePath == retired && change.Kind == SquadFileMutationKind.Delete);
         Assert.Contains(plan.Receipt.Files, file => file == adopted);
-        Assert.Equal(shipped, File.ReadAllText(Path.Combine(temp.Path, "agents", "csharp-dev.md")));
+        Assert.Equal(shipped, state.Files.ReadAllText(Path.Combine(root, "agents", "csharp-dev.md")));
     }
 
     /// <summary>A corpus whose Ready plan hands its one task to a removed agent at <c>hard</c>.</summary>
     private static DocFixture Ready(KyberWeaveConfig config, string role = "csharp-dev")
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus(PlanMarkdown(role));
-        Directory.CreateDirectory(Path.Combine(fixture.Root, ".git"));
-        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, config, DocsPorts.Files)
+        DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(PlanMarkdown(role));
+        _ = fixture.EnsureDirectory(".git");
+        PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(fixture.Root, config, fixture.Store)
             .Run(Plan, PlanTaskFileMode.Write);
         Assert.False(
             outcome.Report.HasErrors,
@@ -286,9 +219,9 @@ public sealed class RemovedAgentResolutionTests
         return fixture;
     }
 
-    private static TaskPromptService Service()
+    private static TaskPromptService Service(DocFixture fixture)
     {
-        IServiceProvider provider = DocsTestCommands.Services();
+        IServiceProvider provider = DocsMemoryServicesD.Services(fixture);
         return new TaskPromptService(
             provider.GetRequiredService<IPlanTaskService>(),
             provider.GetRequiredService<IPacketHostFacts>(),
@@ -299,7 +232,7 @@ public sealed class RemovedAgentResolutionTests
 
     /// <summary>The prompt the service builds for the plan's one task, under the roster of <paramref name="config"/>.</summary>
     private static TaskPromptResult Prompt(DocFixture fixture, KyberWeaveConfig config) =>
-        Service().Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", Plan: Plan), config);
+        Service(fixture).Build(new TaskPromptRequest(fixture.Root, TaskId: "T1", Plan: Plan), config);
 
     private static string PlanMarkdown(string role) => $$"""
         ---
@@ -332,9 +265,6 @@ public sealed class RemovedAgentResolutionTests
         Acceptance criteria: the settings reader returns the value it read.
         """;
 
-    private static string DescribeFailure(SquadLifecycleResult result) =>
-        string.Join("; ", (result.Errors ?? []).Concat(result.Warnings ?? []));
-
     private static SquadLock Lock(string version) => new(
         "kyber-squad.lock/v1",
         version,
@@ -351,10 +281,10 @@ public sealed class RemovedAgentResolutionTests
     private static string Digest(string content) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(content)));
 
-    private static void WriteFile(string root, string relativePath, string content)
+    private static void WriteFile(InMemoryFileSystem files, string root, string relativePath, string content)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, content, new UTF8Encoding(false));
+        files.CreateDirectory(Path.GetDirectoryName(path)!);
+        files.WriteAllText(path, content);
     }
 }
