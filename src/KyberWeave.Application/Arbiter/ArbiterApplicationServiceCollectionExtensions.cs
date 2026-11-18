@@ -35,6 +35,9 @@ public static class ArbiterApplicationServiceCollectionExtensions
             sp.GetRequiredService<IPlanFileResolver>(),
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IPathResolver>()));
+        services.TryAddSingleton<IPlanFacts>(sp => new Core.Arbiter.Plans.PlanFacts(
+            sp.GetRequiredService<IPlanFileResolver>(),
+            sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterPlanService, ArbiterPlanService>();
         services.TryAddSingleton<IArbiterTuneService, ArbiterTuneService>();
         services.TryAddSingleton<IArbiterAuditService, ArbiterAuditService>();

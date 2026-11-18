@@ -27,9 +27,6 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IGateReportFacts, GateReportFacts>();
         services.TryAddSingleton<IFileTextFacts, FileTextFacts>();
         services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();
-        services.TryAddSingleton<IPlanFacts>(sp => new PlanFacts(
-            sp.GetRequiredService<IPlanFileResolver>(),
-            sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IClaudeHookCoverage, ClaudeHookCoverage>();
         services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
         services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
