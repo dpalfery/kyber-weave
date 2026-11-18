@@ -1,55 +1,6 @@
-using System.Collections.ObjectModel;
 using KyberWeave.Core.Skills.Model;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
 
 namespace KyberWeave.Core.Skills.Routing;
-
-/// <summary>
-/// One routing expectation. An <see cref="Expected"/> that is null/empty/"none" asserts a
-/// NEGATIVE case: the prompt should fire NO skill (the often-untested failure mode).
-/// </summary>
-public sealed class RoutingEvalCase
-{
-    [YamlMember(Alias = "prompt")] public string Prompt { get; init; } = string.Empty;
-    [YamlMember(Alias = "expected")] public string? Expected { get; init; }
-
-    [YamlIgnore]
-    public bool ExpectsNoFire =>
-        string.IsNullOrWhiteSpace(Expected) || Expected!.Equals("none", StringComparison.OrdinalIgnoreCase);
-}
-
-public sealed class RoutingEvalFile
-{
-    [YamlMember(Alias = "cases")] public Collection<RoutingEvalCase> Cases { get; init; } = [];
-
-    /// <summary>Parses a routing eval set from its YAML text.</summary>
-    /// <param name="yaml">The eval file's text, read by the caller.</param>
-    /// <returns>The parsed set, empty when the text holds no cases.</returns>
-    public static RoutingEvalFile Parse(string yaml)
-    {
-        ArgumentNullException.ThrowIfNull(yaml);
-
-        IDeserializer deserializer = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .IgnoreUnmatchedProperties()
-            .Build();
-        return deserializer.Deserialize<RoutingEvalFile?>(yaml) ?? new RoutingEvalFile();
-    }
-}
-
-public sealed record RoutingCaseResult(RoutingEvalCase Case, RoutingResult Result, bool Passed)
-{
-    public string ActualLabel => Result.Fired ? Result.SelectedSkill! : "(no fire)";
-    public string ExpectedLabel => Case.ExpectsNoFire ? "(no fire)" : Case.Expected!;
-}
-
-public sealed record RoutingEvalSummary(IReadOnlyList<RoutingCaseResult> Results)
-{
-    public int Total => Results.Count;
-    public int Passed => Results.Count(r => r.Passed);
-    public double Accuracy => Total == 0 ? 1.0 : (double)Passed / Total;
-}
 
 /// <summary>Runs a routing eval set against a skill set and reports accuracy.</summary>
 public sealed class RoutingEvaluator(IRoutingStrategy strategy)
@@ -65,6 +16,7 @@ public sealed class RoutingEvaluator(IRoutingStrategy strategy)
                 : result.Fired && string.Equals(result.SelectedSkill, c.Expected, StringComparison.OrdinalIgnoreCase);
             results.Add(new RoutingCaseResult(c, result, passed));
         }
+
         return new RoutingEvalSummary(results);
     }
 }
