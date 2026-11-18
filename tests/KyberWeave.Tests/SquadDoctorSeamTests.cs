@@ -225,6 +225,8 @@ public sealed class SquadDoctorSeamTests
 
         public SquadProjectRegistryEntry? FindProject(string root) => null;
 
+        public bool IsRegistered(string root) => false;
+
         public IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild() => [];
 
         public void RegisterProject(string root, IReadOnlyList<string> targets, DateTimeOffset now) => throw Unused();

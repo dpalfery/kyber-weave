@@ -1,3 +1,6 @@
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Testing.Squad;
 using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
@@ -599,6 +602,23 @@ public sealed class SquadStateMigrationTests
     }
 
     /// <summary>
+    /// The lease the migration takes and the lease a transaction takes are the same operating-system mutex, so a
+    /// transaction refuses to start while the migration's lease is held: the other direction of the interlock.
+    /// </summary>
+    [Fact]
+    public void ATransactionIsRefusedWhileTheMigrationLeaseIsHeld()
+    {
+        string leaseKey = $"interlock-{Guid.NewGuid():N}";
+
+        using (new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero))
+        {
+            _ = Assert.Throws<InvalidOperationException>(() => SquadTransaction.AcquireLease(leaseKey));
+        }
+
+        using TransactionLease afterRelease = SquadTransaction.AcquireLease(leaseKey);
+    }
+
+    /// <summary>
     /// The project import writes under the same project lease an install takes. Held by another transaction, it
     /// imports nothing and warns, and it completes once the lease is released.
     /// </summary>
@@ -799,7 +819,7 @@ public sealed class SquadStateMigrationTests
         File.SetUnixFileMode(path, UnixFileMode.None);
         try
         {
-            SquadMigrationLedger ledger = SquadMigrationLedger.Read(path, out string? unreadableReason);
+            SquadMigrationLedger ledger = SquadMigrationLedger.Read(new PhysicalFileSystem(), path, out string? unreadableReason);
 
             Assert.NotNull(unreadableReason);
             Assert.Empty(ledger.GlobalMigratedFrom);
@@ -822,8 +842,8 @@ public sealed class SquadStateMigrationTests
         string applicationData = Path.Combine(fixture.Path, "application-data");
         Directory.CreateDirectory(home);
         FakeSquadUserPaths userPaths = new(applicationData, home);
-        SquadStateStore store = new(userPaths);
-        return new MigrationScenario(home, applicationData, store, new SquadStateMigration(store, userPaths));
+        SquadStateStore store = RealSquadState.Store(userPaths);
+        return new MigrationScenario(home, applicationData, store, RealSquadState.Migration(store, userPaths));
     }
 
     private static string LegacyGlobalDirectory(MigrationScenario scenario, string root) =>
@@ -893,7 +913,7 @@ public sealed class SquadStateMigrationTests
 
     private static SquadReceipt GlobalReceipt(SquadReceiptLayout layout, params SquadOwnedFile[] files) =>
         new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Global,
             ".",
             InstalledAt,
@@ -905,7 +925,7 @@ public sealed class SquadStateMigrationTests
 
     private static SquadReceipt ProjectReceipt(params SquadOwnedFile[] files) =>
         new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Project,
             ".",
             InstalledAt,

@@ -37,6 +37,10 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     public void WriteAllBytesAtomic(string path, byte[] bytes) => AtomicFile.WriteAllBytes(path, bytes);
 
     /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] bytes, bool flushToDisk) =>
+        AtomicFile.WriteAllBytes(path, bytes, writeThroughSymlink: false, flushToDisk);
+
+    /// <inheritdoc />
     public void MoveFile(string sourcePath, string destinationPath) => File.Move(sourcePath, destinationPath);
 
     /// <inheritdoc />

@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -241,7 +242,7 @@ public sealed class FactoryMcpConfigurationTests : IDisposable
         SquadHostDefaults.CreateLifecycleService(
             release,
             SquadTestRegistry.Create([renderer]),
-            new SquadStateStore(_paths),
+            RealSquadState.Store(_paths),
             globalRoots: SquadOperatorChannelFixture.GlobalRoots(Path.Combine(_home, ".copilot"), _home));
 
     private static IReadOnlyList<string> FactoryWarnings(SquadLifecycleResult result) =>

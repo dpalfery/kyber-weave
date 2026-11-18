@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
@@ -115,7 +116,7 @@ public sealed class PiSquadLifecycleTests : IDisposable
 
         string userData = Path.Combine(_temp.Path, "pi-real-install-user-data");
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
@@ -147,7 +148,7 @@ public sealed class PiSquadLifecycleTests : IDisposable
     {
         string userData = targetRoot + "-user-data";
         FakeSquadUserPaths userPaths = new(userData);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         ISquadRenderer renderer = SquadHostDefaults.ResolveRenderer();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);

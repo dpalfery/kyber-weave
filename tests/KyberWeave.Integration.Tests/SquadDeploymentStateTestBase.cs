@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
@@ -1424,7 +1425,7 @@ public abstract class SquadDeploymentStateTestBase
     internal static SquadReceipt GlobalReceiptWithHomeFiles(params SquadHomeFile[] homeFiles)
     {
         return new SquadReceipt(
-            SquadStateStore.ReceiptSchemaV2,
+            SquadStateSchemas.ReceiptSchemaV2,
             SquadDeploymentScope.Global,
             ".",
             InstalledAt,
@@ -1505,7 +1506,7 @@ public abstract class SquadDeploymentStateTestBase
 
     internal static SquadStateStore Store(string applicationData)
     {
-        return new SquadStateStore(new FakeSquadUserPaths(applicationData));
+        return RealSquadState.Store(new FakeSquadUserPaths(applicationData));
     }
 
     internal static SquadTransaction Transaction(

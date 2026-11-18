@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -89,7 +90,7 @@ public sealed class SquadDoctorShadowedSkillTests : IDisposable
 
     private void SeedReceipt(string targetRoot, string relativePath, byte[] content)
     {
-        SquadStateStore stateStore = new(new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home")));
+        SquadStateStore stateStore = RealSquadState.Store(new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home")));
         string receiptPath = stateStore.ResolveReceiptPath(targetRoot, SquadDeploymentScope.Project);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
         SquadReceipt receipt = new(

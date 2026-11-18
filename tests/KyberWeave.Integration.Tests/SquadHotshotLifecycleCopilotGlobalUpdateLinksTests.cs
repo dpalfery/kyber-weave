@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using KyberWeave.Cli.Commands.Squad;
@@ -47,7 +48,7 @@ public sealed class SquadHotshotLifecycleCopilotGlobalUpdateLinksTests : IDispos
         Assert.NotNull(copied);
         string targetRoot = home;
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore stateStore = new(new SquadHostDefaults.CliSquadUserPaths(home, home));
+        SquadStateStore stateStore = RealSquadState.Store(new SquadHostDefaults.CliSquadUserPaths(home, home));
         using CorpusSquadReleaseSource releaseSource = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,

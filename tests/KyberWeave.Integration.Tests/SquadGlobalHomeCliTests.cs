@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Security.Cryptography;
@@ -671,7 +672,7 @@ public sealed class SquadGlobalHomeCliTests : IClassFixture<SquadHomeStateTempla
         FakeSquadRenderer renderer = FakeSquadRenderer.ScriptedAgents("architect");
         Project alpha = InstallProject(h, "alpha");
         MoveProjectStateInRepo(h, alpha);
-        new SquadStateMigration(h.Store, h.UserPaths).ImportProject(alpha.Root);
+        RealSquadState.Migration(h.Store, h.UserPaths).ImportProject(alpha.Root);
         Assert.True(File.Exists(alpha.ReceiptPath),
             "The import must restore the home project receipt before the uninstall.");
 

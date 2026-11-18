@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
@@ -710,7 +711,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private async Task<SquadLifecycleResult> UninstallAsync(string targetRoot, string applicationData)
     {
         using FakeSquadReleaseSource releases = new();
-        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             FakeSquadRenderer.WithBlocks(SquadTarget.Factory, FactoryBlock()),
@@ -723,7 +724,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private async Task<SquadLifecycleResult> InstallAsync(string targetRoot, string applicationData, bool subagentStop = true)
     {
         using FakeSquadReleaseSource releases = new();
-        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             FakeSquadRenderer.WithBlocks(SquadTarget.Factory, FactoryBlock(subagentStop)),
@@ -741,7 +742,7 @@ public sealed class ArbiterFactoryRenderingTests : IDisposable
     private async Task<SquadLifecycleResult> UpdateAsync(string targetRoot, string applicationData, bool subagentStop = true)
     {
         using FakeSquadReleaseSource releases = new();
-        SquadStateStore store = new(new FakeSquadUserPaths(applicationData));
+        SquadStateStore store = RealSquadState.Store(new FakeSquadUserPaths(applicationData));
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releases,
             FakeSquadRenderer.WithBlocks(SquadTarget.Factory, FactoryBlock(subagentStop)),

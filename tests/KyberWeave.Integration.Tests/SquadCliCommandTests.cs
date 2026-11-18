@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Globalization;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -241,7 +242,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"),
@@ -269,7 +270,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"),
@@ -302,7 +303,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"),
@@ -335,7 +336,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(globalRoot);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(globalRoot, SquadDeploymentScope.Global, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
@@ -696,7 +697,7 @@ public sealed class SquadCliCommandTests : IDisposable
         FakeSquadUserPaths userPaths = new(userHome);
         prepared.CopyInto(tempHome, userPaths);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         // Simulate a file recorded in the receipt whose bytes differ from the local source render
         // (the authoritative repro in issue #283: receipt-managed file flagged as unmanaged by doctor)
@@ -766,7 +767,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string userHome = Path.Combine(_temp.Path, "doctor-corrupt-sibling-user");
         FakeSquadUserPaths userPaths = new(userHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         string siblingRepo = Path.Combine(_temp.Path, "doctor-corrupt-sibling-repo");
         Directory.CreateDirectory(siblingRepo);
@@ -806,7 +807,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string userHome = Path.Combine(_temp.Path, $"doctor-blank-sibling-user-{blankReceipt.Length}");
         FakeSquadUserPaths userPaths = new(userHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         string siblingRepo = Path.Combine(_temp.Path, $"doctor-blank-sibling-repo-{blankReceipt.Length}");
         Directory.CreateDirectory(siblingRepo);
@@ -844,7 +845,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string userHome = Path.Combine(_temp.Path, "doctor-corrupt-local-user");
         FakeSquadUserPaths userPaths = new(userHome);
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         string receiptPath = stateStore.ResolveReceiptPath(Corpus.Root, SquadDeploymentScope.Global);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
@@ -885,7 +886,7 @@ public sealed class SquadCliCommandTests : IDisposable
 
         SquadGlobalRoots globalRoots = new(_ => null, tempHome);
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "install-global-user"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         using CorpusSquadReleaseSource releaseSource = new();
         SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
             releaseSource,
@@ -936,7 +937,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"),
@@ -977,7 +978,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"),
@@ -1009,7 +1010,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         string receiptPath = stateStore.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
@@ -1045,7 +1046,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.False(File.Exists(cursorFile));
         Assert.True(File.Exists(codexFile));
         Assert.True(File.Exists(receiptPath));
-        SquadReceipt? remaining = new SquadStateStore(userPaths).ReadReceipt(targetDir, SquadDeploymentScope.Project);
+        SquadReceipt? remaining = RealSquadState.Store(userPaths).ReadReceipt(targetDir, SquadDeploymentScope.Project);
         Assert.Equal(["codex"], remaining!.Files.Select(file => file.Target).Distinct());
 
         CommandExecution last = Capture(() => command.Execute(
@@ -1109,7 +1110,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SquadLock squadLock = new(
             "kyber-squad.lock/v1",
             "1.2.3",
@@ -1242,7 +1243,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string targetDir = Path.Combine(_temp.Path, name);
         Directory.CreateDirectory(targetDir);
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\n"),
             ("skills/test-dev/SKILL.md", "Use when writing tests.\n"));
@@ -1378,7 +1379,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             ("agents/architect.md", "You are architect.\nPlan first.\n"));
@@ -1408,7 +1409,7 @@ public sealed class SquadCliCommandTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             (".codex/agents/architect.toml", "name = \"architect\"\n"));
@@ -1448,7 +1449,7 @@ public sealed class SquadCliCommandTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             (".codex/agents/architect.toml", "name = \"architect\"\n"));
@@ -1503,7 +1504,7 @@ public sealed class SquadCliCommandTests : IDisposable
         using FakeSquadReleaseSource releaseSource = new();
         FakeSquadRenderer renderer = new();
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home-explicit-dry-run"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedDeployment(targetDir, SquadDeploymentScope.Project, stateStore,
             (".codex/agents/architect.toml", "name = \"architect\"\n"));
@@ -1569,7 +1570,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(targetDir);
 
         FakeSquadUserPaths userPaths = new FakeSquadUserPaths(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new SquadStateStore(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         // Seed receipt with 0 files (empty target set)
         string receiptPath = stateStore.ResolveReceiptPath(targetDir, SquadDeploymentScope.Project);
@@ -1674,7 +1675,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Assert.NotNull(txDefault);
 
         FakeSquadUserPaths fakePaths = new FakeSquadUserPaths("/custom/appdata");
-        SquadStateStore store = new SquadStateStore(fakePaths);
+        SquadStateStore store = RealSquadState.Store(fakePaths);
         SquadTransaction txWithStore = SquadHostDefaults.ResolveTransaction(store);
         Assert.NotNull(txWithStore);
 
@@ -1773,7 +1774,7 @@ public sealed class SquadCliCommandTests : IDisposable
         Directory.CreateDirectory(appDataDir);
         Directory.CreateDirectory(fakeCodexRoot);
         FakeSquadUserPaths userPaths = new(appDataDir);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
         File.WriteAllText(
@@ -1807,7 +1808,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string appDataDir = Path.Combine(fixture.Path, "app-data");
         Directory.CreateDirectory(appDataDir);
         FakeSquadUserPaths userPaths = new(appDataDir);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
         File.WriteAllText(
@@ -1848,7 +1849,7 @@ public sealed class SquadCliCommandTests : IDisposable
         string appDataDir = Path.Combine(fixture.Path, "app-data");
         Directory.CreateDirectory(appDataDir);
         FakeSquadUserPaths userPaths = new(appDataDir);
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         Directory.CreateDirectory(Path.Combine(targetRoot, ".codex", "agents"));
         File.WriteAllText(
@@ -1975,7 +1976,7 @@ public sealed class SquadCliCommandTests : IDisposable
             Directory.CreateDirectory(globalHome);
             Directory.CreateDirectory(userPaths.ApplicationDataDirectory);
 
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             SquadGlobalRoots globalRoots = new(_ => null, globalHome);
             using CorpusSquadReleaseSource releaseSource = new();
             SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(
@@ -2018,7 +2019,7 @@ public sealed class SquadCliCommandTests : IDisposable
             string targetDir = Path.Combine(directory.Path, "target");
             Directory.CreateDirectory(targetDir);
             FakeSquadUserPaths userPaths = new(Path.Combine(directory.Path, "user-home"));
-            SquadStateStore stateStore = new(userPaths);
+            SquadStateStore stateStore = RealSquadState.Store(userPaths);
             using FakeSquadReleaseSource? releaseSource = unreleasedToolchain ? null : new FakeSquadReleaseSource();
             FakeSquadRenderer? renderer = unreleasedToolchain ? null : new FakeSquadRenderer();
 
@@ -2245,7 +2246,7 @@ public sealed class SquadCliCommandTests : IDisposable
             SquadInstallCopy.Tree(GlobalHome, home);
             SquadInstallCopy.Tree(UserPathsDirectory, userPaths.ApplicationDataDirectory);
 
-            SquadStateStore store = new(userPaths);
+            SquadStateStore store = RealSquadState.Store(userPaths);
             string stateDirectory = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad");
             SquadInstallCopy.ReRoot(
                 stateDirectory,

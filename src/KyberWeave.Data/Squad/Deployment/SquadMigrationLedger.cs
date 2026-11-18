@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Repositories;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -54,18 +55,19 @@ public sealed record SquadMigrationLedger(
         this with { ProjectsImported = Record(ProjectsImported, rootKey) };
 
     /// <summary>
-    /// Reads the ledger at <paramref name="path"/>. A missing file is an empty ledger. A file that cannot be read as a
+    /// Reads the ledger at <paramref name="path"/> through <paramref name="files"/>. A missing file is an empty ledger. A file that cannot be read as a
     /// ledger is an empty ledger, and <paramref name="unreadableReason"/> says why.
     /// </summary>
-    public static SquadMigrationLedger Read(string path, out string? unreadableReason)
+    public static SquadMigrationLedger Read(IFileSystem files, string path, out string? unreadableReason)
     {
+        ArgumentNullException.ThrowIfNull(files);
         unreadableReason = null;
-        if (!File.Exists(path))
+        if (!files.FileExists(path))
             return Empty;
 
         try
         {
-            return Parse(File.ReadAllText(path, Encoding.UTF8));
+            return Parse(files.ReadAllText(path));
         }
         catch (Exception exception) when (
             exception is JsonException or InvalidDataException or InvalidOperationException or FormatException

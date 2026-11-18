@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using KyberWeave.Tests.Configuration;
 
 using KyberWeave.Data.Configuration;
@@ -324,7 +325,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         File.WriteAllText(cursorHook, "{\"hooks\": {\"preToolUse\": [{\"command\": \"kyber-weave-arbiter hook --harness cursor --timeout 1\", \"matcher\": \"Task\"}], \"postToolUse\": []}}");
 
         using SquadHomeHarness harness = new(temp.Path);
-        SquadStateStore store = new(harness.UserPaths);
+        SquadStateStore store = RealSquadState.Store(harness.UserPaths);
         string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
         Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
 
@@ -332,7 +333,7 @@ public sealed class ArbiterKiloReviewRemediationTests
         string oldDigest = new('b', 64);
 
         SquadReceipt receipt = new(
-            SquadStateStore.ReceiptSchemaV3,
+            SquadStateSchemas.ReceiptSchemaV3,
             SquadDeploymentScope.Global,
             home,
             DateTimeOffset.UtcNow,

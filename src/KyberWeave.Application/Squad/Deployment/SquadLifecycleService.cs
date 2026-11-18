@@ -1048,7 +1048,7 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
                     appliedPresets[kvp.Key] = new SquadAppliedPreset(kvp.Value.Name, kvp.Value.Digest);
                 }
 
-        string schema = appliedPresets is { Count: > 0 } ? SquadStateStore.LockSchemaV2 : SquadStateStore.LockSchemaV1;
+        string schema = appliedPresets is { Count: > 0 } ? SquadStateSchemas.LockSchemaV2 : SquadStateSchemas.LockSchemaV1;
 
         return new SquadLock(
             schema,

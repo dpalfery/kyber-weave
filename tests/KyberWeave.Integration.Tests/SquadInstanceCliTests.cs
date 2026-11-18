@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -283,7 +284,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     public void StatusGlobalListsDeployedInstancesUnderInstancesHeading()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
             (".claude/agents/architect.md", "You are architect."));
@@ -315,7 +316,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     public void StatusGlobalShowsNoneUnderInstancesHeadingWhenNoInstancesExist()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         SeedGlobalDeployment(userPaths);
 
         SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
@@ -343,7 +344,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     public void StatusGlobalWithNeitherDeploymentNorInstancesKeepsNoDeploymentExitOne()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
 
@@ -370,7 +371,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     public void UpdateGlobalRefreshesDeployedInstances()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.0",
             (".claude/agents/architect.md", "Old content"));
@@ -403,7 +404,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     public void UpdateGlobalRefreshesDeployedInstancesEvenWithoutGlobalDeployment()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         // Seed instance state only — no global receipt in user-home
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
@@ -432,7 +433,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     public void UpdateGlobalExitsOneWhenInstanceRefreshFails()
     {
         FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
 
         // Seed an instance with corrupted receipt JSON to force a refresh failure
         string home = userPaths.HomeDirectory;
@@ -482,7 +483,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         Directory.CreateDirectory(globalStateDir);
 
         SquadReceipt receipt = new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Global,
             ".",
             DateTimeOffset.UtcNow,
@@ -490,7 +491,7 @@ public sealed class SquadInstanceCliTests : IDisposable
             []);
 
         SquadLock squadLock = new(
-            SquadStateStore.LockSchemaV1,
+            SquadStateSchemas.LockSchemaV1,
             version,
             version,
             version,
@@ -502,7 +503,7 @@ public sealed class SquadInstanceCliTests : IDisposable
             "b".PadRight(64, '0'),
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         File.WriteAllText(
             Path.Combine(globalStateDir, "squad.receipt.json"),
             stateStore.SerializeReceipt(receipt),
@@ -559,7 +560,7 @@ public sealed class SquadInstanceCliTests : IDisposable
         }
 
         SquadReceipt receipt = new(
-            SquadStateStore.ReceiptSchemaV1,
+            SquadStateSchemas.ReceiptSchemaV1,
             SquadDeploymentScope.Instance,
             instanceRoot,
             DateTimeOffset.UtcNow,
@@ -567,7 +568,7 @@ public sealed class SquadInstanceCliTests : IDisposable
             ownedFiles);
 
         SquadLock squadLock = new(
-            SquadStateStore.LockSchemaV2,
+            SquadStateSchemas.LockSchemaV2,
             version,
             version,
             version,
@@ -583,7 +584,7 @@ public sealed class SquadInstanceCliTests : IDisposable
                 [target] = new(presetName, presetDigest)
             });
 
-        SquadStateStore stateStore = new(userPaths);
+        SquadStateStore stateStore = RealSquadState.Store(userPaths);
         File.WriteAllText(
             Path.Combine(instanceStateDir, "squad.receipt.json"),
             stateStore.SerializeReceipt(receipt),

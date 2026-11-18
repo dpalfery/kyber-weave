@@ -26,6 +26,11 @@ public interface ISquadStateStore
     /// <summary>Finds a registered project by its root.</summary>
     SquadProjectRegistryEntry? FindProject(string root);
 
+    /// <summary>Says whether the registry itself holds an entry for a project root, whether or not a receipt could rebuild one.</summary>
+    /// <param name="root">The project root.</param>
+    /// <returns>True when the registry file names the root.</returns>
+    bool IsRegistered(string root);
+
     /// <summary>Lists the registered projects without rebuilding the registry.</summary>
     IReadOnlyList<SquadProjectRegistryEntry> ListProjectsWithoutRebuild();
 

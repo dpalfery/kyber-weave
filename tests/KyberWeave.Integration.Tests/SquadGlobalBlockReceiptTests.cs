@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -253,7 +254,7 @@ public sealed class SquadGlobalBlockReceiptTests
         Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
 
     private static SquadStateStore Store(string applicationData) =>
-        new(new FakeSquadUserPaths(applicationData));
+        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(

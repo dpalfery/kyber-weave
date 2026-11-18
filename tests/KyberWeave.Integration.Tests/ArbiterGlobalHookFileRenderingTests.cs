@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
@@ -155,7 +156,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
         string home = userPaths.HomeDirectory;
         Directory.CreateDirectory(home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = new(userPaths);
+        SquadStateStore store = RealSquadState.Store(userPaths);
 
         SquadRenderedBlock current = CreateBlock(SquadTarget.Antigravity, SquadHookBlockFormat.Antigravity);
         SquadRenderedBlock stale = current with { RelativePath = ".agents/hooks.json" };
@@ -272,7 +273,7 @@ public sealed class ArbiterGlobalHookFileRenderingTests
     }
 
     private static SquadStateStore Store(string applicationData) =>
-        new(new FakeSquadUserPaths(applicationData));
+        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(

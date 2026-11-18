@@ -46,7 +46,7 @@ internal static class SquadTestCommands
         return new SquadInstallCommand(
             SquadHostDefaults.CreateLifecycleService(userPaths, store, releaseSource, renderer, globalRoots: roots, environmentReader: environmentReader),
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             new FileSquadTargetResolver(),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
@@ -80,7 +80,7 @@ internal static class SquadTestCommands
             SquadHostDefaults.CreateLifecycleService(userPaths, store, releaseSource, renderer, globalRoots: roots, environmentReader: environmentReader),
             instanceService ?? new LazyInstanceService(() => SquadHostDefaults.CreateInstanceService(userPaths ?? store.UserPaths)),
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             new FileSquadTargetResolver(),
             roots,
             new PhysicalSquadFileAccess(),
@@ -110,7 +110,7 @@ internal static class SquadTestCommands
         return new SquadUninstallCommand(
             lifecycleService ?? SquadHostDefaults.CreateLifecycleService(userPaths, store, globalRoots: roots, environmentReader: environmentReader),
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             roots,
             new SquadConsoleOptions(isInteractive, readAnswer),
             console,
@@ -179,7 +179,7 @@ internal static class SquadTestCommands
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadStatusCommand(
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader),
             new SquadModelPresetStore(store.UserPaths),
             SquadFileSystemPathSemantics.Instance,
@@ -204,7 +204,7 @@ internal static class SquadTestCommands
         SquadStateStore store = stateStore ?? SquadHostDefaults.ResolveStateStore(userPaths, environmentReader);
         return new SquadDoctorCommand(
             store,
-            new SquadStateMigration(store, store.UserPaths),
+            RealSquadState.Migration(store, store.UserPaths),
             globalRoots ?? SquadHostDefaults.ResolveGlobalRoots(environmentReader),
             renderer ?? SquadHostDefaults.ResolveRenderer(),
             new SquadModelPresetStore(store.UserPaths),
@@ -311,7 +311,7 @@ internal static class SquadTestCommands
     /// The console a command writes to in a test: the process's router, installed before the command is built, so
     /// output goes to whichever test is capturing when the command writes.
     /// </summary>
-    private static SquadConsole CapturedSquadConsole() => new(CapturedConsole(), new SystemConsole());
+    internal static SquadConsole CapturedSquadConsole() => new(CapturedConsole(), new SystemConsole());
 
     private static IAnsiConsole CapturedConsole()
     {

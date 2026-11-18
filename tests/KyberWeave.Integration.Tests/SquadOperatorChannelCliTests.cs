@@ -1,3 +1,4 @@
+using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Cli.Commands.Squad;
@@ -482,7 +483,7 @@ public sealed class SquadOperatorChannelCliTests : IDisposable
             Anchor = anchor;
             CopilotHome = copilotHome;
             UserPaths = new FakeSquadUserPaths(userHome);
-            Store = new SquadStateStore(UserPaths);
+            Store = RealSquadState.Store(UserPaths);
             GlobalRoots = SquadOperatorChannelFixture.GlobalRoots(copilotHome, userHome);
         }
 

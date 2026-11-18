@@ -407,6 +407,21 @@ public abstract class FileSystemContractTests : IDisposable
         Assert.Equal("created", files.ReadAllText(path));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void AtomicByteWriteWithAFlushChoiceKeepsEveryByteAndLeavesNoTemporary(bool flushToDisk)
+    {
+        IWritableFileSystem files = Starting(out string root);
+        string path = WriteFile(files, root, "flushed.bin", "old");
+        byte[] bytes = [0xEF, 0xBB, 0xBF, 0, 255, 13, 10];
+
+        files.WriteAllBytesAtomic(path, bytes, flushToDisk);
+
+        Assert.Equal(bytes, files.ReadAllBytes(path));
+        Assert.Equal([At(root, "flushed.bin")], files.EnumerateFiles(root, "*", recursive: false));
+    }
+
     [Fact]
     public void AtomicByteWriteReplacesTheFile()
     {
