@@ -2,6 +2,7 @@ using KyberWeave.Application;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Application.Review;
 using KyberWeave.Cli.Composition;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -14,6 +15,9 @@ using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Time.Testing;
+using Spectre.Console;
+using Spectre.Console.Cli;
+using Spectre.Console.Testing;
 
 namespace KyberWeave.Tests;
 
@@ -22,7 +26,7 @@ namespace KyberWeave.Tests;
 /// environment, clock, identifiers, process runner and decision log. Nothing here reads the disk, the process
 /// environment, the clock or a program, so a unit test states the tree it needs and gets it back.
 /// </summary>
-public sealed class InMemoryReviewServices : IDisposable
+internal sealed class InMemoryReviewServices : IDisposable
 {
     private readonly ServiceProvider _provider;
 
@@ -45,21 +49,17 @@ public sealed class InMemoryReviewServices : IDisposable
         Log = new FakeArbiterLogStore();
 
         ServiceCollection services = [];
-        services.AddSingleton<IWritableFileSystem>(Files);
-        services.AddSingleton<IFileSystem>(Files);
-        services.AddSingleton<IPathResolver>(Paths);
-        services.AddSingleton<IProcessEnvironment>(Environment);
-        services.AddSingleton<IIdGenerator>(Ids);
-        services.AddSingleton<IProcessRunner>(Processes);
-        services.AddSingleton<IProgramRunner>(Processes);
-        services.AddSingleton<IBoundedProcessExecutor>(Processes);
-        services.AddSingleton<IRepositoryFileStore>(new InMemoryRepositoryFileStore(Files));
-        services.AddSingleton<IArbiterLogStore>(Log);
-        services.AddSingleton<TimeProvider>(Time);
+        Register(services);
         services.TryAddSingleton<IRepositoryToolSettings, ConfigFileToolSettings>();
         _ = services.AddWeaveApplication();
         _provider = services.BuildServiceProvider();
     }
+
+    /// <summary>Gets the console the commands write their standard output and error to.</summary>
+    public FakeConsole Console { get; } = new();
+
+    /// <summary>Gets the rich console the commands render to.</summary>
+    public TestConsole Ansi { get; } = CreateAnsi();
 
     /// <summary>Gets the file system every service reads and writes.</summary>
     public InMemoryFileSystem Files { get; }
@@ -84,6 +84,61 @@ public sealed class InMemoryReviewServices : IDisposable
 
     /// <summary>Gets a directory under the file system's root that is the environment's current directory.</summary>
     public string Root { get; }
+
+    /// <summary>Registers the fakes, so a registration made here wins over the real adapters registered after it.</summary>
+    /// <param name="services">The collection to populate.</param>
+    public void Register(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddSingleton<IWritableFileSystem>(Files);
+        services.AddSingleton<IFileSystem>(Files);
+        services.AddSingleton<IPathResolver>(Paths);
+        services.AddSingleton<IProcessEnvironment>(Environment);
+        services.AddSingleton<IIdGenerator>(Ids);
+        services.AddSingleton<IProcessRunner>(Processes);
+        services.AddSingleton<IProgramRunner>(Processes);
+        services.AddSingleton<IBoundedProcessExecutor>(Processes);
+        services.AddSingleton<IRepositoryFileStore>(new InMemoryRepositoryFileStore(Files));
+        services.AddSingleton<IArbiterLogStore>(Log);
+        services.AddSingleton<TimeProvider>(Time);
+        services.AddSingleton<IConsole>(Console);
+        services.AddSingleton<IAnsiConsole>(Ansi);
+    }
+
+    /// <summary>Builds the <c>review gates</c> command app over these fakes, with its parse errors written to <see cref="Ansi"/>.</summary>
+    /// <returns>The app.</returns>
+    public CommandApp ReviewGatesApp() => CommandAppFixture.ReviewGates(Register, Ansi);
+
+    /// <summary>Runs a command line on an app built over these fakes and returns its exit code and what it wrote.</summary>
+    /// <param name="app">The app, built with <see cref="Register"/>.</param>
+    /// <param name="arguments">The command line.</param>
+    /// <returns>The exit code and the output of the standard and rich consoles.</returns>
+    public CapturedConsoleExecution<int> Run(CommandApp app, params string[] arguments)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+        int exit = app.Run(arguments);
+        return new CapturedConsoleExecution<int>(exit, Console.Output + Ansi.Output, Console.ErrorOutput);
+    }
+
+    /// <summary>Scripts a program that runs for a time on the fake clock, and is stopped when it outlives the limit it was given.</summary>
+    /// <param name="program">The program name.</param>
+    /// <param name="takes">How long the program would run.</param>
+    /// <param name="exitCode">The exit code of a run that finishes.</param>
+    /// <param name="arguments">The exact arguments the script matches; omit to match any arguments.</param>
+    public void ScriptProgram(string program, TimeSpan takes, int exitCode = 0, params string[] arguments) =>
+        Processes.Script(
+            program,
+            request =>
+            {
+                bool outlives = request.Timeout is { } limit && takes > limit;
+                Time.Advance(outlives ? request.Timeout!.Value : takes);
+                return new ProcessRunResult(outlives ? -1 : exitCode, string.Empty, outlives)
+                {
+                    StandardOutput = string.Empty,
+                    StandardError = string.Empty
+                };
+            },
+            arguments);
 
     /// <summary>Gets the cited-line checker.</summary>
     public ICitedLineChecker CitedLines => Get<ICitedLineChecker>();
@@ -148,6 +203,13 @@ public sealed class InMemoryReviewServices : IDisposable
             unavailableReason,
             cacheStore ?? new FakeReviewDecisionCacheStore(),
             cachePath);
+
+    private static TestConsole CreateAnsi()
+    {
+        TestConsole console = new();
+        console.Profile.Width = 200;
+        return console;
+    }
 
     /// <inheritdoc />
     public void Dispose() => _provider.Dispose();

@@ -1,6 +1,4 @@
-using KyberWeave.Tests.Configuration;
-
-using System.Diagnostics;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using Spectre.Console.Cli;
@@ -15,8 +13,8 @@ namespace KyberWeave.Tests;
 /// and the stopped gates are reported as KW-REVIEW-039 and leave the exit code alone. Without <c>--deadline</c> no
 /// run deadline applies, and a blocking gate stopped by its own <c>timeout-seconds</c> fails the run as it always has
 /// (KW-REVIEW-022, exit 1). A single <c>--gate</c> run is never cut by the budget, and <c>--deadline</c> is refused
-/// with <c>--gate</c> and with <c>--agent</c>. The gates here are POSIX shell commands (<c>sleep</c>,
-/// <c>touch</c>), so the facts skip on Windows.
+/// with <c>--gate</c> and with <c>--agent</c>. The gates are scripted programs that run for a time on a fake clock,
+/// so no gate sleeps and none is started.
 /// </summary>
 public sealed class GateRunnerDeadlineTests : IDisposable
 {
@@ -24,29 +22,30 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     private const string GateFailed = "KW-REVIEW-022";
     private const int InputRefused = 2;
 
-    private readonly TempDirectory _temp = new();
+    private readonly InMemoryReviewServices _services = new();
     private readonly string _repo;
     private readonly string _report;
 
     public GateRunnerDeadlineTests()
     {
-        _repo = Path.Combine(_temp.Path, "repo");
-        Directory.CreateDirectory(_repo);
-        _report = Path.Combine(_temp.Path, "gates.json");
+        _repo = Path.Combine(_services.Root, "repo");
+        _services.Files.CreateDirectory(_repo);
+        _report = Path.Combine(_services.Root, "gates.json");
+        _services.ScriptProgram("sleep", TimeSpan.FromSeconds(30), 0, "30");
+        _services.ScriptProgram("sleep", TimeSpan.FromSeconds(3), 0, "3");
+        _services.ScriptProgram("touch", TimeSpan.Zero);
+        _services.ScriptProgram("git", TimeSpan.Zero);
     }
 
-    /// <summary>Deletes the temporary repository.</summary>
+    /// <summary>Releases the services.</summary>
     public void Dispose()
     {
-        _temp.Dispose();
+        _services.Dispose();
     }
 
     [Fact]
     public void ACouncilDeadlineWithDeadlineFlagStopsTheRunningGateAndNoLaterGateStarts()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gates use POSIX sleep and touch.");
-
         WriteConfiguration("""
             review:
               council-deadline-seconds: 2
@@ -58,19 +57,18 @@ public sealed class GateRunnerDeadlineTests : IDisposable
                   run: [touch, later.marker]
             """);
 
-        Stopwatch clock = Stopwatch.StartNew();
+        DateTimeOffset started = _services.Time.GetUtcNow();
         CapturedConsoleExecution<int> run = Gates("--council", "--deadline");
-        clock.Stop();
 
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(20), $"The run took {clock.Elapsed}, so the deadline did not stop it.");
+        Assert.True(_services.Time.GetUtcNow() - started < TimeSpan.FromSeconds(20), "The deadline did not stop the run.");
         Assert.Equal(0, run.Result);
         AssertDiagnostic(run.Output, GateStoppedForTime, "Warning");
         Assert.DoesNotContain(GateFailed, run.Output, StringComparison.Ordinal);
 
-        GateReport gates = ReviewJson.ReadGates(File.ReadAllText(_report));
+        GateReport gates = ReviewJson.ReadGates(_services.Files.ReadAllText(_report));
         Assert.Equal(GateOutcome.DeadlinePassed, gates.Gates[0].Outcome);
         Assert.Equal(GateOutcome.DeadlinePassed, gates.Gates[1].Outcome);
-        Assert.False(File.Exists(Path.Combine(_repo, "later.marker")), "The gate after the deadline was started.");
+        Assert.DoesNotContain(_services.Processes.Calls, call => call.Program == "touch");
     }
 
     /// <summary>
@@ -80,9 +78,6 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     [Fact]
     public void WithoutTheDeadlineFlagACouncilRunIsNotCutByTheConfiguredBudget()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gate uses POSIX sleep.");
-
         WriteConfiguration("""
             review:
               council-deadline-seconds: 2
@@ -95,7 +90,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
         CapturedConsoleExecution<int> run = Gates("--council");
 
         Assert.Equal(0, run.Result);
-        GateResult result = Assert.Single(ReviewJson.ReadGates(File.ReadAllText(_report)).Gates);
+        GateResult result = Assert.Single(ReviewJson.ReadGates(_services.Files.ReadAllText(_report)).Gates);
         Assert.Equal(GateOutcome.Completed, result.Outcome);
         Assert.True(result.Passed);
     }
@@ -107,9 +102,6 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     [Fact]
     public void ASingleNamedGateIsNotCutByTheCouncilDeadline()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gate uses POSIX sleep.");
-
         WriteConfiguration("""
             review:
               council-deadline-seconds: 1
@@ -122,7 +114,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
         CapturedConsoleExecution<int> run = Gates("--gate", "pause");
 
         Assert.Equal(0, run.Result);
-        GateResult result = Assert.Single(ReviewJson.ReadGates(File.ReadAllText(_report)).Gates);
+        GateResult result = Assert.Single(ReviewJson.ReadGates(_services.Files.ReadAllText(_report)).Gates);
         Assert.Equal(GateOutcome.Completed, result.Outcome);
         Assert.True(result.Passed);
     }
@@ -134,9 +126,6 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     [Fact]
     public void AGateStoppedAtItsOwnTimeLimitWithoutDeadlineFailsTheRun()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gate uses POSIX sleep.");
-
         WriteConfiguration("""
             review:
               gates:
@@ -150,7 +139,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
         Assert.Equal(1, run.Result);
         AssertDiagnostic(run.Output, GateFailed, "Error");
         Assert.DoesNotContain(GateStoppedForTime, run.Output, StringComparison.Ordinal);
-        Assert.Equal(GateOutcome.TimedOut, Assert.Single(ReviewJson.ReadGates(File.ReadAllText(_report)).Gates).Outcome);
+        Assert.Equal(GateOutcome.TimedOut, Assert.Single(ReviewJson.ReadGates(_services.Files.ReadAllText(_report)).Gates).Outcome);
     }
 
     /// <summary>
@@ -160,9 +149,6 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     [Fact]
     public void AGateStoppedAtItsOwnTimeLimitWithDeadlineIsNotRunAndExitsZero()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gate uses POSIX sleep.");
-
         WriteConfiguration("""
             review:
               gates:
@@ -185,9 +171,6 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     [Fact]
     public void TheDeadlineCutMessageNamesTheDeadlineValueAndItsConfigKey()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gate uses POSIX sleep.");
-
         WriteConfiguration("""
             review:
               council-deadline-seconds: 2
@@ -210,9 +193,6 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     [Fact]
     public void TheDeadlineCutHintReRunsTheGateAloneAndDoesNotAskToRaiseItsTimeout()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gate uses POSIX sleep.");
-
         WriteConfiguration("""
             review:
               council-deadline-seconds: 2
@@ -267,7 +247,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     {
         WriteConfiguration("ontology:\n  docs-root: docs\nreview:\n  council-deadline-seconds: 42\n");
 
-        KyberWeaveConfigLoadResult loaded = ConfigFileReader.TryLoad(_repo);
+        KyberWeaveConfigLoadResult loaded = _services.Get<IKyberWeaveConfigRepository>().TryLoad(_repo);
 
         Assert.True(loaded.Success);
         Assert.NotNull(loaded.Config);
@@ -279,7 +259,7 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     {
         WriteConfiguration("ontology:\n  docs-root: docs\n");
 
-        KyberWeaveConfigLoadResult loaded = ConfigFileReader.TryLoad(_repo);
+        KyberWeaveConfigLoadResult loaded = _services.Get<IKyberWeaveConfigRepository>().TryLoad(_repo);
 
         Assert.True(loaded.Success);
         Assert.NotNull(loaded.Config);
@@ -293,13 +273,10 @@ public sealed class GateRunnerDeadlineTests : IDisposable
     [Fact]
     public void ATimedOutBlockingTaskGateStopsTheRunWhenStoppingOnFailure()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("The gate uses POSIX sleep.");
-
         PlannedTaskGate slow = new("slow-gate", true, 1, [], ["sleep", "30"]);
         PlannedTaskGate later = new("later-gate", true, 30, [], ["git", "--version"]);
 
-        TaskGateRun run = ReviewTestServices.Gates.RunTaskGates([slow, later], _repo, fix: false, stopOnBlockingFailure: true);
+        TaskGateRun run = _services.Gates.RunTaskGates([slow, later], _repo, fix: false, stopOnBlockingFailure: true);
 
         GateResult result = Assert.Single(run.Report.Gates);
         Assert.Equal(GateOutcome.TimedOut, result.Outcome);
@@ -307,14 +284,14 @@ public sealed class GateRunnerDeadlineTests : IDisposable
 
     private void WriteConfiguration(string yaml)
     {
-        Directory.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
-        File.WriteAllText(Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"), yaml);
+        _services.Files.CreateDirectory(Path.Combine(_repo, ".kyber-weave"));
+        _services.Files.WriteAllText(Path.Combine(_repo, ".kyber-weave", "kyber-weave.yml"), yaml);
     }
 
     /// <summary>Runs <c>review gates</c> on the repository with JSON output and the report written to a known path.</summary>
     private CapturedConsoleExecution<int> Gates(params string[] options)
     {
         List<string> arguments = ["review", "gates", _repo, .. options, "--format", "json", "--out", _report];
-        return ProcessConsoleCapture.Run(() => CommandAppFixture.ReviewGates().Run([.. arguments]));
+        return _services.Run(_services.ReviewGatesApp(), [.. arguments]);
     }
 }
