@@ -23,9 +23,10 @@ adapters come from the code on this branch, not from the design. The counts come
 `git grep -E` over `src/`: a **site** is one non-comment line that calls `System.IO`, a file or
 directory member, `Process`/`ProcessStartInfo`, `Environment`, `Console`, the system clock,
 `Stopwatch`, `Thread.Sleep`, `Task.Delay`, `Guid.NewGuid`, `Random`, `Mutex` or a network client.
-Pure string work in `System.IO.Path` (`Combine`, `GetFileName`, `DirectorySeparatorChar`) is not
-counted, because it reads no process state; `Path.GetFullPath`, `Path.GetTempPath` and
-`Path.GetRandomFileName` are. Counts are lower bounds: one line can hold two calls.
+Two kinds of line are not counted, because neither reads process state: pure string work in
+`System.IO.Path` (`Combine`, `GetFileName`, `DirectorySeparatorChar`) and the platform constant
+`Environment.NewLine`. `Path.GetFullPath`, `Path.GetTempPath` and `Path.GetRandomFileName` are
+counted. Counts are lower bounds: one line can hold two calls.
 
 ## The seams
 
@@ -142,21 +143,21 @@ also where those splits are recorded.
 
 | Project | Classes calling a resource | Direct-call sites | Tasks |
 |---|---|---|---|
-| `KyberWeave.Application` | 67 | 217 | 4.1, 4.2, 4.3 |
-| `KyberWeave.Cli` | 49 | 181 | 4.5 |
+| `KyberWeave.Application` | 64 | 208 | 4.1, 4.2, 4.3, unassigned |
+| `KyberWeave.Cli` | 49 | 180 | 4.5 |
 | `KyberWeave.Data` | 80 | 705 | 3.2, 3.3, 3.4, 3.5, 4.4 |
 | `KyberWeave.Domain` | 26 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
 | `KyberWeave.Kernel` | 2 | 18 | 2.2, 4.6 |
-| `KyberWeave.Mcp` | 4 | 19 | 4.6 |
+| `KyberWeave.Mcp` | 4 | 16 | 4.6 |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
-| **Total** | **229** | **1,187** | |
+| **Total** | **226** | **1,174** | |
 
-The totals before adapters and roots are taken out are 71 classes and 221 sites in Application,
-52 and 184 in Cli, 111 and 955 in Data, 28 and 49 in Domain, 2 and 3 in Hooks, 6 and 47 in Kernel,
-7 and 31 in Mcp, and 2 and 6 in Arbiter. `KyberWeave.Contracts` reports
-six files and eight sites, all of them `ProcessStartInfo` in an interface or a request record; it
-holds no implementation.
+The totals before adapters and roots are taken out are 68 classes and 212 sites in Application,
+52 and 183 in Cli, 111 and 955 in Data, 28 and 49 in Domain, 2 and 3 in Hooks, 6 and 47 in Kernel,
+7 and 28 in Mcp, and 2 and 6 in Arbiter. `KyberWeave.Contracts` reports six files and eight sites,
+all of them `ProcessStartInfo` in an interface or a request record; it holds no implementation.
+`Environment.NewLine` sites are excluded from both sets of numbers.
 
 #### KyberWeave.Application (67 classes)
 
@@ -184,7 +185,6 @@ holds no implementation.
 | `PullRequestDescription` (`Docs/Delivery/PullRequestDescription.cs`) | file system | 4.2 |
 | `RunDelivery` (`Docs/Delivery/RunDelivery.cs`) | paths | 4.2 |
 | `CorpusProvenanceService` (`Docs/Mcp/CorpusProvenanceService.cs`) | paths | 4.2 |
-| `DocsQueryService` (`Docs/Mcp/DocsQueryService.cs`) | environment | 4.2 |
 | `McpServerRenamer` (`Docs/Mcp/McpServerRenamer.cs`) | paths, clock | 4.2 |
 | `McpWiringFixes` (`Docs/Mcp/McpWiringFixes.cs`) | paths | 4.2 |
 | `McpWiringInspector` (`Docs/Mcp/McpWiringInspector.cs`) | paths | 4.2 |
@@ -223,10 +223,8 @@ holds no implementation.
 | `SkillFileReader` (`Skills/SkillFileReader.cs`) | paths | 4.3 (split) |
 | `SquadBriefBuilder` (`Squad/Briefs/SquadBriefBuilder.cs`) | file system, paths | 4.3 (split) |
 | `FactoryMcpConfiguration` (`Squad/Deployment/FactoryMcpConfiguration.cs`) | file system | 4.3 (split) |
-| `SquadLifecycleService` (`Squad/Deployment/SquadLifecycleService.cs`) | environment | 4.3 (split) |
 | `SquadInstanceService` (`Squad/Instances/SquadInstanceService.cs`) | paths | 4.3 (split) |
 | `SquadPackService` (`Squad/Packaging/SquadPackService.cs`) | paths | 4.3 (split) |
-| `ArbiterHookRefresher` (`Update/ArbiterHookRefresher.cs`) | environment | 4.1 |
 | `SelfUpdater` (`Update/SelfUpdater.cs`) | file system, paths, environment, network | 4.1 |
 | `StatusLineProductArtifactSource` (`Utilities/StatusLineProductArtifactSource.cs`) | paths | 4.3 (split) |
 
@@ -456,7 +454,8 @@ already covers them and must replace them:
 - `Mutex` appears in `MutexLease` (the lease adapter) and in `TransactionLease`, which task 3.4
   moves onto `ILease`.
 - `OperatingSystem.Is*` and `Environment.*` belong to `IProcessEnvironment`; a class outside the
-  environment adapter that calls them is on the task list above.
+  environment adapter that calls them is on the task list above. `Environment.NewLine` is a
+  platform constant, not process state, and is not a seam violation.
 
 ## Keeping this register current
 
