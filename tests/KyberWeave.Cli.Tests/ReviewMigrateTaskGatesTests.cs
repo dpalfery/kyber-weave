@@ -1,4 +1,3 @@
-using KyberWeave.Tests.Configuration;
 
 using KyberWeave.Application.Review;
 using KyberWeave.Cli;
@@ -42,13 +41,13 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
 
     private const string MigrationCommand = "kyber-weave review migrate-task-gates";
 
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryReviewServices _services = new();
 
-    public ReviewMigrateTaskGatesTests() => Directory.CreateDirectory(Repo);
+    public ReviewMigrateTaskGatesTests() => _services.Files.CreateDirectory(Repo);
 
-    public void Dispose() => _root.Dispose();
+    public void Dispose() => _services.Dispose();
 
-    private string Repo => Path.Combine(_root.Path, "repo");
+    private string Repo => Path.Combine(_services.Root, "repo");
 
     private string ConfigPath => Path.Combine(Repo, ".kyber-weave", "kyber-weave.yml");
 
@@ -87,7 +86,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        Assert.Equal(before, File.ReadAllText(ConfigPath));
+        Assert.Equal(before, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains("nothing to do", run.Output, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -107,7 +106,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate();
 
         Assert.Equal(0, run.ExitCode);
-        Assert.Equal(before, File.ReadAllText(ConfigPath));
+        Assert.Equal(before, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains($"-    csharp-dev:", run.Output, StringComparison.Ordinal);
         Assert.Contains($"+    csharp:", run.Output, StringComparison.Ordinal);
         Assert.Contains("--write", run.Output, StringComparison.Ordinal);
@@ -121,17 +120,17 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     public void TwoEqualEntriesCollapseIntoOneTechnologyAndNothingElseInTheFileChanges()
     {
         WriteConfig(FileWithTwoEqualCsharpAgents());
-        string before = File.ReadAllText(ConfigPath);
+        string before = _services.Files.ReadAllText(ConfigPath);
 
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        Assert.Equal(ExpectedCollapsedFile, File.ReadAllText(ConfigPath));
+        Assert.Equal(ExpectedCollapsedFile, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains("moved", run.Output, StringComparison.OrdinalIgnoreCase);
 
         // The positive control: the same run on the untouched copy is a preview, so the bytes above changed by
         // this command and not by the fixture.
-        File.WriteAllText(ConfigPath, before);
+        _services.Files.WriteAllText(ConfigPath, before);
         Assert.Equal(0, Migrate().ExitCode);
     }
 
@@ -154,12 +153,12 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
 
         Assert.Equal(0, Migrate("--write").ExitCode);
 
-        string after = File.ReadAllText(ConfigPath);
+        string after = _services.Files.ReadAllText(ConfigPath);
         Assert.Contains("    docs-dev:", after, StringComparison.Ordinal);
         Assert.DoesNotContain("    go-dev:", after, StringComparison.Ordinal);
 
         // The Go agent is a removed one, so its gates are now read under the technology that outlives it.
-        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
+        KyberWeaveConfig config = _services.Get<IKyberWeaveConfigRepository>().Load(Repo);
         Assert.Equal(["go-build"], config.Review.TechnologyGates["go"].Select(gate => gate.Id));
         Assert.DoesNotContain("go-dev", config.Review.TaskGates.Keys);
         Assert.Equal(["review-config"], config.Review.TaskGates["docs-dev"].Select(gate => gate.Id));
@@ -191,7 +190,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
                   - id: format
                     run: [dotnet, format]
             """.Replace("\r\n", "\n", StringComparison.Ordinal).Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n",
-            File.ReadAllText(ConfigPath));
+            _services.Files.ReadAllText(ConfigPath));
     }
 
     /// <summary>A quoted key names the same agent as a bare one, and YAML readers agree, so the migration must too.</summary>
@@ -209,7 +208,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
+        KyberWeaveConfig config = _services.Get<IKyberWeaveConfigRepository>().Load(Repo);
         Assert.Equal(["build"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
         Assert.Empty(config.Review.TaskGates);
     }
@@ -237,7 +236,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        Assert.Equal(before, File.ReadAllText(ConfigPath));
+        Assert.Equal(before, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains("test-dev", run.Output, StringComparison.Ordinal);
         Assert.Contains("technology", run.Output, StringComparison.OrdinalIgnoreCase);
     }
@@ -264,7 +263,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        Assert.Equal(before, File.ReadAllText(ConfigPath));
+        Assert.Equal(before, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains("csharp-dev", run.Output, StringComparison.Ordinal);
         Assert.Contains("technology-gates", run.Output, StringComparison.Ordinal);
     }
@@ -292,7 +291,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        Assert.Equal(before, File.ReadAllText(ConfigPath));
+        Assert.Equal(before, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains("csharp", run.Output, StringComparison.Ordinal);
         Assert.Contains("differ", run.Output, StringComparison.OrdinalIgnoreCase);
     }
@@ -330,7 +329,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.DoesNotContain("does not hold", run.Output, StringComparison.Ordinal);
         Assert.DoesNotContain("folded", run.Output, StringComparison.OrdinalIgnoreCase);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
+        KyberWeaveConfig config = _services.Get<IKyberWeaveConfigRepository>().Load(Repo);
         Assert.Equal(["build"], config.Review.TaskGates["csharp-dev"].Select(gate => gate.Id));
         Assert.Equal(["build"], config.Review.TaskGates["dal-dev"].Select(gate => gate.Id));
         Assert.Equal(["build", "test"], config.Review.TaskGates["maui-dev"].Select(gate => gate.Id));
@@ -358,7 +357,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(1, run.ExitCode);
-        Assert.Equal(before, File.ReadAllText(ConfigPath));
+        Assert.Equal(before, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains("KW-CONFIG-001", run.Output, StringComparison.Ordinal);
     }
 
@@ -391,7 +390,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         Assert.Equal(0, run.ExitCode);
         Assert.Contains("moved", run.Output, StringComparison.OrdinalIgnoreCase);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
+        KyberWeaveConfig config = _services.Get<IKyberWeaveConfigRepository>().Load(Repo);
         Assert.Equal(["format"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
         Assert.Equal(["format"], config.Review.TaskGates["test-dev"].Select(gate => gate.Id));
     }
@@ -421,7 +420,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(1, run.ExitCode);
-        Assert.Equal(before, File.ReadAllText(ConfigPath));
+        Assert.Equal(before, _services.Files.ReadAllText(ConfigPath));
         Assert.Contains("would not load", run.Output, StringComparison.Ordinal);
     }
 
@@ -447,11 +446,11 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        string after = File.ReadAllText(ConfigPath);
+        string after = _services.Files.ReadAllText(ConfigPath);
         Assert.Contains("# dal-dev runs the same list, so it needs no entry of its own", after, StringComparison.Ordinal);
         Assert.DoesNotContain("dal-dev:", after, StringComparison.Ordinal);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
+        KyberWeaveConfig config = _services.Get<IKyberWeaveConfigRepository>().Load(Repo);
         Assert.Equal(["format"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
     }
 
@@ -477,11 +476,11 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        string after = File.ReadAllText(ConfigPath);
+        string after = _services.Files.ReadAllText(ConfigPath);
         Assert.Equal(1, after.Split("technology-gates:", StringSplitOptions.None).Length - 1);
         Assert.DoesNotContain("task-gates:", after, StringComparison.Ordinal);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
+        KyberWeaveConfig config = _services.Get<IKyberWeaveConfigRepository>().Load(Repo);
         Assert.Equal(["go-build"], config.Review.TechnologyGates["go"].Select(gate => gate.Id));
         Assert.Equal(["build"], config.Review.TechnologyGates["csharp"].Select(gate => gate.Id));
     }
@@ -504,7 +503,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
         CliRun run = Migrate("--write");
 
         Assert.Equal(0, run.ExitCode);
-        KyberWeaveConfig config = ConfigFileReader.Load(Repo);
+        KyberWeaveConfig config = _services.Get<IKyberWeaveConfigRepository>().Load(Repo);
         Assert.Equal(["go-build"], config.Review.TechnologyGates["go"].Select(gate => gate.Id));
         Assert.Empty(config.Review.TaskGates);
     }
@@ -583,31 +582,29 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     [Fact]
     public void AConfigThatIsASymlinkOutsideTheRepositoryIsRefusedWithZeroBytesWritten()
     {
-        if (OperatingSystem.IsWindows())
-            Assert.Skip("Creating a symbolic link needs a privilege this case cannot assume.");
-
-        using TempDirectory outside = new();
-        string target = Path.Combine(outside.Path, "kyber-weave.yml");
-        File.WriteAllText(target, TwoAgentsOnOneTechnology() + "\n");
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
-        File.CreateSymbolicLink(ConfigPath, target);
-        string before = File.ReadAllText(target);
+        string outside = Path.Combine(_services.Root, "outside");
+        _services.Files.CreateDirectory(outside);
+        string target = Path.Combine(outside, "kyber-weave.yml");
+        _services.Files.WriteAllText(target, TwoAgentsOnOneTechnology() + "\n");
+        _services.Files.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        _services.Files.CreateFileLink(ConfigPath, target);
+        string before = _services.Files.ReadAllText(target);
 
         CliRun run = Migrate("--write");
 
         Assert.Equal(1, run.ExitCode);
         Assert.Contains("symbolic link", run.Output, StringComparison.Ordinal);
-        Assert.Equal(before, File.ReadAllText(target));
-        Assert.NotNull(new FileInfo(ConfigPath).LinkTarget);
+        Assert.Equal(before, _services.Files.ReadAllText(target));
+        Assert.NotNull(_services.Files.GetLinkTarget(ConfigPath));
     }
 
     /// <summary>Writes the repository's configuration with the line endings a committed file has, and returns it.</summary>
     private string WriteConfig(string yaml)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+        _services.Files.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
         string text = yaml.Replace("\r\n", "\n", StringComparison.Ordinal)
             .Replace("\n", "\r\n", StringComparison.Ordinal) + "\r\n";
-        File.WriteAllText(ConfigPath, text);
+        _services.Files.WriteAllText(ConfigPath, text);
         return text;
     }
 
@@ -618,7 +615,7 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
     [Fact]
     public void AnExplicitConfigTheSeamsHoldIsMigratedWithoutAFileOnDisk()
     {
-        string root = Path.Combine(_root.Path, "seam-only");
+        string root = Path.Combine(_services.Root, "seam-only");
         InMemoryFileSystem files = new();
         files.CreateDirectory(root);
         files.WriteAllText(Path.Combine(root, "custom.yml"), TwoAgentsOnOneTechnology());
@@ -639,9 +636,9 @@ public sealed class ReviewMigrateTaskGatesTests : IDisposable
 
     private CliRun Migrate(params string[] options)
     {
-        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
-            () => CliApplication.Create().Run(["review", "migrate-task-gates", Repo, .. options]));
-        return new CliRun(execution.Result, execution.Output);
+        CapturedConsoleExecution<CapturedConsoleExecution<int>> execution = ProcessConsoleCapture.Run(
+            () => _services.Run(CliApplication.Create(_services.Register), ["review", "migrate-task-gates", Repo, .. options]));
+        return new CliRun(execution.Result.Result, execution.Output + execution.Result.Output);
     }
 
     private static string TwoAgentsOnOneTechnology() => """
