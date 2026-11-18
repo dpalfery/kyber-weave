@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.FileSystem;
@@ -69,12 +70,14 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     private readonly IArbiterLogStore _log;
     private readonly IFileSystem _files;
     private readonly IWritableFileSystem _writes;
+    private readonly IPathResolver _paths;
 
     /// <summary>Creates a store rooted at <c>&lt;arbiter-dir&gt;/stores</c>.</summary>
     /// <param name="arbiterDirectory">The Arbiter directory the stores sit under.</param>
     /// <param name="log">The append and windowed-read mechanics every store file shares.</param>
     /// <param name="files">The file system the retention sweep lists and ages siblings through.</param>
     /// <param name="writes">The file system the retention sweep deletes expired siblings through.</param>
+    /// <param name="paths">Decides whether a swept entry is the directory being appended to.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
     public ArbiterRunStore(
@@ -82,9 +85,10 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         IArbiterLogStore log,
         IFileSystem files,
         IWritableFileSystem writes,
+        IPathResolver paths,
         ArbiterStoreOptions? options = null,
         TimeProvider? clock = null)
-        : this(arbiterDirectory, log, files, writes, options, clock, null)
+        : this(arbiterDirectory, log, files, writes, paths, options, clock, null)
     {
     }
 
@@ -93,6 +97,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     /// <param name="log">The append and windowed-read mechanics every store file shares.</param>
     /// <param name="files">The file system the retention sweep lists and ages siblings through.</param>
     /// <param name="writes">The file system the retention sweep deletes expired siblings through.</param>
+    /// <param name="paths">Decides whether a swept entry is the directory being appended to.</param>
     /// <param name="options">The size and retention limits; the shipped defaults when null.</param>
     /// <param name="clock">The clock retention is measured against; the system clock when null.</param>
     /// <param name="newestItemTime">Reads when a sibling directory was last written; the file system when null. Lets a test make that read fail.</param>
@@ -101,6 +106,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         IArbiterLogStore log,
         IFileSystem files,
         IWritableFileSystem writes,
+        IPathResolver paths,
         ArbiterStoreOptions? options,
         TimeProvider? clock,
         Func<string, DateTime>? newestItemTime)
@@ -109,9 +115,11 @@ public sealed class ArbiterRunStore : IArbiterRunStore
         ArgumentNullException.ThrowIfNull(log);
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(writes);
+        ArgumentNullException.ThrowIfNull(paths);
         _log = log;
         _files = files;
         _writes = writes;
+        _paths = paths;
         _newestItemTime = newestItemTime ?? NewestItemTimeUtc;
         _storesDirectory = Path.Combine(arbiterDirectory, StoresDirectoryName);
         _options = options ?? new ArbiterStoreOptions();
@@ -283,14 +291,13 @@ public sealed class ArbiterRunStore : IArbiterRunStore
 
         // Clamped before the conversion: a value past the representable span would throw, and the append must still store.
         TimeSpan retain = TimeSpan.FromDays(Math.Clamp(_options.RetainDays, 1, MaxRetainDays));
-        string keep = Path.GetFullPath(keepDirectory);
         // A listing failure is reported to the catch below rather than read as an empty directory: the outcome is the
         // same, but the failure is handled in one place.
         try
         {
             foreach (FileSystemEntry entry in _files.EnumerateEntries(_storesDirectory))
             {
-                SweepEntry(entry, keep, now, retain);
+                SweepEntry(entry, keepDirectory, now, retain);
             }
         }
         catch (Exception exception) when (FileFailure.Is(exception))
@@ -304,7 +311,7 @@ public sealed class ArbiterRunStore : IArbiterRunStore
     {
         if (entry.IsLink
             || !entry.IsDirectory
-            || string.Equals(Path.GetFullPath(entry.Path), keep, StringComparison.Ordinal))
+            || _paths.AreSame(entry.Path, keep))
         {
             return;
         }

@@ -1,9 +1,11 @@
 using System.Text;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Stores;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Paths;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -30,10 +32,10 @@ internal static class RealArbiterState
         string arbiterDirectory,
         ArbiterStoreOptions? options = null,
         TimeProvider? clock = null) =>
-        new(arbiterDirectory, Log(), Files(), Files(), options, clock);
+        new(arbiterDirectory, Log(), Files(), Files(), Paths(), options, clock);
 
     /// <summary>The state factory over the real append lock and the real disk.</summary>
-    internal static FileArbiterStateFactory Factory() => new(Log(), Files(), Files());
+    internal static FileArbiterStateFactory Factory() => new(Log(), Files(), Files(), Paths());
 
     /// <summary>The run store whose sweep ages a sibling through <paramref name="newestItemTime"/>, for a failing read.</summary>
     /// <param name="arbiterDirectory">The arbiter state directory.</param>
@@ -45,9 +47,11 @@ internal static class RealArbiterState
         ArbiterStoreOptions? options,
         TimeProvider? clock,
         Func<string, DateTime>? newestItemTime) =>
-        new(arbiterDirectory, Log(), Files(), Files(), options, clock, newestItemTime);
+        new(arbiterDirectory, Log(), Files(), Files(), Paths(), options, clock, newestItemTime);
 
     private static ArbiterLogFiles Log() => new();
 
     private static IWritableFileSystem Files() => new PhysicalFileSystem();
+
+    private static IPathResolver Paths() => new PhysicalPathResolver(Files());
 }

@@ -12,6 +12,7 @@ using KyberWeave.Core.Docs.Search;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Paths;
 using KyberWeave.Tests.Arbiter;
 using KyberWeave.Tests.Corpus;
 using KyberWeave.Tests.Fakes;
@@ -446,7 +447,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
     {
         TechnologyRepository(_repository.Path, "azure");
         RecordingArbiterStateFactory state = new(
-            new FileArbiterStateFactory(new FakeArbiterLogStore(), new PhysicalFileSystem(), new PhysicalFileSystem()));
+            new FileArbiterStateFactory(new FakeArbiterLogStore(), new PhysicalFileSystem(), new PhysicalFileSystem(), new PhysicalPathResolver(new PhysicalFileSystem())));
 
         _ = Guard(GuardOver(state), "claude", Command("claude", "az vm list -o table"));
 
