@@ -22,8 +22,8 @@ protocol error with no useful detail.
 ## Composition root
 
 `Program.cs` constructs the single `DocumentIndexHost` and hands it the factories Core
-needs. Tools receive it by injection. Core never builds these itself — see
-[`../KyberWeave.Core/AGENTS.md`](../KyberWeave.Core/AGENTS.md).
+needs. Tools receive it by injection. Application never builds these itself — see
+[`../KyberWeave.Application/AGENTS.md`](../KyberWeave.Application/AGENTS.md).
 
 Repository root resolution order is `--repo-root`, then `KYBER_WEAVE_REPO_ROOT`, then the
 working directory. The working directory is accepted only when it contains a Kyber-Weave

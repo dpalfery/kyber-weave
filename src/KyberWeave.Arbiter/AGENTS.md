@@ -56,7 +56,7 @@ fallback for the harnesses that render no hooks. Two names describe it, and they
 interchangeable.
 
 - **Server key `kw-arbiter`.** It is the value of `McpServerNames.Arbiter` in
-  `src/KyberWeave.Core/Configuration/`, never a literal in this project. Every rendered
+  `src/KyberWeave.Domain/Configuration/`, never a literal in this project. Every rendered
   grant and every client configuration is built from that key, so a literal spelled here
   is how a grant stops resolving.
 - **Executable and argv are unchanged.** `kyber-weave-arbiter serve --repo-root <root>`

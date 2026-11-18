@@ -243,7 +243,7 @@ Tests avoid redundant disk extraction, file copying, and YAML/Markdown parsing t
 
 ### Internals are in scope
 
-`InternalsVisibleTo` exposes `KyberWeave.Core` internals here, so helpers like link
+`InternalsVisibleTo` exposes the product projects' internals here, so helpers like link
 normalization, vocabulary parsing, and docs-root detection are tested directly. Marking a
 helper `internal` is not a reason to test it only through a command.
 

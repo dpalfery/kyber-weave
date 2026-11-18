@@ -188,14 +188,14 @@ schedulers, or jobs; shared engine, one datastore, one `/api/kyber/*` API. See
 ## Dependencies
 
 Core dependency policy (Markdig, YamlDotNet, sqlite3 CLI for CodeGraph): see
-[`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md).
+[`src/KyberWeave.Application/AGENTS.md`](src/KyberWeave.Application/AGENTS.md).
 
 ## Where to go next
 
 | Working on | Read |
 |---|---|
 | Writing C# anywhere in this repository | [`docs/standards/csharp/csharp.standards.md`](docs/standards/csharp/csharp.standards.md), the path declared as **<csharp-coding-standard>** below |
-| The engine — `KyberWeave.Core`, `KyberWeave.Core.Docs` and `KyberWeave.Core.Squad` | [`src/KyberWeave.Core/AGENTS.md`](src/KyberWeave.Core/AGENTS.md) |
+| The engine — `KyberWeave.Application` and the layers under it | [`src/KyberWeave.Application/AGENTS.md`](src/KyberWeave.Application/AGENTS.md) |
 | CLI commands and output | [`src/KyberWeave.Cli/AGENTS.md`](src/KyberWeave.Cli/AGENTS.md) |
 | Installing, updating, or configuring Kyber-Weave or KyberDash | [`docs/cli-command-surface.md`](docs/cli-command-surface.md) — every verb and flag, the exit-code contract, and the canonical flows |
 | The MCP server | [`src/KyberWeave.Mcp/AGENTS.md`](src/KyberWeave.Mcp/AGENTS.md) |
