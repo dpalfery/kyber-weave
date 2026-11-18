@@ -405,10 +405,10 @@ public sealed class DispatchPromptInsertionTests : IDisposable
     [Fact]
     public void OnlyAReturnEventCarriesAProvenPromptInsertion()
     {
-        Assert.False(new ArbiterEvent { Phase = "pre", Prompt = TaskPrompt }.PromptInserted);
-        Assert.True(new ArbiterEvent { Phase = "post", Prompt = TaskPrompt }.PromptInserted);
-        Assert.True(new ArbiterEvent { Phase = "return", Prompt = TaskPrompt }.PromptInserted);
-        Assert.False(new ArbiterEvent { Phase = "post", Prompt = TaskDispatch }.PromptInserted);
+        Assert.False(new ArbiterEvent { Phase = "pre", Prompt = TaskPrompt }.PromptInserted());
+        Assert.True(new ArbiterEvent { Phase = "post", Prompt = TaskPrompt }.PromptInserted());
+        Assert.True(new ArbiterEvent { Phase = "return", Prompt = TaskPrompt }.PromptInserted());
+        Assert.False(new ArbiterEvent { Phase = "post", Prompt = TaskDispatch }.PromptInserted());
     }
 
     /// <summary>
