@@ -153,51 +153,14 @@ public sealed class FileHookSnapshotStoreTests
         Assert.False(_store.Exists(Directory, DocumentName));
     }
 
-    /// <summary>
-    /// Runs the update on a thread of its own and moves the clock only while the update is parked in its retry delay,
-    /// so the order of lock attempts and clock steps never depends on how fast either thread runs. The lock is
-    /// released at the park numbered <paramref name="afterParks"/>, before the clock moves past it.
-    /// </summary>
-    private void RunUpdateAdvancingTime(int afterParks, Action release, Func<string, string?> mutate)
-    {
-        Task update = Task.Factory.StartNew(
-            () => _store.Update(Directory, DocumentName, mutate),
-            CancellationToken.None,
-            TaskCreationOptions.LongRunning,
-            TaskScheduler.Default);
-        int parks = 0;
-        while (true)
-        {
-            // The bound is a guard against a hang, not a timing assumption: a correct run never waits on it.
-            Task finished = Task.WhenAny(_time.NextPark(), update).WaitAsync(TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
-            if (ReferenceEquals(finished, update))
+    private void RunUpdateAdvancingTime(int afterParks, Action release, Func<string, string?> mutate) =>
+        _ = _time.RunAdvancingOnParks(
+            () =>
             {
-                break;
-            }
-
-            if (++parks == afterParks)
-            {
-                release();
-            }
-
-            _time.Advance(TimeSpan.FromMilliseconds(50));
-        }
-
-        update.GetAwaiter().GetResult();
-    }
-
-    /// <summary>A fake clock that tells the test each time something starts waiting on it.</summary>
-    private sealed class ParkObservingTimeProvider : FakeTimeProvider
-    {
-        private readonly SemaphoreSlim _parks = new(0);
-
-        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
-        {
-            ITimer timer = base.CreateTimer(callback, state, dueTime, period);
-            _ = _parks.Release();
-            return timer;
-        }
-
-        public Task NextPark() => _parks.WaitAsync();
-    }
+                _store.Update(Directory, DocumentName, mutate);
+                return true;
+            },
+            TimeSpan.FromMilliseconds(50),
+            afterParks,
+            release);
 }
