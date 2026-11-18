@@ -78,7 +78,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         _paths = paths ?? throw new ArgumentNullException(nameof(paths));
         _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _time = time ?? throw new ArgumentNullException(nameof(time));
-        _reviewBlock = new ReviewBlockWriter(files, lister, tree);
+        _reviewBlock = new ReviewBlockWriter(files, lister, tree, paths, environment);
     }
 
     /// <inheritdoc />

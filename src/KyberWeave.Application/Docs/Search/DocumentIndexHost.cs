@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
@@ -27,10 +28,13 @@ namespace KyberWeave.Core.Docs.Search;
 /// <para>
 /// Composition roots supply the loader and resolver factories. This type never constructs
 /// <see cref="DocumentLoader"/> or <see cref="ICodeGraphResolver"/> implementations itself.
+/// It fingerprints the tree through the repository file store, so a symbolic link is never
+/// followed and the walk stays inside the configured roots.
 /// </para>
 /// </remarks>
 public sealed class DocumentIndexHost
 {
+    private readonly IRepositoryFileStore _files;
     private readonly string _repoRoot;
     private readonly IReadOnlyList<string> _docsRelativeRoots;
     private readonly string? _catalogRelativePath;
@@ -47,8 +51,11 @@ public sealed class DocumentIndexHost
         string repoRoot,
         Func<ICodeGraphResolver> resolverFactory,
         Func<DocumentSet> documentSetFactory,
+        IRepositoryFileStore files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
         string docsRelativeRoot = OntologyConfig.DefaultDocsRoot)
-        : this(repoRoot, resolverFactory, documentSetFactory, [docsRelativeRoot], null)
+        : this(repoRoot, resolverFactory, documentSetFactory, files, paths, environment, [docsRelativeRoot], null)
     {
     }
 
@@ -61,14 +68,21 @@ public sealed class DocumentIndexHost
         string repoRoot,
         Func<ICodeGraphResolver> resolverFactory,
         Func<DocumentSet> documentSetFactory,
+        IRepositoryFileStore files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
         IReadOnlyList<string> docsRelativeRoots,
         string? catalogRelativePath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(resolverFactory);
         ArgumentNullException.ThrowIfNull(documentSetFactory);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(docsRelativeRoots);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        _files = files;
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _docsRelativeRoots = docsRelativeRoots;
         _catalogRelativePath = catalogRelativePath;
         _resolverFactory = resolverFactory;
@@ -179,16 +193,16 @@ public sealed class DocumentIndexHost
             string docsRoot = relativeRoot == DocsRootPath.RepositoryRoot
                 ? _repoRoot
                 : Path.Combine(_repoRoot, relativeRoot.Replace('/', Path.DirectorySeparatorChar));
-            if (!Directory.Exists(docsRoot)) continue;
+            if (!_files.DirectoryExists(docsRoot)) continue;
 
-            // Use DocsRootWalk.EnumerateContainedFiles to avoid following symbolic links
-            // into directories outside the configured root (issue #124).
-            foreach (string file in DocsRootWalk.EnumerateContainedFiles(docsRoot, "*.md"))
+            // The contained walk avoids following symbolic links into directories outside the
+            // configured root (issue #124).
+            foreach (string file in _files.EnumerateContainedFiles(docsRoot, "*.md"))
             {
                 if (!visited.Add(file)) continue;
 
                 count++;
-                long ticks = File.GetLastWriteTimeUtc(file).Ticks;
+                long ticks = _files.GetLastWriteTimeUtc(file).Ticks;
                 if (ticks > newest) newest = ticks;
             }
         }
@@ -198,12 +212,12 @@ public sealed class DocumentIndexHost
             string catalog = Path.Combine(
                 _repoRoot, _catalogRelativePath.Replace('/', Path.DirectorySeparatorChar));
             // Skip a catalog that is, or sits beneath, a symlink (issue #124), without
-            // resolving the link: see DocsRootWalk.IsContainedFile.
-            if (DocsRootWalk.IsContainedFile(_repoRoot, _catalogRelativePath, _docsRelativeRoots)
+            // resolving the link: see IRepositoryFileStore.IsContainedFile.
+            if (_files.IsContainedFile(_repoRoot, _catalogRelativePath, _docsRelativeRoots)
                 && visited.Add(catalog))
             {
                 count++;
-                long ticks = File.GetLastWriteTimeUtc(catalog).Ticks;
+                long ticks = _files.GetLastWriteTimeUtc(catalog).Ticks;
                 if (ticks > newest) newest = ticks;
             }
         }
@@ -218,9 +232,8 @@ public sealed class DocumentIndexHost
     private long ComputeCodeGraphStamp()
     {
         string db = Path.Combine(_repoRoot, ".codegraph", "codegraph.db");
-        if (!File.Exists(db)) return 0;
+        if (!_files.FileExists(db)) return 0;
 
-        FileInfo info = new FileInfo(db);
-        return (info.LastWriteTimeUtc.Ticks * 31) + info.Length;
+        return (_files.GetLastWriteTimeUtc(db).Ticks * 31) + _files.GetLength(db);
     }
 }

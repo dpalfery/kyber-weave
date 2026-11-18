@@ -214,7 +214,7 @@ public sealed class ReviewMigrateTaskGatesCommand(
     }
 
     private ReviewWorkingDirectoryFacts Facts() =>
-        new(tree.DirectoryExists, tree.LeadsOutsideThroughSymlink);
+        new(tree.DirectoryExists, tree.LeadsOutsideThroughSymlink, path => paths.GetFullPath(path, environment.CurrentDirectory));
 
     /// <summary>
     /// Checks the rewrite before it can reach the disk: it has to load, and every entry has to still hold the gates it

@@ -224,6 +224,9 @@ public sealed class DocumentIndexHostSymlinkContainmentTests : IDisposable
             repoRoot,
             resolverFactory,
             documentSetFactory,
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             docsRelativeRoots,
             catalogRelativePath);
     }

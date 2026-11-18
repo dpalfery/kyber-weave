@@ -1020,6 +1020,9 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
         return DocsToolsComposition.Create(host);
@@ -1043,6 +1046,9 @@ public sealed class McpAgentCodingStandardsTests : IDisposable
             _corpus.Root,
             () => CodeGraphResolverAdapter.ForRepository(_corpus.Root),
             () => RealDocumentLoader.Create(_corpus.Root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
         return (DocsToolsComposition.Create(host), host);

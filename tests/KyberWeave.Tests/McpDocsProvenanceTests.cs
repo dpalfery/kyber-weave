@@ -210,6 +210,9 @@ public sealed class McpDocsProvenanceTests : IDisposable
             root,
             () => CodeGraphResolverAdapter.ForRepository(root),
             () => RealDocumentLoader.Create(root, config.Ontology).Load(),
+            DocsPorts.Files,
+            DocsPorts.Paths,
+            DocsPorts.Environment,
             config.Ontology.DocsRoots,
             config.Ontology.ResolvedCatalogPath);
     }

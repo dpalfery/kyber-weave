@@ -182,7 +182,9 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton(sp => new ReviewBlockWriter(
             sp.GetRequiredService<IRepositoryFileStore>(),
             sp.GetRequiredService<IRepositoryFileLister>(),
-            sp.GetRequiredService<IRepositoryTreeProbe>()));
+            sp.GetRequiredService<IRepositoryTreeProbe>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IReviewGateCatalogue>(sp => sp.GetRequiredService<ReviewBlockWriter>());
         services.TryAddSingleton<IDocsScaffoldingService>(sp => new DocsScaffolder(
             sp.GetRequiredService<IRepositoryFileStore>(),

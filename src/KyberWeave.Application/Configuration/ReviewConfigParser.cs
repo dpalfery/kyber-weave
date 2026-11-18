@@ -547,9 +547,9 @@ public static class ReviewConfigParser
         }
 
         ArgumentNullException.ThrowIfNull(facts);
-        string root = Path.GetFullPath(repositoryRoot);
+        string root = facts.FullPath(repositoryRoot);
         string normalized = string.Join('/', segments);
-        string full = Path.GetFullPath(Path.Combine(root, normalized));
+        string full = facts.FullPath(Path.Combine(root, normalized));
 
         if (!TaskGatePlanning.IsWithin(root, full))
         {
