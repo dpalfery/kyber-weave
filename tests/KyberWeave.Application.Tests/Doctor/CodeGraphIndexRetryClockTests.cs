@@ -3,6 +3,7 @@ using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Domain.Doctor;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
@@ -11,8 +12,11 @@ namespace KyberWeave.Tests;
 /// <summary>The wait before a sync is retried after CodeGraph reports its own lock held, on a clock the test moves.</summary>
 public sealed class CodeGraphIndexRetryClockTests
 {
-    private const string Root = "/kw/repo";
-    private const string LockDirectory = "/kw/locks";
+    private readonly InMemoryFileSystem _files = new();
+
+    private string Root => Path.Combine(_files.Root, "kw", "repo");
+
+    private string LockDirectory => Path.Combine(_files.Root, "kw", "locks");
 
     private static readonly ProcessResult HeldIndexLock = new(
         1,
@@ -33,10 +37,10 @@ public sealed class CodeGraphIndexRetryClockTests
             return new ProcessResult(0, string.Empty, string.Empty);
         });
         CodeGraphIndexProvisioner provisioner = new(
-            new FakeDoctorFileSystem().WithDirectory(Root + "/.codegraph"),
+            new FakeDoctorFileSystem().WithDirectory(Path.Combine(Root, ".codegraph")),
             new FreeWorkspace(),
             FakePathResolver.OverEmptyFileSystem(),
-            new FakeProcessEnvironment(currentDirectory: "/kw/work"),
+            new FakeProcessEnvironment(currentDirectory: Path.Combine(_files.Root, "kw", "work")),
             clock);
         DoctorOptions options = DoctorOptions.Defaults with { HeldLockRetryPauses = [TimeSpan.FromMinutes(5)] };
 

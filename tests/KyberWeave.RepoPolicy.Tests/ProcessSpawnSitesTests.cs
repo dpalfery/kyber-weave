@@ -12,7 +12,8 @@ namespace KyberWeave.Tests;
 /// <c>bound</c> that says what stops it (a timeout, a kill in finally, a self-exiting
 /// command, or a fake). A site is keyed by its repository-relative file (prefixed with its scan root,
 /// <c>tests/KyberWeave.Tests/</c>, <c>tests/KyberWeave.Integration.Tests/</c>,
-/// <c>tests/KyberWeave.Testing/</c>, <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
+/// <c>tests/KyberWeave.Mcp.Tests/</c>, <c>tests/KyberWeave.Testing/</c>,
+/// <c>tests/KyberWeave.RepoPolicy.Tests/</c> or <c>src/</c>) and
 /// normalized line text with an occurrence count, so unrelated edits above a site do not invalidate
 /// its entry. Unlisted sites fail
 /// with root-prefixed file:line, and entries that no longer match a site fail as stale.
@@ -34,6 +35,7 @@ public sealed class ProcessSpawnSitesTests
         ("tests/KyberWeave.Cli.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Data.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Kernel.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Mcp.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Integration.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Testing", [".cs", ".sh"]),
         ("tests/KyberWeave.RepoPolicy.Tests", [".cs", ".sh"]),

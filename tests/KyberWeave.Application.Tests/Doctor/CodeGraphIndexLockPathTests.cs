@@ -10,13 +10,17 @@ namespace KyberWeave.Tests;
 /// <summary>Which lock file a provisioning run takes, over a fake path resolver and a fake platform, with no disk.</summary>
 public sealed class CodeGraphIndexLockPathTests
 {
-    private const string LockDirectory = "/kw/locks";
+    private readonly InMemoryFileSystem _files = new();
+
+    private string Work => Path.Combine(_files.Root, "kw", "work");
+
+    private string LockDirectory => Path.Combine(_files.Root, "kw", "locks");
 
     [Fact]
     public void Provision_TakesTheSameLockForARelativeRootAsForItsFullPath()
     {
-        string relative = LockTakenFor("repo", currentDirectory: "/kw/work");
-        string full = LockTakenFor("/kw/work/repo", currentDirectory: "/elsewhere");
+        string relative = LockTakenFor("repo", currentDirectory: Work);
+        string full = LockTakenFor(Path.Combine(Work, "repo"), currentDirectory: Path.Combine(_files.Root, "elsewhere"));
 
         Assert.Equal(full, relative);
         Assert.StartsWith(LockDirectory, relative, StringComparison.Ordinal);
@@ -26,11 +30,11 @@ public sealed class CodeGraphIndexLockPathTests
     public void Provision_TakesDifferentLocksForDifferentRoots()
     {
         Assert.NotEqual(
-            LockTakenFor("/kw/work/one", currentDirectory: "/kw/work"),
-            LockTakenFor("/kw/work/two", currentDirectory: "/kw/work"));
+            LockTakenFor(Path.Combine(Work, "one"), currentDirectory: Work),
+            LockTakenFor(Path.Combine(Work, "two"), currentDirectory: Work));
     }
 
-    private static string LockTakenFor(string root, string currentDirectory)
+    private string LockTakenFor(string root, string currentDirectory)
     {
         RecordingWorkspace workspace = new();
         CodeGraphIndexProvisioner provisioner = new(

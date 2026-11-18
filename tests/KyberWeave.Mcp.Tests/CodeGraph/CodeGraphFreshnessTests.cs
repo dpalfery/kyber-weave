@@ -18,10 +18,6 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class CodeGraphFreshnessTests
 {
-    private static readonly string Root = Path.GetFullPath(Path.Combine(Path.DirectorySeparatorChar.ToString(), "kw", "repo"));
-    private static readonly string Temp = Path.GetFullPath(Path.Combine(Path.DirectorySeparatorChar.ToString(), "kw", "temp"));
-    private static readonly string Work = Path.GetFullPath(Path.Combine(Path.DirectorySeparatorChar.ToString(), "kw", "work"));
-
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 11, 18, 9, 0, 0, TimeSpan.Zero));
     private readonly InMemoryFileSystem _files;
     private readonly FakePathResolver _paths;
@@ -36,6 +32,12 @@ public sealed class CodeGraphFreshnessTests
         _paths = new FakePathResolver(_files);
         DeclareCodeGraph(Root, stopOnToolFailure: true);
     }
+
+    private string Root => Path.Combine(_files.Root, "kw", "repo");
+
+    private string Temp => Path.Combine(_files.Root, "kw", "temp");
+
+    private string Work => Path.Combine(_files.Root, "kw", "work");
 
     [Fact]
     public void FirstCallProvisionsTheResolvedRootUnderTheTemporaryDirectory()
@@ -113,7 +115,8 @@ public sealed class CodeGraphFreshnessTests
     [Fact]
     public void LockFileOnARootWithASpaceIsQuotedForTheShellOfTheHostPlatform()
     {
-        string spaced = Path.GetFullPath(Path.Combine(Path.DirectorySeparatorChar.ToString(), "kw", "my repo"));
+        string spaced = Path.Combine(_files.Root, "kw", "my repo");
+        Assert.StartsWith(_files.Root, spaced, StringComparison.Ordinal);
         DeclareCodeGraph(spaced, stopOnToolFailure: true);
         WriteLockFileAt(spaced, "no number");
 

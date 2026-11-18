@@ -14,9 +14,13 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class SqliteAnalysisPersistenceSeamTests
 {
-    private const string Root = "/work/repo";
-
     private readonly InMemoryFileSystem _files = new();
+
+    private string WorkingDirectory => Path.Combine(_files.Root, "work");
+
+    private string Root => Path.Combine(WorkingDirectory, "repo");
+
+    private string CacheDirectory => Path.Combine(Root, ".kyber-weave", "cache");
 
     [Fact]
     public void ASafeCheckoutWithSqliteOpensTheCacheAndCreatesItsFolder()
@@ -27,8 +31,8 @@ public sealed class SqliteAnalysisPersistenceSeamTests
         SqliteAnalysisPersistence persistence = Open(processes);
 
         Assert.True(persistence.IsAvailable);
-        Assert.Equal("/work/repo/.kyber-weave/cache/docs-analysis.sqlite3", persistence.DatabasePath);
-        Assert.True(_files.DirectoryExists("/work/repo/.kyber-weave/cache"));
+        Assert.Equal(Path.Combine(CacheDirectory, "docs-analysis.sqlite3"), persistence.DatabasePath);
+        Assert.True(_files.DirectoryExists(CacheDirectory));
         Assert.Equal("--version", processes.CallsTo("sqlite3").First().ArgumentList[0]);
         Assert.Contains(processes.Inputs, input => input.StartsWith(".timeout 250\n", StringComparison.Ordinal));
     }
@@ -36,14 +40,14 @@ public sealed class SqliteAnalysisPersistenceSeamTests
     [Fact]
     public void ACheckoutThatDoesNotIgnoreTheCacheStaysClosedAndWritesNothing()
     {
-        _files.CreateDirectory("/work/repo/.kyber-weave");
-        _files.WriteAllText("/work/repo/.kyber-weave/.gitignore", "logs/");
+        _files.CreateDirectory(Path.Combine(Root, ".kyber-weave"));
+        _files.WriteAllText(Path.Combine(Root, ".kyber-weave", ".gitignore"), "logs/");
         ScriptedProcessExecutor processes = Scripted(_ => Ok("0\n"));
 
         SqliteAnalysisPersistence persistence = Open(processes);
 
         Assert.False(persistence.IsAvailable);
-        Assert.False(_files.DirectoryExists("/work/repo/.kyber-weave/cache"));
+        Assert.False(_files.DirectoryExists(CacheDirectory));
         Assert.Empty(processes.CallsTo("sqlite3"));
     }
 
@@ -58,15 +62,15 @@ public sealed class SqliteAnalysisPersistenceSeamTests
         SqliteAnalysisPersistence persistence = Open(processes);
 
         Assert.False(persistence.IsAvailable);
-        Assert.False(_files.DirectoryExists("/work/repo/.kyber-weave/cache"));
+        Assert.False(_files.DirectoryExists(CacheDirectory));
     }
 
     [Fact]
     public void ACacheFolderThatIsALinkIsRefused()
     {
         MakeSafe();
-        _files.CreateDirectory("/elsewhere");
-        _files.CreateDirectoryLink("/work/repo/.kyber-weave/cache", "/elsewhere");
+        _files.CreateDirectory(Path.Combine(_files.Root, "elsewhere"));
+        _files.CreateDirectoryLink(CacheDirectory, Path.Combine(_files.Root, "elsewhere"));
         ScriptedProcessExecutor processes = Scripted(_ => Ok("0\n"));
 
         _ = Assert.Throws<InvalidOperationException>(() => Open(processes));
@@ -121,14 +125,14 @@ public sealed class SqliteAnalysisPersistenceSeamTests
 
     private void MakeSafe()
     {
-        _files.CreateDirectory("/work/repo/.kyber-weave");
-        _files.WriteAllText("/work/repo/.kyber-weave/.gitignore", "cache/");
+        _files.CreateDirectory(Path.Combine(Root, ".kyber-weave"));
+        _files.WriteAllText(Path.Combine(Root, ".kyber-weave", ".gitignore"), "cache/");
     }
 
     private SqliteAnalysisPersistence Open(ScriptedProcessExecutor processes)
     {
         FakePathResolver paths = new(_files);
-        FakeProcessEnvironment environment = new(currentDirectory: "/work");
+        FakeProcessEnvironment environment = new(currentDirectory: WorkingDirectory);
         return new SqliteAnalysisPersistence(
             Root, _files, paths, environment, processes, new AnalysisCacheSafety(_files, paths, environment, processes));
     }

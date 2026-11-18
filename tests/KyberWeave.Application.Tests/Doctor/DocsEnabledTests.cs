@@ -1,6 +1,7 @@
 using Xunit;
 using KyberWeave.Core.Doctor;
 using KyberWeave.Domain.Doctor;
+using KyberWeave.Tests.FileSystem;
 
 namespace KyberWeave.Tests;
 
@@ -9,15 +10,13 @@ namespace KyberWeave.Tests;
 /// an existing <c>docs-root</c> directory, and neither alone is enough. The run-start step depends on this exact
 /// condition, so a looser predicate would run it in repositories with no governed docs.
 /// </summary>
-public sealed class DocsEnabledTests : IDisposable
+public sealed class DocsEnabledTests
 {
     private const string ConfigText = "ontology:\n  docs-root: docs\n";
 
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryFileSystem _files = new();
 
-    public void Dispose() => _root.Dispose();
-
-    private string Root => _root.Path;
+    private string Root => Path.Combine(_files.Root, "repo");
 
     /// <summary>The config reader answers for the repository config path only; any other file reads as absent.</summary>
     private static Func<string, string?> ConfigReader(string? text) =>
@@ -29,9 +28,9 @@ public sealed class DocsEnabledTests : IDisposable
     [Fact]
     public void DocsEnabled_NoConfig_IsFalse()
     {
-        Directory.CreateDirectory(Path.Combine(Root, "docs"));
+        _files.CreateDirectory(Path.Combine(Root, "docs"));
 
-        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(null), Directory.Exists);
+        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(null), _files.DirectoryExists);
 
         Assert.False(enabled);
     }
@@ -40,7 +39,7 @@ public sealed class DocsEnabledTests : IDisposable
     [Fact]
     public void DocsEnabled_ConfigWithoutDocsRootDirectory_IsFalse()
     {
-        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText), Directory.Exists);
+        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText), _files.DirectoryExists);
 
         Assert.False(enabled);
     }
@@ -49,12 +48,12 @@ public sealed class DocsEnabledTests : IDisposable
     [Fact]
     public void DocsEnabled_OntologyDocsRootOutsideDocs_IsTrue()
     {
-        Directory.CreateDirectory(Path.Combine(Root, "documentation"));
+        _files.CreateDirectory(Path.Combine(Root, "documentation"));
 
         bool enabled = DocsEnabled.IsEnabled(
             Root,
             ConfigReader("ontology:\n  docs-root: documentation\n"),
-            Directory.Exists);
+            _files.DirectoryExists);
 
         Assert.True(enabled);
     }
@@ -67,12 +66,12 @@ public sealed class DocsEnabledTests : IDisposable
     [Fact]
     public void DocsEnabled_DocsRootEscapesRepository_IsFalse()
     {
-        Assert.True(Directory.Exists(Path.Combine(Root, "..")), "The parent directory must exist for this test to mean anything.");
+        Assert.True(_files.DirectoryExists(Path.Combine(Root, "..")), "The parent directory must exist for this test to mean anything.");
 
         bool enabled = DocsEnabled.IsEnabled(
             Root,
             ConfigReader("ontology:\n  docs-root: ..\n"),
-            Directory.Exists);
+            _files.DirectoryExists);
 
         Assert.False(enabled);
     }
@@ -86,7 +85,7 @@ public sealed class DocsEnabledTests : IDisposable
         bool enabled = DocsEnabled.IsEnabled(
             Root,
             ConfigReader($"ontology:\n  docs-root: '{absolute}'\n"),
-            Directory.Exists);
+            _files.DirectoryExists);
 
         Assert.False(enabled);
     }
@@ -95,12 +94,12 @@ public sealed class DocsEnabledTests : IDisposable
     [Fact]
     public void DocsEnabled_OntologyDocsRootMissing_FallsBackToNothing()
     {
-        Directory.CreateDirectory(Path.Combine(Root, "docs"));
+        _files.CreateDirectory(Path.Combine(Root, "docs"));
 
         bool enabled = DocsEnabled.IsEnabled(
             Root,
             ConfigReader("ontology:\n  docs-root: documentation\n"),
-            Directory.Exists);
+            _files.DirectoryExists);
 
         Assert.False(enabled);
     }
@@ -109,9 +108,9 @@ public sealed class DocsEnabledTests : IDisposable
     [Fact]
     public void DocsEnabled_ConfigAndDocsRoot_IsTrue()
     {
-        Directory.CreateDirectory(Path.Combine(Root, "docs"));
+        _files.CreateDirectory(Path.Combine(Root, "docs"));
 
-        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText), Directory.Exists);
+        bool enabled = DocsEnabled.IsEnabled(Root, ConfigReader(ConfigText), _files.DirectoryExists);
 
         Assert.True(enabled);
     }

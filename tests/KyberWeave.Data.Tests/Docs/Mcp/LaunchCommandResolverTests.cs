@@ -8,11 +8,6 @@ namespace KyberWeave.Tests.Docs;
 /// <summary>Launch-command lookup over an in-memory tree: the search path, the repository root and the PATH the process has.</summary>
 public sealed class LaunchCommandResolverTests
 {
-    private static readonly string Base = Path.GetFullPath(Path.Combine(Path.GetPathRoot(Path.GetTempPath())!, "launch"));
-    private static readonly string Repo = Path.Combine(Base, "repo");
-    private static readonly string BinA = Path.Combine(Base, "binA");
-    private static readonly string BinB = Path.Combine(Base, "binB");
-
     private readonly InMemoryFileSystem _files = new();
     private readonly FakePathResolver _paths;
     private readonly FakeProcessEnvironment _environment;
@@ -22,6 +17,14 @@ public sealed class LaunchCommandResolverTests
         _paths = new FakePathResolver(_files);
         _environment = new FakeProcessEnvironment(currentDirectory: Base);
     }
+
+    private string Base => Path.Combine(_files.Root, "launch");
+
+    private string Repo => Path.Combine(Base, "repo");
+
+    private string BinA => Path.Combine(Base, "binA");
+
+    private string BinB => Path.Combine(Base, "binB");
 
     [Fact]
     public void ANameIsFoundInTheFirstSearchPathHoldingIt()
