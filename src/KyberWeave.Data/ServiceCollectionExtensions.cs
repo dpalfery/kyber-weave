@@ -62,7 +62,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<INotSeatedStore>(_ => new FileNotSeatedStore());
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
-        services.TryAddSingleton<ISeverityOverrideSource>(_ => new FileSeverityOverrideSource());
         services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
         services.TryAddSingleton<IRepositoryFileLister>(sp => new FileRepositoryFileLister(sp.GetRequiredService<IProgramRunner>()));
         services.TryAddSingleton<ICoverageReportSource>(_ => new FileCoverageReportSource());
