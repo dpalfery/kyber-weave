@@ -1,13 +1,16 @@
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Host;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Spectre.Console;
 
 namespace KyberWeave.Cli.Composition;
 
@@ -19,6 +22,8 @@ internal static class SquadCliServices
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddSquadCliServices(this IServiceCollection services)
     {
+        services.TryAddSingleton<IAnsiConsole>(_ => AnsiConsole.Console);
+        services.TryAddSingleton(sp => new SquadConsole(sp.GetRequiredService<IAnsiConsole>(), sp.GetRequiredService<IConsole>()));
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
             sp.GetRequiredService<ISquadRenderInputReader>()));
@@ -30,4 +35,11 @@ internal static class SquadCliServices
         services.TryAddSingleton(_ => KyberDashCapturePluginStep.CreateDefault());
         return services;
     }
+
+    /// <summary>
+    /// The Squad console over the process's own console, for the callers the container does not build yet (the Arbiter
+    /// install command and the static helpers it shares with the Squad commands).
+    /// </summary>
+    /// <returns>A console over <see cref="AnsiConsole.Console"/> and the standard streams.</returns>
+    internal static SquadConsole ProcessConsole() => new(AnsiConsole.Console, new SystemConsole());
 }

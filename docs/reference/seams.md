@@ -145,6 +145,7 @@ they do it. They are not seams and no test fakes them; a smoke test proves the w
 | `SquadServiceCollectionExtensions` | `KyberWeave.Data` | `Squad/SquadServiceCollectionExtensions.cs` |
 | `Program` | `KyberWeave.Cli` | `Program.cs` |
 | `DocsCommandComposition` | `KyberWeave.Cli` | `Commands/Docs/DocsCommandComposition.cs` |
+| `SquadCliServices` | `KyberWeave.Cli` | `Composition/SquadCliServices.cs` |
 | `Program` | `KyberWeave.Mcp` | `Program.cs` |
 | `DocsToolsComposition` | `KyberWeave.Mcp` | `DocsToolsComposition.cs` |
 | `Program` | `KyberWeave.Hooks` | `Program.cs` |
@@ -291,7 +292,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `RunStartCommand` (`Commands/Run/RunStartCommand.cs`) | console | 4.5 |
 | `CatalogCommand` (`Commands/Skills/CatalogCommand.cs`) | console | 4.5 |
 | `RouteCommand` (`Commands/Skills/RouteCommand.cs`) | console | 4.5 |
-| `SquadBriefCommand` (`Commands/Squad/Brief/SquadBriefCommand.cs`) | file system, console | 4.5 |
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
 | `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
 | `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |
@@ -300,15 +300,12 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadDoctorCommand` (`Commands/Squad/SquadDoctorCommand.cs`) | file system, environment | 4.5 |
 | `SquadHostDefaults` (`Commands/Squad/SquadHostDefaults.cs`) | file system, environment | 4.5 |
 | `SquadInstallCommand` (`Commands/Squad/SquadInstallCommand.cs`) | environment, console | 4.5 |
-| `SquadInstanceRemoveCommand` (`Commands/Squad/SquadInstanceRemoveCommand.cs`) | paths | 4.5 |
 | `SquadPresetClearCommand` (`Commands/Squad/SquadPresetClearCommand.cs`) | file system | 4.5 |
 | `SquadPresetListCommand` (`Commands/Squad/SquadPresetListCommand.cs`) | file system | 4.5 |
 | `SquadPresetUseCommand` (`Commands/Squad/SquadPresetUseCommand.cs`) | file system | 4.5 |
-| `SquadRunCommand` (`Commands/Squad/SquadRunCommand.cs`) | paths | 4.5 |
 | `SquadStatusCommand` (`Commands/Squad/SquadStatusCommand.cs`) | file system, environment | 4.5 |
 | `SquadUninstallCommand` (`Commands/Squad/SquadUninstallCommand.cs`) | environment | 4.5 |
 | `SquadUpdateCommand` (`Commands/Squad/SquadUpdateCommand.cs`) | environment | 4.5 |
-| `SquadUserPaths` (`Commands/Squad/SquadUserPaths.cs`) | environment | 4.5 |
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 

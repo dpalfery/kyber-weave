@@ -11,7 +11,8 @@ namespace KyberWeave.Cli.Commands.Squad;
 /// Maintainer-only command that must be run from the repository root.
 /// </summary>
 /// <param name="packs">Validates the source and writes the archives.</param>
-public sealed class SquadPackCommand(ISquadPackService packs) : Command<SquadPackSettings>
+/// <param name="console">Where the command writes its report.</param>
+public sealed class SquadPackCommand(ISquadPackService packs, IAnsiConsole console) : Command<SquadPackSettings>
 {
     /// <inheritdoc />
     public override int Execute(CommandContext context, SquadPackSettings settings, CancellationToken cancellationToken)
@@ -26,37 +27,37 @@ public sealed class SquadPackCommand(ISquadPackService packs) : Command<SquadPac
 
         foreach (string warning in outcome.Warnings)
         {
-            AnsiConsole.MarkupLine($"[yellow]kyber-weave squad: warning: {Markup.Escape(warning)}[/]");
+            console.MarkupLine($"[yellow]kyber-weave squad: warning: {Markup.Escape(warning)}[/]");
         }
 
         switch (outcome.Status)
         {
             case SquadPackStatus.InvalidFormat:
-                AnsiConsole.MarkupLine($"[red]Invalid pack format '{Markup.Escape(settings.Format)}'. Valid formats: apm, plugins, all.[/]");
+                console.MarkupLine($"[red]Invalid pack format '{Markup.Escape(settings.Format)}'. Valid formats: apm, plugins, all.[/]");
                 return 2;
             case SquadPackStatus.NotRepositoryRoot:
-                AnsiConsole.MarkupLine("[red]kyber-weave squad pack is maintainer-only and must be run from the repository root.[/]");
-                AnsiConsole.MarkupLine("Expected markers [bold]KyberWeave.sln[/] and [bold]products/kyber-squad/squad.yml[/] were not found in the current working directory.");
-                AnsiConsole.MarkupLine("To deploy agents and skills to your project or user environment, run [bold]kyber-weave squad install[/] instead.");
+                console.MarkupLine("[red]kyber-weave squad pack is maintainer-only and must be run from the repository root.[/]");
+                console.MarkupLine("Expected markers [bold]KyberWeave.sln[/] and [bold]products/kyber-squad/squad.yml[/] were not found in the current working directory.");
+                console.MarkupLine("To deploy agents and skills to your project or user environment, run [bold]kyber-weave squad install[/] instead.");
                 return 1;
             case SquadPackStatus.Failed:
-                AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(outcome.Error ?? string.Empty)}[/]");
+                console.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(outcome.Error ?? string.Empty)}[/]");
                 return 1;
         }
 
         if (outcome.ApmArchive is not null)
         {
-            AnsiConsole.MarkupLine($"[green]Successfully packed APM archive to [bold]{Markup.Escape(outcome.ApmArchive)}[/].[/]");
+            console.MarkupLine($"[green]Successfully packed APM archive to [bold]{Markup.Escape(outcome.ApmArchive)}[/].[/]");
         }
 
         if (outcome.PluginsArchive is not null)
         {
-            AnsiConsole.MarkupLine($"[green]Successfully packed Agent Plugins archive to [bold]{Markup.Escape(outcome.PluginsArchive)}[/].[/]");
+            console.MarkupLine($"[green]Successfully packed Agent Plugins archive to [bold]{Markup.Escape(outcome.PluginsArchive)}[/].[/]");
         }
 
         if (outcome.ChecksumFile is not null)
         {
-            AnsiConsole.MarkupLine($"[green]Generated checksums at [bold]{Markup.Escape(outcome.ChecksumFile)}[/].[/]");
+            console.MarkupLine($"[green]Generated checksums at [bold]{Markup.Escape(outcome.ChecksumFile)}[/].[/]");
         }
 
         return 0;

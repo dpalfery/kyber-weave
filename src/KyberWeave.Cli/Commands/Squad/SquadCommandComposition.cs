@@ -1,6 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using KyberWeave.Cli.Commands.Arbiter;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
+using KyberWeave.Cli.Composition;
 using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
@@ -52,7 +53,7 @@ internal static class SquadCommandComposition
     /// <summary>Indicates whether the console environment supports interactive input.</summary>
     public static bool IsInteractiveConsole()
     {
-        return !Console.IsInputRedirected && AnsiConsole.Profile.Capabilities.Interactive;
+        return SquadCliServices.ProcessConsole().IsInteractive;
     }
 
     /// <summary>
@@ -63,7 +64,7 @@ internal static class SquadCommandComposition
     /// </summary>
     public static void WriteClientInputError(string message)
     {
-        CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine($"[red]kyber-weave squad: error: {Markup.Escape(message)}[/]"));
+        SquadCliServices.ProcessConsole().WriteClientInputError(message);
     }
 
     /// <summary>
@@ -385,7 +386,7 @@ internal static class SquadCommandComposition
     /// <summary>Writes one line of console output without folding, so a path in it stays copy-pastable.</summary>
     public static void WriteLine(string markup)
     {
-        CommandHelpers.WriteUnfolded(() => AnsiConsole.MarkupLine(markup));
+        SquadCliServices.ProcessConsole().WriteLine(markup);
     }
 
     /// <summary>
