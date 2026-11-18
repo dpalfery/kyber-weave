@@ -552,7 +552,14 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
             return node.IsDirectory;
         }
 
-        return Follow(node)?.IsDirectory ?? node.LinkNamesDirectory;
+        try
+        {
+            return Follow(node)?.IsDirectory ?? node.LinkNamesDirectory;
+        }
+        catch (IOException)
+        {
+            return node.LinkNamesDirectory;
+        }
     }
 
     private Node ResolveParent(string path, out string name)
@@ -897,7 +904,15 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
             return !node.IsDirectory;
         }
 
-        return Follow(node) is { IsDirectory: false };
+        try
+        {
+            return Follow(node) is { IsDirectory: false };
+        }
+        catch (IOException)
+        {
+            // A link whose chain is a cycle names no target, so the kind it was created with is the only answer.
+            return !node.LinkNamesDirectory;
+        }
     }
 
     private bool Matches(string searchPattern, string name) =>
