@@ -23,26 +23,31 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
     private readonly IStatusLineHostService _host;
     private readonly IStatusLineDeploymentService _plans;
     private readonly IFileSystemPathSemantics _semantics;
+    private readonly IAnsiConsole _console;
 
     /// <summary>Creates a deploy command over the process environment and the host service.</summary>
     /// <param name="environment">The process state the per-user roots are read from.</param>
     /// <param name="host">Opens the artifact tree of the checkout and marks the deployed commands executable.</param>
     /// <param name="plans">Plans and applies the deployment.</param>
     /// <param name="semantics">The filesystem's containment rules.</param>
+    /// <param name="console">Receives everything the operator reads.</param>
     public UtilitiesStatusLineDeployCommand(
         IProcessEnvironment environment,
         IStatusLineHostService host,
         IStatusLineDeploymentService plans,
-        IFileSystemPathSemantics semantics)
+        IFileSystemPathSemantics semantics,
+        IAnsiConsole console)
     {
         ArgumentNullException.ThrowIfNull(environment);
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(plans);
+        ArgumentNullException.ThrowIfNull(console);
 
         _environment = environment;
         _host = host;
         _plans = plans;
         _semantics = semantics;
+        _console = console;
     }
 
     /// <inheritdoc />
@@ -60,7 +65,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         }
         catch (ArgumentException ex)
         {
-            UtilitiesStatusLineCommandComposition.WriteClientInputError(ex.Message);
+            UtilitiesStatusLineCommandComposition.WriteClientInputError(_console, ex.Message);
             return 2;
         }
 
@@ -75,7 +80,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         }
         catch (ArgumentException ex)
         {
-            UtilitiesStatusLineCommandComposition.WriteClientInputError(ex.Message);
+            UtilitiesStatusLineCommandComposition.WriteClientInputError(_console, ex.Message);
             return 2;
         }
 
@@ -86,7 +91,7 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         }
         catch (DirectoryNotFoundException ex)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"[red]kyber-weave utilities statusline: error:[/] {Markup.Escape(ex.Message)}");
             return 1;
         }
@@ -123,16 +128,16 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
             ex is StatusLineDeploymentConflictException or InvalidDataException or
                 IOException or UnauthorizedAccessException or ArgumentException)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"[red]kyber-weave utilities statusline: error:[/] {Markup.Escape(ex.Message)}");
             return false;
         }
 
-        AnsiConsole.MarkupLine($"[bold]{Markup.Escape(token)}[/]");
+        _console.MarkupLine($"[bold]{Markup.Escape(token)}[/]");
 
         if (dryRun)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [grey]dry-run[/] would stage {plan.PlannedFileChanges.Count} file(s) beneath " +
                 $"{Markup.Escape(plan.StagingRoot)}");
         }
@@ -145,12 +150,12 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
-                AnsiConsole.MarkupLine(
+                _console.MarkupLine(
                     $"[red]kyber-weave utilities statusline: error:[/] {Markup.Escape(ex.Message)}");
                 return false;
             }
 
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [green]ok[/] staged {plan.PlannedFileChanges.Count} file(s) beneath " +
                 $"{Markup.Escape(plan.StagingRoot)}");
         }
@@ -158,13 +163,13 @@ public sealed class UtilitiesStatusLineDeployCommand : Command<UtilitiesStatusLi
         string? commandPath = UtilitiesStatusLineOutput.ResolvePrimaryCommandPath(target, plan.StagingRoot, files, _semantics);
         if (commandPath is null)
         {
-            AnsiConsole.MarkupLine(
+            _console.MarkupLine(
                 $"  [yellow]warn[/] the {Markup.Escape(token)} artifact set has no " +
                 $"'{Markup.Escape(UtilitiesStatusLineArtifacts.PrimaryFileName(target))}' to activate.");
             return true;
         }
 
-        UtilitiesStatusLineOutput.PrintActivationGuidance(target, commandPath);
+        UtilitiesStatusLineOutput.PrintActivationGuidance(_console, target, commandPath);
         return true;
     }
 }

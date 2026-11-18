@@ -6,22 +6,27 @@ namespace KyberWeave.Cli.Commands.Utilities;
 
 /// <summary>Shared console rendering for the status-line commands.</summary>
 /// <remarks>
-///     The activation snippet is printed line by line through <see cref="AnsiConsole.WriteLine(string)" />
+///     The activation snippet is printed line by line through <see cref="IAnsiConsole.WriteLine(string)" />
 ///     rather than as markup: the snippet is JSON the operator copies verbatim, so it must not be
 ///     re-parsed for markup, and a path containing brackets must survive intact.
 /// </remarks>
 internal static class UtilitiesStatusLineOutput
 {
     /// <summary>Prints the per-harness activation snippet for a deployed artifact.</summary>
-    public static void PrintActivationGuidance(StatusLineTarget target, string commandAbsolutePath)
+    /// <param name="console">Receives the snippet.</param>
+    /// <param name="target">The harness the snippet activates.</param>
+    /// <param name="commandAbsolutePath">The absolute path of the deployed artifact.</param>
+    public static void PrintActivationGuidance(IAnsiConsole console, StatusLineTarget target, string commandAbsolutePath)
     {
-        string token = UtilitiesStatusLineTargetCatalog.GetToken(target);
-        AnsiConsole.WriteLine();
-        AnsiConsole.MarkupLine($"[bold]Activation — {Markup.Escape(token)}[/]");
-        foreach (string line in UtilitiesStatusLineActivationGuidance.Build(target, commandAbsolutePath))
-            AnsiConsole.WriteLine(line);
+        ArgumentNullException.ThrowIfNull(console);
 
-        AnsiConsole.WriteLine(UtilitiesStatusLineActivationGuidance.ApplyYourselfLine);
+        string token = UtilitiesStatusLineTargetCatalog.GetToken(target);
+        console.WriteLine();
+        console.MarkupLine($"[bold]Activation — {Markup.Escape(token)}[/]");
+        foreach (string line in UtilitiesStatusLineActivationGuidance.Build(target, commandAbsolutePath))
+            console.WriteLine(line);
+
+        console.WriteLine(UtilitiesStatusLineActivationGuidance.ApplyYourselfLine);
     }
 
     /// <summary>
