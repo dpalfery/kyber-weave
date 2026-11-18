@@ -115,7 +115,8 @@ public sealed class CodeGraphFreshnessTests
     [Fact]
     public void LockFileOnARootWithASpaceIsQuotedForTheShellOfTheHostPlatform()
     {
-        string spaced = Path.GetFullPath(Path.Combine(Path.DirectorySeparatorChar.ToString(), "kw", "my repo"));
+        string spaced = Path.Combine(_files.Root, "kw", "my repo");
+        Assert.StartsWith(_files.Root, spaced, StringComparison.Ordinal);
         DeclareCodeGraph(spaced, stopOnToolFailure: true);
         WriteLockFileAt(spaced, "no number");
 
