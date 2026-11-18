@@ -25,11 +25,20 @@ public sealed class ProcessEnvironment : IProcessEnvironment
 
     /// <inheritdoc />
     /// <remarks>
-    /// The name rule of this host's default volume. It matches the rule <see cref="Paths.PhysicalPathResolver" />
-    /// takes when the caller does not pass one: Linux volumes compare names case-sensitively, Windows and macOS
-    /// volumes do not.
+    /// The default rule of this host's platform family. Windows and macOS volumes ignore case; every other family,
+    /// FreeBSD and an unidentified one included, is treated as case-sensitive.
     /// </remarks>
-    public bool IsFileSystemCaseInsensitive => OperatingSystem is not OperatingSystemKind.Linux;
+    public bool IsFileSystemCaseInsensitive => IsCaseInsensitivePlatform(OperatingSystem);
+
+    /// <summary>Whether a platform family's default volume compares names without regard to case.</summary>
+    /// <param name="operatingSystem">The operating-system family.</param>
+    /// <returns>True for Windows and macOS; false for every other family, including an unidentified one.</returns>
+    /// <remarks>
+    /// A fallback, not the answer: the volume's own rule is probed. On FreeBSD and other families whose disks vary,
+    /// assuming insensitivity would merge names the file system keeps distinct.
+    /// </remarks>
+    internal static bool IsCaseInsensitivePlatform(OperatingSystemKind operatingSystem) =>
+        operatingSystem is OperatingSystemKind.Windows or OperatingSystemKind.MacOS;
 
     /// <inheritdoc />
     public bool IsInputRedirected => Console.IsInputRedirected;
