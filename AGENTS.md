@@ -102,7 +102,9 @@ contract suite and allowed sealed framework type.
   council's gates run the unit and content projects; CI runs the integration project as its own
   required job.
 - **Test roots are platform-qualified.** Derive a path from the fake's in-memory root or the test
-  temp root, never from a POSIX literal such as `/kw/work`, so the same test runs on Windows.
+  temp root, never from a POSIX literal such as `/kw/work`, so the same test runs on Windows. The
+  unit projects do not yet run on Windows and some fixtures still carry that literal; the gap is
+  tracked in [`docs/todo/unit-tests-on-windows-ci.md`](docs/todo/unit-tests-on-windows-ci.md).
 
 No build check or architecture test enforces these rules, and none is to be added: written
 guidance and review do ([ADR 0089](docs/adr/0089-every-behaviour-is-testable-through-a-seam.md)).
