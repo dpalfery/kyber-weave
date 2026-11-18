@@ -16,6 +16,8 @@ internal sealed class FakeArbiterUserSettings : IArbiterUserSettings
     /// <inheritdoc />
     public ArbiterProviderConfig ApplyTo(ArbiterProviderConfig repository, string homeDirectory)
     {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentException.ThrowIfNullOrWhiteSpace(homeDirectory);
         Asked.Add(homeDirectory);
         return Override?.Invoke(repository, homeDirectory) ?? repository;
     }
