@@ -148,7 +148,7 @@ task 1.8's acceptance criterion is not met for them until `tasks.md` assigns an 
 | `KyberWeave.Data` | 80 | 705 | 3.2, 3.3, 3.4, 3.5, 4.4 |
 | `KyberWeave.Domain` | 26 | 46 | 2.5 |
 | `KyberWeave.Hooks` | 1 | 1 | 4.7 |
-| `KyberWeave.Kernel` | 2 | 18 | 2.2, 4.6 |
+| `KyberWeave.Kernel` | 2 | 18 | unassigned |
 | `KyberWeave.Mcp` | 4 | 16 | 4.6 |
 | `KyberWeave.Arbiter` | 0 | 0 | — (its two files are the Program root and the console-stream adapter) |
 | **Total** | **226** | **1,174** | |
@@ -408,8 +408,8 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | 2.2 |
-| `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | 4.6 |
+| `FileReferenceExtractor` (`Parsing/FileReferenceExtractor.cs`) | file system, paths | unassigned |
+| `CodeGraphIndexStaleness` (`VersionControl/CodeGraphIndexStaleness.cs`) | file system | unassigned |
 
 #### KyberWeave.Mcp (4 classes)
 
@@ -419,6 +419,18 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DocsRootRegistry` (`DocsRootRegistry.cs`) | paths, console | 4.6 |
 | `DocsTools` (`DocsTools.cs`) | paths | 4.6 |
 | `RepositoryRootResolver` (`RepositoryRootResolver.cs`) | paths | 4.6 |
+
+## Gaps in the task list
+
+These are places where the register cannot point at an owning task because the approved
+`tasks.md` does not name one. They are recorded here so the gap is visible and can be closed by
+amending the task list, not by inventing a task number in this page.
+
+| Gap | Classes | Why it matters |
+|---|---|---|
+| `Application` folders with no phase 4 task | 12 classes: `Agents/AgentFileReader`, `Doctor/CodeGraphIndexProvisioner`, `Doctor/McpServerLiveProbe`, `Doctor/PostCheckoutHookInstaller`, `Hooks/EditHookService`, `RunStart/RunStartRunner`, `Skills/SkillFileReader`, `Squad/Briefs/SquadBriefBuilder`, `Squad/Deployment/FactoryMcpConfiguration`, `Squad/Instances/SquadInstanceService`, `Squad/Packaging/SquadPackService`, `Utilities/StatusLineProductArtifactSource` | Task 4.1 names `Update`, 4.2 names `Docs`, and 4.3 names `Review` and `Arbiter`. No task names these folders, so nobody owns the conversion |
+| `Kernel` classes with no phase 2 or phase 4 task | `Parsing/FileReferenceExtractor`, `VersionControl/CodeGraphIndexStaleness` | Task 2.2 names `Core` and `Core.Docs`; 4.6 names `Mcp`. Kernel still calls the file system and path directly |
+| Configuration fake and contract suite | `IKyberWeaveConfigRepository` | Task 2.3 owns this; until then a caller is tested with a private fake, not a shared one |
 
 ## The exceptions register
 
