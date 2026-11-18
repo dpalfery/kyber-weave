@@ -1,3 +1,4 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Core.Review;
@@ -6,19 +7,36 @@ namespace KyberWeave.Data.Review;
 
 /// <summary>Probes a repository root and the symbolic links under it through the file-system seam.</summary>
 /// <param name="files">Answers every existence, listing and link question.</param>
-public sealed class FileRepositoryTreeProbe(IFileSystem files) : IRepositoryTreeProbe
+/// <param name="paths">Resolves a root the caller spelled relatively.</param>
+/// <param name="environment">Names the working directory a relative root resolves against.</param>
+public sealed class FileRepositoryTreeProbe(
+    IFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment) : IRepositoryTreeProbe
 {
     /// <inheritdoc />
     public RepositoryRootAccess ProbeRoot(string root)
     {
+        string full;
         try
         {
-            if (!files.DirectoryExists(root))
+            full = paths.GetFullPath(root, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
+                                       or System.Security.SecurityException)
+        {
+            // A spelling the file system cannot resolve names no directory, which is what an absent root answers.
+            return new RepositoryRootAccess(false);
+        }
+
+        try
+        {
+            if (!files.DirectoryExists(full))
                 return new RepositoryRootAccess(false);
 
             // DirectoryExists returns false without throwing on permission-denied roots;
             // enumerate to detect accessibility issues.
-            _ = files.EnumerateEntries(root).FirstOrDefault();
+            _ = files.EnumerateEntries(full).FirstOrDefault();
             return RepositoryRootAccess.Accessible;
         }
         catch (Exception ex) when (FileFailure.Is(ex))
@@ -28,7 +46,18 @@ public sealed class FileRepositoryTreeProbe(IFileSystem files) : IRepositoryTree
     }
 
     /// <inheritdoc />
-    public bool DirectoryExists(string path) => files.DirectoryExists(path);
+    public bool DirectoryExists(string path)
+    {
+        try
+        {
+            return files.DirectoryExists(paths.GetFullPath(path, environment.CurrentDirectory));
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException
+                                       or System.Security.SecurityException)
+        {
+            return false;
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -40,7 +69,7 @@ public sealed class FileRepositoryTreeProbe(IFileSystem files) : IRepositoryTree
     /// </remarks>
     public bool LeadsOutsideThroughSymlink(string root, string path)
     {
-        string full = Path.GetFullPath(root);
+        string full = paths.GetFullPath(root, environment.CurrentDirectory);
         string current = full;
         string[] segments = path.Split(
             [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],

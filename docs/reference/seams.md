@@ -263,8 +263,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CommandHelpers` (`Commands/CommandHelpers.cs`) | file system, paths | 4.5 |
 | `DocsCloseoutCommand` (`Commands/Docs/DocsCloseoutCommand.cs`) | clock | 4.5 |
 | `DocsFinalizeCommand` (`Commands/Docs/DocsFinalizeCommand.cs`) | clock | 4.5 |
-| `DocsInitCommand` (`Commands/Docs/DocsInitCommand.cs`) | file system, paths, environment, console | 4.5 |
-| `DocsOnboardingCommand` (`Commands/Docs/DocsOnboardingCommand.cs`) | file system, paths | 4.5 |
 | `DocsPacketCommand` (`Commands/Docs/DocsPacketCommand.cs`) | paths, console | 4.5 |
 | `DocsTasksCommand` (`Commands/Docs/DocsTasksCommand.cs`) | console | 4.5 |
 | `DoctorCommand` (`Commands/Doctor/DoctorCommand.cs`) | paths, console | 4.5 |
@@ -284,11 +282,10 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
 | `KyberDashCapturePluginStep` (`Commands/Squad/Infrastructure/KyberDashCapturePluginStep.cs`) | file system, environment | 4.5 |
 | `ProcessProbes` (`Commands/Squad/Infrastructure/ProcessProbes.cs`) | environment | 4.5 |
-| `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | file system, paths, console | 4.5 |
+| `SquadCommandComposition` (`Commands/Squad/SquadCommandComposition.cs`) | console | 4.5 |
 | `SquadPresetClearCommand` (`Commands/Squad/SquadPresetClearCommand.cs`) | file system | 4.5 |
 | `SquadPresetListCommand` (`Commands/Squad/SquadPresetListCommand.cs`) | file system | 4.5 |
 | `SquadPresetUseCommand` (`Commands/Squad/SquadPresetUseCommand.cs`) | file system | 4.5 |
-| `SquadStatusCommand` (`Commands/Squad/SquadStatusCommand.cs`) | file system, environment | 4.5 |
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
@@ -313,7 +310,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `FileHookSnapshotStore` (`Hooks/Arbiter/FileHookSnapshotStore.cs`) | file system, clock, identifiers | 4.4 |
 | `FileWorkerBudgetStore` (`Hooks/Arbiter/FileWorkerBudgetStore.cs`) | file system | 4.4 |
 | `CheckoutProductRootLocator` (`Host/CheckoutProductRootLocator.cs`) | paths | 4.4 |
-| `FileCitedSourceFiles` (`Review/FileCitedSourceFiles.cs`) | file system, paths | 4.4 |
 | `FileCoverageReportSource` (`Review/FileCoverageReportSource.cs`) | file system | 4.4 |
 | `FileProjectFileLocator` (`Review/FileProjectFileLocator.cs`) | file system, paths | 4.4 |
 | `FileReviewDecisionCacheStore` (`Review/FileReviewDecisionCacheStore.cs`) | file system, paths | 4.4 |

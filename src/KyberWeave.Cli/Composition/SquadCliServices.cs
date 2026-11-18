@@ -2,6 +2,7 @@ using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
 using KyberWeave.Contracts.Host;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.FileSystem;
@@ -25,6 +26,11 @@ internal static class SquadCliServices
     {
         services.TryAddSingleton<IAnsiConsole>(_ => AnsiConsole.Console);
         services.TryAddSingleton(sp => new SquadConsole(sp.GetRequiredService<IAnsiConsole>(), sp.GetRequiredService<IConsole>()));
+        services.TryAddSingleton(sp => new SquadCommandRoots(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<SquadConsole>()));
         services.TryAddSingleton(sp => new SquadTargetRootConfirmation(sp.GetRequiredService<SquadConsole>()));
         services.TryAddSingleton<ISquadRenderer>(sp => new SquadRendererRegistry(
             SquadRendererSet.Create(),
@@ -48,11 +54,4 @@ internal static class SquadCliServices
     /// </summary>
     /// <returns>A console over <see cref="AnsiConsole.Console"/> and the standard streams.</returns>
     internal static SquadConsole ProcessConsole() => new(AnsiConsole.Console, new SystemConsole());
-
-    /// <summary>
-    /// The process's own file system, for a Squad helper the container does not give a seam yet. A command that is
-    /// given the seam passes it instead.
-    /// </summary>
-    /// <returns>The physical file system.</returns>
-    internal static IWritableFileSystem ProcessFileSystem() => new PhysicalFileSystem();
 }

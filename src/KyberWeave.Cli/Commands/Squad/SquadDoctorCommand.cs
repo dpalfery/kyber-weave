@@ -43,6 +43,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     private readonly IKyberWeaveConfigRepository _configs;
     private readonly SquadConsole _console;
     private readonly IWritableFileSystem _files;
+    private readonly SquadCommandRoots _roots;
 
     /// <summary>Creates the doctor command over the Squad services the host registers.</summary>
     /// <param name="stateStore">Reads the deployment state.</param>
@@ -63,6 +64,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
     /// <param name="configs">Reads the repository configuration the Arbiter probe follows.</param>
     /// <param name="output">Where every line is written.</param>
     /// <param name="files">Reads the deployment state files the checks probe.</param>
+    /// <param name="roots">Resolves the target root, migrates legacy state and anchors a global run.</param>
     public SquadDoctorCommand(
         ISquadStateStore stateStore,
         ISquadStateMigration migration,
@@ -81,7 +83,8 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         IFileSystemPathSemantics pathSemantics,
         IKyberWeaveConfigRepository configs,
         SquadConsole output,
-        IWritableFileSystem files)
+        IWritableFileSystem files,
+        SquadCommandRoots roots)
     {
         ArgumentNullException.ThrowIfNull(stateStore);
         ArgumentNullException.ThrowIfNull(migration);
@@ -101,6 +104,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ArgumentNullException.ThrowIfNull(configs);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(roots);
         _stateStore = stateStore;
         _migration = migration;
         _globalRoots = globalRoots;
@@ -119,6 +123,7 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         _configs = configs;
         _console = output;
         _files = files;
+        _roots = roots;
     }
 
     /// <inheritdoc />
@@ -148,20 +153,14 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         string targetRoot = effectivePath is null or "."
             ? _options.WorkingDirectory ?? _environment.CurrentDirectory
             : effectivePath;
-        string workingDirectory = SquadCommandComposition.ResolveTargetRoot(targetRoot);
+        string workingDirectory = _roots.ResolveTargetRoot(targetRoot);
 
         // Doctor reads home-level state, so it resolves the store once. A --global doctor is anchored at the
         // home directory whatever the working directory is, and a path given with it is named and ignored.
         // The anchor resolves as a dry run, so doctor never creates the home directory. Doctor is not read-only:
         // the migration below runs with dryRun: false and may move legacy state into the home.
         ISquadStateStore homeStateStore = _stateStore;
-        if (settings.Global)
-            _ = SquadCommandComposition.ResolveGlobalAnchorRoot(
-                homeStateStore,
-                effectivePath,
-                true,
-                _files,
-                _console);
+        if (settings.Global) _ = _roots.ResolveGlobalAnchorRoot(homeStateStore, effectivePath, true);
 
         _console.Ansi.MarkupLine("[bold]Kyber-Squad Doctor[/]");
         _console.Ansi.WriteLine();
@@ -256,12 +255,11 @@ internal sealed class SquadDoctorCommand : Command<SquadDoctorSettings>
         ReportShadowedSkills(workingDirectory, homeStateStore);
 
         // 6. Home state: the migration the other verbs run, then the registry and any retained in-repo state.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
             _environment.CurrentDirectory,
             settings.Global ? null : workingDirectory,
-            false,
-            _files);
+            false);
         _console.WriteMigrationNotes(migration, true);
         try
         {

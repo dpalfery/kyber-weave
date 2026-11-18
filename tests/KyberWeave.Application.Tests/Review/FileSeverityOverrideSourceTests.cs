@@ -2,6 +2,7 @@ using System.IO;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
 using KyberWeave.Data.Review;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -27,7 +28,8 @@ public sealed class FileSeverityOverrideSourceTests
 
     private readonly InMemoryFileSystem _files = new();
 
-    private FileSeverityOverrideSource Source() => new(_files);
+    private FileSeverityOverrideSource Source() =>
+        new(_files, new FakePathResolver(_files), new FakeProcessEnvironment(currentDirectory: "/"));
 
     private string GuidanceFile => Path.GetFullPath(Path.Combine(Root, SeverityOverrides.DefaultGuidancePath));
 
@@ -75,6 +77,45 @@ public sealed class FileSeverityOverrideSourceTests
         _files.FailWhen(operation => operation.Name == "ReadAllText", new IOException("unreadable"));
 
         Assert.Same(SeverityOverrides.None, Source().Load(Root, ConfigRegConfig.ProductDefaults));
+    }
+
+    [Fact]
+    public void GuidancePathReadsARelativeRootAgainstTheWorkingDirectory()
+    {
+        string path = Path.Combine("/work", "repo", SeverityOverrides.DefaultGuidancePath);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, Table);
+        FileSeverityOverrideSource source = new(
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: "/work"));
+
+        Assert.Equal(path, source.GuidancePath("repo", ConfigRegConfig.ProductDefaults));
+    }
+
+    [Fact]
+    public void LoadNamesTheFileRelativeToARelativeRoot()
+    {
+        string path = Path.Combine("/work", "repo", SeverityOverrides.DefaultGuidancePath);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, """
+            # Review guidance
+
+            ## Severity overrides
+
+            | Id | Finding class | Severity | Applies to | Why |
+            |---|---|---|---|---|
+            | SO-1 | Some class | blocker | | |
+
+            """);
+        FileSeverityOverrideSource source = new(
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: "/work"));
+
+        SeverityOverrides overrides = source.Load("repo", ConfigRegConfig.ProductDefaults);
+
+        Assert.Equal(SeverityOverrides.DefaultGuidancePath, Assert.Single(overrides.Problems).FilePath);
     }
 
     [Fact]

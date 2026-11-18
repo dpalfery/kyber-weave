@@ -1,6 +1,5 @@
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
-using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -37,7 +36,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     private readonly SquadConsole _output;
     private readonly SquadTargetRootConfirmation _confirmation;
     private readonly IProcessEnvironment _environment;
-    private readonly IPathResolver _paths;
+    private readonly SquadCommandRoots _roots;
     private readonly KyberDashCapturePluginStep? _capturePluginStep;
     private readonly IKyberWeaveConfigRepository _configs;
 
@@ -53,7 +52,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
     /// <param name="output">Where the command writes and asks.</param>
     /// <param name="confirmation">Echoes the target root and asks before anything is written.</param>
     /// <param name="environment">Names the working directory a relative path resolves against.</param>
-    /// <param name="paths">Resolves the target root to its absolute form.</param>
+    /// <param name="roots">Resolves the target root, anchors a global run and reads the scope's configuration.</param>
     /// <param name="picker">Offers the registered projects to choose from, or null for the terminal picker.</param>
     /// <param name="capturePluginStep">Installs the capture plugin after a global deployment, or null for none.</param>
     /// <param name="configs">Reads the project's host config for the task-gate hint.</param>
@@ -69,7 +68,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         SquadConsole output,
         SquadTargetRootConfirmation confirmation,
         IProcessEnvironment environment,
-        IPathResolver paths,
+        SquadCommandRoots roots,
         IKyberWeaveConfigRepository configs,
         ISquadProjectPicker? picker = null,
         KyberDashCapturePluginStep? capturePluginStep = null)
@@ -85,7 +84,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(confirmation);
         ArgumentNullException.ThrowIfNull(environment);
-        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(roots);
         ArgumentNullException.ThrowIfNull(configs);
         _lifecycle = lifecycle;
         _instances = instances;
@@ -98,7 +97,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         _output = output;
         _confirmation = confirmation;
         _environment = environment;
-        _paths = paths;
+        _roots = roots;
         _configs = configs;
         _picker = picker;
         _capturePluginStep = capturePluginStep;
@@ -151,8 +150,6 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         return true;
     }
 
-    private string ResolveTargetRoot(string? path) =>
-        _paths.GetFullPath(string.IsNullOrWhiteSpace(path) ? "." : path, _environment.CurrentDirectory);
 
     public override int Execute(CommandContext context, SquadUpdateSettings settings,
         CancellationToken cancellationToken)
@@ -192,7 +189,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
             return 2;
         }
 
-        string projectRoot = ResolveTargetRoot(effectivePath);
+        string projectRoot = _roots.ResolveTargetRoot(effectivePath);
 
         // A named project that cannot be resolved is refused before any global work, so a typo costs
         // nothing: no migration, no receipt read, no write.
@@ -200,7 +197,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         if (scope == SquadDeploymentScope.Global && selection.Kind == SquadProjectSelectionKind.Paths)
             try
             {
-                namedProjects = SquadCommandComposition.ResolveNamedProjects(selection.Paths, stateStore);
+                namedProjects = _roots.ResolveNamedProjects(selection.Paths, stateStore);
             }
             catch (ArgumentException ex)
             {
@@ -215,7 +212,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
         // State is migrated before anything reads it. A dry run that finds legacy state reports it and
         // stops without reading a deployment the migration has not yet moved.
-        SquadMigrationReport migration = SquadCommandComposition.EnsureStateMigrated(
+        SquadMigrationReport migration = _roots.EnsureStateMigrated(
             _migration,
             _environment.CurrentDirectory,
             scope == SquadDeploymentScope.Project ? projectRoot : null,
@@ -225,7 +222,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
 
         // Chosen after the migration, so a legacy receipt the migration has just copied is anchored on its recorded root.
         string targetRoot = scope == SquadDeploymentScope.Global
-            ? SquadCommandComposition.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
+            ? _roots.ResolveGlobalAnchorRoot(stateStore, effectivePath, settings.DryRun)
             : projectRoot;
 
         ISquadLifecycleService lifecycleService = _lifecycle;
@@ -421,7 +418,7 @@ internal sealed class SquadUpdateCommand : Command<SquadUpdateSettings>
         }
 
         // Load configuration if present
-        KyberWeaveConfigLoadResult configResult = SquadCommandComposition.TryLoadScopeConfig(
+        KyberWeaveConfigLoadResult configResult = _roots.TryLoadScopeConfig(
             _configs,
             run.TargetRoot,
             run.Scope,
