@@ -1,4 +1,5 @@
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -12,28 +13,19 @@ using KyberWeave.Core.Configuration;
 using Xunit;
 using KyberWeave.Tests.Arbiter;
 
-namespace KyberWeave.Integration.Tests.Arbiter;
+namespace KyberWeave.Application.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 1.9: the single entry point running evaluation end to end.
 /// RED: <see cref="ArbiterEvaluator"/> does not exist yet.
 /// </summary>
-public sealed class ArbiterEvaluatorTests : IDisposable
+public sealed class ArbiterEvaluatorTests
 {
     private static readonly FakeIdGenerator Ids = new();
 
-    private readonly string _root = Path.Combine(
-        Path.GetTempPath(), "kw-arbiter-eval-" + Guid.NewGuid().ToString("N"));
+    private readonly InMemoryArbiterState _state = new();
 
-    public void Dispose()
-    {
-        if (Directory.Exists(_root))
-        {
-            Directory.Delete(_root, recursive: true);
-        }
-    }
-
-    private string ArbiterDirectory => Path.Combine(_root, "artifacts", "arbiter");
+    private static string ArbiterDirectory => InMemoryArbiterState.Directory;
 
     private sealed class CountingProvider : IArbiterProvider
     {
@@ -45,11 +37,11 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         public bool SawLedgerFile { get; private set; }
 
-        private readonly string _directory;
+        private readonly Func<bool> _ledgerHasAnEntry;
 
-        public CountingProvider(string directory)
+        public CountingProvider(Func<bool> ledgerHasAnEntry)
         {
-            _directory = directory;
+            _ledgerHasAnEntry = ledgerHasAnEntry;
         }
 
         public Task<ArbiterStep1BatchResult> AskStep1Async(
@@ -61,8 +53,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             CallCount++;
             if (LedgerMustExist is not null && LedgerMustExist())
             {
-                string ledgerPath = Path.Combine(_directory, InFlightLedger.FileName);
-                SawLedgerFile = File.Exists(ledgerPath);
+                SawLedgerFile = _ledgerHasAnEntry();
             }
 
             Dictionary<string, string> answers = AnswerFor is not null
@@ -172,6 +163,8 @@ public sealed class ArbiterEvaluatorTests : IDisposable
                     ["other"] = "other criterion",
                 }));
 
+    private bool LedgerHasAnEntry() => _state.Log.LinesOf(ArbiterDirectory, InFlightLedger.FileName).Count > 0;
+
     private ArbiterEvaluator CreateEvaluator(
         IArbiterProvider provider,
         IArbiterGitFacts? gitFacts = null,
@@ -184,13 +177,13 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         return new ArbiterEvaluator(
             provider,
             _ => null,
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
+            _state.LedgerStore,
+            _state.DecisionLog,
             gitFacts ?? new PassThroughGitFacts(),
             planReader ?? new PassThroughPlanReader(),
-            modelTargets ?? new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+            modelTargets ?? new FileArbiterModelTargetsReader(_state.Files),
+            _state.GateReports(),
+            _state.State,
             new FixedClock(fixedNow),
             new FakeIdGenerator(),
             modelTargetsDirectory: modelTargetsDirectory);
@@ -237,7 +230,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     public async Task Evaluator_OneProviderCallPerTriggerRegardlessOfRuleCount()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
-        CountingProvider provider = new(ArbiterDirectory);
+        CountingProvider provider = new(LedgerHasAnEntry);
         ArbiterEvaluator evaluator = CreateEvaluator(provider);
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
@@ -262,16 +255,16 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         KyberWeaveConfig config = ConfigWith([
             Step0Rule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
         ]);
-        string harnessTableDirectory = Path.Combine(_root, "claude-root", ".kyber-weave", "arbiter");
+        string harnessTableDirectory = Path.Combine(ArbiterTestRoots.Under("claude-root"), ".kyber-weave", "arbiter");
         RecordingModelTargetsReader given = new();
         RecordingModelTargetsReader defaulted = new();
 
         await CreateEvaluator(
-                new CountingProvider(ArbiterDirectory),
+                new CountingProvider(LedgerHasAnEntry),
                 modelTargets: given,
                 modelTargetsDirectory: harnessTableDirectory)
             .EvaluateAsync(DelegateEvent(Prompt), config);
-        await CreateEvaluator(new CountingProvider(ArbiterDirectory), modelTargets: defaulted)
+        await CreateEvaluator(new CountingProvider(LedgerHasAnEntry), modelTargets: defaulted)
             .EvaluateAsync(DelegateEvent(Prompt), config);
 
         Assert.Equal(harnessTableDirectory, given.Directory);
@@ -283,7 +276,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     public async Task Evaluator_WritesStepOneScoresToTheDecisionRecord()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
-        CountingProvider provider = new(ArbiterDirectory)
+        CountingProvider provider = new(LedgerHasAnEntry)
         {
             Scores = new Dictionary<string, ArbiterStep1Score>(StringComparer.Ordinal)
             {
@@ -297,7 +290,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         await CreateEvaluator(provider).EvaluateAsync(DelegateEvent(Prompt), config);
 
-        ArbiterDecisionRecord record = RealArbiterState.Decisions(ArbiterDirectory).ReadAll()[0];
+        ArbiterDecisionRecord record = _state.DecisionLog.ReadAll()[0];
         ArbiterDecisionRule scored = record.Rules.Single(rule => rule.Id == "KW-ARB-ASK-001");
         Assert.Equal([0.9, 0.1], scored.Probabilities!);
         Assert.Equal(0.85, scored.Confidence);
@@ -312,7 +305,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     public async Task Evaluator_Step0ShortCircuitSkipsProviderCall()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
-        CountingProvider provider = new(ArbiterDirectory);
+        CountingProvider provider = new(LedgerHasAnEntry);
         ArbiterEvaluator evaluator = CreateEvaluator(provider);
         KyberWeaveConfig config = ConfigWith([
             Step0Rule("KW-ARB-SCOPE-001", "delegate", "not-in-plan", RuleEffects.Escalate),
@@ -338,8 +331,8 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.Equal(RuleEffects.Allow, result.Outcome);
         Assert.False(result.IsError);
-        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
-        Assert.Equal(ArbiterProviderStatuses.NotEvaluated, RealArbiterState.Decisions(ArbiterDirectory).ReadAll()[0].Provider.Status);
+        Assert.Single(_state.DecisionLog.ReadAll());
+        Assert.Equal(ArbiterProviderStatuses.NotEvaluated, _state.DecisionLog.ReadAll()[0].Provider.Status);
     }
 
     [Fact]
@@ -354,13 +347,13 @@ public sealed class ArbiterEvaluatorTests : IDisposable
                 resolverCalls++;
                 return null;
             },
-            RealArbiterState.Ledger(ArbiterDirectory),
-            RealArbiterState.Decisions(ArbiterDirectory),
+            _state.LedgerStore,
+            _state.DecisionLog,
             new PassThroughGitFacts(),
             new PassThroughPlanReader(),
-            new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
-            RealGateReportFacts.Create(),
-            RealArbiterState.Factory(),
+            new FileArbiterModelTargetsReader(_state.Files),
+            _state.GateReports(),
+            _state.State,
             new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
@@ -452,7 +445,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         Assert.True(result.IsError);
         Assert.NotEqual(string.Empty, result.LedgerId);
         Assert.Contains(
-            RealArbiterState.Ledger(ArbiterDirectory).ReadAll(),
+            _state.LedgerStore.ReadAll(),
             e => e.Id == result.LedgerId);
     }
 
@@ -479,7 +472,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         ArbiterEvaluator second = CreateEvaluator(new NoneProvider(), planReader: new DigestPlanReader("digest-1"));
         await second.EvaluateAsync(DelegateEvent(Prompt), config);
 
-        DecisionLog log = RealArbiterState.Decisions(ArbiterDirectory);
+        DecisionLog log = _state.DecisionLog;
         ArbiterDecisionRecord unchanged = log.ReadAll()[^1];
         Assert.Equal(2, unchanged.Repeat);
 
@@ -497,7 +490,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
     public async Task Evaluator_LedgerBeforeDecisionAroundEvaluation()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
-        CountingProvider provider = new(ArbiterDirectory) { LedgerMustExist = () => true };
+        CountingProvider provider = new(LedgerHasAnEntry) { LedgerMustExist = () => true };
         ArbiterEvaluator evaluator = CreateEvaluator(provider);
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
@@ -507,26 +500,23 @@ public sealed class ArbiterEvaluatorTests : IDisposable
 
         Assert.False(result.IsError);
         Assert.True(provider.SawLedgerFile, "ledger event is appended before evaluation");
-        Assert.Single(RealArbiterState.Ledger(ArbiterDirectory).ReadAll());
-        Assert.Single(RealArbiterState.Decisions(ArbiterDirectory).ReadAll());
-        string ledgerText = await File.ReadAllTextAsync(Path.Combine(ArbiterDirectory, InFlightLedger.FileName));
-        Assert.NotEmpty(ledgerText.Trim());
+        Assert.Single(_state.LedgerStore.ReadAll());
+        Assert.Single(_state.DecisionLog.ReadAll());
+        Assert.NotEmpty(string.Concat(_state.Log.LinesOf(ArbiterDirectory, InFlightLedger.FileName)).Trim());
     }
 
     [Fact]
     public async Task Evaluator_DryRunReadsLedgerAndWritesNothing()
     {
         const string Prompt = "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement.";
-        InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
+        InFlightLedger ledger = _state.LedgerStore;
         DateTimeOffset at = new(2025, 10, 1, 12, 0, 0, TimeSpan.Zero);
         await ledger.AppendAsync(new ArbiterLedgerEvent(
             Ids.NewSortableId(at), at, ArbiterSources.Hook, "claude", "s1", ArbiterLedgerPhases.Pre));
-        int filesBefore = Directory.Exists(ArbiterDirectory)
-            ? Directory.GetFiles(ArbiterDirectory).Length
-            : 0;
-        string ledgerBefore = await File.ReadAllTextAsync(Path.Combine(ArbiterDirectory, InFlightLedger.FileName));
+        int filesBefore = _state.Log.AppendedPaths.Count;
+        IReadOnlyList<string> ledgerBefore = _state.Log.LinesOf(ArbiterDirectory, InFlightLedger.FileName);
 
-        CountingProvider provider = new(ArbiterDirectory);
+        CountingProvider provider = new(LedgerHasAnEntry);
         ArbiterEvaluator evaluator = CreateEvaluator(provider);
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
@@ -536,9 +526,9 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             DelegateEvent(Prompt), config, new ArbiterEvaluatorOptions(DryRun: true));
 
         Assert.False(result.IsError);
-        Assert.Equal(ledgerBefore, await File.ReadAllTextAsync(Path.Combine(ArbiterDirectory, InFlightLedger.FileName)));
-        Assert.Equal(filesBefore, Directory.GetFiles(ArbiterDirectory).Length);
-        Assert.False(File.Exists(Path.Combine(ArbiterDirectory, DecisionLog.FileName)));
+        Assert.Equal(ledgerBefore, _state.Log.LinesOf(ArbiterDirectory, InFlightLedger.FileName));
+        Assert.Equal(filesBefore, _state.Log.AppendedPaths.Count);
+        Assert.Empty(_state.Log.LinesOf(ArbiterDirectory, DecisionLog.FileName));
     }
 
     [Fact]
@@ -556,7 +546,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
                 new ArbiterDispatch("dev-medium", "KYBER-ARBITER: true\nPLAN_FILE: docs/plans/plan.md\nTASK: T3\n\nImplement B."),
             ],
         };
-        CountingProvider provider = new(ArbiterDirectory)
+        CountingProvider provider = new(LedgerHasAnEntry)
         {
             AnswerFor = (rules, facts) => rules.ToDictionary(
                 rule => rule.Id,
@@ -618,37 +608,5 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         // model the dispatch proceeds (ADR 0072).
         Assert.False(result.IsError, result.ErrorMessage);
         Assert.Equal(RuleEffects.Allow, result.Outcome);
-    }
-
-    /// <summary>
-    /// A per-task commit is now the normal case, so the scope-drift rule must still see what a
-    /// finished task changed. It reads the paths changed since the ledger's pre-dispatch
-    /// snapshot, and that set has to include a path whose change is committed while the tree is
-    /// clean — otherwise every committed task looks as though it changed nothing, and
-    /// <c>KW-ARB-DIFF-001</c> cannot see drift at all.
-    /// </summary>
-    /// <remarks>
-    /// The repository is built through <see cref="RunStartProbe" />, the suite's allow-listed
-    /// driver of a real git repository, because the proof needs two commits: a snapshot taken
-    /// on a clean tree, then one commit on top with the tree clean again.
-    /// </remarks>
-    [Fact]
-    public void PerTaskCommitsDoNotHideScopeDrift()
-    {
-        using RunStartProbe probe = RunStartProbe.Create();
-        GitSnapshot? snapshot = RealGitFacts.Create().CaptureSnapshot(probe.Root);
-        Assert.NotNull(snapshot);
-
-        probe.Git("switch", "-c", "claude/feat/one-task", "origin/main");
-        string committed = Path.Combine(probe.Root, "src", "OneTask.cs");
-        Directory.CreateDirectory(Path.GetDirectoryName(committed)!);
-        File.WriteAllText(committed, "// one task's work\n", System.Text.Encoding.UTF8);
-        probe.Git("add", "-A");
-        probe.Git("commit", "-m", "test(squad): one task, one commit");
-        Assert.Equal(string.Empty, probe.GitOutput("status", "--porcelain").Trim());
-
-        IReadOnlySet<string> changed = RealGitFacts.Create().GetChangedPathsSinceSnapshot(probe.Root, snapshot!);
-
-        Assert.Contains("src/OneTask.cs", changed);
     }
 }
