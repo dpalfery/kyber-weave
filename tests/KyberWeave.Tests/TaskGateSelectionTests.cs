@@ -19,7 +19,7 @@ public sealed class TaskGateSelectionTests
     private static readonly string[] Changed = ["src/KyberWeave.Core/Review/PathGlob.cs"];
 
     private const string Service = "src/KyberWeave.Application/Review/TaskGateSelectionService.cs";
-    private const string SuppressionScan = "src/KyberWeave.Domain/Review/SuppressionScan.cs";
+    private const string SuppressionScan = "src/KyberWeave.Application/Review/SuppressionScan.cs";
 
     private static readonly Dictionary<string, IReadOnlyList<string>> TestMap = new(StringComparer.Ordinal)
     {

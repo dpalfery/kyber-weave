@@ -47,7 +47,7 @@ public sealed class RemovedAgentNameRepoGuardTests
     private static readonly string[] ExemptPaths =
     [
         "src/KyberWeave.Application/Docs/Validation/PlanTaskAgentPick.cs",
-        "src/KyberWeave.Domain/Review/Catalogue/GateCatalogueRenderer.cs",
+        "src/KyberWeave.Application/Review/Catalogue/GateCatalogueRenderer.cs",
         "src/KyberWeave.Domain/Review/Catalogue/RemovedAgentMap.cs"
     ];
 
