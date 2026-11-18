@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <PackageReference Include="JetBrains.Annotations" Version="2026.2.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="11.0.0" />
     <PackageReference Include="xunit.v3.assert" Version="4.0.3" />
     <PackageReference Include="xunit.v3.extensibility.core" Version="4.0.3" />
   </ItemGroup>
