@@ -177,7 +177,7 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
             FakeSquadUserPaths userPaths = new(applicationData, home);
             SquadStateStore store = new(userPaths);
             TempGlobalRoots roots = new(globalRoots);
-            using SeededPriorReleaseSource prior = new(directory.Path);
+            using FakeSquadReleaseSource prior = SeededPriorRelease();
             SquadLifecycleService lifecycle = SquadHostDefaults.CreateLifecycleService(
                 prior,
                 SquadHostDefaults.ResolveRenderer(),
@@ -266,22 +266,15 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
     }
 
     /// <summary>
-    ///     A release that carries the response-format skill as the prior version shipped it. It is the
-    ///     synthetic corpus plus an inline skill and a bundle that lists it, so it does not read the product tree.
+    ///     A release that carries the response-format skill as the prior version shipped it: the synthetic corpus plus
+    ///     the skill and a bundle that lists it, so it does not read the product tree.
     /// </summary>
-    private sealed class SeededPriorReleaseSource : ISquadReleaseSource
+    private static FakeSquadReleaseSource SeededPriorRelease() => new()
     {
-        private const string AssetSha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-        private readonly string _corpusRoot;
-
-        public SeededPriorReleaseSource(string root)
+        SourceDirectory = SyntheticValidSquadReleaseSource.SyntheticCorpusRoot,
+        FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
         {
-            _corpusRoot = Path.Combine(root, "prior-corpus");
-            CopyTree(SyntheticValidSquadReleaseSource.SyntheticCorpusRoot, _corpusRoot);
-
-            File.WriteAllText(
-                Path.Combine(_corpusRoot, "bundles", "full.yml"),
+            ["bundles/full.yml"] =
                 """
                 schema: kyber-squad.bundle/v1
                 name: full
@@ -292,59 +285,11 @@ public sealed class SquadResponseFormatRetirementTests : IDisposable
                   - response-format
                   - task-gate
                 """,
-                new UTF8Encoding(false));
-
-            string skillRoot = Path.Combine(_corpusRoot, "skills", "response-format");
-            Directory.CreateDirectory(skillRoot);
-            File.WriteAllText(
-                Path.Combine(skillRoot, "SKILL.md"),
+            ["skills/response-format/SKILL.md"] =
                 "---\nname: response-format\ndescription: \"Seeded prior response-format skill.\"\n---\n" +
                 SeededSkillBody,
-                new UTF8Encoding(false));
-        }
-
-        public Task<SquadReleaseResult> DownloadAndExtractAsync(
-            SquadReleaseRequest request,
-            CancellationToken cancellationToken)
-        {
-            ArgumentNullException.ThrowIfNull(request);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            CopyTree(_corpusRoot, request.DestinationPath);
-            List<string> extracted = Directory
-                .EnumerateFiles(request.DestinationPath, "*", SearchOption.AllDirectories)
-                .Select(path =>
-                    Path.GetRelativePath(request.DestinationPath, path).Replace(Path.DirectorySeparatorChar, '/'))
-                .Order(StringComparer.Ordinal)
-                .ToList();
-
-            string assetName = $"kyber-squad-{request.Version}.zip";
-            return Task.FromResult(new SquadReleaseResult(
-                request.Version,
-                new SquadReleaseAsset(
-                    assetName,
-                    new Uri(
-                        $"https://github.com/{request.Repository}/releases/download/v{request.Version}/{assetName}"),
-                    1024),
-                new SquadReleaseChecksum(assetName, AssetSha256),
-                Path.GetFullPath(request.DestinationPath),
-                extracted));
-        }
-
-        public void Dispose()
-        {
-            // The corpus lives under the test's own temp directory, which the test disposes.
-        }
-
-        private static void CopyTree(string source, string destination)
-        {
-            Directory.CreateDirectory(destination);
-            foreach (string file in Directory.EnumerateFiles(source))
-                File.Copy(file, Path.Combine(destination, Path.GetFileName(file)), true);
-            foreach (string directory in Directory.EnumerateDirectories(source))
-                CopyTree(directory, Path.Combine(destination, Path.GetFileName(directory)));
-        }
-    }
+        },
+    };
 
     private sealed class TempGlobalRoots(string root) : ISquadGlobalRootResolver
     {
