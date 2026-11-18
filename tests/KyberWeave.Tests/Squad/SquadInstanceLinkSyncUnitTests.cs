@@ -156,6 +156,51 @@ public sealed class SquadInstanceLinkSyncUnitTests
         _ = Assert.Throws<InvalidDataException>(() => Sync());
     }
 
+    private const string PlannedSettings =
+        "[{\"relativePath\":\"settings.json\",\"kind\":\"file\",\"targetPath\":\"/kw/main/settings.json\"}]";
+
+    [Fact]
+    public void LinkTheStoppedSyncPlannedAndNeverRecordedIsAdoptedAsItsOwn()
+    {
+        _files.CreateFileLink(Instance + "/settings.json", Main + "/settings.json");
+        _files.WriteAllText(State + "/links.pending.json", PlannedSettings);
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Empty(result.Warnings);
+        Assert.Contains(result.Links, link => link.RelativePath == "settings.json");
+        Assert.Contains("\"settings.json\"", _files.ReadAllText(State + "/links.json"), StringComparison.Ordinal);
+        Assert.False(_files.FileExists(State + "/links.pending.json"));
+    }
+
+    [Fact]
+    public void PersonsOwnCopyAtAPlannedPathIsStillKeptWithAWarning()
+    {
+        _files.WriteAllText(Instance + "/settings.json", "mine");
+        _files.WriteAllText(State + "/links.pending.json", PlannedSettings);
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Equal("mine", _files.ReadAllText(Instance + "/settings.json"));
+        Assert.Null(_files.GetLinkTarget(Instance + "/settings.json"));
+        Assert.Contains(result.Warnings, warning => warning.Contains("settings.json", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Links, link => link.RelativePath == "settings.json");
+    }
+
+    [Fact]
+    public void PersonsLinkToAnotherFileAtAPlannedPathIsStillKeptWithAWarning()
+    {
+        _files.WriteAllText("/kw/elsewhere.json", "x");
+        _files.CreateFileLink(Instance + "/settings.json", "/kw/elsewhere.json");
+        _files.WriteAllText(State + "/links.pending.json", PlannedSettings);
+
+        SquadInstanceLinkSyncResult result = Sync();
+
+        Assert.Equal("/kw/elsewhere.json", _files.GetLinkTarget(Instance + "/settings.json"));
+        Assert.Contains(result.Warnings, warning => warning.Contains("settings.json", StringComparison.Ordinal));
+        Assert.DoesNotContain(result.Links, link => link.RelativePath == "settings.json");
+    }
+
     [Fact]
     public void LinkNameIsTheSameForARootWhateverItsSpelling()
     {

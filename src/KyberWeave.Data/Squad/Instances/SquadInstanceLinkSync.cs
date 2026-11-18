@@ -33,6 +33,8 @@ public sealed class SquadInstanceLinkSync(
     ILease lease,
     IProcessEnvironment environment) : ISquadInstanceLinkSync
 {
+    private const string PlannedLinksFileName = "links.pending.json";
+
     private static readonly TimeSpan LeaseTimeout = TimeSpan.FromMinutes(5);
 
     // The lease refuses a second request from the process that holds the name, so concurrent callers in this
@@ -115,6 +117,7 @@ public sealed class SquadInstanceLinkSync(
     {
         List<SquadLinkRecord> recordedLinks = ReadRecordedLinks(instanceStateDirectory);
         ValidateRecordedLinks(instanceRoot, recordedLinks);
+        AdoptPlannedLinks(instanceRoot, instanceStateDirectory, fileSystem, recordedLinks);
 
         List<SquadLinkRecord> mainListing = EnumerateMainHome(mainHome, renderedPaths, row.ExtraLinks);
         List<string> instanceListing = EnumerateInstanceRoot(instanceRoot);
@@ -198,6 +201,14 @@ public sealed class SquadInstanceLinkSync(
 
         // 4. Apply Add actions
         List<SquadLinkRecord> activeLinks = [];
+        WritePlannedLinks(
+            instanceStateDirectory,
+            [.. actions.OfType<SquadLinkAction.Add>()
+                .Select(add => add.Record)
+                .Where(record =>
+                    !differingSplitPaths.Contains(NormalizeRelativePath(record.RelativePath)) &&
+                    !keptPaths.Contains(NormalizeRelativePath(record.RelativePath)) &&
+                    !fileSystem.IsLinkTo(Path.Combine(instanceRoot, record.RelativePath), record.TargetPath))]);
 
         foreach (SquadLinkAction.Add add in actions.OfType<SquadLinkAction.Add>())
         {
@@ -253,8 +264,82 @@ public sealed class SquadInstanceLinkSync(
             .ToList();
 
         WriteLinksJson(instanceStateDirectory, sortedLinks);
+        DeletePlannedLinks(instanceStateDirectory);
 
         return new SquadInstanceLinkSyncResult(sortedLinks, warnings);
+    }
+
+    private string PlannedLinksPath(string instanceStateDirectory) =>
+        Path.Combine(instanceStateDirectory, PlannedLinksFileName);
+
+    /// <summary>
+    /// Writes the links about to be created, before the first one is. A stop after some links exist and before
+    /// <c>links.json</c> names them leaves this file as the proof they are the sync's own.
+    /// </summary>
+    private void WritePlannedLinks(string instanceStateDirectory, IReadOnlyList<SquadLinkRecord> planned)
+    {
+        if (planned.Count == 0) return;
+
+        EnsureDirectoryExists(instanceStateDirectory);
+        string text = JsonSerializer.Serialize(planned, JsonOptions) + "\n";
+        files.WriteAllBytesAtomic(
+            PlannedLinksPath(instanceStateDirectory),
+            new UTF8Encoding(false).GetBytes(text),
+            SquadTransaction.SyncToDisk);
+    }
+
+    private void DeletePlannedLinks(string instanceStateDirectory)
+    {
+        string path = PlannedLinksPath(instanceStateDirectory);
+        try
+        {
+            if (files.FileExists(path)) files.DeleteFile(path);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A leftover record only lists links the next sync checks again before adopting any.
+        }
+    }
+
+    /// <summary>
+    /// Treats a planned link that exists on disk as recorded, so a stop before <c>links.json</c> was written does not turn
+    /// the sync's own links into copies it keeps forever. Only a link that points at the planned target is adopted: a
+    /// regular file or a link elsewhere at the same path is still the person's own and is kept with a warning.
+    /// </summary>
+    private void AdoptPlannedLinks(
+        string instanceRoot,
+        string instanceStateDirectory,
+        ISquadLinkFileSystem fileSystem,
+        List<SquadLinkRecord> recordedLinks)
+    {
+        string path = PlannedLinksPath(instanceStateDirectory);
+        if (!files.FileExists(path)) return;
+
+        List<SquadLinkRecord>? planned;
+        try
+        {
+            planned = JsonSerializer.Deserialize<List<SquadLinkRecord>>(files.ReadAllText(path), JsonOptions);
+        }
+        catch (JsonException)
+        {
+            return;
+        }
+
+        if (planned is null) return;
+
+        HashSet<string> known = new(recordedLinks.Select(r => NormalizeRelativePath(r.RelativePath)), StringComparer.Ordinal);
+        List<SquadLinkRecord> candidates = [.. planned.Where(r => !string.IsNullOrWhiteSpace(r.RelativePath))];
+        ValidateRecordedLinks(instanceRoot, candidates);
+        foreach (SquadLinkRecord record in candidates)
+        {
+            if (known.Contains(NormalizeRelativePath(record.RelativePath))) continue;
+
+            if (fileSystem.IsLinkTo(Path.Combine(instanceRoot, record.RelativePath), record.TargetPath))
+            {
+                recordedLinks.Add(record);
+                known.Add(NormalizeRelativePath(record.RelativePath));
+            }
+        }
     }
 
     private void ValidateRecordedLinks(string instanceRoot, IReadOnlyList<SquadLinkRecord> recordedLinks)

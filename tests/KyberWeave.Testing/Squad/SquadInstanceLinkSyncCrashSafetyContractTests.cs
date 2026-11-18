@@ -47,6 +47,7 @@ public enum SquadLinkSyncFlow
 public abstract class SquadInstanceLinkSyncCrashSafetyContractTests
 {
     private const string ManagedMarker = "state/links.json";
+    private const string PendingMarker = "state/links.pending.json";
 
     private static readonly SquadInstanceRow Row = SquadInstanceCatalog.GetRow(SquadTarget.Claude);
 
@@ -232,6 +233,11 @@ public abstract class SquadInstanceLinkSyncCrashSafetyContractTests
                 continue;
             }
 
+            if (path == PendingMarker)
+            {
+                continue;
+            }
+
             if (path.Contains(".tmp", StringComparison.Ordinal))
             {
                 yield return $"a temporary file was left behind: '{path}'";
@@ -305,11 +311,3 @@ public sealed record SquadLinkSyncKnownWeakness(
     string DetailContains,
     IReadOnlyCollection<int> Points,
     string Reason);
-
-/// <summary>The crash-safety weaknesses of the instance link sync that are known and reported to a person, not fixed here.</summary>
-public static class SquadLinkSyncKnownWeaknesses
-{
-    /// <summary>A stop between the first link and the recorded links file leaves links no record names.</summary>
-    public const string UnrecordedLinksReason =
-        "A stop after the sync created some links and before it wrote links.json leaves those links unrecorded; the next sync sees them as the person's own copies, keeps them with a warning and never records them, so they are never removed when the main home file goes away.";
-}

@@ -12,21 +12,6 @@ public sealed class PhysicalSquadInstanceLinkSyncCrashSafetyTests : SquadInstanc
     private readonly TempDirectory _directory = new();
 
     /// <inheritdoc />
-    protected override IReadOnlyList<SquadLinkSyncKnownWeakness> KnownWeaknesses =>
-    [
-        new(
-            SquadLinkSyncFlow.FirstSync,
-            "'state/links.json' changed",
-            [.. Enumerable.Range(11, 12)],
-            SquadLinkSyncKnownWeaknesses.UnrecordedLinksReason),
-        new(
-            SquadLinkSyncFlow.UnmanagedCopyKept,
-            "'state/links.json' changed",
-            [.. Enumerable.Range(11, 7)],
-            SquadLinkSyncKnownWeaknesses.UnrecordedLinksReason),
-    ];
-
-    /// <inheritdoc />
     protected override SquadLinkSyncCrashWorkspace CreateWorkspace() => new PhysicalSquadLinkSyncCrashWorkspace(_directory.Path);
 
     /// <inheritdoc />
