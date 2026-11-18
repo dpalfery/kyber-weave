@@ -1,6 +1,5 @@
 using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
-using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Release;
@@ -8,7 +7,7 @@ using KyberWeave.Core.Squad.Validation;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad;
 
 /// <summary>
 ///     Verifies Squad install and update lifecycle behaviors when applying, persisting, and diffing model presets.
@@ -19,7 +18,7 @@ namespace KyberWeave.Integration.Tests;
 ///     - 3.2: WHEN update runs, Squad SHALL re-apply recorded preset.
 ///     - 3.4: WHEN recorded preset no longer exists, update SHALL fail before writing and name missing preset.
 /// </summary>
-public sealed class SquadModelPresetLifecycleTests : IDisposable
+public sealed class SquadModelPresetLifecycleTests
 {
     private const string FastPresetYaml = """
                                           schema: kyber-squad.model-preset/v1
@@ -70,26 +69,21 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
                                                          default: custom-unsupported-model
                                                      """;
 
-    private readonly TempDirectory _temp = new();
-
-    public void Dispose()
-    {
-        _temp.Dispose();
-    }
+    private readonly InMemorySquadState _state = new();
 
     [Fact]
     public async Task InstallWithPresetWritesV2LockAndReceiptHashesMatchDeployedFiles()
     {
         // Arrange
-        string targetRoot = Path.Combine(_temp.Path, "install-preset-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "install-preset-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         Dictionary<SquadTarget, string> presets = new()
         {
@@ -128,8 +122,8 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         foreach (SquadOwnedFile file in receipt.Files)
         {
             string diskPath = ResolveTargetPath(targetRoot, file.RelativePath);
-            Assert.True(File.Exists(diskPath));
-            byte[] diskBytes = await File.ReadAllBytesAsync(diskPath);
+            Assert.True(_state.Files.FileExists(diskPath));
+            byte[] diskBytes = _state.Files.ReadAllBytes(diskPath);
             string diskHash = Convert.ToHexStringLower(SHA256.HashData(diskBytes));
             Assert.Equal(file.Sha256, diskHash);
         }
@@ -139,21 +133,20 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     public async Task UpdateWithNullModelPresetsReappliesRecordedPresetToNewRelease()
     {
         // Arrange — an install that recorded "fast" is the starting point; the update is the subject.
-        string targetRoot = Path.Combine(_temp.Path, "update-reapply-preset-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "update-reapply-preset-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
-        new SquadInstalledPresetProjectTemplate(
-                "fast",
-                [SquadTarget.Copilot],
-                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
-                ("fast", FastPresetYaml))
-            .CopyInto(userPaths, targetRoot);
+        await InstallPresetProjectAsync(
+            targetRoot,
+            [SquadTarget.Copilot],
+            new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
+                        ("fast", FastPresetYaml));
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         // Act — update specifying ModelPresets = null must preserve and re-apply recorded preset
         SquadUpdateRequest updateRequest = new(
@@ -184,28 +177,27 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     public async Task UpdateChangingOnlyClaudePresetLeavesSecondTargetPresetUnchanged()
     {
         // Arrange — an install recording one preset per target is the starting point.
-        string targetRoot = Path.Combine(_temp.Path, "update-partial-override-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "update-partial-override-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "claude-fast", ClaudeFastPresetYaml);
         await WritePresetAsync(userPaths, "copilot-fast", FastPresetYaml);
         await WritePresetAsync(userPaths, "claude-quality", ClaudeQualityPresetYaml);
-        new SquadInstalledPresetProjectTemplate(
-                "claude-and-copilot",
-                [SquadTarget.Claude, SquadTarget.Copilot],
-                new Dictionary<SquadTarget, string>
-                {
-                    [SquadTarget.Claude] = "claude-fast",
-                    [SquadTarget.Copilot] = "copilot-fast"
-                },
-                ("claude-fast", ClaudeFastPresetYaml),
-                ("copilot-fast", FastPresetYaml))
-            .CopyInto(userPaths, targetRoot);
+        await InstallPresetProjectAsync(
+            targetRoot,
+            [SquadTarget.Claude, SquadTarget.Copilot],
+            new Dictionary<SquadTarget, string>
+            {
+                [SquadTarget.Claude] = "claude-fast",
+                [SquadTarget.Copilot] = "copilot-fast"
+            },
+                        ("claude-fast", ClaudeFastPresetYaml),
+                        ("copilot-fast", FastPresetYaml));
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         // Act — update overriding only Claude target's preset
         SquadUpdateRequest updateRequest = new(
@@ -233,28 +225,27 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     {
         // Arrange — an install that recorded "ephemeral" is the starting point; deleting its preset file
         // is what the update must refuse.
-        string targetRoot = Path.Combine(_temp.Path, "update-missing-preset-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "update-missing-preset-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         string presetPath = await WritePresetAsync(userPaths, "ephemeral", FastPresetYaml);
-        new SquadInstalledPresetProjectTemplate(
-                "ephemeral",
-                [SquadTarget.Copilot],
-                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "ephemeral" },
-                ("ephemeral", FastPresetYaml))
-            .CopyInto(userPaths, targetRoot);
+        await InstallPresetProjectAsync(
+            targetRoot,
+            [SquadTarget.Copilot],
+            new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "ephemeral" },
+                        ("ephemeral", FastPresetYaml));
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         // Record snapshots before deleting preset and running update
         Dictionary<string, byte[]> rootSnapshotBefore = CaptureDirectorySnapshot(targetRoot);
         Dictionary<string, byte[]> homeSnapshotBefore = CaptureDirectorySnapshot(userPaths.HomeDirectory);
 
         // Delete recorded preset file
-        File.Delete(presetPath);
+        _state.Files.DeleteFile(presetPath);
         homeSnapshotBefore.Remove(presetPath);
 
         // Act
@@ -288,14 +279,14 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     public async Task InstallWhenPresetMissingThrowsConflictExceptionAndAbortsBeforeDownload()
     {
         // Arrange
-        string targetRoot = Path.Combine(_temp.Path, "install-missing-preset-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "install-missing-preset-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -319,22 +310,22 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             StringComparison.OrdinalIgnoreCase);
 
         Assert.Empty(releaseSource.Requests);
-        Assert.Empty(Directory.GetFiles(targetRoot, "*", SearchOption.AllDirectories));
+        Assert.Empty(_state.Files.EnumerateFiles(targetRoot, "*", recursive: true));
     }
 
     [Fact]
     public async Task InstallWithPresetReferencingUnknownCategoryThrowsSourceValidationExceptionBeforeWriting()
     {
         // Arrange
-        string targetRoot = Path.Combine(_temp.Path, "unknown-category-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "unknown-category-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "bad-category", UnknownCategoryPresetYaml);
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -352,22 +343,22 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Assert
         Assert.Contains("nonexistent-profile-category", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.Empty(Directory.GetFiles(targetRoot, "*", SearchOption.AllDirectories));
+        Assert.Empty(_state.Files.EnumerateFiles(targetRoot, "*", recursive: true));
     }
 
     [Fact]
     public async Task DryRunInstallWithPresetReturnsModelChangesAndWritesNothingToDisk()
     {
         // Arrange
-        string targetRoot = Path.Combine(_temp.Path, "dry-run-install-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "dry-run-install-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -391,7 +382,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         Assert.All(result.ModelChanges, item => { Assert.False(string.IsNullOrWhiteSpace(item.Agent)); });
 
         // Dry run must write nothing to target root or state store
-        Assert.Empty(Directory.GetFiles(targetRoot, "*", SearchOption.AllDirectories));
+        Assert.Empty(_state.Files.EnumerateFiles(targetRoot, "*", recursive: true));
         Assert.Null(stateStore.ReadReceipt(targetRoot, SquadDeploymentScope.Project));
         Assert.Null(stateStore.ReadLock(targetRoot, SquadDeploymentScope.Project));
     }
@@ -400,32 +391,30 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     public async Task TwoDistinctProjectRootsMaintainIndependentPresetMaps()
     {
         // Arrange — two installs, each recording its own preset, are the starting points.
-        string projectRoot1 = Path.Combine(_temp.Path, "project-1");
-        string projectRoot2 = Path.Combine(_temp.Path, "project-2");
-        Directory.CreateDirectory(projectRoot1);
-        Directory.CreateDirectory(projectRoot2);
+        string projectRoot1 = Path.Combine(_state.Files.Root, "work", "project-1");
+        string projectRoot2 = Path.Combine(_state.Files.Root, "work", "project-2");
+        _state.Files.CreateDirectory(projectRoot1);
+        _state.Files.CreateDirectory(projectRoot2);
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
         await WritePresetAsync(userPaths, "quality", QualityPresetYaml);
 
-        new SquadInstalledPresetProjectTemplate(
-                "fast",
-                [SquadTarget.Copilot],
-                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
-                ("fast", FastPresetYaml))
-            .CopyInto(userPaths, projectRoot1);
-        new SquadInstalledPresetProjectTemplate(
-                "quality",
-                [SquadTarget.Copilot],
-                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "quality" },
-                ("quality", QualityPresetYaml))
-            .CopyInto(userPaths, projectRoot2);
+        await InstallPresetProjectAsync(
+            projectRoot1,
+            [SquadTarget.Copilot],
+            new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
+                        ("fast", FastPresetYaml));
+        await InstallPresetProjectAsync(
+            projectRoot2,
+            [SquadTarget.Copilot],
+            new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "quality" },
+                        ("quality", QualityPresetYaml));
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         // Act — update Project 1 with ModelPresets = null
         SquadUpdateRequest update1 = new(
@@ -455,21 +444,20 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     public async Task UpdateWithEmptyModelPresetsMapClearsActivePresets()
     {
         // Arrange — an install that recorded "fast" is the starting point.
-        string targetRoot = Path.Combine(_temp.Path, "update-clear-presets-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "update-clear-presets-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
-        new SquadInstalledPresetProjectTemplate(
-                "fast",
-                [SquadTarget.Copilot],
-                new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
-                ("fast", FastPresetYaml))
-            .CopyInto(userPaths, targetRoot);
+        await InstallPresetProjectAsync(
+            targetRoot,
+            [SquadTarget.Copilot],
+            new Dictionary<SquadTarget, string> { [SquadTarget.Copilot] = "fast" },
+                        ("fast", FastPresetYaml));
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         // Act — update with empty map clears presets
         SquadUpdateRequest updateRequest = new(
@@ -490,13 +478,13 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task InstallAsyncWithInstanceScopeAndMultipleTargetsThrowsArgumentException()
     {
-        string targetRoot = Path.Combine(_temp.Path, "instance-multi-target-install");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "instance-multi-target-install");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -511,13 +499,13 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task UpdateAsyncWithInstanceScopeAndMultipleTargetsThrowsArgumentException()
     {
-        string targetRoot = Path.Combine(_temp.Path, "instance-multi-target-update");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "instance-multi-target-update");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadUpdateRequest request = new(
             targetRoot,
@@ -531,14 +519,15 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     [Fact]
     public async Task InstallWithPresetAndCorruptExtractedSquadSourceThrowsSourceValidationExceptionWithoutSwallowing()
     {
-        string targetRoot = Path.Combine(_temp.Path, "corrupt-source-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "corrupt-source-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         await WritePresetAsync(userPaths, "fast", FastPresetYaml);
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        SquadStateStore stateStore = _state.Store;
         using FakeSquadReleaseSource releaseSource = new()
         {
+            Files = _state.Files,
             FileContents = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["squad.yml"] = "name: kyber-squad\nschema: invalid-schema-v999\n",
@@ -549,7 +538,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             DownloadUri = new Uri("https://example.com/asset.zip"),
         };
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -569,14 +558,14 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     {
         // Arrange — no presets: source resolution must run whenever the extraction root is
         // available, not only when presets are loaded.
-        string targetRoot = Path.Combine(_temp.Path, "install-snapshot-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "install-snapshot-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -589,7 +578,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Assert
         Assert.True(result.Success);
-        SquadCanonicalProfileStore snapshots = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
+        SquadCanonicalProfileStore snapshots = new(userPaths, _state.Files);
         SquadCanonicalProfiles? snapshot = snapshots.TryRead("1.0.0");
         Assert.NotNull(snapshot);
         Assert.Equal("1.0.0", snapshot.SquadVersion);
@@ -605,19 +594,18 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     public async Task CommittedUpdateWritesCanonicalSnapshotKeyedByReleaseVersion()
     {
         // Arrange — an install of 1.0.0, with the snapshot it wrote, is the starting point.
-        string targetRoot = Path.Combine(_temp.Path, "update-snapshot-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
-        new SquadInstalledPresetProjectTemplate(
-                "no-presets",
-                [SquadTarget.Copilot],
-                new Dictionary<SquadTarget, string>())
-            .CopyInto(userPaths, targetRoot);
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "update-snapshot-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
+        await InstallPresetProjectAsync(
+            targetRoot,
+            [SquadTarget.Copilot],
+            new Dictionary<SquadTarget, string>());
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         // Act
         SquadUpdateRequest updateRequest = new(
@@ -630,7 +618,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
         // Assert — the update snapshot is keyed by the new release version; the older
         // snapshot is retained (no pruning) and the newest read resolves to the update.
         Assert.True(updateResult.Success);
-        SquadCanonicalProfileStore snapshots = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
+        SquadCanonicalProfileStore snapshots = new(userPaths, _state.Files);
         SquadCanonicalProfiles? updated = snapshots.TryRead("1.1.0");
         Assert.NotNull(updated);
         Assert.Equal("1.1.0", updated.SquadVersion);
@@ -644,14 +632,14 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     public async Task DryRunInstallAndUpdateWriteNoCanonicalSnapshot()
     {
         // Arrange
-        string targetRoot = Path.Combine(_temp.Path, "dry-run-snapshot-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "dry-run-snapshot-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         // Act — dry-run install modifies no state, so it must not write a snapshot.
         SquadInstallRequest dryInstall = new(
@@ -665,7 +653,7 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
 
         // Assert
         Assert.True(dryInstallResult.Success);
-        SquadCanonicalProfileStore snapshots = new(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem());
+        SquadCanonicalProfileStore snapshots = new(userPaths, _state.Files);
         Assert.Null(snapshots.TryRead("1.0.0"));
         Assert.Null(snapshots.TryReadLatest());
 
@@ -700,17 +688,17 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
     {
         // Arrange — a directory at the snapshot file path makes the atomic rename fail
         // after the deployment has already committed.
-        string targetRoot = Path.Combine(_temp.Path, "snapshot-failure-root");
-        Directory.CreateDirectory(targetRoot);
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-data"));
+        string targetRoot = Path.Combine(_state.Files.Root, "work", "snapshot-failure-root");
+        _state.Files.CreateDirectory(targetRoot);
+        ISquadUserPaths userPaths = _state.UserPaths;
         string blocker = Path.Combine(
             userPaths.HomeDirectory, ".kyber-weave", "squad", "profiles", "1.0.0.yml");
-        Directory.CreateDirectory(blocker);
+        _state.Files.CreateDirectory(blocker);
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        using FakeSquadReleaseSource releaseSource = new();
+        SquadStateStore stateStore = _state.Store;
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
         FakeSquadRenderer renderer = new();
-        SquadLifecycleService service = SquadHostDefaults.CreateLifecycleService(releaseSource, renderer, stateStore);
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, renderer);
 
         SquadInstallRequest request = new(
             targetRoot,
@@ -728,30 +716,61 @@ public sealed class SquadModelPresetLifecycleTests : IDisposable
             warning => warning.Contains("squad update", StringComparison.OrdinalIgnoreCase));
         Assert.NotNull(stateStore.ReadReceipt(targetRoot, SquadDeploymentScope.Project));
         Assert.NotNull(stateStore.ReadLock(targetRoot, SquadDeploymentScope.Project));
-        Assert.Null(new SquadCanonicalProfileStore(userPaths, new KyberWeave.Data.Hooks.PhysicalFileSystem()).TryRead("1.0.0"));
+        Assert.Null(new SquadCanonicalProfileStore(userPaths, _state.Files).TryRead("1.0.0"));
     }
 
-    private static async Task<string> WritePresetAsync(ISquadUserPaths userPaths, string name, string yaml)
+    /// <summary>
+    ///     A project that already holds an install recording <paramref name="presetNames"/>, with the preset files it
+    ///     names written into the home: the starting point for an update.
+    /// </summary>
+    private async Task InstallPresetProjectAsync(
+        string projectRoot,
+        IReadOnlyList<SquadTarget> targets,
+        IReadOnlyDictionary<SquadTarget, string> presetNames,
+        params (string Name, string Yaml)[] presets)
+    {
+        _state.Files.CreateDirectory(projectRoot);
+        foreach ((string name, string yaml) in presets) await WritePresetAsync(_state.UserPaths, name, yaml);
+
+        using FakeSquadReleaseSource releaseSource = ReleaseSource();
+        SquadLifecycleService service = SquadTestCommands.InMemoryLifecycle(_state, releaseSource, new FakeSquadRenderer());
+        SquadLifecycleResult result = await service.InstallAsync(new SquadInstallRequest(
+            projectRoot,
+            SquadDeploymentScope.Project,
+            targets,
+            Version: "1.0.0",
+            ModelPresets: presetNames.Count == 0 ? null : presetNames));
+        Assert.True(result.Success, $"The prior install failed: {string.Join("; ", result.Errors ?? [])}");
+    }
+
+    private FakeSquadReleaseSource ReleaseSource()
+    {
+        string source = Path.Combine(_state.Files.Root, "release", "kyber-squad");
+        _ = CanonicalSquadTree.CopyInto(_state.Files, source);
+        return FakeSquadReleaseSource.FromDirectory(source, _state.Files);
+    }
+
+    private async Task<string> WritePresetAsync(ISquadUserPaths userPaths, string name, string yaml)
     {
         string presetsDir = Path.Combine(userPaths.HomeDirectory, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
+        _state.Files.CreateDirectory(presetsDir);
         string presetPath = Path.Combine(presetsDir, $"{name}.yml");
-        await File.WriteAllTextAsync(presetPath, yaml);
+        _state.Files.WriteAllText(presetPath, yaml);
         return presetPath;
     }
 
-    private static string ResolveTargetPath(string root, string relativePath)
+    private string ResolveTargetPath(string root, string relativePath)
     {
         return Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
     }
 
-    private static Dictionary<string, byte[]> CaptureDirectorySnapshot(string root)
+    private Dictionary<string, byte[]> CaptureDirectorySnapshot(string root)
     {
         Dictionary<string, byte[]> snapshot = new(StringComparer.Ordinal);
-        if (!Directory.Exists(root)) return snapshot;
+        if (!_state.Files.DirectoryExists(root)) return snapshot;
 
-        foreach (string file in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories))
-            snapshot[file] = File.ReadAllBytes(file);
+        foreach (string file in _state.Files.EnumerateFiles(root, "*", recursive: true))
+            snapshot[file] = _state.Files.ReadAllBytes(file);
 
         return snapshot;
     }
