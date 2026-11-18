@@ -77,4 +77,17 @@ public sealed class ArbiterGuardCompositionTests
             Directory.Delete(home, recursive: true);
         }
     }
+
+    [Fact]
+    public void TheHookHostContainerResolvesTheServicesThatReadThroughTheFactsTheGuardsDoNotNeed()
+    {
+        using ServiceProvider services = (ServiceProvider)ArbiterContainer.Create();
+
+        Assert.NotNull(services.GetRequiredService<IArbiterHookHost>());
+        Assert.NotNull(services.GetRequiredService<IFileTextFacts>());
+        Assert.NotNull(services.GetRequiredService<IClaudeHookCoverage>());
+        Assert.NotNull(services.GetRequiredService<IGateReportFacts>());
+        Assert.NotNull(services.GetRequiredService<IArbiterUserSettings>());
+        Assert.NotNull(services.GetRequiredService<IArbiterModelTargetsReader>());
+    }
 }
