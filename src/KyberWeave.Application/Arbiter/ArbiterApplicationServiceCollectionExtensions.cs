@@ -8,6 +8,7 @@ using KyberWeave.Arbiter.Hooks.Adapters;
 using KyberWeave.Arbiter.Mcp;
 using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Data;
+using KyberWeave.Data.Arbiter;
 using KyberWeave.Data.Configuration;
 using KyberWeave.Data.Hooks.Arbiter;
 using KyberWeave.Data.Review;
@@ -31,6 +32,9 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton<IOllamaProbe, Core.Arbiter.OllamaProbe>();
         services.TryAddSingleton<IArbiterConfigResolver, Cli.Commands.Arbiter.ArbiterConfigResolver>();
         services.TryAddSingleton<IArbiterSectionSelectionService, ArbiterSectionSelectionService>();
+        services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
+        services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IPlanRootResolver>(sp => new Core.Arbiter.Plans.PlanRootResolver(
             sp.GetRequiredService<IGitRepositoryFacts>(),
             sp.GetRequiredService<IPlanFileResolver>(),

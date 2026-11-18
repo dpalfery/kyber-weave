@@ -19,8 +19,6 @@ internal static class ArbiterDataServiceCollectionExtensions
     /// <returns>The same collection, for chaining.</returns>
     internal static IServiceCollection AddWeaveArbiterData(this IServiceCollection services)
     {
-        services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
-        services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
         services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(sp.GetRequiredService<IArbiterUserSettings>()));
         services.TryAddSingleton<IArbiterStateFactory, FileArbiterStateFactory>();
@@ -31,7 +29,6 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
         services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
         services.TryAddSingleton<IFileStatReader, FileStatReader>();
-        services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));
         services.TryAddSingleton<IDispatchClaimStore, FileDispatchClaimStore>();
         services.TryAddSingleton<IBackgroundDispatchStore, FileBackgroundDispatchStore>();
         services.TryAddSingleton<IHookSnapshotStore, FileHookSnapshotStore>();
