@@ -486,7 +486,7 @@ public sealed class ArbiterCommandAllowListTests : IDisposable
         public IArbiterRunStore OpenRunStore(
             string arbiterDirectory,
             ArbiterStoreOptions? options = null,
-            Func<DateTimeOffset>? clock = null) =>
+            TimeProvider? clock = null) =>
             inner.OpenRunStore(arbiterDirectory, options, clock);
     }
 
