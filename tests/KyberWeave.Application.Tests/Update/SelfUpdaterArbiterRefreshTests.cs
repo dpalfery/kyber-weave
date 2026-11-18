@@ -1,25 +1,17 @@
-using KyberWeave.Testing.Update;
-using KyberWeave.Testing.Squad;
-using KyberWeave.Tests.Configuration;
-using System.Diagnostics.CodeAnalysis;
-using System.Formats.Tar;
-using System.IO.Compression;
-using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
-using KyberWeave.Data.Configuration;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Paths;
 using KyberWeave.Cli.Update;
-using KyberWeave.Core.Configuration;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Testing.Update;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Update;
 
 /// <summary>
 /// T6 contract: <c>kyber-weave update</c> refreshes arbiter hooks through an injected
@@ -34,16 +26,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     private static readonly DateTimeOffset GlobalInstalledAt =
         new(2026, 11, 06, 9, 30, 00, TimeSpan.Zero);
 
-    private readonly TempDirectory _install = new();
-    private readonly TempDirectory _assets = new();
+    private static readonly ProcessResult QuietSuccess = UpdateWorld.QuietSuccess;
 
-    private static readonly ProcessResult QuietSuccess = new(0, string.Empty, string.Empty);
+    private readonly UpdateWorld _world = new();
 
-    public void Dispose()
-    {
-        _install.Dispose();
-        _assets.Dispose();
-    }
+    public void Dispose() => _world.Dispose();
 
     /// <summary>
     /// When an arbiter binary is installed, the update invokes the injected refresh seam
@@ -53,12 +40,12 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     public void Update_InvokesArbiterRefreshSeamForEnabledProjectsWhenArbiterInstalled()
     {
         InstallArbiter();
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        LoopbackFinishingProcess loopback = new(
+        LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
             host,
             log.Add,
@@ -66,13 +53,10 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects);
-        using SelfUpdater updater = new(
+        using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: _ => null),
-            RealSelfUpdateSystem.Create(),
+            _ => null,
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -91,12 +75,12 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     [Fact]
     public void Update_SkipsArbiterRefreshSeamWhenNoArbiterInstalled()
     {
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
 
-        LoopbackFinishingProcess loopback = new(
+        LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
             host,
             log.Add,
@@ -104,13 +88,10 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects);
-        using SelfUpdater updater = new(
+        using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: _ => null),
-            RealSelfUpdateSystem.Create(),
+            _ => null,
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
@@ -130,7 +111,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     public void Update_ArbiterRefreshSeamIsInjectedNeverShelledOut()
     {
         InstallArbiter();
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         RecordingArbiterHookRefresher refresher = new();
         List<string> log = [];
@@ -141,7 +122,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             spawned.Add(file + " " + string.Join(" ", args));
             return 0;
         };
-        LoopbackFinishingProcess loopback = new(
+        LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
             host,
             log.Add,
@@ -150,13 +131,10 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects);
-        using SelfUpdater updater = new(
+        using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: _ => null),
-            RealSelfUpdateSystem.Create(),
+            _ => null,
             log.Add,
             runProcess: runProcess,
             captureProcess: (_, _) => QuietSuccess,
@@ -178,29 +156,29 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     public void Update_ReportsTheRefreshOutcomeNotTheInputCount()
     {
         InstallArbiter();
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "user-home"));
-        Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = RealSquadState.Store(userPaths);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "user-home"));
+        _world.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = _world.SquadStore(userPaths);
 
-        string project = Path.Combine(_install.Path, "registered-project");
+        string project = Path.Combine(_world.Install, "registered-project");
         string configDirectory = Path.Combine(project, ".kyber-weave");
-        Directory.CreateDirectory(configDirectory);
-        File.WriteAllText(
+        _world.Files.CreateDirectory(configDirectory);
+        _world.Files.WriteAllText(
             Path.Combine(configDirectory, "kyber-weave.yml"),
             "arbiter:\n  enabled: true\n");
 
         string receiptPath = store.ResolveReceiptPath(project, SquadDeploymentScope.Project);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        File.WriteAllText(
+        _world.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _world.Files.WriteAllText(
             receiptPath,
             store.SerializeReceipt(new SquadReceipt(
                 "kyber-squad.receipt/v1",
                 SquadDeploymentScope.Project,
                 project,
-                DateTimeOffset.UtcNow,
+                GlobalInstalledAt,
                 [],
                 [])));
 
@@ -216,25 +194,22 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        LoopbackFinishingProcess loopback = new(
+        LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
             host,
             log.Add,
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: UpdateTestServices.Targets(environment));
-        using SelfUpdater updater = new(
+            arbiterTargets: _world.Targets(environment));
+        using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: environment),
-            RealSelfUpdateSystem.Create(),
+            environment,
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: UpdateTestServices.Targets(environment),
+            arbiterTargets: _world.Targets(environment),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -252,9 +227,9 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     [Fact]
     public void Refresh_RefreshesExistingGlobalArbiterHookListedInUserConfig()
     {
-        string home = Path.Combine(_install.Path, "home");
-        Directory.CreateDirectory(home);
-        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["cursor"]);
+        string home = Path.Combine(_world.Install, "home");
+        _world.Files.CreateDirectory(home);
+        new FileUserHostConfigStore(_world.Files).WriteGlobalTargets(home, ["cursor"]);
         string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
 
         List<string> log = [];
@@ -265,11 +240,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(environment, log.Add);
+        ArbiterHookRefresher refresher = _world.Refresher(environment, log.Add);
         ArbiterHookRefreshResult outcome = refresher.Refresh([]);
 
         Assert.Equal(1, outcome.Refreshed);
-        string content = File.ReadAllText(hookPath);
+        string content = _world.Files.ReadAllText(hookPath);
         Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
         Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
     }
@@ -282,12 +257,12 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     [Fact]
     public void Refresh_AddsSubagentStopToAnExistingGlobalFactoryHook()
     {
-        string home = Path.Combine(_install.Path, "home");
-        Directory.CreateDirectory(home);
-        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["factory"]);
+        string home = Path.Combine(_world.Install, "home");
+        _world.Files.CreateDirectory(home);
+        new FileUserHostConfigStore(_world.Files).WriteGlobalTargets(home, ["factory"]);
         string hookPath = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Factory), "hooks.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
-        File.WriteAllText(hookPath, """
+        _world.Files.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        _world.Files.WriteAllText(hookPath, """
             {
               "PreToolUse": [
                 { "matcher": "Task", "hooks": [ { "type": "command", "command": "/legacy/kyber-weave-arbiter hook --harness factory --scope global", "timeout": 5 } ] },
@@ -306,11 +281,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(environment, _ => { });
+        ArbiterHookRefresher refresher = _world.Refresher(environment, _ => { });
         ArbiterHookRefreshResult outcome = refresher.Refresh([]);
 
         Assert.Equal(1, outcome.Refreshed);
-        string content = File.ReadAllText(hookPath);
+        string content = _world.Files.ReadAllText(hookPath);
         Assert.Contains("\"SubagentStop\"", content, StringComparison.Ordinal);
         Assert.Contains("kyber-weave-arbiter hook --harness factory --scope global", content, StringComparison.Ordinal);
         Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
@@ -324,16 +299,16 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     [Fact]
     public void Update_RefreshesOnlyListedGlobalArbiterHooksWithoutTouchingForeignBytes()
     {
-        string home = Path.Combine(_install.Path, "home");
-        Directory.CreateDirectory(home);
-        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["cursor"]);
+        string home = Path.Combine(_world.Install, "home");
+        _world.Files.CreateDirectory(home);
+        new FileUserHostConfigStore(_world.Files).WriteGlobalTargets(home, ["cursor"]);
         string hookPath = WriteLegacyGlobalHook(home, SquadTarget.Cursor, "/legacy/kyber-weave-arbiter hook");
 
         string foreign = Path.Combine(new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Cursor), "foreign.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(foreign)!);
-        File.WriteAllText(foreign, "{\"user\":\"keep-me\"}");
+        _world.Files.CreateDirectory(Path.GetDirectoryName(foreign)!);
+        _world.Files.WriteAllText(foreign, "{\"user\":\"keep-me\"}");
 
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
         List<string> log = [];
         Func<string, string?> environment = name => name switch
@@ -343,34 +318,31 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(environment, log.Add);
-        LoopbackFinishingProcess loopback = new(
+        ArbiterHookRefresher refresher = _world.Refresher(environment, log.Add);
+        LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
             host,
             log.Add,
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: UpdateTestServices.Targets(environment));
-        using SelfUpdater updater = new(
+            arbiterTargets: _world.Targets(environment));
+        using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: environment),
-            RealSelfUpdateSystem.Create(),
+            environment,
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: UpdateTestServices.Targets(environment),
+            arbiterTargets: _world.Targets(environment),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
         Assert.Equal(0, outcome.ExitCode);
-        string content = File.ReadAllText(hookPath);
+        string content = _world.Files.ReadAllText(hookPath);
         Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
         Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
-        Assert.Equal("{\"user\":\"keep-me\"}", File.ReadAllText(foreign), StringComparer.Ordinal);
+        Assert.Equal("{\"user\":\"keep-me\"}", _world.Files.ReadAllText(foreign), StringComparer.Ordinal);
     }
 
     /// <summary>
@@ -384,16 +356,16 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     public void Update_RefreshesEveryGlobalBlockAndRewritesItsRecordedEntries()
     {
         InstallArbiter();
-        using MapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", "osx-arm64", windows: false, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0", "osx-arm64");
 
-        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "global-block-home"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "global-block-home"));
         string home = userPaths.HomeDirectory;
-        Directory.CreateDirectory(home);
+        _world.Files.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
-        SquadStateStore store = RealSquadState.Store(userPaths);
+        SquadStateStore store = _world.SquadStore(userPaths);
         SeedGlobalBlocks(store, roots, home);
-        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["cursor", "codex"]);
+        new FileUserHostConfigStore(_world.Files).WriteGlobalTargets(home, ["cursor", "codex"]);
         StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Cursor));
         StaleHookTimeouts(GlobalHookFile(roots, SquadTarget.Codex));
 
@@ -405,26 +377,23 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefresher refresher = UpdateTestServices.Refresher(environment, log.Add);
-        LoopbackFinishingProcess loopback = new(
+        ArbiterHookRefresher refresher = _world.Refresher(environment, log.Add);
+        LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
             host,
             log.Add,
             environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: UpdateTestServices.Targets(environment));
-        using SelfUpdater updater = new(
+            arbiterTargets: _world.Targets(environment));
+        using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: environment),
-            RealSelfUpdateSystem.Create(),
+            environment,
             log.Add,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
-            arbiterTargets: UpdateTestServices.Targets(environment),
+            arbiterTargets: _world.Targets(environment),
             finishingProcess: loopback.Invoke);
         SelfUpdateOutcome outcome = updater.Run(new SelfUpdateOptions("0.2.0", false, false));
 
@@ -432,8 +401,8 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         Assert.Contains(
             log,
             line => line.Contains("refreshed arbiter hooks for 2 project(s)", StringComparison.Ordinal));
-        Assert.DoesNotContain("999", File.ReadAllText(GlobalHookFile(roots, SquadTarget.Cursor)), StringComparison.Ordinal);
-        Assert.DoesNotContain("999", File.ReadAllText(GlobalHookFile(roots, SquadTarget.Codex)), StringComparison.Ordinal);
+        Assert.DoesNotContain("999", _world.Files.ReadAllText(GlobalHookFile(roots, SquadTarget.Cursor)), StringComparison.Ordinal);
+        Assert.DoesNotContain("999", _world.Files.ReadAllText(GlobalHookFile(roots, SquadTarget.Codex)), StringComparison.Ordinal);
 
         SquadReceipt after = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
         Assert.Equal(["cursor", "codex"], after.Blocks.Select(block => block.Target).ToArray());
@@ -450,21 +419,21 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     [Fact]
     public void Refresh_UpdatesTheHookEntryAndLeavesAnotherFileForTheSameTargetUntouched()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "home-with-a-sibling-file"));
+        FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "home-with-a-sibling-file"));
         string home = userPaths.HomeDirectory;
-        Directory.CreateDirectory(home);
+        _world.Files.CreateDirectory(home);
         SquadGlobalRoots roots = new(_ => null, home);
         string root = roots.ResolveGlobalRoot(SquadTarget.Copilot);
         const string agentRelativePath = "agents/dev.md";
         const string hookRelativePath = "hooks/kyber-arbiter.json";
         string agentPath = Path.Combine(root, agentRelativePath);
         string hookPath = Path.Combine(root, hookRelativePath);
-        Directory.CreateDirectory(Path.GetDirectoryName(agentPath)!);
-        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
-        File.WriteAllText(agentPath, "agent body");
-        File.WriteAllText(hookPath, "{\"version\":1,\"hooks\":{\"task\":[]}}");
+        _world.Files.CreateDirectory(Path.GetDirectoryName(agentPath)!);
+        _world.Files.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        _world.Files.WriteAllText(agentPath, "agent body");
+        _world.Files.WriteAllText(hookPath, "{\"version\":1,\"hooks\":{\"task\":[]}}");
 
-        SquadStateStore store = RealSquadState.Store(userPaths);
+        SquadStateStore store = _world.SquadStore(userPaths);
         SquadOwnedFile agentEntry = new(agentRelativePath, Digest("agent body"), "copilot", false);
         SquadOwnedFile hookEntry = new(
             hookRelativePath,
@@ -472,8 +441,8 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             "copilot",
             false);
         string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        File.WriteAllText(
+        _world.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _world.Files.WriteAllText(
             receiptPath,
             store.SerializeReceipt(new SquadReceipt(
                 "kyber-squad.receipt/v2",
@@ -482,7 +451,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
                 GlobalInstalledAt,
                 [],
                 [agentEntry, hookEntry])));
-        RealUserHostConfigStore.Create().WriteGlobalTargets(home, ["copilot"]);
+        new FileUserHostConfigStore(_world.Files).WriteGlobalTargets(home, ["copilot"]);
 
         Func<string, string?> environment = name => name switch
         {
@@ -491,10 +460,10 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             _ => null,
         };
 
-        ArbiterHookRefreshResult outcome = UpdateTestServices.Refresher(environment, _ => { }).Refresh([]);
+        ArbiterHookRefreshResult outcome = _world.Refresher(environment, _ => { }).Refresh([]);
 
         Assert.Equal(1, outcome.Refreshed);
-        string refreshedHook = File.ReadAllText(hookPath);
+        string refreshedHook = _world.Files.ReadAllText(hookPath);
         Assert.NotEqual("{\"version\":1,\"hooks\":{\"task\":[]}}", refreshedHook, StringComparer.Ordinal);
 
         SquadReceipt after = Assert.IsType<SquadReceipt>(store.ReadReceipt(home, SquadDeploymentScope.Global));
@@ -517,22 +486,22 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// signature, which is what lets a refresh replace the entries in place rather than append
     /// beside them.
     /// </summary>
-    private static void SeedGlobalBlocks(SquadStateStore store, SquadGlobalRoots roots, string home)
+    private void SeedGlobalBlocks(SquadStateStore store, SquadGlobalRoots roots, string home)
     {
-        IReadOnlyList<SquadHookOwnedEntry> cursorOwned = RealSquadServices.HookJsonFile().SpliceFile(
+        IReadOnlyList<SquadHookOwnedEntry> cursorOwned = new SquadHookJsonFile(_world.Files, _world.Environment()).SpliceFile(
             SquadHookBlockFormat.Cursor,
             GlobalHookFile(roots, SquadTarget.Cursor),
             [CursorHookEntry()],
             [CursorHookEntry()]);
-        IReadOnlyList<SquadHookOwnedEntry> codexOwned = RealSquadServices.HookJsonFile().SpliceFile(
+        IReadOnlyList<SquadHookOwnedEntry> codexOwned = new SquadHookJsonFile(_world.Files, _world.Environment()).SpliceFile(
             SquadHookBlockFormat.Codex,
             GlobalHookFile(roots, SquadTarget.Codex),
             [MatcherGroupHookEntry()],
             [MatcherGroupHookEntry()]);
 
         string receiptPath = store.ResolveReceiptPath(home, SquadDeploymentScope.Global);
-        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
-        File.WriteAllText(
+        _world.Files.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        _world.Files.WriteAllText(
             receiptPath,
             store.SerializeReceipt(new SquadReceipt(
                 "kyber-squad.receipt/v3",
@@ -584,11 +553,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// stale while the entries remain Squad's own. A refresh then has real work to do: it replaces
     /// them and has to record the new digests, which is the update this test pins.
     /// </summary>
-    private static void StaleHookTimeouts(string path)
+    private void StaleHookTimeouts(string path)
     {
-        JsonNode root = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode root = JsonNode.Parse(_world.Files.ReadAllText(path))!;
         StaleTimeouts(root);
-        File.WriteAllText(path, root.ToJsonString());
+        _world.Files.WriteAllText(path, root.ToJsonString());
     }
 
     private static void StaleTimeouts(JsonNode? node)
@@ -627,7 +596,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
     /// matches the node at its container. Without this the refresh could rewrite both files and
     /// leave a stale record behind, which reads as drift on the next status.
     /// </summary>
-    private static void AssertBlocksMatchTheirFiles(SquadReceipt receipt, SquadGlobalRoots roots)
+    private void AssertBlocksMatchTheirFiles(SquadReceipt receipt, SquadGlobalRoots roots)
     {
         Assert.Equal(2, receipt.Blocks.Count);
         foreach (SquadOwnedBlock block in receipt.Blocks)
@@ -650,7 +619,7 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
                 .ToDictionary(entry => entry.Container, entry => entry.Sha256, StringComparer.Ordinal);
             IReadOnlyList<SquadHookDrift> drifts = SquadHookJsonBlock.FindDrift(
                 format,
-                File.ReadAllText(GlobalHookFile(roots, target)),
+                _world.Files.ReadAllText(GlobalHookFile(roots, target)),
                 expected);
 
             Assert.True(
@@ -660,11 +629,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         }
     }
 
-    private static string WriteLegacyGlobalHook(string home, SquadTarget target, string legacyCommand)
+    private string WriteLegacyGlobalHook(string home, SquadTarget target, string legacyCommand)
     {
         SquadGlobalRoots globalRoots = new(_ => null, home);
         string hookPath = Path.Combine(globalRoots.ResolveGlobalRoot(target), "hooks.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        _world.Files.CreateDirectory(Path.GetDirectoryName(hookPath)!);
 
         string token = SquadTargetCatalog.GetToken(target);
         string content = $$"""
@@ -681,111 +650,22 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             }
             """;
 
-        File.WriteAllText(hookPath, content);
+        _world.Files.WriteAllText(hookPath, content);
         return hookPath;
     }
 
-    private SelfUpdateHost CreateHost(string currentVersion, string rid, bool windows = false)
-    {
-        string name = BinaryInstaller.InstalledFileName("kyber-weave", windows);
-        string path = Path.Combine(_install.Path, name);
-        File.WriteAllText(path, "old-cli");
-        return new SelfUpdateHost(path, currentVersion, rid, windows, false);
-    }
+    private SelfUpdateHost CreateHost(string currentVersion, string rid, bool windows = false) =>
+        _world.CreateHost(currentVersion, rid, windows);
 
-    private string InstallArbiter(bool windows = false)
-    {
-        string path = Path.Combine(
-            _install.Path,
-            BinaryInstaller.InstalledFileName("kyber-weave-arbiter", windows));
-        File.WriteAllText(path, "old-arbiter");
-        return path;
-    }
+    private string InstallArbiter(bool windows = false) => _world.InstallArbiter(windows);
 
-    private MapHandler MapRelease(
+    private static ReleaseMapHandler MapRelease(
         string version,
         string rid,
         bool windows,
         bool withKyberDash = false,
-        bool withArbiter = false)
-    {
-        MapHandler handler = new();
-        string tag = "v" + version;
-        string cliName = BinaryInstaller.ArchiveName("kyber-weave", rid);
-        string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", rid);
-        string cliArchive = Path.Combine(_assets.Path, cliName);
-        string mcpArchive = Path.Combine(_assets.Path, mcpName);
-        string cliFile = BinaryInstaller.InstalledFileName("kyber-weave", windows);
-        string mcpFile = BinaryInstaller.InstalledFileName("kyber-weave-mcp", windows);
-        WriteArchive(cliArchive, cliFile, "new-cli"u8.ToArray(), windows);
-        WriteArchive(mcpArchive, mcpFile, "new-mcp"u8.ToArray(), windows);
-        byte[] cliBytes = File.ReadAllBytes(cliArchive);
-        byte[] mcpBytes = File.ReadAllBytes(mcpArchive);
-        string sums = $"{Sha(cliBytes)}  {cliName}\n{Sha(mcpBytes)}  {mcpName}\n";
-
-        if (withKyberDash)
-        {
-            string dashName = BinaryInstaller.ArchiveName(
-                "kyberdash",
-                PlatformRid.KyberDashRid(rid));
-            string dashArchive = Path.Combine(_assets.Path, dashName);
-            string dashFile = BinaryInstaller.InstalledFileName("kyberdash", windows);
-            WriteArchive(dashArchive, dashFile, "new-kyberdash"u8.ToArray(), windows);
-            byte[] dashBytes = File.ReadAllBytes(dashArchive);
-            sums += $"{Sha(dashBytes)}  {dashName}\n";
-            handler.MapFile(GitHubReleaseClient.AssetUri(tag, dashName).AbsoluteUri, dashBytes);
-        }
-
-        if (withArbiter)
-        {
-            // Ships like kyber-weave-mcp: published under this host's .NET RID.
-            string arbiterName = BinaryInstaller.ArchiveName("kyber-weave-arbiter", rid);
-            string arbiterArchive = Path.Combine(_assets.Path, arbiterName);
-            string arbiterFile = BinaryInstaller.InstalledFileName("kyber-weave-arbiter", windows);
-            WriteArchive(arbiterArchive, arbiterFile, "new-arbiter"u8.ToArray(), windows);
-            byte[] arbiterBytes = File.ReadAllBytes(arbiterArchive);
-            sums += $"{Sha(arbiterBytes)}  {arbiterName}\n";
-            handler.MapFile(GitHubReleaseClient.AssetUri(tag, arbiterName).AbsoluteUri, arbiterBytes);
-        }
-
-        handler.MapFile(
-            GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
-            Encoding.UTF8.GetBytes(sums));
-        handler.MapFile(GitHubReleaseClient.AssetUri(tag, cliName).AbsoluteUri, cliBytes);
-        handler.MapFile(GitHubReleaseClient.AssetUri(tag, mcpName).AbsoluteUri, mcpBytes);
-        return handler;
-    }
-
-    private static void WriteArchive(string archivePath, string entryName, byte[] content, bool windows)
-    {
-        if (windows)
-        {
-            using ZipArchive zip = ZipFile.Open(archivePath, ZipArchiveMode.Create);
-            ZipArchiveEntry entry = zip.CreateEntry(entryName, CompressionLevel.Fastest);
-            using Stream stream = entry.Open();
-            stream.Write(content);
-            return;
-        }
-
-        using FileStream file = File.Create(archivePath);
-        using GZipStream gzip = new(file, CompressionLevel.Fastest);
-        using TarWriter writer = new(gzip);
-        using MemoryStream data = new(content);
-        writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, entryName)
-        {
-            DataStream = data
-        });
-    }
-
-    [SuppressMessage(
-        "Globalization",
-        "CA1308:Normalize strings to uppercase",
-        Justification =
-            "SHA256SUMS.txt and the digests it is compared against are lowercase hex by sha256sum convention; ToUpperInvariant would not match the published format.")]
-    private static string Sha(byte[] bytes)
-    {
-        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-    }
+        bool withArbiter = false) =>
+        UpdateRelease.Map(version, rid, windows, withKyberDash, withArbiter);
 
     private sealed class RecordingArbiterHookRefresher : IArbiterHookRefresher
     {
@@ -802,44 +682,6 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
             Calls++;
             RefreshedRoots.AddRange(projectRoots);
             return Result ?? new ArbiterHookRefreshResult(projectRoots.Count, Failed: 0);
-        }
-    }
-
-    private sealed class MapHandler : HttpMessageHandler
-    {
-        private readonly Dictionary<string, Func<HttpResponseMessage>> _map = new(StringComparer.Ordinal);
-
-        public void MapFile(string uri, byte[] bytes)
-        {
-            Map(uri, () =>
-            {
-                HttpResponseMessage response = new(HttpStatusCode.OK)
-                {
-                    Content = new ByteArrayContent(bytes)
-                };
-                return response;
-            });
-        }
-
-        private void Map(string uri, Func<HttpResponseMessage> factory)
-        {
-            _map[uri] = factory;
-        }
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            string uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
-            if (_map.TryGetValue(uri, out Func<HttpResponseMessage>? factory))
-            {
-                return Task.FromResult(factory());
-            }
-
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
-            {
-                RequestMessage = request,
-                Content = new StringContent("not found", Encoding.UTF8, "text/plain"),
-            });
         }
     }
 }

@@ -1,24 +1,16 @@
-using KyberWeave.Testing.Update;
-using KyberWeave.Testing.Squad;
-using KyberWeave.Tests.Configuration;
 using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
-using System.Formats.Tar;
-using System.IO.Compression;
-using System.Net;
-using System.Security.Cryptography;
-using System.Text;
-using KyberWeave.Data.Configuration;
-using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Paths;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
 using KyberWeave.Core.Squad.Deployment;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Testing.Update;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Update;
 
 /// <summary>
 /// The hand-off that finishes an update in the new binary. The old process probes its own image once before the
@@ -32,16 +24,11 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
 {
-    private static readonly ProcessResult QuietSuccess = new(0, string.Empty, string.Empty);
+    private static readonly ProcessResult QuietSuccess = UpdateWorld.QuietSuccess;
 
-    private readonly TempDirectory _install = new();
-    private readonly TempDirectory _assets = new();
+    private readonly UpdateWorld _world = new();
 
-    public void Dispose()
-    {
-        _install.Dispose();
-        _assets.Dispose();
-    }
+    public void Dispose() => _world.Dispose();
 
     /// <summary>
     /// The hand-off is a real process start, so it runs once, for the update's own release, after every binary is in
@@ -53,7 +40,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     {
         InstallKyberDash();
         InstallArbiter();
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -82,7 +69,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     {
         InstallKyberDash();
         InstallArbiter();
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
         TrackingRefresher refresher = new(record);
@@ -116,7 +103,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     {
         InstallKyberDash();
         InstallArbiter();
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: true, withArbiter: true);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
         TrackingRefresher refresher = new(record);
@@ -145,7 +132,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     [Fact]
     public void ExactlyOneEarlierSeamCallProbesTheOldImageBeforeAnyInstalledFileChanges()
     {
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -168,7 +155,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     [Fact]
     public void HandOffThatExitsOneReportsTheBinariesInstalledAndTheRetryCommand()
     {
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -183,7 +170,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         Assert.Equal(1, outcome.ExitCode);
         Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
         Assert.Contains("kyber-weave update 0.2.0", outcome.Message, StringComparison.Ordinal);
-        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+        Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
     }
 
     /// <summary>
@@ -194,7 +181,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     [Fact]
     public void HandOffThatExitsOneCarriesTheForwardedOptOutsInTheRetryCommand()
     {
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -213,7 +200,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             StringComparison.Ordinal);
         Assert.DoesNotContain("--no-kyberdash", outcome.Message, StringComparison.Ordinal);
         Assert.Contains("installed", outcome.Message, StringComparison.Ordinal);
-        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+        Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
     }
 
     /// <summary>
@@ -224,7 +211,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     public void HandOffThatCannotStartReportsTheCauseAndTheRetryCommand()
     {
         Win32Exception failure = new(5, "Access is denied.");
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -249,7 +236,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         FileNotFoundException failure = new(
             "Could not load file or assembly",
             "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a");
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -275,7 +262,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         AggregateException failure = new(
             "one or more tree members refused to terminate",
             new InvalidOperationException("Process 1234 still running after Kill."));
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -300,7 +287,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     {
         InstallKyberDash();
         InstallArbiter();
-        using MapHandler handler = new();
+        using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
@@ -324,7 +311,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         InstallKyberDash();
         InstallArbiter();
         WriteTrayRecord("""{"path":"/Applications/KyberDash.app"}""");
-        using MapHandler handler = new();
+        using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
@@ -351,7 +338,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     [Fact]
     public void FinishUpdateWithAHostVersionThatDiffersRefusesAndRunsNothing()
     {
-        using MapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
+        using ReleaseMapHandler handler = MapRelease("0.2.0", withKyberDash: false, withArbiter: false);
         SelfUpdateHost host = CreateHost("0.1.0");
         HandOffRecord record = new();
 
@@ -368,7 +355,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         Assert.Empty(record.Verbs);
         Assert.Empty(record.Spawned);
         Assert.Empty(record.Refreshes);
-        Assert.Equal("old-cli", File.ReadAllText(host.ProcessPath));
+        Assert.Equal("old-cli", _world.Files.ReadAllText(host.ProcessPath));
     }
 
     /// <summary>
@@ -377,7 +364,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     [Fact]
     public void FinishUpdateWithoutAVersionRefusesWithAUsageHintAndNeverLooksUpARelease()
     {
-        using MapHandler handler = new();
+        using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
@@ -401,7 +388,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     public void FinishUpdateWarnsThatArbiterHooksWereNotRefreshedWhenAComponentCannotLoad()
     {
         InstallArbiter();
-        using MapHandler handler = new();
+        using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
         FileNotFoundException missing = new(
@@ -479,13 +466,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     public void FinishUpdateWarnsThatTheProjectRegistryCouldNotBeReadWhenItIsCorrupt()
     {
         InstallArbiter();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "corrupt-home"));
-        Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = RealSquadState.Store(userPaths);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "corrupt-home"));
+        _world.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = _world.SquadStore(userPaths);
         string stateDirectory = store.ResolveHomeStateDirectory();
-        Directory.CreateDirectory(stateDirectory);
-        File.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
-        using MapHandler handler = new();
+        _world.Files.CreateDirectory(stateDirectory);
+        _world.Files.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
+        using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
@@ -510,15 +497,15 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     public void FinishUpdateWithACorruptRegistryStillRefreshesTheGlobalHook()
     {
         InstallArbiter();
-        FakeSquadUserPaths userPaths = new(Path.Combine(_install.Path, "corrupt-with-globals"));
-        Directory.CreateDirectory(userPaths.HomeDirectory);
-        SquadStateStore store = RealSquadState.Store(userPaths);
+        FakeSquadUserPaths userPaths = new(Path.Combine(_world.Install, "corrupt-with-globals"));
+        _world.Files.CreateDirectory(userPaths.HomeDirectory);
+        SquadStateStore store = _world.SquadStore(userPaths);
         string stateDirectory = store.ResolveHomeStateDirectory();
-        Directory.CreateDirectory(stateDirectory);
-        File.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
-        RealUserHostConfigStore.Create().WriteGlobalTargets(userPaths.HomeDirectory, ["cursor"]);
+        _world.Files.CreateDirectory(stateDirectory);
+        _world.Files.WriteAllText(Path.Combine(stateDirectory, "registry.json"), "{ this is not a registry");
+        new FileUserHostConfigStore(_world.Files).WriteGlobalTargets(userPaths.HomeDirectory, ["cursor"]);
         string hookPath = WriteLegacyCursorHook(userPaths.HomeDirectory, "/legacy/kyber-weave-arbiter hook");
-        using MapHandler handler = new();
+        using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
         Func<string, string?> environment = HomeAndAppData(userPaths);
@@ -529,13 +516,13 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             new SelfUpdateOptions("0.2.0", false, false, FinishUpdate: true),
             record,
             environment: environment,
-            refresher: UpdateTestServices.Refresher(environment, record.Log.Add));
+            refresher: _world.Refresher(environment, record.Log.Add, userPaths));
 
         Assert.Equal(0, outcome.ExitCode);
         Assert.Contains(
             record.Log,
             line => line.Contains("project registry could not be read", StringComparison.Ordinal));
-        string content = File.ReadAllText(hookPath);
+        string content = _world.Files.ReadAllText(hookPath);
         Assert.Contains("kyber-weave-arbiter hook --harness cursor --scope global", content, StringComparison.Ordinal);
         Assert.DoesNotContain("/legacy/kyber-weave-arbiter hook", content, StringComparison.Ordinal);
     }
@@ -543,12 +530,12 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     // ---- helpers ----
 
     /// <summary>Writes a Cursor global hook file that still names the old arbiter command, and returns its path.</summary>
-    private static string WriteLegacyCursorHook(string home, string legacyCommand)
+    private string WriteLegacyCursorHook(string home, string legacyCommand)
     {
         string hookPath = Path.Combine(
             new SquadGlobalRoots(_ => null, home).ResolveGlobalRoot(SquadTarget.Cursor),
             "hooks.json");
-        Directory.CreateDirectory(Path.GetDirectoryName(hookPath)!);
+        _world.Files.CreateDirectory(Path.GetDirectoryName(hookPath)!);
         string token = SquadTargetCatalog.GetToken(SquadTarget.Cursor);
         string content = $$"""
             {
@@ -563,7 +550,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
               "postToolUse": []
             }
             """;
-        File.WriteAllText(hookPath, content);
+        _world.Files.WriteAllText(hookPath, content);
         return hookPath;
     }
 
@@ -601,7 +588,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// Wraps the hand-off seam so each call records the installed bytes and how many commit lines were logged before
     /// it, and so the child's own captures and refreshes are marked as inside the hand-off.
     /// </summary>
-    private sealed class SeamProbe(HandOffRecord record, Func<string, IReadOnlyList<string>, bool, int> handOff)
+    private sealed class SeamProbe(HandOffRecord record, InMemoryFileSystem files, Func<string, IReadOnlyList<string>, bool, int> handOff)
     {
         public int Invoke(string fileName, IReadOnlyList<string> arguments, bool discardOutput)
         {
@@ -610,7 +597,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
                 fileName,
                 arguments.ToArray(),
                 discardOutput,
-                File.ReadAllText(fileName),
+                files.ReadAllText(fileName),
                 installedLines));
 
             bool previous = record.InHandOff;
@@ -652,7 +639,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         Func<string, string?>? environment = null,
         IArbiterHookRefresher? refresher = null)
     {
-        Func<string, string?> readEnvironment = environment ?? HomeAndAppData(_install.Path);
+        Func<string, string?> readEnvironment = environment ?? HomeAndAppData(_world.Install);
         IArbiterHookRefresher arbiter = refresher ?? new TrackingRefresher(record);
         Func<string, IReadOnlyList<string>, ProcessResult> capture = (file, args) =>
         {
@@ -665,7 +652,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             return 0;
         };
 
-        LoopbackFinishingProcess loopback = new(
+        LoopbackFinishingProcess loopback = _world.Loopback(
             handler,
             host,
             record.Log.Add,
@@ -673,22 +660,19 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
             spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
-            arbiterTargets: UpdateTestServices.Targets(readEnvironment));
+            arbiterTargets: _world.Targets(readEnvironment));
         Func<string, IReadOnlyList<string>, bool, int> loopbackSeam = loopback.Invoke;
-        SeamProbe probe = new(record, handOff ?? loopbackSeam);
+        SeamProbe probe = new(record, _world.Files, handOff ?? loopbackSeam);
 
-        using SelfUpdater updater = new(
+        using SelfUpdater updater = _world.CreateUpdater(
             handler,
             host,
-            new PhysicalFileSystem(),
-            new PhysicalPathResolver(new PhysicalFileSystem()),
-            new FakeProcessEnvironment(readVariable: readEnvironment),
-            RealSelfUpdateSystem.Create(),
+            readEnvironment,
             record.Log.Add,
             runProcess: spawn,
             captureProcess: capture,
             arbiterHookRefresher: arbiter,
-            arbiterTargets: UpdateTestServices.Targets(readEnvironment),
+            arbiterTargets: _world.Targets(readEnvironment),
             finishingProcess: probe.Invoke);
         return updater.Run(options);
     }
@@ -697,7 +681,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     private HandOffRecord RunFinishWithRefresherFailure(Exception failure)
     {
         InstallArbiter();
-        using MapHandler handler = new();
+        using ReleaseMapHandler handler = new();
         SelfUpdateHost host = CreateHost("0.2.0");
         HandOffRecord record = new();
 
@@ -733,7 +717,7 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
         Assert.Contains(causeFragment, outcome.Message, StringComparison.Ordinal);
         Assert.NotEqual(rawText, outcome.Message);
         Assert.DoesNotContain("project registry", outcome.Message, StringComparison.Ordinal);
-        Assert.Equal("new-cli", File.ReadAllText(host.ProcessPath));
+        Assert.Equal("new-cli", _world.Files.ReadAllText(host.ProcessPath));
     }
 
     /// <summary>A hand-off fake that throws the given failure for the real hand-off and answers the rehearsal with 0.</summary>
@@ -763,122 +747,20 @@ public sealed class SelfUpdaterPostUpdateHandoffTests : IDisposable
     /// <summary>Writes the tray record under the same home the updater reads, so the tray step has a record to find.</summary>
     private void WriteTrayRecord(string json)
     {
-        string config = Path.Combine(_install.Path, ".kyberdash");
-        Directory.CreateDirectory(config);
-        File.WriteAllText(Path.Combine(config, "tray.json"), json);
+        string config = Path.Combine(_world.Install, ".kyberdash");
+        _world.Files.CreateDirectory(config);
+        _world.Files.WriteAllText(Path.Combine(config, "tray.json"), json);
     }
 
-    private SelfUpdateHost CreateHost(string currentVersion)
-    {
-        string path = Path.Combine(_install.Path, BinaryInstaller.InstalledFileName("kyber-weave", windows: false));
-        File.WriteAllText(path, "old-cli");
-        return new SelfUpdateHost(path, currentVersion, "osx-arm64", false, false);
-    }
+    private SelfUpdateHost CreateHost(string currentVersion) => _world.CreateHost(currentVersion, "osx-arm64");
 
     /// <summary>Places an already-installed kyberdash beside the CLI.</summary>
-    private void InstallKyberDash()
-    {
-        File.WriteAllText(
-            Path.Combine(_install.Path, BinaryInstaller.InstalledFileName("kyberdash", windows: false)),
-            "old-kyberdash");
-    }
+    private void InstallKyberDash() => _ = _world.InstallKyberDash();
 
     /// <summary>Places an already-installed arbiter beside the CLI.</summary>
-    private void InstallArbiter()
-    {
-        File.WriteAllText(
-            Path.Combine(_install.Path, BinaryInstaller.InstalledFileName("kyber-weave-arbiter", windows: false)),
-            "old-arbiter");
-    }
+    private void InstallArbiter() => _ = _world.InstallArbiter();
 
     /// <summary>A macOS release for this host's RID, with the assets an update downloads and checks against SHA256SUMS.</summary>
-    private MapHandler MapRelease(string version, bool withKyberDash, bool withArbiter)
-    {
-        MapHandler handler = new();
-        string tag = "v" + version;
-        string cliName = BinaryInstaller.ArchiveName("kyber-weave", "osx-arm64");
-        string mcpName = BinaryInstaller.ArchiveName("kyber-weave-mcp", "osx-arm64");
-        byte[] cliBytes = WriteAsset(cliName, "kyber-weave", "new-cli");
-        byte[] mcpBytes = WriteAsset(mcpName, "kyber-weave-mcp", "new-mcp");
-        string sums = $"{Sha(cliBytes)}  {cliName}\n{Sha(mcpBytes)}  {mcpName}\n";
-        handler.MapFile(GitHubReleaseClient.AssetUri(tag, cliName).AbsoluteUri, cliBytes);
-        handler.MapFile(GitHubReleaseClient.AssetUri(tag, mcpName).AbsoluteUri, mcpBytes);
-
-        if (withKyberDash)
-        {
-            string dashName = BinaryInstaller.ArchiveName("kyberdash", PlatformRid.KyberDashRid("osx-arm64"));
-            byte[] dashBytes = WriteAsset(dashName, "kyberdash", "new-kyberdash");
-            sums += $"{Sha(dashBytes)}  {dashName}\n";
-            handler.MapFile(GitHubReleaseClient.AssetUri(tag, dashName).AbsoluteUri, dashBytes);
-        }
-
-        if (withArbiter)
-        {
-            string arbiterName = BinaryInstaller.ArchiveName("kyber-weave-arbiter", "osx-arm64");
-            byte[] arbiterBytes = WriteAsset(arbiterName, "kyber-weave-arbiter", "new-arbiter");
-            sums += $"{Sha(arbiterBytes)}  {arbiterName}\n";
-            handler.MapFile(GitHubReleaseClient.AssetUri(tag, arbiterName).AbsoluteUri, arbiterBytes);
-        }
-
-        handler.MapFile(
-            GitHubReleaseClient.AssetUri(tag, "SHA256SUMS.txt").AbsoluteUri,
-            Encoding.UTF8.GetBytes(sums));
-        return handler;
-    }
-
-    private byte[] WriteAsset(string archiveName, string entryName, string content)
-    {
-        string archivePath = Path.Combine(_assets.Path, archiveName);
-        using (FileStream file = File.Create(archivePath))
-        using (GZipStream gzip = new(file, CompressionLevel.Fastest))
-        using (TarWriter writer = new(gzip))
-        using (MemoryStream data = new(Encoding.UTF8.GetBytes(content)))
-        {
-            writer.WriteEntry(new PaxTarEntry(TarEntryType.RegularFile, entryName) { DataStream = data });
-        }
-
-        return File.ReadAllBytes(archivePath);
-    }
-
-    // reason: the digests in SHA256SUMS.txt are lowercase hex by sha256sum convention, so the test must emit lowercase.
-    [SuppressMessage(
-        "Globalization",
-        "CA1308:Normalize strings to uppercase",
-        Justification =
-            "SHA256SUMS.txt and the digests it is compared against are lowercase hex by sha256sum convention; ToUpperInvariant would not match the published format.")]
-    private static string Sha(byte[] bytes)
-    {
-        return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-    }
-
-    private sealed class MapHandler : HttpMessageHandler
-    {
-        private readonly Dictionary<string, byte[]> _map = new(StringComparer.Ordinal);
-
-        public List<string> Uris { get; } = [];
-
-        public void MapFile(string uri, byte[] bytes)
-        {
-            _map[uri] = bytes;
-        }
-
-        protected override Task<HttpResponseMessage> SendAsync(
-            HttpRequestMessage request,
-            CancellationToken cancellationToken)
-        {
-            string uri = request.RequestUri?.AbsoluteUri ?? string.Empty;
-            Uris.Add(uri);
-            if (_map.TryGetValue(uri, out byte[]? bytes))
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                {
-                    Content = new ByteArrayContent(bytes)
-                });
-
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
-            {
-                RequestMessage = request,
-                Content = new StringContent("not found", Encoding.UTF8, "text/plain")
-            });
-        }
-    }
+    private static ReleaseMapHandler MapRelease(string version, bool withKyberDash, bool withArbiter) =>
+        UpdateRelease.Map(version, "osx-arm64", windows: false, withKyberDash, withArbiter);
 }
