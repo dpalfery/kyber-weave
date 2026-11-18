@@ -385,9 +385,9 @@ public sealed class SquadTransaction : ISquadTransaction
 
     /// <summary>Rolls back an interrupted transaction. Repeated recovery is a no-op.</summary>
     /// <remarks>
-    ///     A journal in its final committed phase is only cleaned up, not rolled back, and that cleanup deletes
-    ///     everything in the journal folder, including a file another tool put there: the folder belongs to the
-    ///     transaction while a journal exists in it.
+    ///     A journal in its final committed phase is only cleaned up, not rolled back, and it removes exactly the
+    ///     entries the transaction writes into its folder. Anything else found beside them is another tool's or the
+    ///     user's, so recovery refuses and removes nothing.
     /// </remarks>
     public void Recover(string targetRoot, SquadDeploymentScope scope)
     {
@@ -465,7 +465,10 @@ public sealed class SquadTransaction : ISquadTransaction
             string receiptPath = PhysicalLeaf(_stateStore.ResolveReceiptPath(root, scope));
             if (intent.Phase == TransactionPhase.Committed)
             {
-                // The deployment finished; a kill during cleanup left a partial transaction tree. Finish forward.
+                // The deployment finished; a kill during cleanup left a partial transaction tree. Finish forward,
+                // removing only the names this transaction makes: the committed journal no longer lists its
+                // artifacts, so anything else in the folder belongs to someone else and is left alone.
+                VerifyCommittedJournalHoldsOnlyItsOwnArtifacts(journalDirectory);
                 createdDirectoriesToRemove = intent.CreatedDirectories;
                 CleanupOwnedArtifacts(journalDirectory, workDirectory);
                 recoveryCompleted = true;
@@ -2334,6 +2337,33 @@ public sealed class SquadTransaction : ISquadTransaction
 
         return new TransactionLease(held, _files);
     }
+
+    /// <summary>
+    ///     Refuses to finish a committed journal that holds anything this transaction did not make. A committed
+    ///     journal has already published its receipt and dropped its artifact list, so it cannot prove ownership of
+    ///     anything beyond the fixed names the transaction writes; removing the rest would delete another tool's file.
+    /// </summary>
+    private void VerifyCommittedJournalHoldsOnlyItsOwnArtifacts(string journalDirectory)
+    {
+        foreach (FileSystemEntry entry in _files.EnumerateEntries(journalDirectory).ToArray())
+        {
+            string name = Path.GetFileName(entry.Path);
+            if (IsOwnedJournalEntry(name))
+                continue;
+
+            throw new InvalidDataException(
+                $"Squad transaction journal at '{journalDirectory}' holds '{name}', which this transaction did not " +
+                "write. Its prepared artifact authority does not exactly describe its transaction tree, so nothing " +
+                "was removed. Move that entry out of the journal folder and run the command again.");
+        }
+    }
+
+    /// <summary>The names a transaction writes directly into its journal folder, which is also its work folder.</summary>
+    private static bool IsOwnedJournalEntry(string name) =>
+        string.Equals(name, IntentFileName, StringComparison.Ordinal) ||
+        IsIntentTemporary(name) ||
+        name.StartsWith("claimed-", StringComparison.Ordinal) ||
+        name is "backups" or "staging" or "links" or "state-originals" or "state-original-links" or "state-staging";
 
     private void CleanupOwnedArtifacts(
         string journalDirectory,

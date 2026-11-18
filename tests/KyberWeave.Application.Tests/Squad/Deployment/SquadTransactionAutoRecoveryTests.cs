@@ -59,6 +59,40 @@ public sealed class SquadTransactionAutoRecoveryTests
     }
 
     [Fact]
+    public void ACommittedJournalHoldingAFileItDoesNotOwnRefusesAndLeavesEveryEntryInPlace()
+    {
+        using Crashed crashed = Crashed.Start(SquadCrashFlow.Install, points => points[^3]);
+        Assert.True(crashed.JournalExists());
+        string journal = Path.GetDirectoryName(crashed.IntentPath)!;
+        string operatorNotes = Path.Combine(journal, "operator-notes.md");
+        crashed.Fixture.Files.WriteAllText(operatorNotes, "kept by the operator");
+        IReadOnlyDictionary<string, SquadTreeEntry> crashedTree = crashed.Fixture.Capture();
+
+        InvalidOperationException refused = Assert.Throws<InvalidOperationException>(() =>
+            crashed.Fixture.Transaction().Execute(crashed.Fixture.Plan(SquadCrashFlow.Install)));
+
+        Assert.Contains(journal, refused.Message, StringComparison.Ordinal);
+        Assert.Contains("does not exactly describe its transaction tree", refused.Message, StringComparison.Ordinal);
+        Assert.Equal("kept by the operator", crashed.Fixture.Files.ReadAllText(operatorNotes));
+        Assert.Null(SquadTreeComparison.Difference(crashedTree, crashed.Fixture.Capture()));
+    }
+
+    [Fact]
+    public void ACommittedJournalHoldingOnlyWhatTheTransactionOwnsIsFinishedForward()
+    {
+        using Crashed crashed = Crashed.Start(SquadCrashFlow.Install, points => points[^3]);
+        string journal = Path.GetDirectoryName(crashed.IntentPath)!;
+        Assert.True(crashed.Fixture.Files.DirectoryExists(journal));
+
+        SquadTransaction transaction = crashed.Fixture.Transaction();
+        transaction.Recover(crashed.Fixture.Root, SquadDeploymentScope.Project);
+
+        Assert.False(crashed.JournalExists());
+        Assert.Null(SquadTreeComparison.Difference(crashed.NewTree, crashed.Fixture.Capture()));
+        Assert.Contains(transaction.Warnings, warning => warning.Contains("finished", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void AKillBeforeTheJournalExistsLeavesOnlyFoldersSoTheDeploymentContinuesAndSaysSo()
     {
         using Crashed crashed = Crashed.Start(SquadCrashFlow.Install, points => points[1]);
