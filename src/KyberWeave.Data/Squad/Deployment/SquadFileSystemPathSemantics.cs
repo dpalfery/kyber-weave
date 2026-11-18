@@ -57,12 +57,15 @@ public sealed class SquadFileSystemPathSemantics : IFileSystemPathSemantics, IPa
     /// <inheritdoc />
     public string ResolvePhysicalRoot(string targetRoot)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(targetRoot);
         try
         {
             return _resolver.ResolvePhysicalRoot(targetRoot);
         }
-        catch (DirectoryNotFoundException exception)
+        catch (Exception exception) when (exception is DirectoryNotFoundException or ArgumentException)
         {
+            // A relative or malformed root is not a directory this deployment can bind, and a caller that handles a
+            // deployment conflict must see one. The blank check above keeps a programming error a programming error.
             throw new SquadDeploymentConflictException(exception.Message, exception);
         }
     }
