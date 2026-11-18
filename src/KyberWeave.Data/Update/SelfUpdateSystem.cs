@@ -55,6 +55,10 @@ internal sealed class SelfUpdateSystem : ISelfUpdateSystem
         ExtractArchiveCore(archivePath, destinationDirectory, windows);
 
     /// <inheritdoc />
+    void ISelfUpdateSystem.CopyFile(string sourcePath, string destinationPath, bool overwrite) =>
+        File.Copy(sourcePath, destinationPath, overwrite);
+
+    /// <inheritdoc />
     void ISelfUpdateSystem.ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs) =>
         Replace(extractedBinaryPath, destinationPath, windows, macOs);
 

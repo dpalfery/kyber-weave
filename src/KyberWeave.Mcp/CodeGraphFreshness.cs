@@ -4,11 +4,12 @@ using System.Globalization;
 
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Docs;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Contracts.Services;
-using KyberWeave.Domain.Doctor;
 using KyberWeave.Core.Processes;
+using KyberWeave.Domain.Doctor;
 
 namespace KyberWeave.Mcp;
 
@@ -45,7 +46,7 @@ namespace KyberWeave.Mcp;
 /// never a failure. Every other sync failure still fails the tool.
 /// </para>
 /// <para>
-/// The child's output is captured by <see cref="ProcessRunner"/> and is never read into a
+/// The child's output is captured by the bounded process executor and is never read into a
 /// response or a stream of ours: stdout carries the JSON-RPC transport, and one line written
 /// there breaks the session.
 /// </para>
@@ -96,6 +97,9 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     private readonly ICodeGraphProvisioner _provisioner;
     private readonly IKyberWeaveConfigRepository _config;
     private readonly TimeProvider _time;
+    private readonly IFileSystem _files;
+    private readonly IProcessEnvironment _environment;
+    private readonly IProcessRunner _processes;
     private readonly IProcessExecutor _executor;
     private readonly Action<TimeSpan> _pause;
     private readonly Lock _gate = new();
@@ -112,16 +116,21 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     /// <param name="provisioner">Brings the index up to date under the cross-process lock.</param>
     /// <param name="config">Reads the repository's declaration and its stop rule at each attempt.</param>
     /// <param name="time">Supplies the clock the refresh interval is measured against.</param>
+    /// <param name="files">Looks for CodeGraph's lock file and reads the process id it records.</param>
+    /// <param name="paths">Turns the repository root into a full path.</param>
+    /// <param name="environment">Names the directory a relative root is resolved against, the temporary directory the refresh lock lives in, and the platform whose shell quoting the remedy follows.</param>
+    /// <param name="processes">Says whether the process that holds CodeGraph's lock file is still running.</param>
+    /// <param name="bounded">Runs the CodeGraph child under a time limit when <paramref name="executor"/> is null.</param>
     /// <param name="executor">
     /// Runs the CodeGraph child the provisioner starts, or null for one bounded by
-    /// <see cref="RefreshBound"/>. The provisioner takes its executor from the caller for the same
+    /// <see cref="RefreshBound"/> through <paramref name="bounded"/>. The provisioner takes its executor from the caller for the same
     /// reason it takes the root: a caller that must answer without a CodeGraph binary — a test, or a
     /// host that supplies its own runner — supplies the executor rather than being answered by
     /// whichever binary this machine happens to have installed.
     /// </param>
     /// <param name="pause">
     /// Waits between two sync attempts when CodeGraph's own lock is held, or null to block the
-    /// calling thread. A test supplies one so it does not wait in real time.
+    /// calling thread on <paramref name="time"/>. A test supplies one so it does not wait at all.
     /// </param>
     public CodeGraphFreshness(
         string repositoryRoot,
@@ -129,19 +138,32 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         ICodeGraphProvisioner provisioner,
         IKyberWeaveConfigRepository config,
         TimeProvider time,
+        IFileSystem files,
+        IPathResolver paths,
+        IProcessEnvironment environment,
+        IProcessRunner processes,
+        IBoundedProcessExecutor bounded,
         IProcessExecutor? executor = null,
         Action<TimeSpan>? pause = null)
     {
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(time);
-        _repositoryRoot = Path.GetFullPath(repositoryRoot);
+        ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(processes);
+        ArgumentNullException.ThrowIfNull(bounded);
+        _repositoryRoot = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
         _refreshEnabled = refreshEnabled;
         _provisioner = provisioner;
         _config = config;
         _time = time;
-        _executor = executor ?? new BoundedExecutor(RefreshBound);
-        _pause = pause ?? Thread.Sleep;
+        _files = files;
+        _environment = environment;
+        _processes = processes;
+        _executor = executor ?? new BoundedExecutor(bounded, RefreshBound);
+        _pause = pause ?? (wait => Task.Delay(wait, time).GetAwaiter().GetResult());
     }
 
     /// <summary>
@@ -221,7 +243,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
             return CodeGraphGate.Clear;
 
         bool stops = loaded.Config.StopsOnToolFailure;
-        string lockDirectory = Path.GetTempPath();
+        string lockDirectory = _environment.TempDirectory;
 
         if (!WaitForNoIndexLockFile())
         {
@@ -266,13 +288,13 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         string lockFile = CodeGraphIndexRules.IndexLockPathFor(_repositoryRoot);
         foreach (TimeSpan wait in CodeGraphIndexRules.LockFileWaits)
         {
-            if (!File.Exists(lockFile))
+            if (!_files.FileExists(lockFile))
                 return true;
 
             _pause(wait);
         }
 
-        return !File.Exists(lockFile);
+        return !_files.FileExists(lockFile);
     }
 
     /// <summary>
@@ -291,7 +313,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
             : "it records no PID";
         string fix = running
             ? $"wait for process {holder!.Value.ToString(CultureInfo.InvariantCulture)} to finish its index work, or stop it"
-            : $"codegraph unlock {CodeGraphIndexRules.QuoteShellPath(_repositoryRoot, OperatingSystem.IsWindows())}";
+            : $"codegraph unlock {CodeGraphIndexRules.QuoteShellPath(_repositoryRoot, _environment.OperatingSystem == OperatingSystemKind.Windows)}";
 
         return Failure(
             stops,
@@ -303,12 +325,12 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     private const int LockHolderReadBytes = 32;
 
     /// <summary>The process id the lock file records, or null when the file is gone, unreadable, or holds no number.</summary>
-    private static int? ReadLockHolder(string lockFile)
+    private int? ReadLockHolder(string lockFile)
     {
         try
         {
             // A process id is a few digits: read no more than that, whatever the file holds.
-            using FileStream stream = new(lockFile, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using Stream stream = _files.OpenRead(lockFile);
             byte[] buffer = new byte[LockHolderReadBytes];
             int read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
             string text = System.Text.Encoding.ASCII.GetString(buffer, 0, read).Trim();
@@ -322,38 +344,16 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
         }
     }
 
-    private static bool IsRunning(int processId)
+    private bool IsRunning(int processId)
     {
-        Process process;
         try
         {
-            process = Process.GetProcessById(processId);
-        }
-        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
-        {
-            return false;
+            return _processes.IsAlive(processId);
         }
         catch (Exception exception) when (exception is Win32Exception or UnauthorizedAccessException or NotSupportedException)
         {
             // The lookup was refused, not answered: treat the process as running, so unlocking under it is not advised.
             return true;
-        }
-
-        using (process)
-        {
-            try
-            {
-                return !process.HasExited;
-            }
-            catch (InvalidOperationException)
-            {
-                return false;
-            }
-            catch (Exception exception) when (exception is Win32Exception or UnauthorizedAccessException or NotSupportedException)
-            {
-                // The process exists but this user may not ask about it: it is running, and unlocking under it is wrong.
-                return true;
-            }
         }
     }
 
@@ -372,7 +372,7 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
                 break;
 
             _pause(pause);
-            if (!File.Exists(lockFile))
+            if (!_files.FileExists(lockFile))
                 provisioned = Provision(options, lockDirectory);
         }
 
@@ -426,9 +426,9 @@ public sealed class CodeGraphFreshness : ICodeGraphFreshnessGate
     /// fake it; the production implementation the CLI uses is the CLI's, so this server carries
     /// the same three-line shape rather than a second way to start a process.
     /// </summary>
-    private sealed class BoundedExecutor(TimeSpan timeout) : IProcessExecutor
+    private sealed class BoundedExecutor(IBoundedProcessExecutor bounded, TimeSpan timeout) : IProcessExecutor
     {
         public ProcessResult Run(ProcessStartInfo startInfo, string standardInput) =>
-            ProcessRunner.Run(startInfo, standardInput, timeout);
+            bounded.Run(startInfo, standardInput, timeout);
     }
 }

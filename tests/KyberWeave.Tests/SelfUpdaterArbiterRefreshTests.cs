@@ -7,6 +7,8 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Hooks;
+using KyberWeave.Data.Paths;
 using KyberWeave.Cli.Update;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Processes;
@@ -65,8 +67,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _ => null),
+            new SelfUpdateSystem(),
             log.Add,
-            _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
@@ -100,8 +105,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _ => null),
+            new SelfUpdateSystem(),
             log.Add,
-            _ => null,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
@@ -143,9 +151,12 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: _ => null),
+            new SelfUpdateSystem(),
             log.Add,
-            _ => null,
-            runProcess,
+            runProcess: runProcess,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.NoProjects,
@@ -214,8 +225,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: environment),
+            new SelfUpdateSystem(),
             log.Add,
-            environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.Targets(environment),
@@ -339,8 +353,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: environment),
+            new SelfUpdateSystem(),
             log.Add,
-            environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.Targets(environment),
@@ -398,8 +415,11 @@ public sealed class SelfUpdaterArbiterRefreshTests : IDisposable
         using SelfUpdater updater = new(
             handler,
             host,
+            new PhysicalFileSystem(),
+            new PhysicalPathResolver(new PhysicalFileSystem()),
+            new FakeProcessEnvironment(readVariable: environment),
+            new SelfUpdateSystem(),
             log.Add,
-            environment,
             captureProcess: (_, _) => QuietSuccess,
             arbiterHookRefresher: refresher,
             arbiterTargets: UpdateTestServices.Targets(environment),

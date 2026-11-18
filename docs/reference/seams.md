@@ -245,7 +245,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `RunCheckoutGuard` (`RunStart/RunCheckoutGuard.cs`) | paths | 4.4 |
 | `SkillParser` (`Skills/Parsing/SkillParser.cs`) | paths | 2.5 |
 | `GitHubReleaseClient` (`Update/GitHubReleaseClient.cs`) | network | 4.4 |
-| `SelfUpdater` (`Update/SelfUpdater.cs`) | file system, paths, environment, network | 4.1 |
 | `ArbiterConfigLoader` (`Arbiter/ArbiterConfigLoader.cs`) | file system | 2.5 |
 | `ArbiterSquadCatalog` (`Arbiter/Squad/ArbiterSquadCatalog.cs`) | file system | 2.5 |
 | `DocsAnalysisConfigLoader` (`Configuration/DocsAnalysisConfigLoader.cs`) | network | 2.5 |
@@ -379,7 +378,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `HooksCli` (`HooksCli.cs`) | environment | 4.7 |
 
 #### KyberWeave.Kernel (3 classes)
 
@@ -393,10 +391,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 
 | Class (file) | Calls directly | Task |
 |---|---|---|
-| `CodeGraphFreshness` (`CodeGraphFreshness.cs`) | file system, paths, clock | 4.6 |
-| `DocsRootRegistry` (`DocsRootRegistry.cs`) | paths, console | 4.6 |
-| `DocsTools` (`DocsTools.cs`) | paths | 4.6 |
-| `RepositoryRootResolver` (`RepositoryRootResolver.cs`) | paths | 4.6 |
 
 ## Gaps in the task list
 

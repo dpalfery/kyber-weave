@@ -64,6 +64,9 @@ internal static class UpdateCommandTestServices
         public void ExtractArchive(string archivePath, string destinationDirectory, bool windows) =>
             _inner.ExtractArchive(archivePath, destinationDirectory, windows);
 
+        public void CopyFile(string sourcePath, string destinationPath, bool overwrite) =>
+            _inner.CopyFile(sourcePath, destinationPath, overwrite);
+
         public void ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs) =>
             _inner.ReplaceBinary(extractedBinaryPath, destinationPath, windows, macOs);
     }

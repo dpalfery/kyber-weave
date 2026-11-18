@@ -578,6 +578,12 @@
       "bound": "Windows only (guarded by OperatingSystem.IsWindows in TryEnableWindowsDirectoryCaseSensitivity). ProcessRunner timeout 60 s kills the child tree on expiry; fsutil file setCaseSensitiveInfo on a test directory."
     },
     {
+      "file": "tests/KyberWeave.Tests/CodeGraphFreshnessTests.cs",
+      "text": "System.Diagnostics.ProcessStartInfo start = new(\"codegraph\")",
+      "count": 1,
+      "bound": "Fake: the start information is handed to a scripted process runner that records the request and starts nothing."
+    },
+    {
       "file": "tests/KyberWeave.Tests/SquadHarnessLauncherTests.cs",
       "text": "ProcessStartInfo startInfo = SquadHarnessLauncher.BuildStartInfo(",
       "count": 8,
@@ -804,12 +810,6 @@
       "text": "return BuildStartInfo(",
       "count": 1,
       "bound": "Delegating call to the six-argument overload. It builds a ProcessStartInfo and starts nothing."
-    },
-    {
-      "file": "src/KyberWeave.Mcp/CodeGraphFreshness.cs",
-      "text": "ProcessRunner.Run(startInfo, standardInput, timeout);",
-      "count": 1,
-      "bound": "The docs server's only spawn: one CodeGraph child through the repository's deadlock-safe runner, whose timeout is CodeGraphFreshness.RefreshBound (30 s) and kills the process tree on expiry. It exists because the provisioner takes an IProcessExecutor and the CLI's implementation is not reachable from this assembly, so this is the same three-line shape rather than a second way to start a process; the cross-process lock and the doctor's own executor are reused."
     },
     {
       "file": "src/KyberWeave.Cli/Commands/Docs/DocsInitCommand.cs",

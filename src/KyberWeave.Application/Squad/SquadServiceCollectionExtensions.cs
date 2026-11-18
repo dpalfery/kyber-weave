@@ -63,6 +63,8 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISelfUpdateService>(sp => new SelfUpdateService(
             sp.GetRequiredService<Func<SelfUpdateHost>>(),
             sp.GetRequiredService<IProcessEnvironment>(),
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
             sp.GetRequiredService<ISelfUpdateSystem>(),
             sp.GetRequiredService<IArbiterHookRefresherFactory>(),
             sp.GetRequiredService<IArbiterRefreshTargets>(),

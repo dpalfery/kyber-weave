@@ -209,7 +209,13 @@ public sealed class PhysicalFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
-    public Stream OpenRead(string path) => new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+    /// <remarks>
+    ///     The read shares read, write and delete, so a reader never stops another process from
+    ///     writing, deleting or atomically replacing the file on Windows (a CodeGraph lock file, a
+    ///     store another process rotates).
+    /// </remarks>
+    public Stream OpenRead(string path) =>
+        new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
 
     /// <inheritdoc />
     public long GetLength(string path) => new FileInfo(path).Length;
