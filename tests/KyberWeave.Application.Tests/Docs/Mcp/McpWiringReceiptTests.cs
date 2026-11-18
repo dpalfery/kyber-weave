@@ -4,9 +4,10 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
+using KyberWeave.Tests;
 using Xunit;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Mcp;
 
 /// <summary>
 /// The receipt (5.8–5.10): every write is auditable and removable, and removal refuses rather than
@@ -27,7 +28,7 @@ namespace KyberWeave.Tests;
 /// edit left it (5.9).
 /// </para>
 /// </remarks>
-public sealed class McpWiringReceiptTests : IDisposable
+public sealed class McpWiringReceiptTests
 {
     private const string ServerName = "kyber-weave";
 
@@ -39,23 +40,16 @@ public sealed class McpWiringReceiptTests : IDisposable
 
     private const string VsCodeConfigFile = ".vscode/mcp.json";
 
-    private readonly TempDirectory _root = new();
+    private readonly InMemoryMcpWiring _wiring = McpWiringTestServices.InMemory();
 
-    public McpWiringReceiptTests()
-    {
-        Directory.CreateDirectory(Repo);
-        Directory.CreateDirectory(Bin);
-        McpWiringFixture.WriteExecutable(Bin, BinaryName);
-    }
+    public McpWiringReceiptTests() => McpWiringFixture.WriteExecutable(_wiring.Files, Bin, BinaryName);
 
-    private string Repo => Path.Combine(_root.Path, "repo");
+    private string Repo => _wiring.Root;
 
     /// <summary>Where a case puts the fake launch binary it wants the resolver to find.</summary>
-    private string Bin => Path.Combine(_root.Path, "bin");
+    private string Bin => Path.Combine(_wiring.Files.Root, "bin");
 
     private string ReceiptPath => McpWiringReceipt.PathFor(Repo);
-
-    public void Dispose() => _root.Dispose();
 
     /// <summary>
     /// The location is a design decision the removal path depends on (DD13): a receipt anywhere else
@@ -78,11 +72,11 @@ public sealed class McpWiringReceiptTests : IDisposable
     [Fact]
     public void ARepositoryWithNoReceiptLoadsAsEmpty()
     {
-        McpWiringReceipt receipt = McpWiringTestServices.Receipts.Load(Repo);
+        McpWiringReceipt receipt = _wiring.Receipts.Load(Repo);
 
         Assert.Empty(receipt.Files);
         Assert.Null(receipt.Find(VsCodeConfigFile));
-        Assert.False(File.Exists(ReceiptPath));
+        Assert.False(_wiring.FileExists(McpWiringReceipt.RelativePath));
     }
 
     /// <summary>
@@ -100,13 +94,13 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void AnInsertedWriteRecordsBothDigestsAndTheMode()
     {
         byte[] original = Encoding.UTF8.GetBytes("""{"servers": {}}""");
-        McpWiringFixture.WriteBytes(Repo, VsCodeConfigFile, original);
+        McpWiringFixture.WriteBytes(_wiring.Files, _wiring.Root, VsCodeConfigFile, original);
 
         Repair(VsCode);
 
-        byte[] written = File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile));
+        byte[] written = _wiring.Files.ReadAllBytes(_wiring.FullPath(VsCodeConfigFile));
 
-        using JsonDocument receipt = JsonDocument.Parse(File.ReadAllText(ReceiptPath));
+        using JsonDocument receipt = JsonDocument.Parse(_wiring.Read(McpWiringReceipt.RelativePath));
         Assert.Equal(1, receipt.RootElement.GetProperty("version").GetInt32());
 
         JsonElement record = Assert.Single(receipt.RootElement.GetProperty("files").EnumerateArray());
@@ -123,7 +117,7 @@ public sealed class McpWiringReceiptTests : IDisposable
         Assert.Equal(original, recordedPreWrite);
         Assert.Equal(Normalize(record.GetProperty("preSha256").GetString()), Digest(recordedPreWrite));
 
-        McpWiringReceiptRecord loaded = RecordFor(McpWiringTestServices.Receipts.Load(Repo), VsCodeConfigFile);
+        McpWiringReceiptRecord loaded = RecordFor(_wiring.Receipts.Load(Repo), VsCodeConfigFile);
         Assert.Equal(McpWiringWriteMode.Inserted, loaded.Mode);
         Assert.Equal(ServerName, Assert.Single(loaded.Servers));
         Assert.Equal(Digest(original), Normalize(loaded.PreSha256));
@@ -141,9 +135,9 @@ public sealed class McpWiringReceiptTests : IDisposable
     {
         Repair(VsCode);
 
-        byte[] written = File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile));
+        byte[] written = _wiring.Files.ReadAllBytes(_wiring.FullPath(VsCodeConfigFile));
 
-        using JsonDocument receipt = JsonDocument.Parse(File.ReadAllText(ReceiptPath));
+        using JsonDocument receipt = JsonDocument.Parse(_wiring.Read(McpWiringReceipt.RelativePath));
         JsonElement record = Assert.Single(receipt.RootElement.GetProperty("files").EnumerateArray());
 
         Assert.Equal(VsCodeConfigFile, record.GetProperty("path").GetString());
@@ -153,7 +147,7 @@ public sealed class McpWiringReceiptTests : IDisposable
             !record.TryGetProperty("preSha256", out JsonElement pre) || pre.ValueKind == JsonValueKind.Null,
             "a created file has no pre-write content, so there is no pre-write digest to record");
 
-        McpWiringReceiptRecord loaded = RecordFor(McpWiringTestServices.Receipts.Load(Repo), VsCodeConfigFile);
+        McpWiringReceiptRecord loaded = RecordFor(_wiring.Receipts.Load(Repo), VsCodeConfigFile);
         Assert.Equal(McpWiringWriteMode.Created, loaded.Mode);
         Assert.Equal(Digest(written), Normalize(loaded.PostSha256));
     }
@@ -167,7 +161,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     {
         Repair(VsCode, "claude-code");
 
-        McpWiringReceipt receipt = McpWiringTestServices.Receipts.Load(Repo);
+        McpWiringReceipt receipt = _wiring.Receipts.Load(Repo);
 
         Assert.Equal(2, receipt.Files.Count);
         Assert.Single(receipt.Files, record => record.Path == VsCodeConfigFile);
@@ -182,10 +176,10 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void ASecondWriteAfterUnwireLeavesOneRecordForTheFile()
     {
         Repair(VsCode);
-        McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
+        _wiring.Wiring.Unwire(Repo, [VsCode]);
         Repair(VsCode);
 
-        McpWiringReceipt receipt = McpWiringTestServices.Receipts.Load(Repo);
+        McpWiringReceipt receipt = _wiring.Receipts.Load(Repo);
 
         Assert.Single(receipt.Files, record => record.Path == VsCodeConfigFile);
         Assert.Equal(McpWiringWriteMode.Created, RecordFor(receipt, VsCodeConfigFile).Mode);
@@ -204,18 +198,18 @@ public sealed class McpWiringReceiptTests : IDisposable
               "servers": {}
             }
             """);
-        McpWiringFixture.WriteBytes(Repo, VsCodeConfigFile, original);
+        McpWiringFixture.WriteBytes(_wiring.Files, _wiring.Root, VsCodeConfigFile, original);
 
         Repair(VsCode);
-        Assert.NotEqual(original, File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile)));
+        Assert.NotEqual(original, _wiring.Files.ReadAllBytes(_wiring.FullPath(VsCodeConfigFile)));
 
-        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
+        McpWiringRepairReport report = _wiring.Wiring.Unwire(Repo, [VsCode]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Restored, change.Outcome);
         Assert.True(change.Written, "a restore is a write");
-        Assert.Equal(original, File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile)));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(VsCodeConfigFile));
+        Assert.Equal(original, _wiring.Files.ReadAllBytes(_wiring.FullPath(VsCodeConfigFile)));
+        Assert.Null(_wiring.Receipts.Load(Repo).Find(VsCodeConfigFile));
     }
 
     /// <summary>
@@ -226,15 +220,15 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void UnwireDeletesAFileTheRepairCreated()
     {
         Repair(VsCode);
-        Assert.True(File.Exists(Path.Combine(Repo, VsCodeConfigFile)));
+        Assert.True(_wiring.FileExists(VsCodeConfigFile));
 
-        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
+        McpWiringRepairReport report = _wiring.Wiring.Unwire(Repo, [VsCode]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Deleted, change.Outcome);
         Assert.True(change.Written, "a delete is a write");
-        Assert.False(File.Exists(Path.Combine(Repo, VsCodeConfigFile)));
-        Assert.Null(McpWiringTestServices.Receipts.Load(Repo).Find(VsCodeConfigFile));
+        Assert.False(_wiring.FileExists(VsCodeConfigFile));
+        Assert.Null(_wiring.Receipts.Load(Repo).Find(VsCodeConfigFile));
     }
 
     /// <summary>
@@ -245,22 +239,22 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void UnwireRefusesWhenTheFileChangedAfterTheRepair()
     {
         byte[] original = Encoding.UTF8.GetBytes("""{"mcpServers": {}}""");
-        McpWiringFixture.WriteBytes(Repo, ".mcp.json", original);
+        McpWiringFixture.WriteBytes(_wiring.Files, _wiring.Root, ".mcp.json", original);
         Repair("claude-code");
 
-        File.AppendAllText(Path.Combine(Repo, ".mcp.json"), "\n// a teammate's edit\n");
-        byte[] drifted = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
+        _wiring.Files.WriteAllText(_wiring.FullPath(".mcp.json"), _wiring.Read(".mcp.json") + "\n// a teammate's edit\n");
+        byte[] drifted = _wiring.Files.ReadAllBytes(_wiring.FullPath(".mcp.json"));
 
-        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, ["claude-code"]);
+        McpWiringRepairReport report = _wiring.Wiring.Unwire(Repo, ["claude-code"]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.Equal(DriftCode, change.Code);
         Assert.False(change.Written);
         Assert.Contains(".mcp.json", DiagnosticText(change), StringComparison.Ordinal);
-        Assert.Equal(drifted, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
+        Assert.Equal(drifted, _wiring.Files.ReadAllBytes(_wiring.FullPath(".mcp.json")));
         Assert.NotNull(
-            McpWiringTestServices.Receipts.Load(Repo).Find(".mcp.json"));
+            _wiring.Receipts.Load(Repo).Find(".mcp.json"));
     }
 
     /// <summary>
@@ -274,10 +268,10 @@ public sealed class McpWiringReceiptTests : IDisposable
     public void UnwireRefusesAReceiptWhoseRecordedContentNoLongerMatchesItsDigest()
     {
         byte[] original = Encoding.UTF8.GetBytes("""{"servers": {}}""");
-        McpWiringFixture.WriteBytes(Repo, VsCodeConfigFile, original);
+        McpWiringFixture.WriteBytes(_wiring.Files, _wiring.Root, VsCodeConfigFile, original);
         Repair(VsCode);
 
-        byte[] repaired = File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile));
+        byte[] repaired = _wiring.Files.ReadAllBytes(_wiring.FullPath(VsCodeConfigFile));
 
         // The target file is untouched and still matches its post-write digest, so this is not the
         // drift refusal: the only thing wrong is the record's own payload.
@@ -287,11 +281,11 @@ public sealed class McpWiringReceiptTests : IDisposable
         // The tampered receipt still loads and still yields the record — otherwise a refusal would be
         // indistinguishable from "the receipt could not be read", and this case would prove nothing
         // about the integrity check.
-        McpWiringReceiptRecord? afterTampering = McpWiringTestServices.Receipts.Load(Repo).Find(VsCodeConfigFile);
+        McpWiringReceiptRecord? afterTampering = _wiring.Receipts.Load(Repo).Find(VsCodeConfigFile);
         Assert.NotNull(afterTampering);
         Assert.Equal(tampered, Convert.FromBase64String(afterTampering.PreContent ?? string.Empty));
 
-        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, [VsCode]);
+        McpWiringRepairReport report = _wiring.Wiring.Unwire(Repo, [VsCode]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
@@ -300,9 +294,9 @@ public sealed class McpWiringReceiptTests : IDisposable
         Assert.Contains("pre-write content", DiagnosticText(change), StringComparison.Ordinal);
 
         // Neither the tampered payload nor the original bytes were written: a refusal is zero bytes.
-        Assert.Equal(repaired, File.ReadAllBytes(Path.Combine(Repo, VsCodeConfigFile)));
+        Assert.Equal(repaired, _wiring.Files.ReadAllBytes(_wiring.FullPath(VsCodeConfigFile)));
         Assert.NotNull(
-            McpWiringTestServices.Receipts.Load(Repo).Find(VsCodeConfigFile));
+            _wiring.Receipts.Load(Repo).Find(VsCodeConfigFile));
     }
 
     /// <summary>
@@ -312,17 +306,17 @@ public sealed class McpWiringReceiptTests : IDisposable
     [Fact]
     public void UnwireRefusesWhenTheReceiptHoldsNoRecord()
     {
-        McpWiringFixture.WriteBytes(Repo, ".mcp.json", Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""));
-        byte[] before = File.ReadAllBytes(Path.Combine(Repo, ".mcp.json"));
+        McpWiringFixture.WriteBytes(_wiring.Files, _wiring.Root, ".mcp.json", Encoding.UTF8.GetBytes("""{"mcpServers": {}}"""));
+        byte[] before = _wiring.Files.ReadAllBytes(_wiring.FullPath(".mcp.json"));
 
-        McpWiringRepairReport report = McpWiringTestServices.Wiring.Unwire(Repo, ["claude-code"]);
+        McpWiringRepairReport report = _wiring.Wiring.Unwire(Repo, ["claude-code"]);
 
         McpWiringFileChange change = Assert.Single(report.Files);
         Assert.Equal(McpWiringChangeOutcome.Refused, change.Outcome);
         Assert.Equal(DriftCode, change.Code);
         Assert.False(change.Written);
-        Assert.Equal(before, File.ReadAllBytes(Path.Combine(Repo, ".mcp.json")));
-        Assert.False(File.Exists(ReceiptPath), "a refusal writes no receipt either");
+        Assert.Equal(before, _wiring.Files.ReadAllBytes(_wiring.FullPath(".mcp.json")));
+        Assert.False(_wiring.FileExists(McpWiringReceipt.RelativePath), "a refusal writes no receipt either");
     }
 
     /// <summary>
@@ -332,22 +326,23 @@ public sealed class McpWiringReceiptTests : IDisposable
     [Fact]
     public void ADryRunWritesNoReceiptAndCreatesNoFile()
     {
-        McpWiringTestServices.Wiring.Repair(
+        _wiring.Wiring.Repair(
             Repo,
             McpWiringFixture.Declare(FirstPartyServer()),
             ResolverOver(Bin),
             [VsCode],
             dryRun: true);
 
-        Assert.False(File.Exists(ReceiptPath));
-        Assert.False(File.Exists(Path.Combine(Repo, VsCodeConfigFile)));
-        Assert.Empty(McpWiringTestServices.Receipts.Load(Repo).Files);
+        Assert.False(_wiring.FileExists(McpWiringReceipt.RelativePath));
+        Assert.False(_wiring.FileExists(VsCodeConfigFile));
+        Assert.Empty(_wiring.Receipts.Load(Repo).Files);
     }
 
     private McpWiringRepairReport Repair(params string[] targets) =>
-        McpWiringTestServices.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), targets, dryRun: false);
+        _wiring.Wiring.Repair(Repo, McpWiringFixture.Declare(FirstPartyServer()), ResolverOver(Bin), targets, dryRun: false);
 
-    private LaunchCommandResolver ResolverOver(params string[] searchPaths) => PhysicalLaunchCommands.Over(searchPaths);
+    private LaunchCommandResolver ResolverOver(params string[] searchPaths) =>
+        new(Repo, searchPaths, _wiring.Files, _wiring.Paths, _wiring.Environment);
 
     private static RequiredMcpServer FirstPartyServer() =>
         new(ServerName, [BinaryName, "--repo-root", "."], McpProvenance.FirstParty);
@@ -359,7 +354,7 @@ public sealed class McpWiringReceiptTests : IDisposable
     /// </summary>
     private void ReplaceReceiptPreContent(string relativePath, byte[] content)
     {
-        JsonNode document = JsonNode.Parse(File.ReadAllText(ReceiptPath))
+        JsonNode document = JsonNode.Parse(_wiring.Read(McpWiringReceipt.RelativePath))
             ?? throw new InvalidOperationException("the receipt is not a JSON document");
 
         JsonNode? record = document["files"]?
@@ -371,7 +366,7 @@ public sealed class McpWiringReceiptTests : IDisposable
 
         record["preContent"] = Convert.ToBase64String(content);
 
-        File.WriteAllText(ReceiptPath, document.ToJsonString());
+        _wiring.Files.WriteAllText(_wiring.FullPath(McpWiringReceipt.RelativePath), document.ToJsonString());
     }
 
     private static McpWiringReceiptRecord RecordFor(McpWiringReceipt receipt, string relativePath) =>
