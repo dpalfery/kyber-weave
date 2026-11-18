@@ -410,12 +410,13 @@ internal static class SquadCommandComposition
             tokens.Distinct(StringComparer.Ordinal).ToArray());
     }
 
-    /// <summary>Offers the operator a project to pick, through the injected picker or the Spectre picker.</summary>
+    /// <summary>Offers the operator a project to pick, through the injected picker or the Spectre picker on the console.</summary>
     public static IReadOnlyList<string> RunProjectPicker(
         ISquadProjectPicker? picker,
-        IReadOnlyList<SquadProjectRegistryEntry> projects)
+        IReadOnlyList<SquadProjectRegistryEntry> projects,
+        IAnsiConsole console)
     {
-        return (picker ?? new SpectreSquadProjectPicker()).Pick(projects);
+        return (picker ?? new SpectreSquadProjectPicker(console)).Pick(projects);
     }
 
     /// <summary>Resolves the deployment scope from the global flag.</summary>
