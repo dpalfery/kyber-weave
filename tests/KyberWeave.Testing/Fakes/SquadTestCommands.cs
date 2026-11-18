@@ -242,7 +242,8 @@ internal static class SquadTestCommands
         ISquadGlobalRootResolver? globalRoots = null,
         bool isInteractive = false,
         Func<string, bool>? readAnswer = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        KyberDashCapturePluginStep? capturePluginStep = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadInstallCommand(
@@ -257,7 +258,7 @@ internal static class SquadTestCommands
             state.Environment,
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
             configs ?? new FakeKyberWeaveConfigRepository(),
-            null);
+            capturePluginStep);
     }
 
     /// <summary><c>squad update</c> over the in-memory lifecycle of <paramref name="state"/>.</summary>
@@ -270,7 +271,8 @@ internal static class SquadTestCommands
         ISquadInstanceService? instances = null,
         bool isInteractive = false,
         Func<string, bool>? readAnswer = null,
-        IKyberWeaveConfigRepository? configs = null)
+        IKyberWeaveConfigRepository? configs = null,
+        KyberDashCapturePluginStep? capturePluginStep = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadUpdateCommand(
@@ -288,7 +290,7 @@ internal static class SquadTestCommands
             new SquadCommandRoots(state.Files, state.Paths, state.Environment, console),
             configs ?? new FakeKyberWeaveConfigRepository(),
             null,
-            null);
+            capturePluginStep);
     }
 
     /// <summary>The real instance service over the in-memory state, link file system, link sync and lifecycle of <paramref name="state"/>.</summary>
