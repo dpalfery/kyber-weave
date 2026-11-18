@@ -7,7 +7,8 @@ namespace KyberWeave.Tests.Fakes;
 /// <remarks>
 /// The archives are scripted, so nothing is extracted from a real one, and a replacement is a byte copy inside the
 /// in-memory file system. A test that wants a step to fail sets the matching result or failure and asserts what the
-/// updater did around it.
+/// updater did around it. The in-memory file system models content, not permissions: the executable bit a real copy
+/// carries is proven against the disk adapter in the integration project, not here.
 /// </remarks>
 public sealed class FakeSelfUpdateSystem(IWritableFileSystem files) : ISelfUpdateSystem
 {
@@ -90,6 +91,11 @@ public sealed class FakeSelfUpdateSystem(IWritableFileSystem files) : ISelfUpdat
     /// <inheritdoc />
     public void CopyFile(string sourcePath, string destinationPath, bool overwrite)
     {
+        if (!files.FileExists(sourcePath))
+            throw new FileNotFoundException($"Could not find file '{sourcePath}'.", sourcePath);
+        if (!overwrite && files.PathExists(destinationPath))
+            throw new IOException($"The file '{destinationPath}' already exists.");
+
         _copies.Add((sourcePath, destinationPath));
         files.WriteAllBytes(destinationPath, files.ReadAllBytes(sourcePath));
     }

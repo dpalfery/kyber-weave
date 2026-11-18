@@ -43,7 +43,10 @@ public interface ISelfUpdateSystem
     /// <param name="sourcePath">The file to copy.</param>
     /// <param name="destinationPath">Where the copy goes.</param>
     /// <param name="overwrite">True to replace an existing destination; false to fail when one is there.</param>
-    /// <remarks>The copy carries the source's permissions, so a restored binary is still executable.</remarks>
+    /// <remarks>
+    /// The physical adapter carries the source's permissions, so a restored binary is still executable. An in-memory
+    /// fake models content only; the executable bit is proven against the real adapter.
+    /// </remarks>
     /// <exception cref="FileNotFoundException">The source does not exist.</exception>
     /// <exception cref="IOException">The copy could not be made.</exception>
     /// <exception cref="UnauthorizedAccessException">The process may not read the source or write the destination.</exception>
