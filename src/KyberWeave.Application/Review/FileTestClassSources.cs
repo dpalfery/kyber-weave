@@ -20,23 +20,32 @@ public sealed class FileTestClassSources(
     public TestSourceTree? Open(string? root)
     {
         string candidateRoot = root ?? DefaultRepositoryRoot();
-        if (string.IsNullOrWhiteSpace(candidateRoot) || !files.DirectoryExists(candidateRoot))
+        if (string.IsNullOrWhiteSpace(candidateRoot))
             return null;
 
+        // Resolve first: a root the caller spelled relatively names the working directory's repository, and probing
+        // the spelling would ask the file system about a path that only exists relative to the process.
         string repository;
         try
         {
-            _ = files.EnumerateEntries(candidateRoot).FirstOrDefault();
             repository = paths.GetFullPath(candidateRoot, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
+
+        if (!files.DirectoryExists(repository))
+            return null;
+
+        try
+        {
+            _ = files.EnumerateEntries(repository).FirstOrDefault();
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException)
         {
             string target = root ?? candidateRoot;
             throw new InvalidOperationException($"The repository root '{target}' is not accessible: {ex.Message}", ex);
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
-        {
-            return null;
         }
 
         return new TestSourceTree(repository, SourceFilesByName(repository));

@@ -127,6 +127,22 @@ public sealed class FileTestClassSourcesTests
     }
 
     [Fact]
+    public void OpenReadsARelativeRootAgainstTheWorkingDirectory()
+    {
+        _files.CreateDirectory(Path.Combine("/work", "repo", "src"));
+        _files.WriteAllText(Path.Combine("/work", "repo", "src", "Alpha.cs"), "x");
+        FileTestClassSources sources = new(
+            _files,
+            new FakeProcessEnvironment(currentDirectory: "/work"),
+            new FakePathResolver(_files));
+
+        TestSourceTree? tree = sources.Open("repo");
+
+        Assert.NotNull(tree);
+        Assert.Equal(Path.Combine("/work", "repo"), tree.Repository);
+    }
+
+    [Fact]
     public void OpenWithoutARootRecognisesAWorktreeWhoseGitIsAFileAndAKyberWeaveFolder()
     {
         WriteFile(".git", "gitdir: elsewhere");
