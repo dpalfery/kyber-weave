@@ -312,7 +312,20 @@ internal sealed class SquadPresetClearCommand : Command<SquadPresetClearSettings
             effectiveGlobalRoots);
 
         ISquadTransaction transaction = _transactions.Create(null);
-        transaction.Execute(plan);
+        try
+        {
+            transaction.Execute(plan);
+        }
+        catch (SquadDeploymentConflictException refused)
+        {
+            // A recovery that ran under this deployment's lease refuses a plan read before it, so the user runs the
+            // command again. That is this command's ordinary error output, not an unhandled exception.
+            _output.WriteTransactionWarnings(transaction.Warnings);
+            _output.WriteClientInputError(refused.Message);
+            return 1;
+        }
+
+        _output.WriteTransactionWarnings(transaction.Warnings);
 
         foreach (ISquadModelPresetSelectionStore store in selectionStores)
         {

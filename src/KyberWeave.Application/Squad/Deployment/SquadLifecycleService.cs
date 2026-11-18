@@ -136,6 +136,29 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         string targetRoot = identity.PhysicalPath;
         IReadOnlyList<string> recovery = RecoverUnfinishedTransaction(targetRoot, request.Scope, request.DryRun);
 
+        try
+        {
+            return await InstallAfterRecoveryAsync(request, targetRoot, recovery, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            throw WithRecoveryNotices(cause, recovery);
+        }
+    }
+
+    /// <summary>The install, once any interrupted transaction has been recovered and its notices are known.</summary>
+    /// <param name="request">The install request, with the targets an existing global install already added.</param>
+    /// <param name="targetRoot">The root's physical path.</param>
+    /// <param name="recovery">The notices recovery raised; they reach the result and every failure.</param>
+    /// <param name="cancellationToken">Cancels the release download and the render.</param>
+    /// <returns>The lifecycle result.</returns>
+    private async Task<SquadLifecycleResult> InstallAfterRecoveryAsync(
+        SquadInstallRequest request,
+        string targetRoot,
+        IReadOnlyList<string> recovery,
+        CancellationToken cancellationToken)
+    {
         SquadReceipt? existingReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
 
         // A global install that names a target the install does not have yet adds it: the existing targets stay
@@ -410,6 +433,28 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
         return [.. transaction.Warnings];
     }
 
+    /// <summary>
+    ///     Carries the notices recovery raised into a failure that happens afterwards, so an operator whose command
+    ///     failed still learns that an interrupted transaction was finished first. A failure a caller distinguishes by
+    ///     type keeps it; any other is wrapped, as the recovery failure above already is.
+    /// </summary>
+    /// <param name="cause">The failure.</param>
+    /// <param name="recovery">The notices recovery raised; empty when nothing was recovered.</param>
+    /// <returns>The failure to throw.</returns>
+    private static Exception WithRecoveryNotices(Exception cause, IReadOnlyList<string> recovery)
+    {
+        if (recovery.Count == 0)
+            return cause;
+
+        string message = $"{cause.Message} {string.Join(" ", recovery)}";
+        return cause switch
+        {
+            SquadDeploymentConflictException => new SquadDeploymentConflictException(message, cause),
+            SquadRenderValidationException => new SquadRenderValidationException(message, cause),
+            _ => new InvalidOperationException(message, cause)
+        };
+    }
+
     private static IReadOnlyList<SquadTarget> MergeAddedTargets(SquadInstallRequest request, SquadReceipt? existing)
     {
         if (existing is null || request.Scope != SquadDeploymentScope.Global)
@@ -459,6 +504,28 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
 
         IReadOnlyList<string> recovery = RecoverUnfinishedTransaction(targetRoot, request.Scope, request.DryRun);
 
+        try
+        {
+            return await UpdateAfterRecoveryAsync(request, targetRoot, recovery, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            throw WithRecoveryNotices(cause, recovery);
+        }
+    }
+
+    /// <summary>The update, once any interrupted transaction has been recovered and its notices are known.</summary>
+    /// <param name="request">The update request.</param>
+    /// <param name="targetRoot">The root's physical path.</param>
+    /// <param name="recovery">The notices recovery raised; they reach the result and every failure.</param>
+    /// <param name="cancellationToken">Cancels the release download and the render.</param>
+    /// <returns>The lifecycle result.</returns>
+    private async Task<SquadLifecycleResult> UpdateAfterRecoveryAsync(
+        SquadUpdateRequest request,
+        string targetRoot,
+        IReadOnlyList<string> recovery,
+        CancellationToken cancellationToken)
+    {
         SquadReceipt previousReceipt = _stateStore.ReadReceipt(targetRoot, request.Scope)
                                        ?? throw new SquadDeploymentConflictException(
                                            $"No Kyber-Squad deployment found at '{targetRoot}'. Run 'squad install' first.");
@@ -703,6 +770,26 @@ public sealed class SquadLifecycleService : ISquadLifecycleService
 
         IReadOnlyList<string> recovery = RecoverUnfinishedTransaction(targetRoot, request.Scope, request.DryRun);
 
+        try
+        {
+            return UninstallAfterRecovery(request, targetRoot, recovery);
+        }
+        catch (Exception cause) when (cause is not OperationCanceledException)
+        {
+            throw WithRecoveryNotices(cause, recovery);
+        }
+    }
+
+    /// <summary>The uninstall, once any interrupted transaction has been recovered and its notices are known.</summary>
+    /// <param name="request">The uninstall request.</param>
+    /// <param name="targetRoot">The root's physical path.</param>
+    /// <param name="recovery">The notices recovery raised; they reach the result and every failure.</param>
+    /// <returns>The lifecycle result.</returns>
+    private Task<SquadLifecycleResult> UninstallAfterRecovery(
+        SquadUninstallRequest request,
+        string targetRoot,
+        IReadOnlyList<string> recovery)
+    {
         SquadReceipt? receipt = _stateStore.ReadReceipt(targetRoot, request.Scope);
         if (receipt is null)
             return Task.FromResult(new SquadLifecycleResult(

@@ -4,6 +4,7 @@ using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Model;
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Spectre.Console.Testing;
@@ -202,8 +203,102 @@ public sealed class SquadPresetCommandsTests
         Assert.Equal("worker: m9 -> m-fast\n", Output());
     }
 
-    private static string PresetPath(string name) => Path.Combine(Home, ".kyber-weave", "squad", "presets", $"{name}.yml");
+    [Fact]
+    public void Use_ARefusedDeploymentAfterARecovery_PrintsTheNoticeWithTheErrorAndExitsOne()
+    {
+        ArrangeDeployedWorker();
+        StubTransactions transactions = new()
+        {
+            Warnings = [RecoveryNotice],
+            Failure = new SquadDeploymentConflictException(RecoveryNotice + " Run the command again.")
+        };
 
+        int exit = Use(transactions).Execute(
+            null!,
+            new SquadPresetUseSettings { Name = "alpha", Targets = ["codex"] },
+            CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("warning: " + RecoveryNotice + "\n", Output(), StringComparison.Ordinal);
+        Assert.Contains(
+            "kyber-weave squad: error: " + RecoveryNotice + " Run the command again.\n",
+            Output(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Use_ASuccessfulDeploymentPrintsTheWarningsTheTransactionRaised()
+    {
+        ArrangeDeployedWorker();
+        StubTransactions transactions = new() { Warnings = [RecoveryNotice] };
+
+        int exit = Use(transactions).Execute(
+            null!,
+            new SquadPresetUseSettings { Name = "alpha", Targets = ["codex"] },
+            CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("warning: " + RecoveryNotice + "\n", Output(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clear_ARefusedDeploymentAfterARecovery_PrintsTheNoticeWithTheErrorAndExitsOne()
+    {
+        ArrangeDeployedWorker();
+        StubTransactions transactions = new()
+        {
+            Warnings = [RecoveryNotice],
+            Failure = new SquadDeploymentConflictException(RecoveryNotice + " Run the command again.")
+        };
+
+        int exit = Clear(transactions).Execute(
+            null!,
+            new SquadPresetClearSettings { Targets = ["codex"] },
+            CancellationToken.None);
+
+        Assert.Equal(1, exit);
+        Assert.Contains("warning: " + RecoveryNotice + "\n", Output(), StringComparison.Ordinal);
+        Assert.Contains(
+            "kyber-weave squad: error: " + RecoveryNotice + " Run the command again.\n",
+            Output(),
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Clear_ASuccessfulDeploymentPrintsTheWarningsTheTransactionRaised()
+    {
+        ArrangeDeployedWorker();
+        StubTransactions transactions = new() { Warnings = [RecoveryNotice] };
+
+        int exit = Clear(transactions).Execute(
+            null!,
+            new SquadPresetClearSettings { Targets = ["codex"] },
+            CancellationToken.None);
+
+        Assert.Equal(0, exit);
+        Assert.Contains("warning: " + RecoveryNotice + "\n", Output(), StringComparison.Ordinal);
+    }
+
+    /// <summary>An installed worker file the preset verbs can rewrite, with the preset they apply.</summary>
+    private void ArrangeDeployedWorker()
+    {
+        _canonical = Canonical("fast");
+        _presets.Loadable["alpha"] = Preset("alpha", ("fast", "m9"));
+        string relative = ".codex/agents/worker.md";
+        _files.CreateDirectory(Path.Combine(Work, ".codex", "agents"));
+        _files.WriteAllBytes(
+            Path.Combine(Work, relative),
+            Encoding.UTF8.GetBytes("---\nname: worker\nmodel-profile: fast\nmodel: m-fast\n---\nbody\n"));
+        _state.Add(new SquadReceipt(
+            "kyber-squad.receipt/v2",
+            SquadDeploymentScope.Project,
+            Work,
+            DateTimeOffset.UnixEpoch,
+            [],
+            [new SquadOwnedFile(relative, new string('0', 64), "codex", false)]));
+    }
+
+    private static string PresetPath(string name) => Path.Combine(Home, ".kyber-weave", "squad", "presets", $"{name}.yml");
     private static SquadModelPreset Preset(string name, params (string Category, string Model)[] overrides) =>
         new(name, "/p/" + name + ".yml", "digest", overrides.ToDictionary(
             entry => entry.Category,
@@ -237,7 +332,119 @@ public sealed class SquadPresetCommandsTests
     private SquadPresetClearCommand Clear() =>
         SquadTestCommands.PresetClearOver(_state, _presets, _selections, _ => _canonical, Roots(), _files, Console());
 
+    private SquadPresetUseCommand Use(ISquadTransactionFactory transactions) =>
+        SquadTestCommands.PresetUseOver(
+            _state,
+            _presets,
+            _selections,
+            _ => _canonical,
+            Roots(),
+            _files,
+            Console(),
+            transactions,
+            new StubPlanner());
+
+    private SquadPresetClearCommand Clear(ISquadTransactionFactory transactions) =>
+        SquadTestCommands.PresetClearOver(
+            _state,
+            _presets,
+            _selections,
+            _ => _canonical,
+            Roots(),
+            _files,
+            Console(),
+            transactions,
+            new StubPlanner());
+
     private string Output() => _ansi.Output.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+    private const string RecoveryNotice =
+        "Recovered an unfinished Squad transaction at '/kw/work/.kyber-weave/.squad-transaction': " +
+        "it had not committed, so its changes were rolled back.";
+
+    /// <summary>Plans the update the preset verbs ask for without touching a real tree, so the test reaches the transaction.</summary>
+    private sealed class StubPlanner : ISquadDeploymentPlanner
+    {
+        public SquadDeploymentPlan CreateUpdate(
+            string targetRoot,
+            SquadDeploymentScope scope,
+            SquadLock squadLock,
+            IReadOnlyList<SquadDeploymentFile> renderedFiles,
+            SquadReceipt previousReceipt,
+            IReadOnlyList<SquadDegradation> degradations,
+            bool replaceManaged,
+            TimeProvider timeProvider,
+            ISquadGlobalRootResolver? globalRoots = null,
+            IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+            IReadOnlyList<SquadRenderedBlock>? blocks = null) =>
+            new(
+                targetRoot,
+                new SquadPhysicalRootIdentity(targetRoot, "stub-root"),
+                scope,
+                squadLock,
+                previousReceipt,
+                [],
+                [],
+                SquadStateMutation.Keep,
+                SquadStateMutation.Keep,
+                globalRoots);
+
+        public SquadDeploymentPlan CreateInstall(
+            string targetRoot,
+            SquadDeploymentScope scope,
+            SquadLock squadLock,
+            IReadOnlyList<SquadDeploymentFile> renderedFiles,
+            IReadOnlyList<SquadDegradation> degradations,
+            bool adopt,
+            TimeProvider timeProvider,
+            ISquadGlobalRootResolver? globalRoots = null,
+            IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+            IReadOnlyList<SquadRenderedBlock>? blocks = null) =>
+            throw new NotSupportedException("The preset verbs plan updates only.");
+
+        public SquadDeploymentPlan CreateUninstall(
+            string targetRoot,
+            SquadDeploymentScope scope,
+            SquadReceipt receipt,
+            ISquadGlobalRootResolver? globalRoots = null,
+            IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null,
+            SquadTarget? onlyTarget = null) =>
+            throw new NotSupportedException("The preset verbs plan updates only.");
+
+        public IReadOnlyList<SquadUnmanagedPathCollision> CollectUnmanagedCollisions(
+            string targetRoot,
+            SquadDeploymentScope scope,
+            IReadOnlyList<SquadDeploymentFile> renderedFiles,
+            ISquadGlobalRootResolver? globalRoots,
+            SquadReceipt? receipt = null,
+            IReadOnlyList<SquadReceipt>? siblingGlobalReceipts = null) => [];
+    }
+
+    /// <summary>A transaction the test controls: the warnings it reports and the failure it raises.</summary>
+    private sealed class StubTransactions : ISquadTransactionFactory
+    {
+        public IReadOnlyList<string> Warnings { get; init; } = [];
+
+        public Exception? Failure { get; init; }
+
+        public ISquadTransaction Create(ISquadTransactionObserver? observer) => new StubTransaction(this);
+
+        private sealed class StubTransaction(StubTransactions owner) : ISquadTransaction
+        {
+            public IReadOnlyList<string> Warnings => owner.Warnings;
+
+            public void Execute(SquadDeploymentPlan plan)
+            {
+                if (owner.Failure is not null)
+                    throw owner.Failure;
+            }
+
+            public void Execute(SquadDeploymentPlan plan, Action<SquadDeploymentPlan>? underLease) => Execute(plan);
+
+            public void Recover(string targetRoot, SquadDeploymentScope scope) =>
+                throw new NotSupportedException("The preset verbs never recover.");
+        }
+    }
 
     private sealed class FakePresetStore : ISquadModelPresetStore
     {
