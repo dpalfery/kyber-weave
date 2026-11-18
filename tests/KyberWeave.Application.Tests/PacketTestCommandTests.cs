@@ -4,10 +4,11 @@ using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Core.Review;
 using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests;
 
@@ -18,11 +19,35 @@ namespace KyberWeave.Tests;
 /// </summary>
 public sealed class PacketTestCommandTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+    private static readonly string Root = Path.GetFullPath("/repo");
 
     private static readonly IServiceProvider Services = DocsTestCommands.Services();
 
     private const string Source = "src/KyberWeave.Application/Review/TaskGateSelectionService.cs";
+
+    /// <summary>The gate planner over fakes: the test map's class is found without reading a test file.</summary>
+    private static TaskGateSelectionService GateSelection() =>
+        new(
+            new FakeRepositoryTreeProbe { Roots = { [Root] = new RepositoryRootAccess(true) } },
+            new FakeTestClassSources
+            {
+                SourcesByName = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["TaskGateSelectionTests"] = Path.Combine(Root, "tests", "KyberWeave.Tests", "TaskGateSelectionTests.cs"),
+                },
+            },
+            FakePathResolver.OverEmptyFileSystem(),
+            new FakeProcessEnvironment(currentDirectory: Root));
+
+    /// <summary>The task-target service over the same fake gate planner, so no path is checked on a real disk.</summary>
+    private static PlanTaskTargetService Targets() =>
+        new(
+            Services.GetRequiredService<IPlanTaskService>(),
+            GateSelection(),
+            Services.GetRequiredService<IGitRepositoryFacts>(),
+            new InMemoryFileSystem(),
+            FakePathResolver.OverEmptyFileSystem(),
+            new FakeProcessEnvironment(currentDirectory: Root));
 
     /// <summary>The section <c>docs packet</c> prints, over the same services the command takes from the container.</summary>
     private static string? Render(
@@ -39,9 +64,9 @@ public sealed class PacketTestCommandTests
             entry,
             row,
             windows,
-            Services.GetRequiredService<IPlanTaskTargetService>(),
-            Services.GetRequiredService<ITaskGateSelectionService>(),
-            Services.GetRequiredService<IFileSystem>());
+            Targets(),
+            GateSelection(),
+            new InMemoryFileSystem());
 
 
     private static KyberWeaveConfig Config() => KyberWeaveConfigAssembler.FromYaml("""
@@ -63,7 +88,7 @@ public sealed class PacketTestCommandTests
     {
         PlanContractRow row = new("T1", "tests/X.cs", "`dotnet test --filter FullyQualifiedName~XTests`", null, null, null);
 
-        string? text = Render(Corpus.Root, Config(), "csharp-dev", Task, row, windows: false);
+        string? text = Render(Root, Config(), "csharp-dev", Task, row, windows: false);
 
         Assert.NotNull(text);
         Assert.Contains("kyber-weave review gates . --agent csharp-dev --task t1", text, StringComparison.Ordinal);
@@ -76,7 +101,7 @@ public sealed class PacketTestCommandTests
     {
         PlanContractRow row = new("T1", "tests/X.cs", "`dotnet test --filter FullyQualifiedName~XTests`", null, null, null);
 
-        string? text = Render(Corpus.Root, Config(), "react-dev", Task, row, windows: false);
+        string? text = Render(Root, Config(), "react-dev", Task, row, windows: false);
 
         Assert.NotNull(text);
         Assert.StartsWith("## Test command\n", text, StringComparison.Ordinal);
@@ -89,7 +114,7 @@ public sealed class PacketTestCommandTests
     [Fact]
     public void TheSectionNamesTheOneGateCommandForTheFailingAndThePassingRunWithNothingLeftToFillIn()
     {
-        string? text = Render(Corpus.Root, Config(), "csharp-dev", Task, null, windows: false);
+        string? text = Render(Root, Config(), "csharp-dev", Task, null, windows: false);
 
         Assert.NotNull(text);
         Assert.Contains("    kyber-weave review gates . --agent csharp-dev --task t1 --red ", text, StringComparison.Ordinal);
@@ -100,7 +125,7 @@ public sealed class PacketTestCommandTests
     [Fact]
     public void TheTestsGateIsExpandedForTheTaskExactlyAsTheGateRunnerExpandsItAndQuotedToPaste()
     {
-        string? text = Render(Corpus.Root, Config(), "csharp-dev", Task, null, windows: false);
+        string? text = Render(Root, Config(), "csharp-dev", Task, null, windows: false);
 
         Assert.NotNull(text);
         Assert.EndsWith(
@@ -116,7 +141,7 @@ public sealed class PacketTestCommandTests
             "T1", "tests/Acme.Tests/OrdersTests.cs", "FullyQualifiedName~Acme.Tests.OrdersTests|FullyQualifiedName~Acme.Tests.CartTests", null, null, null);
         PlanTaskFileEntry task = Task with { Files = ["src/Acme/Orders.cs", "tests/Acme.Tests/OrdersTests.cs"] };
 
-        string? text = Render(Corpus.Root, Config(), "csharp-dev", task, row, windows: false);
+        string? text = Render(Root, Config(), "csharp-dev", task, row, windows: false);
 
         Assert.NotNull(text);
         Assert.EndsWith(
@@ -134,9 +159,9 @@ public sealed class PacketTestCommandTests
     [Fact]
     public void NothingIsPrintedWhenNoCommandResolves()
     {
-        Assert.Null(Render(Corpus.Root, Config(), null, Task, null, windows: false));
-        Assert.Null(Render(Corpus.Root, Config(), "go-dev", Task, null, windows: false));
+        Assert.Null(Render(Root, Config(), null, Task, null, windows: false));
+        Assert.Null(Render(Root, Config(), "go-dev", Task, null, windows: false));
         Assert.Null(Render(
-            Corpus.Root, Config(), "csharp-dev", Task with { Files = ["docs/README.md"] }, null, windows: false));
+            Root, Config(), "csharp-dev", Task with { Files = ["docs/README.md"] }, null, windows: false));
     }
 }
