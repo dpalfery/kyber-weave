@@ -1147,7 +1147,7 @@ internal sealed class SelfUpdater : IDisposable
         if (files.FileExists(direct) && files.GetLinkTarget(direct) is null)
             return direct;
 
-        StringComparison comparison = environment.OperatingSystem == OperatingSystemKind.Windows
+        StringComparison comparison = environment.IsFileSystemCaseInsensitive
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
         List<string> matches = [];

@@ -68,19 +68,20 @@ public sealed class SelfUpdaterExtractedBinaryTests
         Assert.Null(Find());
     }
 
+    /// <summary>
+    /// The match follows the volume's name rule, not the operating system's name: macOS usually has a case-insensitive
+    /// volume, and Linux never does. Keying the walk to "Windows" would miss a good archive on the first.
+    /// </summary>
     [Fact]
-    public void TheHostNameRuleDecidesWhetherACaseDifferenceStillMatches()
+    public void TheVolumesNameRuleDecidesWhetherACaseDifferenceStillMatches()
     {
         _files.CreateDirectory(Extract + "/pkg");
         _files.WriteAllText(Extract + "/pkg/" + FileName.ToUpperInvariant(), "x");
+        FakeProcessEnvironment insensitive = new(isFileSystemCaseInsensitive: true);
 
         Assert.Equal(
             Extract + "/pkg/" + FileName.ToUpperInvariant(),
-            SelfUpdater.TryFindExtractedBinary(
-                _files,
-                new FakeProcessEnvironment(operatingSystem: KyberWeave.Contracts.Repositories.OperatingSystemKind.Windows),
-                Extract,
-                FileName));
+            SelfUpdater.TryFindExtractedBinary(_files, insensitive, Extract, FileName));
         Assert.Null(Find());
     }
 
