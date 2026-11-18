@@ -135,7 +135,7 @@ from this file when it is marked Ready.
 
 ## Phase 2: Layers and locators
 
-- [ ] 2.1 Plan the move of Domain's logic
+- [x] 2.1 Plan the move of Domain's logic
   - **Objective:** list every class in `KyberWeave.Domain` as data (stays) or logic (moves), and every
     caller of that logic outside `Application`, with the route each caller takes: move to `Application`,
     or take the service through its `Contracts` interface.
@@ -145,7 +145,7 @@ from this file when it is marked Ready.
   - **Depends on:** 1.8
   - _Requirements: 4.2, 4.3_
 
-- [ ] 2.2 Remove Core's references to Data and Application
+- [x] 2.2 Remove Core's references to Data and Application
   - **Objective:** `KyberWeave.Core` and `Core.Docs` depend on `Contracts` and `Domain` only.
   - **Files:** `src/KyberWeave.Core/**`, `src/KyberWeave.Core.Docs/**`, the composition roots
   - **Acceptance criteria:** the references are gone; the 17 static locators (`DoctorServices`,
@@ -154,7 +154,7 @@ from this file when it is marked Ready.
   - **Depends on:** 2.1
   - _Requirements: 1.5, 4.1, 4.4_
 
-- [ ] 2.3 Retire the static configuration loader
+- [x] 2.3 Retire the static configuration loader
   - **Objective:** the 23 callers of `KyberWeaveConfigLoader.TryLoad` take `IKyberWeaveConfigRepository`;
     one shared fake of it in the testing library, with a contract suite run on the fake and on
     `FileKyberWeaveConfigRepository`.
@@ -164,7 +164,7 @@ from this file when it is marked Ready.
   - **Depends on:** 2.2
   - _Requirements: 1.5, 2.10_
 
-- [ ] 2.4 Retire the static process runner
+- [x] 2.4 Retire the static process runner
   - **Objective:** the 23 callers of the static `ProcessRunner.Run` take `IProcessRunner`.
   - **Files:** the 12 files listed in the data and tests inventories
   - **Acceptance criteria:** the static entry point is removed; each caller has a unit test with the
