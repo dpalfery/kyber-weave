@@ -241,6 +241,17 @@ public abstract class CorpusSourceContractTests
     }
 
     [Fact]
+    public void RefusesAMissingDirectoryName()
+    {
+        ICorpusSource corpus = CreateCorpus();
+
+        Assert.ThrowsAny<ArgumentException>(() => corpus.DirectoryExists(null!));
+        Assert.Throws<ArgumentException>(() => corpus.DirectoryExists(" "));
+        Assert.Throws<ArgumentException>(() => corpus.EnumerateFiles(" "));
+        Assert.Throws<ArgumentException>(() => corpus.EnumerateDirectories(" "));
+    }
+
+    [Fact]
     public void RefusesARootedPath()
     {
         ICorpusSource corpus = CreateCorpus();

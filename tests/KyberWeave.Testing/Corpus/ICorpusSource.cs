@@ -31,10 +31,11 @@ public interface ICorpusSource
 
     /// <summary>Gets whether the corpus holds a directory at a relative path.</summary>
     /// <param name="relativeDirectory">
-    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root itself.
+    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root
+    /// itself. Null or whitespace is refused, as it is for a file path.
     /// </param>
     /// <returns>True when the directory exists, including an empty one the corpus ships.</returns>
-    /// <exception cref="ArgumentException">The path is rooted or climbs above the root.</exception>
+    /// <exception cref="ArgumentException">The name is null or whitespace, the path is rooted, or it climbs above the root.</exception>
     bool DirectoryExists(string relativeDirectory);
 
     /// <summary>Reads a file as text.</summary>
@@ -53,7 +54,8 @@ public interface ICorpusSource
 
     /// <summary>Lists the files under a directory, as paths relative to <see cref="Root"/> with forward slashes.</summary>
     /// <param name="relativeDirectory">
-    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root itself.
+    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root
+    /// itself. Null or whitespace is refused, as it is for a file path.
     /// </param>
     /// <param name="searchPattern">A file name pattern such as <c>*.md</c>; <c>*</c> when null.</param>
     /// <param name="recursive">True to descend into subdirectories; false to list the directory's own files.</param>
@@ -72,7 +74,8 @@ public interface ICorpusSource
 
     /// <summary>Lists the child directories of a directory, as paths relative to <see cref="Root"/>.</summary>
     /// <param name="relativeDirectory">
-    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root itself.
+    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root
+    /// itself. Null or whitespace is refused, as it is for a file path.
     /// </param>
     /// <returns>
     /// One path per immediate child directory, relative to <see cref="Root"/> with forward slashes; empty when the
