@@ -9,8 +9,9 @@ namespace KyberWeave.Tests.FileSystem;
 /// <para>
 /// The fake reproduces the semantics the product relies on: an atomic rename that may replace its
 /// destination, an exclusive create, case-preserving names with a case-insensitive or a
-/// case-sensitive lookup chosen per instance, file and directory links resolved one hop or to the
-/// final target, deletion that removes a link instead of following it, enumeration with and
+/// case-sensitive lookup chosen per instance, and per directory for a directory that asks for
+/// exact names, file and directory links resolved one hop or to the final target, deletion that
+/// removes a link instead of following it, enumeration with and
 /// without following links, length, attributes and a last-write time taken from the injected
 /// <see cref="TimeProvider"/>.
 /// </para>
@@ -244,7 +245,23 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     public void CreateDirectory(string path)
     {
         Enter(nameof(CreateDirectory), path);
-        CreateDirectoryCore(Full(path));
+        CreateDirectoryCore(Full(path), caseSensitiveNames: false);
+    }
+
+    /// <summary>Creates a directory whose own children are matched with the case sensitivity the caller names.</summary>
+    /// <param name="path">The absolute path of the directory to create.</param>
+    /// <param name="caseSensitiveNames">
+    /// True to match this directory's children exactly, as a Windows directory with case sensitivity turned on does
+    /// even when the volume folds names; false for the volume's own rule.
+    /// </param>
+    /// <remarks>
+    /// The setting belongs to this directory alone and is not inherited by the directories created beneath it, so it
+    /// models the per-directory flag rather than a second volume-wide rule.
+    /// </remarks>
+    public void CreateDirectory(string path, bool caseSensitiveNames)
+    {
+        Enter(nameof(CreateDirectory), path);
+        CreateDirectoryCore(Full(path), caseSensitiveNames);
     }
 
     /// <inheritdoc />
@@ -415,7 +432,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
         Enter(nameof(CreateTemporaryDirectory), prefix);
         string root = Path.Combine(_rootPath, "kw-memfs-tmp");
-        CreateDirectoryCore(root);
+        CreateDirectoryCore(root, caseSensitiveNames: false);
 
         string path;
         do
@@ -424,7 +441,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         }
         while (ResolveFull(path, followFinal: false) is not null);
 
-        CreateDirectoryCore(path);
+        CreateDirectoryCore(path, caseSensitiveNames: false);
         return path;
     }
 
@@ -604,13 +621,13 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         return final;
     }
 
-    private Node NewDirectory(string name, Node parent) =>
-        new(name, parent, isDirectory: true, _names, Now);
+    private Node NewDirectory(string name, Node parent, bool caseSensitiveNames = false) =>
+        new(name, parent, isDirectory: true, _names, Now, caseSensitiveNames);
 
     private Node NewFile(string name, Node parent, byte[] content) =>
         new(name, parent, isDirectory: false, _names, Now) { Content = content };
 
-    private void CreateDirectoryCore(string fullPath)
+    private void CreateDirectoryCore(string fullPath, bool caseSensitiveNames)
     {
         string relative = Path.GetRelativePath(_rootPath, fullPath);
         if (relative.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(relative))
@@ -620,8 +637,9 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
         string[] segments = relative == "." ? [] : relative.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
         Node current = _root;
-        foreach (string segment in segments)
+        for (int index = 0; index < segments.Length; index++)
         {
+            string segment = segments[index];
             if (current.LinkTarget is not null)
             {
                 current = Follow(current)
@@ -636,7 +654,8 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
             Node? next = Child(current, segment);
             if (next is null)
             {
-                Node created = NewDirectory(segment, current);
+                bool exactNames = caseSensitiveNames && index == segments.Length - 1;
+                Node created = NewDirectory(segment, current, exactNames);
                 current.Children[segment] = created;
                 next = created;
             }
@@ -719,7 +738,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         string full = Full(path);
         string? parentPath = Path.GetDirectoryName(full)
             ?? throw new InvalidOperationException($"The path '{path}' has no parent directory.");
-        CreateDirectoryCore(parentPath);
+        CreateDirectoryCore(parentPath, caseSensitiveNames: false);
 
         Node? existing = ResolveFull(full, followFinal: false);
         if (existing is not null && existing.LinkTarget is not null)
@@ -795,7 +814,7 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
         string? parentPath = Path.GetDirectoryName(full);
         if (parentPath is not null)
         {
-            CreateDirectoryCore(parentPath);
+            CreateDirectoryCore(parentPath, caseSensitiveNames: false);
         }
 
         Node parent = ResolveParent(linkPath, out string name);
@@ -920,12 +939,19 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
 
     private sealed class Node
     {
-        internal Node(string name, Node? parent, bool isDirectory, StringComparer names, DateTime lastWriteTimeUtc)
+        internal Node(
+            string name,
+            Node? parent,
+            bool isDirectory,
+            StringComparer names,
+            DateTime lastWriteTimeUtc,
+            bool caseSensitiveNames = false)
         {
             Name = name;
             Parent = parent;
             IsDirectory = isDirectory;
-            Children = new Dictionary<string, Node>(names);
+            Children = new Dictionary<string, Node>(
+                caseSensitiveNames ? StringComparer.Ordinal : names);
             Attributes = isDirectory ? FileAttributes.Directory : FileAttributes.Normal;
             LastWriteTimeUtc = lastWriteTimeUtc;
         }
