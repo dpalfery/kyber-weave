@@ -69,7 +69,8 @@ public abstract class FileSystemContractTests : IDisposable
     }
 
     /// <summary>An absolute path under a directory.</summary>
-    protected static string At(string directory, string relative) => Path.Combine(directory, relative);
+    protected static string At(string directory, string relative) =>
+        Path.Combine(directory, relative.Replace('/', Path.DirectorySeparatorChar));
 
     /// <summary>A path whose parent directory exists.</summary>
     protected static string WriteFile(IWritableFileSystem files, string directory, string relative, string text)

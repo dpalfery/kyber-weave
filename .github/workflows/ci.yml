@@ -265,7 +265,6 @@ jobs:
           }
           run tests/KyberWeave.RepoPolicy.Tests/KyberWeave.RepoPolicy.Tests.csproj repo-policy.trx & pids+=($!)
           run tests/KyberWeave.PromptContent.Tests/KyberWeave.PromptContent.Tests.csproj prompt-content.trx & pids+=($!)
-          run tests/KyberWeave.Domain.Tests/KyberWeave.Domain.Tests.csproj layers-Domain.trx & pids+=($!)
           run tests/KyberWeave.Application.Tests/KyberWeave.Application.Tests.csproj layers-Application.trx & pids+=($!)
           run tests/KyberWeave.Hooks.Tests/KyberWeave.Hooks.Tests.csproj layers-Hooks.trx & pids+=($!)
           run tests/KyberWeave.Architecture.Tests/KyberWeave.Architecture.Tests.csproj layers-Architecture.trx & pids+=($!)

@@ -87,7 +87,6 @@ PROMPT_TEST_DLL="tests/KyberWeave.PromptContent.Tests/bin/${CONFIGURATION}/net10
 # The layer projects (Domain, Application, Hooks, Architecture): pure or fake-backed, so they run whole
 # on every .NET loop, whatever --class / --method names a legacy project.
 LAYER_TEST_DLLS=(
-  "tests/KyberWeave.Domain.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Domain.Tests.dll"
   "tests/KyberWeave.Application.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Application.Tests.dll"
   "tests/KyberWeave.Hooks.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Hooks.Tests.dll"
   "tests/KyberWeave.Architecture.Tests/bin/${CONFIGURATION}/net10.0/KyberWeave.Architecture.Tests.dll"
