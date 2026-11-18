@@ -34,12 +34,7 @@ public sealed class CanonicalSquadTree
         Services = new InMemorySquadServices(files);
         ProductRoot = Path.Combine(files.Root, "kyber-squad");
         files.CreateDirectory(ProductRoot);
-        foreach ((string relativePath, byte[] bytes) in Snapshot.Value)
-        {
-            string path = ToPath(ProductRoot, relativePath);
-            files.CreateDirectory(Path.GetDirectoryName(path)!);
-            files.WriteAllBytes(path, bytes);
-        }
+        WriteSnapshot(files, ProductRoot);
     }
 
     /// <summary>Gets the in-memory file system the tree lives in.</summary>
@@ -58,6 +53,21 @@ public sealed class CanonicalSquadTree
 
     /// <summary>Gets the source loaded once from <see cref="Shared"/>.</summary>
     public static SquadSource SharedSource => SharedLoaded.Value;
+
+    /// <summary>Gets whether this checkout carries the shipped Squad source.</summary>
+    public static bool Exists => CheckoutCorpusSource.Checkout.DirectoryExists(CorpusDirectory);
+
+    /// <summary>Copies the shipped Squad source into an in-memory file system the caller already holds.</summary>
+    /// <param name="files">The file system to copy into.</param>
+    /// <param name="destinationDirectory">Where the tree lands.</param>
+    /// <returns>The destination directory.</returns>
+    public static string CopyInto(InMemoryFileSystem files, string destinationDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(files);
+        files.CreateDirectory(destinationDirectory);
+        WriteSnapshot(files, destinationDirectory);
+        return destinationDirectory;
+    }
 
     /// <summary>Copies the shipped Squad source into a new in-memory file system.</summary>
     /// <returns>The tree.</returns>
@@ -108,6 +118,16 @@ public sealed class CanonicalSquadTree
         }
 
         return result;
+    }
+
+    private static void WriteSnapshot(InMemoryFileSystem files, string root)
+    {
+        foreach ((string relativePath, byte[] bytes) in Snapshot.Value)
+        {
+            string path = ToPath(root, relativePath);
+            files.CreateDirectory(Path.GetDirectoryName(path)!);
+            files.WriteAllBytes(path, bytes);
+        }
     }
 
     private static string ToPath(string root, string relativePath) =>

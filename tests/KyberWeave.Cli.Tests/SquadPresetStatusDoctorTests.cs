@@ -61,7 +61,7 @@ public sealed class SquadPresetStatusDoctorTests
     {
         string root = Root(name);
         Files.WriteAllText(Path.Combine(root, "KyberWeave.sln"), "solution");
-        ShippedSquadSource.CopyInto(Files, Path.Combine(root, "products", "kyber-squad"));
+        CanonicalSquadTree.CopyInto(Files, Path.Combine(root, "products", "kyber-squad"));
         return root;
     }
 
