@@ -40,41 +40,49 @@ public sealed class RepositoryRootOverPathSeamTests
     public void DocSpecValidatorChecksASourceRootUnderTheInjectedWorkingDirectory()
     {
         _disk.CreateDirectory($"{WorkingDirectory}/{RelativeRoot}/src/app");
+        DocSpecValidator validator = new(RelativeRoot, OntologyConfig.ProductDefaults, _disk, _paths, _environment);
 
-        DiagnosticReport report = new DocSpecValidator(RelativeRoot, OntologyConfig.ProductDefaults, _disk, _paths, _environment)
-            .Validate(new DocumentSet
-            {
-                Documents =
-                [
-                    new DocumentModel
-                    {
-                        RelativePath = "docs/a.md",
-                        FilePath = $"{WorkingDirectory}/{RelativeRoot}/docs/a.md",
-                        HasFrontmatter = true,
-                        Frontmatter = new DocumentFrontmatter { SourceRoot = "src/app" }
-                    }
-                ]
-            });
+        Assert.DoesNotContain(validator.Validate(DocumentWithSourceRoot()).Items, item => item.Code == DocSpecValidator.SourceRootMissing);
 
-        Assert.DoesNotContain(report.Items, item => item.Code == DocSpecValidator.SourceRootMissing);
+        // The counter-case proves the check ran against the injected directory at all: with the directory removed, the
+        // same validator reports the same source root.
+        _disk.DeleteTreeNoFollow($"{WorkingDirectory}/{RelativeRoot}/src/app");
+        Assert.Contains(validator.Validate(DocumentWithSourceRoot()).Items, item => item.Code == DocSpecValidator.SourceRootMissing);
     }
+
+    private static DocumentSet DocumentWithSourceRoot() => new()
+    {
+        Documents =
+        [
+            new DocumentModel
+            {
+                RelativePath = "docs/a.md",
+                FilePath = $"{WorkingDirectory}/{RelativeRoot}/docs/a.md",
+                HasFrontmatter = true,
+                Frontmatter = new DocumentFrontmatter { SourceRoot = "src/app" }
+            }
+        ]
+    };
 
     [Fact]
     public void ConfigRegValidatorFindsAnEntryUnderTheInjectedWorkingDirectory()
     {
         _disk.CreateDirectory($"{WorkingDirectory}/{RelativeRoot}/docs/reference");
         _disk.WriteAllText($"{WorkingDirectory}/{RelativeRoot}/docs/reference/auth-design.md", "# Auth\n");
-        KyberWeaveConfig config = KyberWeaveConfigDefaults.Product
-            .WithOntology(new OntologyConfig { DocsRoots = ["docs"] })
-            .WithConfigReg(new ConfigRegConfig
-            {
-                Additions = [new ConfigRegEntry("auth-design", "docs/reference/auth-design.md")]
-            });
+        KyberWeaveConfig config = ConfigWithAuthDesign();
+        ConfigRegValidator validator = new(RelativeRoot, config, _store, _paths, _environment);
 
-        DiagnosticReport report = new ConfigRegValidator(RelativeRoot, config, _store, _paths, _environment).Validate();
+        DiagnosticReport present = validator.Validate();
 
         Assert.DoesNotContain(
-            report.Items,
+            present.Items,
+            item => item.Code == ConfigRegValidator.UnresolvedPath && item.Message.Contains("auth-design", StringComparison.Ordinal));
+
+        // The counter-case proves the check ran against the injected directory at all: with the file removed, the
+        // same validator reports it.
+        _disk.DeleteFile($"{WorkingDirectory}/{RelativeRoot}/docs/reference/auth-design.md");
+        Assert.Contains(
+            validator.Validate().Items,
             item => item.Code == ConfigRegValidator.UnresolvedPath && item.Message.Contains("auth-design", StringComparison.Ordinal));
     }
 
@@ -104,10 +112,17 @@ public sealed class RepositoryRootOverPathSeamTests
         KyberWeaveConfig config = KyberWeaveConfigDefaults.Product
             .WithOntology(new OntologyConfig { DocsRoots = ["docs"] });
 
-        PlanTaskFileOutcome outcome = new PlanTaskService(_store, _paths, _environment)
-            .Run(RelativeRoot, config, "docs/plans/2026-01-01-widget.md", PlanTaskFileMode.Preview);
+        PlanTaskService service = new(_store, _paths, _environment);
+
+        PlanTaskFileOutcome outcome = service.Run(RelativeRoot, config, "docs/plans/2026-01-01-widget.md", PlanTaskFileMode.Preview);
 
         Assert.DoesNotContain(outcome.Report.Items, item => item.Code == PlanTaskFileGenerator.PlanNotReadable);
+
+        // The counter-case proves the read went through the injected directory at all: the same call for a plan that
+        // is not there reports it unreadable.
+        Assert.Contains(
+            service.Run(RelativeRoot, config, "docs/plans/2026-01-01-absent.md", PlanTaskFileMode.Preview).Report.Items,
+            item => item.Code == PlanTaskFileGenerator.PlanNotReadable);
     }
 
     [Fact]
@@ -137,6 +152,14 @@ public sealed class RepositoryRootOverPathSeamTests
         Assert.Contains(report.Items, item => item.Code == PlanTaskFileRules.SidecarTaskFile);
         Assert.Equal($"{WorkingDirectory}/{RelativeRoot}", severity.Root);
     }
+
+    private static KyberWeaveConfig ConfigWithAuthDesign() =>
+        KyberWeaveConfigDefaults.Product
+            .WithOntology(new OntologyConfig { DocsRoots = ["docs"] })
+            .WithConfigReg(new ConfigRegConfig
+            {
+                Additions = [new ConfigRegEntry("auth-design", "docs/reference/auth-design.md")]
+            });
 
     private sealed class RecordingSeverityOverrides : ISeverityOverrideSource
     {
