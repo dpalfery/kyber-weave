@@ -42,6 +42,38 @@ public class SkillScannerTests
         List<Diagnostic> diags = Scan(Make("ALWAYS verify identity before acting.")).ToList();
         Assert.DoesNotContain(diags, d => d.Severity == Severity.Critical);
     }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void ReportsABundledScriptItCannotRead(bool readerThrows)
+    {
+        Skill skill = SkillWith(resources: Script("scripts/run.sh"));
+        Func<SkillResource, string?> readScript = _ =>
+        {
+            if (readerThrows)
+                throw new IOException("permission denied");
+            return null;
+        };
+
+        List<Diagnostic> diags = new SkillScanner().Scan(skill, readScript).ToList();
+
+        Diagnostic finding = Assert.Single(diags, d => d.Code == SkillScanner.RuleUnreadableScript);
+        Assert.Equal(Severity.Warning, finding.Severity);
+    }
+
+    private static Skill SkillWith(string body = "Safe body.", params SkillResource[] resources) => new()
+    {
+        SkillFilePath = "/tmp/scan-x/SKILL.md",
+        DirectoryPath = "/tmp/scan-x",
+        Frontmatter = new SkillFrontmatter(),
+        RawFrontmatter = string.Empty,
+        InstructionsBody = body,
+        Resources = resources
+    };
+
+    private static SkillResource Script(string relativePath) =>
+        new(relativePath, $"/tmp/scan-x/{relativePath}", SkillResourceKind.Script);
 }
 
 public class RoutingTests
