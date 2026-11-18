@@ -23,14 +23,10 @@ public static class ReportRenderer
     public static string DisplayRoot { get; set; } = string.Empty;
 
     /// <summary>
-    /// Renders a report. <paramref name="subjectLabel"/> names what the findings are
+    /// Renders a report to <paramref name="console"/>. <paramref name="subjectLabel"/> names what the findings are
     /// about — "Skill", "Agent", "Document" — because the diagnostic model is shared
     /// across artifact classes and only the caller knows which one it is running over.
     /// </summary>
-    public static void Render(DiagnosticReport report, OutputFormat format, string command, string subjectLabel) =>
-        Render(AnsiConsole.Console, report, format, command, subjectLabel);
-
-    /// <summary>Renders a report to <paramref name="console"/>.</summary>
     /// <param name="console">The console the report is written to.</param>
     /// <param name="report">The report to render.</param>
     /// <param name="format">The requested format.</param>
@@ -66,7 +62,12 @@ public static class ReportRenderer
     /// measure itself, is read by a program or an agent that greps it, and a table there wraps a rule id or a message
     /// across several lines.
     /// </summary>
-    public static bool IsInteractive() => AnsiConsole.Profile.Out.IsTerminal && AnsiConsole.Profile.Width > 0;
+    /// <param name="console">The console the output goes to.</param>
+    public static bool IsInteractive(IAnsiConsole console)
+    {
+        ArgumentNullException.ThrowIfNull(console);
+        return console.Profile.Out.IsTerminal && console.Profile.Width > 0;
+    }
 
     /// <summary>Whether the format is the one meant for a person or an agent to read, rather than a document for a program.</summary>
     public static bool IsHuman(OutputFormat format) => format is OutputFormat.Table or OutputFormat.Lines;
@@ -206,8 +207,6 @@ public static class ReportRenderer
         console.Write(table);
         RenderMetricsTable(console, report);
     }
-
-    public static void RenderSummary(DiagnosticReport report) => RenderSummary(AnsiConsole.Console, report);
 
     /// <summary>Renders the one-line severity summary to <paramref name="console"/>.</summary>
     /// <param name="console">The console the summary is written to.</param>

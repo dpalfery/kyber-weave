@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using KyberWeave.Cli.Rendering;
+using Spectre.Console;
 using Spectre.Console.Cli;
 
 namespace KyberWeave.Cli.Commands;
@@ -29,10 +30,12 @@ public class AnalysisSettings : CommandSettings
     /// </summary>
     internal string? WorkingDirectory { get; set; }
 
+    /// <summary>The format the command writes: the one <c>--format</c> names, or the one that suits <paramref name="console"/>.</summary>
+    /// <param name="console">The console the output goes to; it decides the default when no format was named.</param>
 #pragma warning disable CA1308 // Lowercase is intentional for stable IDs/hashing; changing to Upper would invalidate persisted hashes
-    public OutputFormat ParsedFormat => Format?.ToLowerInvariant() switch
+    public OutputFormat FormatFor(IAnsiConsole console) => Format?.ToLowerInvariant() switch
     {
-        null or "" => ReportRenderer.IsInteractive() ? OutputFormat.Table : OutputFormat.Lines,
+        null or "" => ReportRenderer.IsInteractive(console) ? OutputFormat.Table : OutputFormat.Lines,
         "json" => OutputFormat.Json,
         "sarif" => OutputFormat.Sarif,
         "markdown" or "md" => OutputFormat.Markdown,

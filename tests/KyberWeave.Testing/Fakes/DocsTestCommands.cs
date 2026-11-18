@@ -165,8 +165,11 @@ internal static class DocsTestCommands
             provider.GetRequiredService<IKyberWeaveConfigRepository>());
     }
 
-    public static DocsReviewImportCommand ReviewImport(IDocsAnalysisCommandService service) =>
-        new(service, Services().GetRequiredService<IFileSystem>());
+    public static DocsReviewImportCommand ReviewImport(IDocsAnalysisCommandService service, IAnsiConsole? console = null) =>
+        new(service, Services().GetRequiredService<IFileSystem>(), console ?? AnsiConsole.Console);
+
+    public static DocsReviewExportCommand ReviewExport(IDocsAnalysisCommandService service, IAnsiConsole? console = null) =>
+        new(service, Services().GetRequiredService<IWritableFileSystem>(), console ?? AnsiConsole.Console);
 
     public static DocsExportGraphCommand ExportGraph(IAnsiConsole? console = null) => new(
         Services().GetRequiredService<IManagedGlossaryFactory>(),

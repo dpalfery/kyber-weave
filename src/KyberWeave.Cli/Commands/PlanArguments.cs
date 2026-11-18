@@ -109,7 +109,7 @@ public sealed class PlanArguments(
     public void Announce(DiagnosticReport report, AnalysisSettings settings, string relative)
     {
         report.AddMetric("plan", relative);
-        if (ReportRenderer.IsHuman(settings.ParsedFormat))
+        if (ReportRenderer.IsHuman(settings.FormatFor(console)))
         {
             CommandHelpers.WriteUnfolded(console, () => console.MarkupLine($"Plan: {Markup.Escape(relative)}"));
         }

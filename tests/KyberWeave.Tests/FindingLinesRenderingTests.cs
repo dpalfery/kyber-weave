@@ -1,3 +1,4 @@
+using Spectre.Console;
 using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
@@ -32,7 +33,7 @@ public sealed class FindingLinesRenderingTests
     private static string Render(OutputFormat format) =>
         ProcessConsoleCapture.Run(() =>
         {
-            ReportRenderer.Render(Report(), format, "docs closeout", "Plan");
+            ReportRenderer.Render(AnsiConsole.Console, Report(), format, "docs closeout", "Plan");
             return true;
         }).Output;
 
@@ -80,7 +81,7 @@ public sealed class FindingLinesRenderingTests
 
         string output = ProcessConsoleCapture.Run(() =>
         {
-            ReportRenderer.Render(report, OutputFormat.Lines, "docs closeout", "Plan");
+            ReportRenderer.Render(AnsiConsole.Console, report, OutputFormat.Lines, "docs closeout", "Plan");
             return true;
         }).Output;
 

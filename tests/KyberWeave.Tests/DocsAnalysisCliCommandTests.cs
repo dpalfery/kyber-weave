@@ -7,6 +7,8 @@ using KyberWeave.Core.Docs.Analysis;
 using KyberWeave.Core.Docs.Analysis.Glossary;
 using KyberWeave.Core.Docs.Analysis.Model;
 using KyberWeave.Core.Docs.Analysis.Review;
+using Spectre.Console;
+using Spectre.Console.Testing;
 using Xunit;
 
 using KyberWeave.Tests.Fakes;
@@ -39,6 +41,8 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         Assert.Contains("AddCommand<DocsGlossaryCommand>(\"glossary\")", program, StringComparison.Ordinal);
     }
 
+    private static TestConsole NonTerminalConsole() => new();
+
     [Fact]
     public void AnalyzeSettingsDefaultToAdvisoryAndRetainEveryExistingFormat()
     {
@@ -46,14 +50,14 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
 
         Assert.Equal("none", settings.FailOn);
         Assert.Null(settings.Format);
-        Assert.Equal(OutputFormat.Lines, settings.ParsedFormat);
-        Assert.Equal(OutputFormat.Table, new DocsIntegrityCheckSettings { Format = "table" }.ParsedFormat);
+        Assert.Equal(OutputFormat.Lines, settings.FormatFor(NonTerminalConsole()));
+        Assert.Equal(OutputFormat.Table, new DocsIntegrityCheckSettings { Format = "table" }.FormatFor(NonTerminalConsole()));
         Assert.Equal(OutputFormat.Json,
-            new DocsIntegrityCheckSettings { Format = "json" }.ParsedFormat);
+            new DocsIntegrityCheckSettings { Format = "json" }.FormatFor(NonTerminalConsole()));
         Assert.Equal(OutputFormat.Sarif,
-            new DocsIntegrityCheckSettings { Format = "sarif" }.ParsedFormat);
+            new DocsIntegrityCheckSettings { Format = "sarif" }.FormatFor(NonTerminalConsole()));
         Assert.Equal(OutputFormat.Markdown,
-            new DocsIntegrityCheckSettings { Format = "markdown" }.ParsedFormat);
+            new DocsIntegrityCheckSettings { Format = "markdown" }.FormatFor(NonTerminalConsole()));
     }
 
     [Theory]
@@ -74,7 +78,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         {
             AnalysisResult = AnalysisResult(Finding(severity))
         };
-        DocsIntegrityCheckCommand command = new DocsIntegrityCheckCommand(service);
+        DocsIntegrityCheckCommand command = new DocsIntegrityCheckCommand(service, AnsiConsole.Console);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -98,7 +102,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 "KW-DOC-ANALYSIS-004: malformed ignore markup")
         };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, AnsiConsole.Console).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
@@ -125,7 +129,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             "docs analysis"));
         RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, AnsiConsole.Console).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
@@ -153,7 +157,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         report.AddMetric("truncated", false);
         RecordingCommandService service = new RecordingCommandService { AnalysisResult = AnalysisResult(report) };
 
-        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsIntegrityCheckCommand(service, AnsiConsole.Console).Execute(
             null!,
             new DocsIntegrityCheckSettings
             {
@@ -175,7 +179,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
         string output = Path.Combine(_temp.Path, "review", "candidates.json");
         RecordingCommandService service = new RecordingCommandService { ExportResult = ExportResult("{\"schema\":\"candidates/v1\"}") };
 
-        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service).Execute(
+        CommandExecution execution = Capture(() => DocsTestCommands.ReviewExport(service).Execute(
             null!,
             new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output }));
 
@@ -194,7 +198,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
             ExportException = new IOException("candidate export failed")
         };
 
-        CommandExecution execution = Capture(() => new DocsReviewExportCommand(service).Execute(
+        CommandExecution execution = Capture(() => DocsTestCommands.ReviewExport(service).Execute(
             null!,
             new DocsReviewExportSettings { Path = _temp.Path, OutputPath = output }));
 
@@ -250,7 +254,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
             null!,
             new DocsGlossarySettings { Path = _temp.Path, Write = write }));
 
@@ -279,7 +283,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
             null!,
             new DocsGlossarySettings { Path = _temp.Path, Format = format }));
 
@@ -307,7 +311,7 @@ public sealed class DocsAnalysisCliCommandTests : IDisposable
                 new DiagnosticReport())
         };
 
-        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service).Execute(
+        CommandExecution execution = Capture(() => new DocsGlossaryCommand(service, AnsiConsole.Console).Execute(
             null!,
             new DocsGlossarySettings { Path = _temp.Path, Format = format }));
 

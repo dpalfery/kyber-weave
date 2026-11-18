@@ -30,7 +30,7 @@ public sealed class LintCommand(ISkillGovernanceService skills, IAnsiConsole ans
         DiagnosticReport report = linted.Report;
         SkillSet set = linted.Skills;
 
-        if (settings.Explain && ReportRenderer.IsHuman(settings.ParsedFormat))
+        if (settings.Explain && ReportRenderer.IsHuman(settings.FormatFor(ansi)))
         {
             ansi.WriteLine();
             foreach (Skill skill in set.Skills)

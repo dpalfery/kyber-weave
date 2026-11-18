@@ -55,6 +55,7 @@ public sealed class DocsExportGraphCommand(
         catch (Exception exception) when (DocsAnalysisCommandErrors.IsOperational(exception))
         {
             DocsAnalysisCommandErrors.Render(
+                console,
                 exception,
                 settings,
                 "docs export-graph",
