@@ -16,6 +16,29 @@ internal static class CorpusTree
     public static IEnumerable<string> Entries(ICorpusSource corpus, string relativeDirectory) =>
         corpus.EnumerateFiles(relativeDirectory).Concat(Directories(corpus, relativeDirectory));
 
+    /// <summary>Gets whether a corpus directory exists, comparing the path's case as the corpus's file system does.</summary>
+    /// <param name="corpus">The corpus to read.</param>
+    /// <param name="relativePath">The directory's path relative to the corpus root, with forward slashes.</param>
+    /// <returns>True when the directory exists.</returns>
+    public static bool DirectoryExists(ICorpusSource corpus, string relativePath)
+    {
+        string path = relativePath.Replace('\\', '/').TrimEnd('/');
+        int slash = path.LastIndexOf('/');
+        string parent = slash < 0 ? string.Empty : path[..slash];
+        StringComparison comparison = NameComparison(corpus);
+
+        return corpus.EnumerateDirectories(parent)
+            .Any(child => string.Equals(child, path, comparison));
+    }
+
+    /// <summary>Gets the name comparison the corpus's file system uses, which its seam contract declares.</summary>
+    /// <param name="corpus">The corpus being read.</param>
+    /// <returns>Ordinal on Linux; case-insensitive on the case-preserving APFS and NTFS rules.</returns>
+    private static StringComparison NameComparison(ICorpusSource corpus) =>
+        corpus is InMemoryCorpusSource memory
+            ? memory.CaseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase
+            : OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
+
     /// <summary>Lists every directory under a corpus directory, recursively, excluding the directory itself.</summary>
     /// <param name="corpus">The corpus to read.</param>
     /// <param name="relativeDirectory">The directory's path relative to the corpus root, with forward slashes.</param>

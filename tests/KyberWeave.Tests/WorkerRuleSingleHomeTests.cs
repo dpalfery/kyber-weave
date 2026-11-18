@@ -50,7 +50,7 @@ public sealed class WorkerRuleSingleHomeTests
     public void InspectCodeAndItsSkillAreAbsentFromTheSquad()
     {
         Assert.False(
-            Corpus.EnumerateDirectories($"{ProductRoot}/skills").Contains($"{ProductRoot}/skills/resharper-clt"),
+            CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/skills/resharper-clt"),
             "The resharper-clt skill was removed with InspectCode (ADR 0075).");
 
         string[] skillNamed = AgentsContaining("resharper-clt");

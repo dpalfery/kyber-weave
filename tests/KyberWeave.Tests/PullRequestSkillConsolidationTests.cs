@@ -136,8 +136,7 @@ public sealed class PullRequestSkillConsolidationTests
         Assert.DoesNotContain(source.Skills, skill => skill.Name == RetiredSkill);
         Assert.DoesNotContain(source.Bundle.SkillNames, name => name == RetiredSkill);
         Assert.False(
-            Corpus.EnumerateDirectories($"{ProductRootRelativePath}/skills")
-                .Contains($"{ProductRootRelativePath}/skills/{RetiredSkill}"),
+            CorpusTree.DirectoryExists(Corpus, $"{ProductRootRelativePath}/skills/{RetiredSkill}"),
             $"The retired skill directory 'skills/{RetiredSkill}' still exists.");
 
         using TempDirectory temp = new();

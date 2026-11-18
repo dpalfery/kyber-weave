@@ -70,10 +70,10 @@ public sealed class WarpRendererContractTests : IDisposable
     public void ToolRoot_ExistsForCanonicalCorpus()
     {
         Assert.True(
-            Corpus.EnumerateDirectories(string.Empty).Contains("products"),
+            CorpusTree.DirectoryExists(Corpus, "products"),
             $"Expected the corpus at '{Corpus.Root}' to hold 'products'.");
         Assert.True(
-            Corpus.EnumerateDirectories("products").Contains("products/kyber-squad"),
+            CorpusTree.DirectoryExists(Corpus, "products/kyber-squad"),
             $"Expected products/kyber-squad under the corpus root at '{ProductRoot}'.");
     }
 

@@ -58,6 +58,58 @@ public sealed class CorpusTreeTests
         Assert.Equal(["products/kyber-squad/skills", "products/kyber-squad/skills/code-review"], directories);
     }
 
+    /// <summary>
+    /// A retired skill folder that ships under a different capitalisation than the name the test bans. On the
+    /// case-insensitive file systems this repository develops and ships on, the folder exists; an ordinal
+    /// comparison says it does not, and the retired skill slips through.
+    /// </summary>
+    [Fact]
+    public void DirectoryExistsFindsAWrongCaseDirectoryOnACaseInsensitiveCorpus()
+    {
+        InMemoryCorpusSource corpus = new InMemoryCorpusSource(caseSensitive: false)
+            .Add("products/kyber-squad/skills/Second-Brain/SKILL.md", "retired");
+
+        Assert.True(CorpusTree.DirectoryExists(corpus, "products/kyber-squad/skills/second-brain"));
+    }
+
+    [Fact]
+    public void DirectoryExistsRejectsAWrongCaseDirectoryOnACaseSensitiveCorpus()
+    {
+        InMemoryCorpusSource corpus = new InMemoryCorpusSource(caseSensitive: true)
+            .Add("products/kyber-squad/skills/Second-Brain/SKILL.md", "a different skill");
+
+        Assert.False(CorpusTree.DirectoryExists(corpus, "products/kyber-squad/skills/second-brain"));
+        Assert.True(CorpusTree.DirectoryExists(corpus, "products/kyber-squad/skills/Second-Brain"));
+    }
+
+    [Fact]
+    public void DirectoryExistsAnswersTheCheckoutAsTheHostFileSystemDoes()
+    {
+        Assert.True(CorpusTree.DirectoryExists(CheckoutCorpusSource.Checkout, "products/kyber-squad/agents"));
+        Assert.Equal(
+            !OperatingSystem.IsLinux(),
+            CorpusTree.DirectoryExists(CheckoutCorpusSource.Checkout, "PRODUCTS/kyber-squad/agents"));
+    }
+
+    [Fact]
+    public void DirectoryExistsIsFalseForAFile()
+    {
+        InMemoryCorpusSource corpus = new InMemoryCorpusSource()
+            .Add("products/kyber-squad/README.md", "readme");
+
+        Assert.False(CorpusTree.DirectoryExists(corpus, "products/kyber-squad/README.md"));
+    }
+
+    /// <summary>A trailing slash names the same directory, as it does for the file system.</summary>
+    [Fact]
+    public void DirectoryExistsIgnoresATrailingSlash()
+    {
+        InMemoryCorpusSource corpus = new InMemoryCorpusSource()
+            .Add("products/kyber-squad/skills/code-review/SKILL.md", "review");
+
+        Assert.True(CorpusTree.DirectoryExists(corpus, "products/kyber-squad/skills/code-review/"));
+    }
+
     [Fact]
     public void EntriesOfAMissingDirectoryAreEmpty()
     {

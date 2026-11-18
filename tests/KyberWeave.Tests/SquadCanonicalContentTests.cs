@@ -193,7 +193,9 @@ public sealed class SquadCanonicalContentTests
         SquadSource source = TestSquadCorpus.CanonicalSource;
 
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "kyber-weave-docs");
-        Assert.DoesNotContain($"{ProductRoot}/skills/kyber-weave-docs", Corpus.EnumerateDirectories($"{ProductRoot}/skills"));
+        Assert.False(
+            CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/skills/kyber-weave-docs"),
+            "The retired kyber-weave-docs skill folder still exists.");
     }
 
     /// <summary>
@@ -251,7 +253,9 @@ public sealed class SquadCanonicalContentTests
         Assert.DoesNotContain(source.Skills, skill => skill.Name == "second-brain");
         Assert.DoesNotContain("second-brain", source.Bundle.SkillNames);
         Assert.DoesNotContain("second-brain", bundleText, StringComparison.Ordinal);
-        Assert.DoesNotContain($"{ProductRoot}/skills/second-brain", Corpus.EnumerateDirectories($"{ProductRoot}/skills"));
+        Assert.False(
+            CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/skills/second-brain"),
+            "The retired second-brain skill folder still exists.");
     }
 
     /// <summary>
@@ -930,7 +934,7 @@ public sealed class SquadCanonicalContentTests
             Corpus.Exists($"{agentsRoot}/task-reviewer.md"),
             "The retired task-reviewer agent body must be deleted.");
         Assert.False(
-            Corpus.EnumerateDirectories(agentsRoot).Contains($"{agentsRoot}/task-reviewer"),
+            CorpusTree.DirectoryExists(Corpus, $"{agentsRoot}/task-reviewer"),
             "The retired task-reviewer reference folder must be deleted.");
     }
 
@@ -999,7 +1003,7 @@ public sealed class SquadCanonicalContentTests
 
         Assert.True(Corpus.Exists(ownerBody), $"expected the product-owner body at '{ownerBody}'.");
         Assert.True(
-            Corpus.EnumerateDirectories($"{ProductRoot}/skills").Contains(ownerSkill),
+            CorpusTree.DirectoryExists(Corpus, ownerSkill),
             $"expected the product-owner skill at '{ownerSkill}'.");
 
         string[] surfaces =
@@ -1296,7 +1300,7 @@ public sealed class SquadCanonicalContentTests
         string principal = Corpus.ReadText(principalPath);
         string referencesRoot = $"{agentRoot}/{name}/references";
         Assert.True(
-            Corpus.EnumerateDirectories($"{agentRoot}/{name}").Contains(referencesRoot),
+            CorpusTree.DirectoryExists(Corpus, referencesRoot),
             $"Agent '{name}' must progressively disclose its conditional contract from '{referencesRoot}'.");
 
         string[] references = Corpus.EnumerateFiles(referencesRoot, "*.md")

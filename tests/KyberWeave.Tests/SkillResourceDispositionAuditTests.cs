@@ -633,8 +633,7 @@ public sealed class SkillResourceDispositionAuditTests
             foreach (Match match in CodingStandardToken.Matches(Corpus.ReadText(file)))
             {
                 string technology = match.Groups[1].Value;
-                if (!Corpus.EnumerateDirectories($"{ProductRoot}/standards")
-                        .Contains($"{ProductRoot}/standards/{technology}"))
+                if (!CorpusTree.DirectoryExists(Corpus, $"{ProductRoot}/standards/{technology}"))
                 {
                     findings.Add(
                         $"{relativePath}: token '<{technology}-coding-standard>' names no " +
