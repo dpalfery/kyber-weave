@@ -366,6 +366,9 @@ internal static class SquadTestCommands
         public ISquadTransaction Create(ISquadTransactionObserver? observer) => throw new NotSupportedException();
     }
 
+    /// <summary>A console whose output goes to whichever test is capturing the process console.</summary>
+    public static SquadConsole ProcessCapturedConsole() => CapturedSquadConsole();
+
     /// <summary>A capture-plugin step whose output goes to whichever test is capturing the process console.</summary>
     public static KyberDashCapturePluginStep CapturePluginStep(IProcessExecutor executor, Func<string?> locateKyberDash) =>
         new(executor, locateKyberDash, CapturedSquadConsole());

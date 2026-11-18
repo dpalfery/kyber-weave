@@ -3,7 +3,9 @@ using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands.Squad;
 using KyberWeave.Domain.CopilotPrompt;
+using KyberWeave.Data.Hooks;
 using KyberWeave.Kernel.FileSystem;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests.CopilotPrompt;
@@ -62,7 +64,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
 
     private CapturedConsoleExecution<int> Install(CopilotPromptSettings settings, bool interactive = true)
     {
-        CopilotPromptInstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files, ShippedCopilotPrompt.Resources);
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
         return ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
     }
 
@@ -84,7 +86,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
               }
             }
             """);
-        CopilotPromptInstallCommand command = new(NewEnvironment(interactive: true), files, ShippedCopilotPrompt.Resources);
+        CopilotPromptInstallCommand command = new(NewEnvironment(interactive: true), files, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
@@ -95,7 +97,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
 
     private CapturedConsoleExecution<int> Uninstall(CopilotPromptSettings settings, bool interactive = true)
     {
-        CopilotPromptUninstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files);
+        CopilotPromptUninstallCommand command = new(NewEnvironment(interactive), DoctorTestServices.Files, new PhysicalFileSystem(), SquadTestCommands.ProcessCapturedConsole());
         return ProcessConsoleCapture.Run(() => command.Execute(null!, settings, CancellationToken.None));
     }
 
@@ -482,7 +484,7 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_NoHomeDirectory_RefusesAndWritesNothing()
     {
         DetectFlavour(VsCodeFlavour.Stable);
-        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false), DoctorTestServices.Files, ShippedCopilotPrompt.Resources);
+        CopilotPromptInstallCommand command = new(new CopilotPromptEnvironment(null, null, OSPlatform.OSX, true, _ => false), DoctorTestServices.Files, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole());
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(
             () => command.Execute(null!, new CopilotPromptSettings { Yes = true }, CancellationToken.None));
@@ -505,32 +507,32 @@ public sealed class CopilotPromptSettingsMergeTests : IDisposable
     public void Install_RefusesANullFileSystemAtConstruction()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptInstallCommand((IDoctorFileSystem)null!, ShippedCopilotPrompt.Resources));
+            () => new CopilotPromptInstallCommand((IDoctorFileSystem)null!, ShippedCopilotPrompt.Resources, new FakeProcessEnvironment(), SquadTestCommands.ProcessCapturedConsole()));
 
         Assert.Equal("files", exception.ParamName);
         _ = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptInstallCommand(NewEnvironment(interactive: true), null!, ShippedCopilotPrompt.Resources));
+            () => new CopilotPromptInstallCommand(NewEnvironment(interactive: true), null!, ShippedCopilotPrompt.Resources, SquadTestCommands.ProcessCapturedConsole()));
     }
 
     [Fact]
     public void Uninstall_RefusesANullFileSystemAtConstruction()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptUninstallCommand((IDoctorFileSystem)null!));
+            () => new CopilotPromptUninstallCommand((IDoctorFileSystem)null!, new PhysicalFileSystem(), new FakeProcessEnvironment(), SquadTestCommands.ProcessCapturedConsole()));
 
         Assert.Equal("files", exception.ParamName);
         _ = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptUninstallCommand(NewEnvironment(interactive: true), null!));
+            () => new CopilotPromptUninstallCommand(NewEnvironment(interactive: true), null!, new PhysicalFileSystem(), SquadTestCommands.ProcessCapturedConsole()));
     }
 
     [Fact]
     public void Status_RefusesANullFileSystemAtConstruction()
     {
         ArgumentNullException exception = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptStatusCommand((IDoctorFileSystem)null!));
+            () => new CopilotPromptStatusCommand((IDoctorFileSystem)null!, new FakeProcessEnvironment(), SquadTestCommands.ProcessCapturedConsole()));
 
         Assert.Equal("files", exception.ParamName);
         _ = Assert.Throws<ArgumentNullException>(
-            () => new CopilotPromptStatusCommand(NewEnvironment(interactive: true), null!));
+            () => new CopilotPromptStatusCommand(NewEnvironment(interactive: true), null!, SquadTestCommands.ProcessCapturedConsole()));
     }
 }

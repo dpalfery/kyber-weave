@@ -264,7 +264,7 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `DocsPacketCommand` (`Commands/Docs/DocsPacketCommand.cs`) | paths, console | 4.5 |
 | `DocsTasksCommand` (`Commands/Docs/DocsTasksCommand.cs`) | console | 4.5 |
 | `RunDeliverCommand` (`Commands/Run/RunDeliverCommand.cs`) | paths | 4.5 |
-| `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system, environment, console | 4.5 |
+| `CopilotPromptCommands` (`Commands/Squad/CopilotPromptCommands.cs`) | file system | 4.5 |
 | `SelfUpdateHostFactory` (`Composition/SelfUpdateHostFactory.cs`) | environment | 4.5 |
 | `ReportRenderer` (`Rendering/ReportRenderer.cs`) | console | 4.5 |
 
