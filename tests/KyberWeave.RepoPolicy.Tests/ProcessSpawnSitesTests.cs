@@ -30,6 +30,10 @@ public sealed class ProcessSpawnSitesTests
     private static readonly (string Root, string[] Extensions)[] ScanRoots =
     [
         ("tests/KyberWeave.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Application.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Cli.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Data.Tests", [".cs", ".sh"]),
+        ("tests/KyberWeave.Kernel.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Integration.Tests", [".cs", ".sh"]),
         ("tests/KyberWeave.Testing", [".cs", ".sh"]),
         ("tests/KyberWeave.RepoPolicy.Tests", [".cs", ".sh"]),

@@ -3,6 +3,9 @@
   <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <NoWarn>$(NoWarn);CA1707;xUnit1051</NoWarn>
+    <!-- CA2000: test consoles and HTTP handlers are held in fields or returned by helpers and are
+         disposed by the test class; the analyzer cannot follow that. Same exemption as KyberWeave.Tests. -->
+    <NoWarn>$(NoWarn);CA2000</NoWarn>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -16,6 +19,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="xunit.v3" Version="4.0.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1" />
+    <PackageReference Include="Spectre.Console.Testing" Version="0.57.2" />
   </ItemGroup>
 
   <ItemGroup>
