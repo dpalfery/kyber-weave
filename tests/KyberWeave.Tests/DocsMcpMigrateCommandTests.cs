@@ -1,4 +1,5 @@
 using KyberWeave.Tests.Configuration;
+using KyberWeave.Tests.Fakes;
 
 using System.Text;
 using System.Text.Json;
@@ -1173,6 +1174,26 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     }
 
     /// <summary>
+    /// The home refusal resolves both spellings through the path seam and reads the home from the
+    /// environment seam, so a spelling that lands on the home directory is refused without touching
+    /// the disk and without reading the developer's own profile.
+    /// </summary>
+    [Fact]
+    public void TheHomeRefusalResolvesTheSpellingThroughTheSeams()
+    {
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            new DocsMcpMigrateCommand(
+                McpWiringTestServices.Wiring,
+                FakePathResolver.OverEmptyFileSystem(),
+                new FakeProcessEnvironment(homeDirectory: "/kw/home")).Execute(
+                null!,
+                new DocsMcpMigrateSettings { Path = "/kw/home/../home/", Target = Cursor }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>
     /// A declaration that is a symbolic link is refused before it is read: reading it would read a
     /// file the repository does not contain, and writing it would write there.
     /// </summary>
@@ -1278,7 +1299,10 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// fake home, for the cases about which tree the operator pointed the command at.
     /// </summary>
     private CapturedConsoleExecution<int> MigrateAt(string root, string targets, bool dryRun = false) =>
-        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand(McpWiringTestServices.Wiring, () => FakeHome).Execute(
+        ProcessConsoleCapture.Run(() => new DocsMcpMigrateCommand(
+            McpWiringTestServices.Wiring,
+            FakePathResolver.OverEmptyFileSystem(),
+            new FakeProcessEnvironment(() => FakeHome)).Execute(
             null!,
             new DocsMcpMigrateSettings { Path = root, Target = targets, DryRun = dryRun }));
 

@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Mcp;
@@ -49,21 +51,25 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
                 .Append(McpServerRenamer.DeclarationTarget));
 
     private readonly IMcpWiringService _wiring;
-    private readonly Func<string?> _home;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
 
     /// <summary>
-    /// Creates the command over the MCP wiring service the container resolves, with an injectable home reader so the
-    /// home-directory refusal can be exercised against a fixture rather than the developer's own profile.
+    /// Creates the command over the MCP wiring service the container resolves, and the path and environment seams
+    /// the home-directory refusal compares through, so the refusal is exercised against a fake rather than the
+    /// developer's own profile.
     /// </summary>
     /// <param name="wiring">Inspects, repairs and renames the harness MCP configuration.</param>
-    /// <param name="home">
-    /// Resolves the operator's home directory, or null for
-    /// <see cref="Environment.SpecialFolder.UserProfile"/> under the process environment.
-    /// </param>
-    public DocsMcpMigrateCommand(IMcpWiringService wiring, Func<string?>? home = null)
+    /// <param name="paths">Canonicalizes the root and the operator's home before they are compared.</param>
+    /// <param name="environment">Names the operator's home directory and the platform's case rule.</param>
+    public DocsMcpMigrateCommand(
+        IMcpWiringService wiring,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
         _wiring = wiring ?? throw new ArgumentNullException(nameof(wiring));
-        _home = home ?? (() => Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
     }
 
     /// <inheritdoc />
@@ -83,7 +89,7 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
 
         // Before the first read: a root that is the operator's home directory would make every
         // catalog path a user-scope file, which is the thing this verb promises never to touch.
-        if (IsOperatorHome(root, _home()))
+        if (IsOperatorHome(root))
         {
             CommandHelpers.WriteUnfolded(() => PrintHomeRefusal(root));
             return 1;
@@ -155,8 +161,10 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     /// refusal that let one spelling through would be a refusal an operator could walk around by
     /// accident. A home this process cannot resolve, or does not have, cannot equal anything.
     /// </remarks>
-    private static bool IsOperatorHome(string root, string? home)
+    private bool IsOperatorHome(string root)
     {
+        string home = _environment.HomeDirectory;
+
         if (string.IsNullOrWhiteSpace(home))
             return false;
 
@@ -168,20 +176,22 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
             && string.Equals(
                 canonicalRoot,
                 canonicalHome,
-                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+                _environment.OperatingSystem == OperatingSystemKind.Windows
+                    ? StringComparison.OrdinalIgnoreCase
+                    : StringComparison.Ordinal);
     }
 
     /// <summary>The directory a path names, with its own link resolved and its trailing separator removed.</summary>
-    private static string? Canonical(string path)
+    private string? Canonical(string path)
     {
         try
         {
-            string full = Path.GetFullPath(path);
+            // The base is named rather than read from the process: the path seam resolves a relative
+            // spelling against it and never falls back to the working directory.
+            string full = _paths.GetFullPath(path, _environment.CurrentDirectory);
 
-            if (Directory.Exists(full) && Directory.ResolveLinkTarget(full, returnFinalTarget: true) is { } target)
-                full = Path.GetFullPath(target.FullName);
-
-            string trimmed = full.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string trimmed = _paths.Canonicalize(full)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
             // A filesystem root trims to nothing, and "" is not a directory name this can compare.
             return trimmed.Length == 0 ? full : trimmed;
