@@ -177,6 +177,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IKyberWeaveConfigRepository>(),
             sp.GetRequiredService<IRepositoryFileLister>(),
             sp.GetRequiredService<IRepositoryTreeProbe>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<TimeProvider>()));
         services.TryAddSingleton<ISquadBriefService>(sp => new SquadBriefService(sp.GetRequiredService<IFileSystem>()));
         _ = services.AddWeaveSquadApplication();

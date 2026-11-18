@@ -75,6 +75,9 @@ public class DocsStandardsMigrateCommandTests
     private static string StandardPath(string root, string scope) =>
         Path.Combine(root, "6-Docs", "standards", scope, $"{scope}.standards.md");
 
+    private static StandardsFolderMigration Migration(string repoRoot) =>
+        DocsPorts.StandardsMigration(repoRoot, Declared);
+
     [Fact]
     public void ItRenamesTheStandardAndAddsTheMissingFiles()
     {
@@ -84,7 +87,7 @@ public class DocsStandardsMigrateCommandTests
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
 
         StandardsFolderMigrationResult result =
-            new StandardsFolderMigration(repo.Path, Declared).Run();
+            Migration(repo.Path).Run();
 
         Assert.Equal(4, result.Changes.Count);
         Assert.True(File.Exists(StandardPath(repo.Path, "csharp")));
@@ -103,7 +106,7 @@ public class DocsStandardsMigrateCommandTests
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
 
-        new StandardsFolderMigration(repo.Path, Declared).Run();
+        Migration(repo.Path).Run();
 
         string rules = File.ReadAllText(Path.Combine(folder, "csharp.rules.md"));
         Assert.Contains("doc-type: rule", rules, StringComparison.Ordinal);
@@ -122,8 +125,8 @@ public class DocsStandardsMigrateCommandTests
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
 
-        new StandardsFolderMigration(repo.Path, Declared).Run();
-        StandardsFolderMigrationResult second = new StandardsFolderMigration(repo.Path, Declared).Run();
+        Migration(repo.Path).Run();
+        StandardsFolderMigrationResult second = Migration(repo.Path).Run();
 
         Assert.Empty(second.Changes);
     }
@@ -137,7 +140,7 @@ public class DocsStandardsMigrateCommandTests
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
 
         StandardsFolderMigrationResult result =
-            new StandardsFolderMigration(repo.Path, Declared).Run(dryRun: true);
+            Migration(repo.Path).Run(dryRun: true);
 
         Assert.Equal(4, result.Changes.Count);
         Assert.True(File.Exists(Path.Combine(folder, "README.md")));
@@ -151,7 +154,7 @@ public class DocsStandardsMigrateCommandTests
         string folder = Path.Combine(repo.Path, "6-Docs", "standards", "reviewer");
         Directory.CreateDirectory(folder);
 
-        new StandardsFolderMigration(repo.Path, Declared).Run();
+        Migration(repo.Path).Run();
 
         string standard = File.ReadAllText(StandardPath(repo.Path, "reviewer"));
         Assert.Contains("role: reviewer", standard, StringComparison.Ordinal);
@@ -171,7 +174,7 @@ public class DocsStandardsMigrateCommandTests
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
 
         StandardsFolderMigrationResult result =
-            new StandardsFolderMigration(repo.Path, Declared).Run();
+            Migration(repo.Path).Run();
 
         Assert.Empty(result.Changes);
         Assert.True(File.Exists(Path.Combine(folder, "README.md")));
@@ -191,7 +194,7 @@ public class DocsStandardsMigrateCommandTests
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
 
         StandardsFolderMigrationResult result =
-            new StandardsFolderMigration(repo.Path, Declared).Run();
+            Migration(repo.Path).Run();
 
         string shaped = File.ReadAllText(StandardPath(repo.Path, "csharp"));
 
@@ -218,11 +221,11 @@ public class DocsStandardsMigrateCommandTests
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
 
-        new StandardsFolderMigration(repo.Path, Declared).Run();
+        Migration(repo.Path).Run();
         string once = File.ReadAllText(StandardPath(repo.Path, "csharp"));
 
         StandardsFolderMigrationResult second =
-            new StandardsFolderMigration(repo.Path, Declared).Run();
+            Migration(repo.Path).Run();
 
         Assert.Empty(second.Changes);
         Assert.Empty(second.Moves);
@@ -238,7 +241,7 @@ public class DocsStandardsMigrateCommandTests
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
 
         StandardsFolderMigrationResult result =
-            new StandardsFolderMigration(repo.Path, Declared).Run(dryRun: true);
+            Migration(repo.Path).Run(dryRun: true);
 
         Assert.Contains(result.Moves, move =>
             move.Heading == "Stack" && move.Under == "Coding standards");
@@ -285,7 +288,7 @@ public class DocsStandardsMigrateCommandTests
         string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharp);
-        StandardsFolderMigration migration = new(repo.Path, Declared);
+        StandardsFolderMigration migration = Migration(repo.Path);
 
         IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
         File.WriteAllText(StandardPath(repo.Path, "csharp"), "written by someone else");
@@ -308,7 +311,7 @@ public class DocsStandardsMigrateCommandTests
         string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
         Directory.CreateDirectory(folder);
         File.WriteAllText(Path.Combine(folder, "README.md"), LegacyCsharpWithOwnHeadings);
-        StandardsFolderMigration migration = new(repo.Path, Declared);
+        StandardsFolderMigration migration = Migration(repo.Path);
 
         IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
         Assert.Contains(planned, change => change.Kind == StandardsFolderChangeKind.Reshape);
@@ -330,7 +333,7 @@ public class DocsStandardsMigrateCommandTests
         using TempDirectory repo = new();
         string folder = Path.Combine(repo.Path, "6-Docs", "standards", "csharp");
         Directory.CreateDirectory(folder);
-        StandardsFolderMigration migration = new(repo.Path, Declared);
+        StandardsFolderMigration migration = Migration(repo.Path);
 
         IReadOnlyList<StandardsFolderChange> planned = migration.Plan();
         string rules = Path.Combine(folder, "csharp.rules.md");
@@ -357,7 +360,7 @@ public class DocsStandardsMigrateCommandTests
         Directory.CreateDirectory(folder);
         string target = $"{scope}.rules.md";
 
-        Assert.ThrowsAny<IOException>(() => new StandardsFolderMigration(repo.Path, Declared).Apply(
+        Assert.ThrowsAny<IOException>(() => Migration(repo.Path).Apply(
             [
                 new StandardsFolderChange(
                     StandardsFolderChangeKind.Add, string.Empty, $"6-Docs/standards/{scope}/{target}")
@@ -391,7 +394,7 @@ public class DocsStandardsMigrateCommandTests
         List<StandardsFolderChange> applied;
         try
         {
-            applied = new StandardsFolderMigration(repo.Path, Declared).Apply(
+            applied = Migration(repo.Path).Apply(
                 [new StandardsFolderChange(StandardsFolderChangeKind.Add, string.Empty, "6-Docs/standards/csharp/csharp.rules.md")],
                 "csharp",
                 null,
@@ -427,7 +430,7 @@ public class DocsStandardsMigrateCommandTests
         File.CreateSymbolicLink(StandardPath(repo.Path, "csharp"), shared);
 
         IOException error = Assert.Throws<IOException>(() =>
-            new StandardsFolderMigration(repo.Path, Declared).Run());
+            Migration(repo.Path).Run());
 
         Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
         Assert.NotNull(new FileInfo(StandardPath(repo.Path, "csharp")).LinkTarget);
@@ -455,7 +458,7 @@ public class DocsStandardsMigrateCommandTests
         if (!TrySetMode(legacy, hostMode))
             Assert.Skip("Comparing a file's mode needs a POSIX mode, so this case cannot be arranged here.");
 
-        new StandardsFolderMigration(repo.Path, Declared).Run();
+        Migration(repo.Path).Run();
 
         Assert.Equal(hostMode, ModeOf(StandardPath(repo.Path, "csharp")));
     }
@@ -477,7 +480,7 @@ public class DocsStandardsMigrateCommandTests
             Path.Combine(repo.Path, "6-Docs", "standards", "csharp"), outside.Path);
 
         IOException error = Assert.Throws<IOException>(() =>
-            new StandardsFolderMigration(repo.Path, Declared).Run());
+            Migration(repo.Path).Run());
 
         Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
         Assert.Empty(Directory.EnumerateFileSystemEntries(outside.Path));
@@ -502,7 +505,7 @@ public class DocsStandardsMigrateCommandTests
         File.CreateSymbolicLink(StandardPath(repo.Path, "csharp"), hostStandard);
 
         IOException error = Assert.Throws<IOException>(() =>
-            new StandardsFolderMigration(repo.Path, Declared).Run());
+            Migration(repo.Path).Run());
 
         Assert.Contains("symbolic link", error.Message, StringComparison.Ordinal);
         Assert.Equal(LegacyCsharpWithOwnHeadings, File.ReadAllText(hostStandard));
@@ -527,7 +530,7 @@ public class DocsStandardsMigrateCommandTests
         try
         {
             IOException error = Assert.Throws<IOException>(() =>
-                new StandardsFolderMigration(repo.Path, Declared).Run());
+                Migration(repo.Path).Run());
 
             Assert.Contains("csharp.standards.md", error.Message, StringComparison.Ordinal);
         }

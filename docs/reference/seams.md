@@ -207,9 +207,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `PlanFinalize` (`Docs/Closeout/PlanFinalize.cs`) | paths | 4.2 |
 | `PullRequestDescription` (`Docs/Delivery/PullRequestDescription.cs`) | file system | 4.2 |
 | `RunDelivery` (`Docs/Delivery/RunDelivery.cs`) | paths | 4.2 |
-| `DocsScaffolder` (`Docs/Scaffolding/DocsScaffolder.cs`) | file system, paths | 4.2 |
-| `StandardsFolderMigration` (`Docs/Scaffolding/StandardsFolderMigration.cs`) | file system, paths, identifiers | 4.2 |
-| `StandardsTemplateDiff` (`Docs/Scaffolding/StandardsTemplateDiff.cs`) | file system, paths | 4.2 |
 | `KyberStandardsTemplates` (`Docs/Scaffolding/KyberStandardsTemplates.cs`) | file system | 4.2 |
 | `DocumentIndexHost` (`Docs/Search/DocumentIndexHost.cs`) | file system, paths | 4.2 |
 | `ArchiveCloseoutValidator` (`Docs/Validation/ArchiveCloseoutValidator.cs`) | paths | 4.2 |
@@ -363,7 +360,7 @@ the behaviour: where a test observes the value, the seam still wraps it.
 
 `FileStream` needs a caveat. The design allows it only inside the file-system adapter, and the code
 does not yet meet that: 15 non-adapter classes open a `FileStream` directly. They are
-`Application/Docs/Scaffolding/StandardsFolderMigration.cs`, `Application/Update/SelfUpdater.cs`,
+`Application/Update/SelfUpdater.cs`,
 `Data/Squad/Deployment/SquadTransaction.cs`, `Data/Squad/Instances/SquadInstanceLinkSync.cs`,
 `Data/Squad/Presets/SquadCanonicalProfileStore.cs` and
 `SquadModelPresetSelectionStore.cs`,

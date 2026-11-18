@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -20,7 +21,13 @@ public sealed class DocsStandardsMigrateSettings : DocsSettings
 /// Renames each legacy standards <c>README.md</c> to the folder-prefixed standard and writes
 /// the four files a technology or role folder holds.
 /// </summary>
-public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository configs, IAnsiConsole console) : Command<DocsStandardsMigrateSettings>
+public sealed class DocsStandardsMigrateCommand(
+    IKyberWeaveConfigRepository configs,
+    IWritableFileSystem files,
+    IPathResolver paths,
+    IProcessEnvironment environment,
+    IIdGenerator ids,
+    IAnsiConsole console) : Command<DocsStandardsMigrateSettings>
 {
     /// <inheritdoc />
     public override int Execute(
@@ -35,7 +42,7 @@ public sealed class DocsStandardsMigrateCommand(IKyberWeaveConfigRepository conf
             return 1;
         }
 
-        StandardsFolderMigration migration = new(settings.Path, ontology);
+        StandardsFolderMigration migration = new(files, settings.Path, ontology, paths, environment, ids);
         StandardsFolderMigrationResult result;
         try
         {

@@ -1,3 +1,5 @@
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Configuration;
 
 namespace KyberWeave.Core.Docs.Scaffolding;
@@ -30,15 +32,30 @@ public sealed class StandardsTemplateDiff
 {
     private static readonly string[] HostOwnedKeys = ["owner:", "status:", "last-reviewed:"];
 
+    private readonly IFileSystem _files;
     private readonly OntologyConfig _config;
     private readonly string _repoRoot;
 
-    /// <summary>Creates the diff over a repository and its ontology.</summary>
-    public StandardsTemplateDiff(string repoRoot, OntologyConfig config)
+    /// <summary>Creates the diff over the seams it reads through.</summary>
+    /// <param name="files">Reads the host's standards files.</param>
+    /// <param name="repoRoot">The repository whose standards folders are compared.</param>
+    /// <param name="config">The ontology that declares the technologies and roles.</param>
+    /// <param name="paths">Turns the repository root into a full path.</param>
+    /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
+    public StandardsTemplateDiff(
+        IFileSystem files,
+        string repoRoot,
+        OntologyConfig config,
+        IPathResolver paths,
+        IProcessEnvironment environment)
     {
+        ArgumentNullException.ThrowIfNull(files);
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
         ArgumentNullException.ThrowIfNull(config);
-        _repoRoot = Path.GetFullPath(repoRoot);
+        ArgumentNullException.ThrowIfNull(paths);
+        ArgumentNullException.ThrowIfNull(environment);
+        _files = files;
+        _repoRoot = paths.GetFullPath(repoRoot, environment.CurrentDirectory);
         _config = config;
     }
 
@@ -82,7 +99,7 @@ public sealed class StandardsTemplateDiff
     private StandardsFolderDiff? Compare(string docsRoot, string scope)
     {
         string folder = $"{docsRoot}/{DocsLayout.Standards}/{scope}";
-        if (!Directory.Exists(Absolute(folder))) return null;
+        if (!_files.DirectoryExists(Absolute(folder))) return null;
 
         List<string> missing = [];
         List<string> changed = [];
@@ -98,13 +115,13 @@ public sealed class StandardsTemplateDiff
                 continue;
             }
 
-            if (!File.Exists(Absolute(hostPath)))
+            if (!_files.FileExists(Absolute(hostPath)))
             {
                 missing.Add(fileName);
                 continue;
             }
 
-            string host = Normalize(File.ReadAllText(Absolute(hostPath)));
+            string host = Normalize(_files.ReadAllText(Absolute(hostPath)));
             if (!string.Equals(host, Normalize(template), StringComparison.Ordinal))
             {
                 changed.Add(fileName);
@@ -115,8 +132,8 @@ public sealed class StandardsTemplateDiff
             .Select(part => KyberStandardsTemplates.FileName(scope, part))
             .ToHashSet(StringComparer.Ordinal);
 
-        List<string> hostOnly = Directory
-            .EnumerateFiles(Absolute(folder))
+        List<string> hostOnly = _files
+            .EnumerateFiles(Absolute(folder), "*", recursive: false)
             .Select(Path.GetFileName)
             .Where(file => file is not null && !templateNames.Contains(file))
             .Select(file => file!)

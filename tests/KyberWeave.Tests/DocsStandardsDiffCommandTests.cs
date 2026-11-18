@@ -40,7 +40,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
         Write("6-Docs/standards/csharp/csharp.standards.md", changed);
         Write("6-Docs/standards/csharp/extra.md", "host-owned note");
 
-        StandardsDiffResult result = new StandardsTemplateDiff(_temp.Path, Declared).Run();
+        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, Declared).Run();
 
         StandardsFolderDiff folder = Assert.Single(result.Folders);
         Assert.Equal("csharp", folder.Name);
@@ -60,7 +60,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
             .Replace("\nlast-reviewed: 2026-08-16\n", "\nlast-reviewed: 2026-11-16\n", StringComparison.Ordinal);
         Write("6-Docs/standards/csharp/csharp.standards.md", host);
 
-        StandardsDiffResult result = new StandardsTemplateDiff(_temp.Path, Declared).Run();
+        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, Declared).Run();
 
         Assert.DoesNotContain("csharp.standards.md", Assert.Single(result.Folders).Changed);
     }
@@ -76,7 +76,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
                 template!);
         }
 
-        StandardsFolderDiff folder = Assert.Single(new StandardsTemplateDiff(_temp.Path, Declared).Run().Folders);
+        StandardsFolderDiff folder = Assert.Single(DocsPorts.StandardsDiff(_temp.Path, Declared).Run().Folders);
 
         Assert.Empty(folder.Missing);
         Assert.Empty(folder.Changed);
@@ -95,7 +95,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
         string host = standard! + "\nstatus: review needed\n";
         Write("6-Docs/standards/csharp/csharp.standards.md", host);
 
-        StandardsDiffResult result = new StandardsTemplateDiff(_temp.Path, Declared).Run();
+        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, Declared).Run();
 
         Assert.Contains("csharp.standards.md", Assert.Single(result.Folders).Changed);
     }
@@ -114,7 +114,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
         };
         Write("handbook/standards/csharp/csharp.standards.md", "# ours\n");
 
-        StandardsFolderDiff folder = Assert.Single(new StandardsTemplateDiff(_temp.Path, twoRoots).Run().Folders);
+        StandardsFolderDiff folder = Assert.Single(DocsPorts.StandardsDiff(_temp.Path, twoRoots).Run().Folders);
 
         Assert.Equal("handbook", folder.Root);
         Assert.Contains("csharp.rules.md", folder.Missing);
@@ -191,7 +191,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
     public void ANameThatIsNotDeclaredIsRefusedWithTheNearestMatch()
     {
         ArgumentException error = Assert.Throws<ArgumentException>(() =>
-            new StandardsTemplateDiff(_temp.Path, Declared).Run("cshar"));
+            DocsPorts.StandardsDiff(_temp.Path, Declared).Run("cshar"));
 
         Assert.Contains("csharp", error.Message, StringComparison.Ordinal);
     }
@@ -202,7 +202,7 @@ public class DocsStandardsDiffCommandTests : IDisposable
         OntologyConfig two = new() { Technologies = ["csharp", "python"] };
         Write("6-Docs/standards/csharp/csharp.standards.md", "x");
 
-        StandardsDiffResult result = new StandardsTemplateDiff(_temp.Path, two).Run();
+        StandardsDiffResult result = DocsPorts.StandardsDiff(_temp.Path, two).Run();
 
         Assert.Single(result.Folders);
         Assert.Equal("csharp", result.Folders[0].Name);

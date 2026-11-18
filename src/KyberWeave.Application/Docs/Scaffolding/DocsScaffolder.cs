@@ -1,5 +1,6 @@
 using System.IO.Enumeration;
 using System.Text;
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
@@ -29,6 +30,8 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
 {
     private readonly IRepositoryFileStore _files;
     private readonly IKyberWeaveConfigRepository _config;
+    private readonly IPathResolver _paths;
+    private readonly IProcessEnvironment _environment;
     private readonly TimeProvider _time;
     private readonly ReviewBlockWriter _reviewBlock;
 
@@ -58,16 +61,22 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// <param name="config">Loads and locates the host configuration.</param>
     /// <param name="lister">Lists the repository's files, for project-root detection.</param>
     /// <param name="tree">Answers the path questions the review configuration parser asks.</param>
+    /// <param name="paths">Turns the caller's root spelling into a full path and checks a write's containment.</param>
+    /// <param name="environment">Supplies the base directory a relative root is resolved against.</param>
     /// <param name="time">Supplies the date every generated document carries.</param>
     public DocsScaffolder(
         IRepositoryFileStore files,
         IKyberWeaveConfigRepository config,
         IRepositoryFileLister lister,
         IRepositoryTreeProbe tree,
+        IPathResolver paths,
+        IProcessEnvironment environment,
         TimeProvider time)
     {
         _files = files ?? throw new ArgumentNullException(nameof(files));
         _config = config ?? throw new ArgumentNullException(nameof(config));
+        _paths = paths ?? throw new ArgumentNullException(nameof(paths));
+        _environment = environment ?? throw new ArgumentNullException(nameof(environment));
         _time = time ?? throw new ArgumentNullException(nameof(time));
         _reviewBlock = new ReviewBlockWriter(files, lister, tree);
     }
@@ -83,7 +92,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
         IReadOnlyList<string>? standards = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(repoRoot);
-        string root = Path.GetFullPath(repoRoot);
+        string root = _paths.GetFullPath(repoRoot, _environment.CurrentDirectory);
 
         ArgumentException.ThrowIfNullOrWhiteSpace(owner);
         string resolvedOwner = owner.Trim();
@@ -448,11 +457,12 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
     /// </remarks>
     private string RequireContained(string repoRoot, string relativePath, string parameterName)
     {
-        string absolute = Path.GetFullPath(
-            Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+        string absolute = _paths.GetFullPath(
+            Path.Combine(repoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)),
+            repoRoot);
 
         string boundary = RepositoryBoundary.For(repoRoot, Path.DirectorySeparatorChar);
-        if (!RepositoryBoundary.IsWithin(absolute, boundary, OperatingSystem.IsWindows()))
+        if (!RepositoryBoundary.IsWithin(absolute, boundary, _environment.IsFileSystemCaseInsensitive))
         {
             throw new ArgumentException(
                 $"Refusing to write outside the repository root: '{relativePath}' resolves to '{absolute}'.",
@@ -757,7 +767,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             return FileSystemName.MatchesSimpleExpression(
                 pattern,
                 Path.GetFileName(databaseRelativePath),
-                ignoreCase: OperatingSystem.IsWindows());
+                ignoreCase: _environment.IsFileSystemCaseInsensitive);
         }
 
 #pragma warning disable CA1847 // Single-char Contains with StringComparison requires string overload to satisfy CA1307
@@ -766,7 +776,7 @@ public sealed class DocsScaffolder : IDocsScaffoldingService
             : FileSystemName.MatchesSimpleExpression(
                 pattern.Replace("**", "*", StringComparison.Ordinal),
                 databaseRelativePath,
-                ignoreCase: OperatingSystem.IsWindows());
+                ignoreCase: _environment.IsFileSystemCaseInsensitive);
 #pragma warning restore CA1847
     }
 
