@@ -411,10 +411,9 @@ public sealed class ArbiterHarnessGating : IArbiterHarnessGating
         string shim = _paths.GetFullPath(hookPath, _environment.CurrentDirectory);
         return receipt.Files.Any(file =>
             string.Equals(file.Target, token, StringComparison.Ordinal)
-            && string.Equals(
+            && _paths.AreSame(
                 _paths.GetFullPath(Path.Combine(globalRoot, file.RelativePath), _environment.CurrentDirectory),
-                shim,
-                StringComparison.Ordinal));
+                shim));
     }
 
     private static string? ResolveGlobalRootOrNull(ISquadGlobalRootResolver roots, SquadTarget target)

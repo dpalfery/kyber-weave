@@ -51,6 +51,34 @@ public sealed class ArbiterHarnessGatingSeamsTests
         Assert.Contains(report.Rows, row => row.Token == "kilo");
     }
 
+    /// <summary>
+    /// On a volume that folds names, a receipt spelling that differs only in case names the same shim file, so the
+    /// harness still owns its global hook. A plain spelling comparison would report the hook as not installed.
+    /// </summary>
+    [Fact]
+    public void Build_CountsAShimHookOwned_WhenTheReceiptSpellingDiffersOnlyInCase()
+    {
+        InMemoryFileSystem files = new(caseSensitive: false);
+        files.CreateDirectory(Home);
+        files.CreateDirectory(Root);
+        files.CreateDirectory("/kw/home/.kilo");
+        files.CreateDirectory("/kw/home/.kilo/plugin");
+        files.WriteAllText(ShimPath, "// kyber-arbiter");
+        FakeSquadStateStore store = StoreOwning("PLUGIN/kyber-arbiter.ts");
+        ArbiterHarnessGating gating = new(
+            store,
+            new FakeSquadGlobalRootResolver(Home),
+            new NoClaudeHooks(),
+            files,
+            new NoDeployment(),
+            new FakePathResolver(files),
+            _environment);
+
+        HarnessGatingReport report = gating.Build(Root, Home, KyberWeaveConfigDefaults.Product, []);
+
+        Assert.Contains("kilo", report.UnlistedGlobalTokens);
+    }
+
     /// <summary>A receipt file for another harness names no shim of this one, so the harness is not installed here.</summary>
     [Fact]
     public void Build_CountsNoShimHookOwned_WhenTheReceiptNamesAnotherFile()
