@@ -519,7 +519,7 @@ public sealed class DocsCloseoutCommandTests
 
     private static PlanCloseout Closer(DocFixture fixture, Action<string>? afterActivePlanCheck = null, Action<string>? beforeWriteTarget = null) =>
         new(fixture.Root, KyberWeaveConfig.ProductDefaults,
-            () => new DocumentLoader(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
+            () => RealDocumentLoader.Create(fixture.Root, KyberWeaveConfig.ProductDefaults.Ontology),
             DocsPorts.Files, DocsPorts.Process, DocsPorts.Exclusive)
         {
             AfterActivePlanCheck = afterActivePlanCheck,

@@ -256,13 +256,13 @@ public class MotorcycleRagHostProfileTests
         }
 
         public IReadOnlyList<DocumentModel> LoadSubjects() =>
-            new DocumentLoader(Root, _config.Ontology).Load().Documents
+            RealDocumentLoader.Create(Root, _config.Ontology).Load().Documents
                 .Where(d => d.RelativePath != "6-Docs/catalog.md")
                 .ToList();
 
         public DiagnosticReport Validate() =>
             new DocSpecValidator(Root, _config.Ontology)
-                .Validate(new DocumentLoader(Root, _config.Ontology).Load());
+                .Validate(RealDocumentLoader.Create(Root, _config.Ontology).Load());
 
         public void Dispose()
         {

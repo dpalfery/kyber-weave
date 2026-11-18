@@ -142,7 +142,7 @@ public sealed class TodoInventoryValidatorTests
             .Write("6-Docs/README.md", Index("None.", "docs/index"))
             .Write("6-Docs/archive/todo/closed-spike.md", Todo("todo/closed-spike"));
 
-        DocumentSet set = new DocumentLoader(fixture.Root, ArchiveInCorpus).Load();
+        DocumentSet set = RealDocumentLoader.Create(fixture.Root, ArchiveInCorpus).Load();
         DiagnosticReport report = new TodoInventoryValidator(HostOverrides).Validate(set);
 
         Assert.True(report.Items.Count == 0, Describe(report));
@@ -164,7 +164,7 @@ public sealed class TodoInventoryValidatorTests
                 Todo("todo/closed-spike", "- [Spike: cleanup](../../todo/spike-cleanup.md)"))
             .Write("6-Docs/todo/spike-cleanup.md", Todo("todo/spike-cleanup"));
 
-        DocumentSet set = new DocumentLoader(fixture.Root, ArchiveInCorpus).Load();
+        DocumentSet set = RealDocumentLoader.Create(fixture.Root, ArchiveInCorpus).Load();
         DiagnosticReport report = new TodoInventoryValidator(HostOverrides).Validate(set);
 
         Diagnostic finding = Assert.Single(report.Items);

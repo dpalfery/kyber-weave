@@ -681,7 +681,7 @@ public sealed class PlanTaskFileValidatorTests
         fixture.Write("6-Docs/plans/locked/placeholder.txt", "x");
         fixture.Write("6-Docs/plans/zz-later.tasks.json.new", PlanTaskFileProbe.TaskFile());
         OntologyConfig ontology = OntologyConfig.ProductDefaults;
-        DocumentSet set = new DocumentLoader(fixture.Root, ontology).Load();
+        DocumentSet set = RealDocumentLoader.Create(fixture.Root, ontology).Load();
         KyberWeaveConfig config = KyberWeaveConfig.ProductDefaults.WithOntology(ontology);
         string locked = Path.Combine(fixture.Root, "6-Docs", "plans", "locked");
         File.SetUnixFileMode(locked, UnixFileMode.None);

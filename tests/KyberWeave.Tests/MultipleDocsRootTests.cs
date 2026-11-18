@@ -215,7 +215,7 @@ public class MultipleDocsRootTests : IDisposable
         Write("automation/README.md", Document("automation/readme"));
         Write("lab/README.md", Document("lab/readme"));
 
-        List<string> paths = new DocumentLoader(_temp.Path, MultiRootConfig).Load()
+        List<string> paths = RealDocumentLoader.Create(_temp.Path, MultiRootConfig).Load()
             .Documents.Select(d => d.RelativePath).ToList();
 
         Assert.Equal(["docs/catalog.md", "automation/README.md", "lab/README.md"], paths);
@@ -232,11 +232,11 @@ public class MultipleDocsRootTests : IDisposable
         Write("docs/nested/guide.md", Document("nested/guide"));
 
         OntologyConfig config = OntologyConfig.ProductDefaults.WithDocsRoots(["docs", "docs/nested"]);
-        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
 
         Assert.Single(documents, d => d.RelativePath == "docs/nested/guide.md");
         Assert.False(new DocSpecValidator(_temp.Path, config).Validate(
-            new DocumentLoader(_temp.Path, config).Load()).HasErrors);
+            RealDocumentLoader.Create(_temp.Path, config).Load()).HasErrors);
     }
 
     /// <summary>Exclusion entries are recorded relative to a root, not to the repository.</summary>
@@ -248,7 +248,7 @@ public class MultipleDocsRootTests : IDisposable
         Write("automation/vendored/upstream.md", "# no frontmatter either\n");
 
         OntologyConfig config = MultiRootConfig.Clone(excludedFiles: ["vendored/upstream.md"]);
-        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
 
         Assert.DoesNotContain(documents, d => d.RelativePath.EndsWith("upstream.md", StringComparison.Ordinal));
     }
@@ -262,7 +262,7 @@ public class MultipleDocsRootTests : IDisposable
         OntologyConfig config = OntologyConfig.ProductDefaults
             .WithDocsRoots(["docs", "docs/nested"])
             .Clone(excludedFiles: ["skip.md"]);
-        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
 
         Assert.DoesNotContain(documents, d => d.RelativePath == "docs/nested/skip.md");
     }
@@ -322,7 +322,7 @@ public class MultipleDocsRootTests : IDisposable
         WriteCatalog(".kyber-weave/catalog.md", owner: "not-in-the-catalog");
 
         OntologyConfig config = MultiRootConfig.Clone(catalogPath: ".kyber-weave/catalog.md");
-        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
 
         Assert.Contains(documents, d => d.RelativePath == ".kyber-weave/catalog.md");
         Assert.Contains(Validate(config).Items, i =>
@@ -335,7 +335,7 @@ public class MultipleDocsRootTests : IDisposable
         WriteCatalog("docs/catalog.md");
 
         OntologyConfig config = MultiRootConfig.Clone(catalogPath: "docs/catalog.md");
-        IReadOnlyList<DocumentModel> documents = new DocumentLoader(_temp.Path, config).Load().Documents;
+        IReadOnlyList<DocumentModel> documents = RealDocumentLoader.Create(_temp.Path, config).Load().Documents;
 
         Assert.Single(documents, d => d.RelativePath == "docs/catalog.md");
     }
@@ -581,5 +581,5 @@ public class MultipleDocsRootTests : IDisposable
 
     private DiagnosticReport Validate(OntologyConfig config) =>
         new DocSpecValidator(_temp.Path, config).Validate(
-            new DocumentLoader(_temp.Path, config).Load());
+            RealDocumentLoader.Create(_temp.Path, config).Load());
 }

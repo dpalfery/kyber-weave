@@ -579,7 +579,7 @@ public sealed class DocsScaffolderTests : IDisposable
     {
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: "platform-team");
 
-        DocumentSet set = new DocumentLoader(_temp.Path, "docs").Load();
+        DocumentSet set = RealDocumentLoader.Create(_temp.Path, "docs").Load();
 
         Assert.Contains("platform-team", set.Owners);
         Assert.All(set.Documents, d => Assert.Equal("platform-team", d.Frontmatter.Owner));
@@ -683,7 +683,7 @@ public sealed class DocsScaffolderTests : IDisposable
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot, owner);
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
-        DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
+        DocumentSet set = RealDocumentLoader.Create(_temp.Path, ontology).Load();
         Assert.Equal(docsRoot, ontology.DocsRoot);
         Assert.Contains(owner, set.Owners);
         Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
@@ -701,7 +701,7 @@ public sealed class DocsScaffolderTests : IDisposable
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: owner, kyberStandards: true);
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
-        DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
+        DocumentSet set = RealDocumentLoader.Create(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
         Assert.Contains(owner, set.Owners);
         Assert.All(set.Documents, document => Assert.Equal(owner, document.Frontmatter.Owner));
@@ -715,7 +715,7 @@ public sealed class DocsScaffolderTests : IDisposable
         DocsTestCommands.Scaffolding.Scaffold(_temp.Path, owner: " platform ");
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
-        DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
+        DocumentSet set = RealDocumentLoader.Create(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
         Assert.Contains("platform", set.Owners);
         Assert.All(set.Documents, document => Assert.Equal("platform", document.Frontmatter.Owner));
@@ -818,7 +818,7 @@ public sealed class DocsScaffolderTests : IDisposable
         ScaffoldResult result = DocsTestCommands.Scaffolding.Scaffold(_temp.Path, docsRoot);
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
-        DocumentSet set = new DocumentLoader(_temp.Path, ontology).Load();
+        DocumentSet set = RealDocumentLoader.Create(_temp.Path, ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology).Validate(set);
 
         // The ontology reference, the catalog, the corpus index, and one index per
@@ -956,7 +956,7 @@ public sealed class DocsScaffolderTests : IDisposable
 
         OntologyConfig ontology = ConfigFileReader.Load(_temp.Path).Ontology;
         DiagnosticReport report = new DocSpecValidator(_temp.Path, ontology)
-            .Validate(new DocumentLoader(_temp.Path, ontology).Load());
+            .Validate(RealDocumentLoader.Create(_temp.Path, ontology).Load());
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
     }
 
@@ -1028,7 +1028,7 @@ public sealed class DocsScaffolderTests : IDisposable
         }
 
         // Running DocSpecValidator.Validate yields 0 findings
-        DocumentSet set = new DocumentLoader(_temp.Path, config.Ontology).Load();
+        DocumentSet set = RealDocumentLoader.Create(_temp.Path, config.Ontology).Load();
         DiagnosticReport report = new DocSpecValidator(_temp.Path, config.Ontology).Validate(set);
         Assert.False(report.HasErrors, string.Join("; ", report.Items.Select(i => $"{i.Code} {i.Message}")));
         Assert.Equal(3 + DocsLayout.Folders.Count + (KyberStandardsTemplates.All.Count * 3) + 1, set.Documents.Count);

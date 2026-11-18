@@ -314,7 +314,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SqliteAnalysisPersistence` (`Docs/Analysis/Persistence/SqliteAnalysisPersistence.cs`) | file system, paths | 4.4 |
 | `PresentFile` (`Docs/Closeout/PresentFile.cs`) | file system | 4.4 |
 | `LaunchCommandResolver` (`Docs/Mcp/LaunchCommandResolver.cs`) | file system, paths, environment | 4.4 |
-| `DocumentLoader` (`Docs/Parsing/DocumentLoader.cs`) | file system, paths | 4.4 |
 | `FileCodeGraphIndexWorkspace` (`Doctor/FileCodeGraphIndexWorkspace.cs`) | file system, clock, identifiers | clock: 4.9 |
 | `DocsRootPath` (`FileSystem/DocsRootPath.cs`) | file system | 4.4 |
 | `FileBackgroundDispatchStore` (`Hooks/Arbiter/FileBackgroundDispatchStore.cs`) | file system, clock, identifiers | 4.4 |

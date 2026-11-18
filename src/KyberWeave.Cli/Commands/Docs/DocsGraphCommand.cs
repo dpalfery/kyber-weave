@@ -16,7 +16,8 @@ public sealed class DocsExportGraphCommand(
     IManagedGlossaryFactory glossaries,
     ICodeGraphPortsFactory codeGraph,
     IKyberWeaveConfigRepository configs,
-    IWritableFileSystem files) : Command<DocsExportGraphSettings>
+    IWritableFileSystem files,
+    IDocumentSourceFactory documents) : Command<DocsExportGraphSettings>
 {
     public override int Execute(CommandContext context, DocsExportGraphSettings settings, CancellationToken cancellationToken)
     {
@@ -25,7 +26,8 @@ public sealed class DocsExportGraphCommand(
                 configs,
                 settings,
                 report,
-                out DocumentLoader? loader,
+                documents,
+                out IDocumentSource? loader,
                 out KyberWeaveConfig config))
         {
             CommandHelpers.Finish(report, settings, "docs export-graph", "Document");

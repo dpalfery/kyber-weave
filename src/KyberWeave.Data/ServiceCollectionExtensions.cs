@@ -38,7 +38,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
-        services.TryAddSingleton<IDocumentSourceFactory>(_ => new DocumentLoaderFactory());
         services.TryAddSingleton<IDoctorFileSystem>(_ => new PhysicalDoctorFileSystem());
         services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
             sp.GetRequiredService<IFileSystem>(),
