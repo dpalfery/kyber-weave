@@ -37,7 +37,10 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddWeaveRunData();
         services.TryAddSingleton(TimeProvider.System);
-        services.TryAddSingleton<IProductRootLocator>(sp => new CheckoutProductRootLocator(sp.GetRequiredService<IWritableFileSystem>()));
+        services.TryAddSingleton<IProductRootLocator>(sp => new CheckoutProductRootLocator(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IRepositoryFileStore>(_ => new PhysicalRepositoryFileStore());
         services.TryAddSingleton<IBoundedProcessExecutor>(_ => new KernelBoundedProcessExecutor());
         services.TryAddSingleton<IExclusiveFileWriter>(_ => new ExclusiveFileWriter());
@@ -55,9 +58,15 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<ISeatFolder, FileSeatFolder>();
         services.TryAddSingleton<ISkillArchiveWriter, ZipSkillArchiveWriter>();
         services.TryAddSingleton<IReviewEvidenceStore>(_ => new FileReviewEvidenceStore());
-        services.TryAddSingleton<IProjectFileLocator>(_ => new FileProjectFileLocator());
+        services.TryAddSingleton<IProjectFileLocator>(sp => new FileProjectFileLocator(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IBoundedFileReader>(_ => new FileBoundedFileReader());
-        services.TryAddSingleton<IReviewDecisionCacheStore>(_ => new FileReviewDecisionCacheStore());
+        services.TryAddSingleton<IReviewDecisionCacheStore>(sp => new FileReviewDecisionCacheStore(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IRepositoryToolSettings>(sp => new ConfigFileToolSettings(sp.GetRequiredService<IKyberWeaveConfigRepository>()));
         _ = services.AddWeaveArbiterData();
         return services;

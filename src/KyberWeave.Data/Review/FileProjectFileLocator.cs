@@ -1,9 +1,10 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 
 namespace KyberWeave.Data.Review;
 
 /// <summary>Finds the project file of a source file by walking up the directories on disk.</summary>
-public sealed class FileProjectFileLocator : IProjectFileLocator
+public sealed class FileProjectFileLocator(IFileSystem files, IPathResolver paths, IProcessEnvironment environment) : IProjectFileLocator
 {
     /// <inheritdoc />
     public string? NearestProjectFile(string? repositoryRoot, string file)
@@ -13,13 +14,13 @@ public sealed class FileProjectFileLocator : IProjectFileLocator
             return null;
         }
 
-        string root = Path.GetFullPath(repositoryRoot);
-        string? directory = Path.GetDirectoryName(Path.GetFullPath(Path.Combine(root, file)));
+        string root = paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
+        string? directory = Path.GetDirectoryName(paths.GetFullPath(file, root));
         while (directory is not null && directory.StartsWith(root, StringComparison.Ordinal))
         {
-            if (Directory.Exists(directory))
+            if (files.DirectoryExists(directory))
             {
-                string? found = Directory.EnumerateFiles(directory)
+                string? found = files.EnumerateFiles(directory, "*", recursive: false)
                     .FirstOrDefault(path => Path.GetExtension(path) is ".csproj" or ".fsproj" or ".vbproj"
                                             || Path.GetFileName(path) is "package.json" or "pyproject.toml" or "Cargo.toml" or "go.mod");
                 if (found is not null)
