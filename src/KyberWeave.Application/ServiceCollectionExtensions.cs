@@ -151,7 +151,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<McpWiringFixes>(),
             sp.GetRequiredService<ILaunchCommandResolverFactory>()));
         services.TryAddSingleton<IDocsHostConfiguration, HostConfiguration>();
-        services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(sp.GetRequiredService<IRepositoryFileStore>()));
+        services.TryAddSingleton<IDocumentSourceFactory>(sp => new DocumentLoaderFactory(
+            sp.GetRequiredService<IRepositoryFileStore>(),
+            sp.GetRequiredService<IPathResolver>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
         services.TryAddSingleton<IGitWorktreeIdentity>(sp => new GitWorktreeIdentity(
             sp.GetRequiredService<IProcessRunner>(),
             sp.GetRequiredService<IPathResolver>(),
