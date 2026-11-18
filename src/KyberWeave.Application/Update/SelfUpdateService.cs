@@ -15,6 +15,7 @@ internal sealed class SelfUpdateService(
     ISelfUpdateSystem system,
     IArbiterHookRefresherFactory refreshers,
     IArbiterRefreshTargets targets,
+    CopilotPromptRefresher copilotPrompt,
     HttpMessageHandler? handler = null) : ISelfUpdateService
 {
     /// <inheritdoc />
@@ -25,7 +26,7 @@ internal sealed class SelfUpdateService(
         SelfUpdateHost snapshot = host();
         IArbiterHookRefresher refresher = refreshers.Create(log);
         using SelfUpdater updater = handler is null
-            ? SelfUpdater.Create(snapshot, log, refresher, system: system, arbiterTargets: targets, readEnvironment: environment.GetVariable)
+            ? SelfUpdater.Create(snapshot, log, refresher, system: system, arbiterTargets: targets, readEnvironment: environment.GetVariable, copilotPrompt: copilotPrompt)
             : new SelfUpdater(
                 handler,
                 snapshot,
@@ -33,7 +34,8 @@ internal sealed class SelfUpdateService(
                 environment.GetVariable,
                 arbiterHookRefresher: refresher,
                 system: system,
-                arbiterTargets: targets);
+                arbiterTargets: targets,
+                copilotPrompt: copilotPrompt);
         return updater.Run(options);
     }
 }

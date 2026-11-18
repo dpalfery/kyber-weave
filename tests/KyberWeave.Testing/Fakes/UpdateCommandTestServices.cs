@@ -66,8 +66,6 @@ internal static class UpdateCommandTestServices
 
         public void ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs) =>
             _inner.ReplaceBinary(extractedBinaryPath, destinationPath, windows, macOs);
-
-        public bool RefreshCopilotPrompt(string homeDirectory, Action<string> log) => _inner.RefreshCopilotPrompt(homeDirectory, log);
     }
 }
 

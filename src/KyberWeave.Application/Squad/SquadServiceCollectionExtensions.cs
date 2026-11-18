@@ -2,6 +2,7 @@ using KyberWeave.Application.Squad.Packaging;
 using KyberWeave.Application.Update;
 using KyberWeave.Cli.Commands.Squad.Infrastructure;
 using KyberWeave.Cli.Update;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
@@ -11,6 +12,8 @@ using KyberWeave.Core.Squad.Model;
 using KyberWeave.Core.Squad.Packaging;
 using KyberWeave.Core.Squad.Release;
 using KyberWeave.Core.Squad.Rendering;
+using KyberWeave.Data.Host;
+using KyberWeave.Domain.CopilotPrompt;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -53,12 +56,17 @@ public static class SquadServiceCollectionExtensions
             sp.GetRequiredService<ISquadCompanionSkills>()));
         services.TryAddSingleton<IArbiterRefreshTargets, CliArbiterRefreshTargets>();
         services.TryAddSingleton<IArbiterHookRefresherFactory, ArbiterHookRefresherFactory>();
+        services.TryAddSingleton<IEmbeddedResources>(_ => new AssemblyEmbeddedResources(typeof(CopilotPromptFile).Assembly));
+        services.TryAddSingleton<CopilotPromptRefresher>(sp => new CopilotPromptRefresher(
+            sp.GetRequiredService<IWritableFileSystem>(),
+            sp.GetRequiredService<IEmbeddedResources>()));
         services.TryAddSingleton<ISelfUpdateService>(sp => new SelfUpdateService(
             sp.GetRequiredService<Func<SelfUpdateHost>>(),
             sp.GetRequiredService<IProcessEnvironment>(),
             sp.GetRequiredService<ISelfUpdateSystem>(),
             sp.GetRequiredService<IArbiterHookRefresherFactory>(),
             sp.GetRequiredService<IArbiterRefreshTargets>(),
+            sp.GetRequiredService<CopilotPromptRefresher>(),
             sp.GetService<HttpMessageHandler>()));
         services.TryAddSingleton<ISquadLifecycleService>(sp => CreateLifecycle(sp, sp.GetRequiredService<ISquadReleaseSource>()));
         services.TryAddSingleton<ISquadInstanceService>(sp => new SquadInstanceService(

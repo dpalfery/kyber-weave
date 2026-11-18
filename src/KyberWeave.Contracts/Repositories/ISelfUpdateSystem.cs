@@ -45,10 +45,4 @@ public interface ISelfUpdateSystem
     /// <param name="windows">Whether the platform is Windows.</param>
     /// <param name="macOs">Whether the platform is macOS, which clears the quarantine attribute first.</param>
     void ReplaceBinary(string extractedBinaryPath, string destinationPath, bool windows, bool macOs);
-
-    /// <summary>Rewrites the installed Copilot system-prompt file to the text this binary ships, when it is installed.</summary>
-    /// <param name="homeDirectory">The user's home directory.</param>
-    /// <param name="log">Receives one line per warning.</param>
-    /// <returns>True when a file was rewritten.</returns>
-    bool RefreshCopilotPrompt(string homeDirectory, Action<string> log);
 }

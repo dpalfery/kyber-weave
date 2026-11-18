@@ -1,4 +1,4 @@
-using System.Text;
+using KyberWeave.Contracts.Host;
 using YamlDotNet.RepresentationModel;
 using YamlDotNet.Core;
 
@@ -10,7 +10,7 @@ namespace KyberWeave.Domain.CopilotPrompt;
 /// </summary>
 public static class CopilotPromptFile
 {
-    /// <summary>The manifest name the prompt is embedded under; see the Core project file.</summary>
+    /// <summary>The manifest name the prompt is embedded under; see the Application area props.</summary>
     private const string ResourceName = "CopilotPrompt.system-prompt.yaml";
 
     /// <summary>The only top-level keys VS Code reads from a prompt file.</summary>
@@ -20,13 +20,13 @@ public static class CopilotPromptFile
     /// <summary>
     /// Returns the system-prompt YAML text that ships inside the Kyber-Weave binary.
     /// </summary>
+    /// <param name="resources">The embedded-resource seam the text is read through.</param>
     /// <returns>The embedded YAML text with a top-level <c>systemPrompt</c> key.</returns>
-    public static string EmbeddedText()
+    /// <exception cref="MissingEmbeddedResourceException">The prompt is missing from the binary.</exception>
+    public static string EmbeddedText(IEmbeddedResources resources)
     {
-        using Stream stream = typeof(CopilotPromptFile).Assembly.GetManifestResourceStream(ResourceName)
-            ?? throw new InvalidOperationException($"The embedded resource '{ResourceName}' is missing from this binary.");
-        using StreamReader reader = new(stream, Encoding.UTF8);
-        return reader.ReadToEnd();
+        ArgumentNullException.ThrowIfNull(resources);
+        return resources.ReadAllText(ResourceName);
     }
 
     /// <summary>

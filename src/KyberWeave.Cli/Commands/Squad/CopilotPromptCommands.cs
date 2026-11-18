@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using KyberWeave.Cli.Commands;
+using KyberWeave.Contracts.Host;
 using KyberWeave.Core.Docs.Mcp;
 using KyberWeave.Core.FileSystem;
 using KyberWeave.Domain.CopilotPrompt;
@@ -49,20 +50,25 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
 {
     private readonly CopilotPromptEnvironment? _environment;
     private readonly IDoctorFileSystem _files;
+    private readonly IEmbeddedResources _resources;
 
-    /// <summary>Creates the command over the file-system seam the container resolves.</summary>
-    public CopilotPromptInstallCommand(IDoctorFileSystem files)
+    /// <summary>Creates the command over the file-system and embedded-resource seams the container resolves.</summary>
+    public CopilotPromptInstallCommand(IDoctorFileSystem files, IEmbeddedResources resources)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(resources);
         _files = files;
+        _resources = resources;
     }
 
     /// <summary>Creates the command for an injected environment.</summary>
-    internal CopilotPromptInstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files)
+    internal CopilotPromptInstallCommand(CopilotPromptEnvironment environment, IDoctorFileSystem files, IEmbeddedResources resources)
     {
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(resources);
         _environment = environment;
         _files = files;
+        _resources = resources;
     }
 
     /// <inheritdoc />
@@ -167,7 +173,7 @@ public sealed class CopilotPromptInstallCommand : Command<CopilotPromptSettings>
         try
         {
             // The prompt file goes first, so VS Code never reads a setting that points at a file that is not there yet.
-            AtomicFile.WriteAllText(promptPath, CopilotPromptFile.EmbeddedText());
+            AtomicFile.WriteAllText(promptPath, CopilotPromptFile.EmbeddedText(_resources));
             foreach ((string file, byte[] document) in writes)
                 AtomicFile.WriteAllBytes(file, document, writeThroughSymlink: true);
         }
