@@ -15,8 +15,12 @@ public sealed class FileContainedFileReader(IFileSystem files) : IContainedFileR
             .Where(segment => segment != ".")
             .ToArray();
 
-        if (segments.Length == 0)
+        if (segments.Length == 0
+            || segments.Contains("..", StringComparer.Ordinal)
+            || IsRooted(relativePath))
+        {
             return false;
+        }
 
         string current = repositoryRoot;
         foreach (string segment in segments)
@@ -41,4 +45,13 @@ public sealed class FileContainedFileReader(IFileSystem files) : IContainedFileR
 
         return [.. lines];
     }
+
+    /// <summary>
+    /// True when the caller spelled an absolute path, which is not repository-relative. A Windows drive form is refused
+    /// on every platform, as <see cref="Path.IsPathRooted(string)"/> does not treat it as rooted off Windows.
+    /// </summary>
+    private static bool IsRooted(string path) =>
+        Path.IsPathRooted(path)
+        || path.StartsWith("//", StringComparison.Ordinal)
+        || (path.Length >= 2 && char.IsAsciiLetter(path[0]) && path[1] == ':');
 }

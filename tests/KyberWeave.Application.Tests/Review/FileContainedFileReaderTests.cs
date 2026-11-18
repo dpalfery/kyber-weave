@@ -54,6 +54,21 @@ public sealed class FileContainedFileReaderTests
     }
 
     [Fact]
+    public void APathThatClimbsOutOfTheTreeIsNotContained()
+    {
+        _files.WriteAllText(Path.Combine(Root, "..", "outside.cs"), "outside");
+
+        Assert.False(_reader.IsContainedFile(Root, "../outside.cs"));
+        Assert.False(_reader.IsContainedFile(Root, "src/../../outside.cs"));
+    }
+
+    [Fact]
+    public void ARootedPathIsNotAContainedFile()
+    {
+        Assert.False(_reader.IsContainedFile(Root, Path.Combine(Root, "src", "a.cs")));
+    }
+
+    [Fact]
     public void ReadLinesSplitsTheFileTheSameWayTheFileSystemDoes()
     {
         string path = Path.Combine(Root, "src", "a.cs");
