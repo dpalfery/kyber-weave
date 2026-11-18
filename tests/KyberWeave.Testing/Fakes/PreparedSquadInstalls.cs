@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
+using System.Text;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Release;
 
@@ -168,8 +169,9 @@ public class PreparedSquadInstall : IDisposable
 /// </remarks>
 public static class PreparedSquadInstalls
 {
-    private static readonly ConcurrentDictionary<string, Lazy<PreparedSquadInstall>> Installs =
-        new(StringComparer.Ordinal);
+    private readonly record struct CacheKey(Type Type, string Key);
+
+    private static readonly ConcurrentDictionary<CacheKey, Lazy<PreparedSquadInstall>> Installs = new();
 
     private static readonly ConcurrentDictionary<string, int> BuildCounts = new(StringComparer.Ordinal);
 
@@ -192,7 +194,7 @@ public static class PreparedSquadInstalls
     /// if this is the first request.
     /// </summary>
     /// <typeparam name="T">The install type the recipe produces.</typeparam>
-    /// <param name="key">The recipe. Two callers with the same key share one install.</param>
+    /// <param name="key">The recipe. Two callers with the same key and type share one install.</param>
     /// <param name="build">Makes the install. It runs once, under a lock, and must not return null.</param>
     /// <returns>The one install for that recipe.</returns>
     public static T Get<T>(string key, Func<T> build)
@@ -201,17 +203,19 @@ public static class PreparedSquadInstalls
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(build);
 
+        CacheKey cacheKey = new(typeof(T), key);
         Lazy<PreparedSquadInstall> entry = Installs.GetOrAdd(
-            key,
-            static (recipe, factory) => new Lazy<PreparedSquadInstall>(
+            cacheKey,
+            static (ck, factory) => new Lazy<PreparedSquadInstall>(
                 () =>
                 {
-                    PreparedSquadInstall install = factory();
-                    BuildCounts.AddOrUpdate(recipe, 1, static (_, count) => count + 1);
+                    PreparedSquadInstall install = factory()
+                        ?? throw new InvalidOperationException($"Prepared install factory for '{ck.Key}' returned null.");
+                    BuildCounts.AddOrUpdate(ck.Key, 1, static (_, count) => count + 1);
                     return install;
                 },
                 LazyThreadSafetyMode.ExecutionAndPublication),
-            () => build()!);
+            build);
 
         try
         {
@@ -222,7 +226,7 @@ public static class PreparedSquadInstalls
             // A Lazy in ExecutionAndPublication mode caches its exception, so leaving this entry in place
             // would rethrow the one failure to every later request for the recipe, with no retry. Removing
             // this exact entry leaves one another thread has already stored in its place untouched.
-            _ = Installs.TryRemove(new KeyValuePair<string, Lazy<PreparedSquadInstall>>(key, entry));
+            _ = Installs.TryRemove(new KeyValuePair<CacheKey, Lazy<PreparedSquadInstall>>(cacheKey, entry));
             throw;
         }
     }
@@ -230,8 +234,8 @@ public static class PreparedSquadInstalls
     /// <summary>Removes every prepared install.</summary>
     public static void RemoveAll()
     {
-        foreach (string key in Installs.Keys)
-            Remove(key);
+        foreach (CacheKey cacheKey in Installs.Keys)
+            Remove(cacheKey.Key);
     }
 
     /// <summary>Removes the prepared install for <paramref name="key"/>, if there is one.</summary>
@@ -239,8 +243,15 @@ public static class PreparedSquadInstalls
     internal static void Remove(string key)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        if (Installs.TryRemove(key, out Lazy<PreparedSquadInstall>? entry) && entry.IsValueCreated)
-            entry.Value.Dispose();
+        foreach (CacheKey cacheKey in Installs.Keys)
+        {
+            if (string.Equals(cacheKey.Key, key, StringComparison.Ordinal) &&
+                Installs.TryRemove(cacheKey, out Lazy<PreparedSquadInstall>? entry) &&
+                entry.IsValueCreated)
+            {
+                entry.Value.Dispose();
+            }
+        }
 
         _ = BuildCounts.TryRemove(key, out _);
     }
@@ -254,7 +265,15 @@ public static class SquadInstallCopy
 {
     private static readonly SquadFileSystemPathSemantics Semantics = SquadFileSystemPathSemantics.Instance;
 
-    /// <summary>Copies a directory tree with <see cref="File.Copy"/>, which clones copy-on-write where the file system offers it.</summary>
+    private static readonly HashSet<string> TextExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".json", ".toml", ".yaml", ".yml", ".md", ".txt", ".sh", ".ps1",
+        ".cmd", ".bat", ".cfg", ".conf", ".ini", ".xml", ".env", ".gitignore",
+    };
+
+    /// <summary>
+    /// Copies a directory tree with <see cref="File.Copy"/>, preserving symbolic links and Unix file modes.
+    /// </summary>
     /// <param name="source">The directory to copy from. It is only read.</param>
     /// <param name="destination">The directory to copy into. It is created if it is missing.</param>
     /// <param name="include">Filters a path relative to <paramref name="source"/>; null copies everything.</param>
@@ -264,23 +283,7 @@ public static class SquadInstallCopy
         ArgumentException.ThrowIfNullOrWhiteSpace(destination);
 
         _ = Directory.CreateDirectory(destination);
-        foreach (string directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
-        {
-            string relative = Path.GetRelativePath(source, directory);
-            if (include is null || include(relative))
-                _ = Directory.CreateDirectory(Path.Combine(destination, relative));
-        }
-
-        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
-        {
-            string relative = Path.GetRelativePath(source, file);
-            if (include is not null && !include(relative))
-                continue;
-
-            string target = Path.Combine(destination, relative);
-            _ = Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
-        }
+        CopyDirectoryContents(source, source, destination, include);
     }
 
     /// <summary>
@@ -303,14 +306,7 @@ public static class SquadInstallCopy
         if (!Directory.Exists(stateDirectory) || string.Equals(from, to, StringComparison.Ordinal))
             return;
 
-        foreach (string file in Directory.EnumerateFiles(stateDirectory, "*", SearchOption.AllDirectories))
-        {
-            string text = File.ReadAllText(file);
-            if (!text.Contains(from, StringComparison.Ordinal))
-                continue;
-
-            File.WriteAllText(file, text.Replace(from, to, StringComparison.Ordinal));
-        }
+        ReRootTextFiles(stateDirectory, from, to);
     }
 
     /// <summary>
@@ -348,14 +344,7 @@ public static class SquadInstallCopy
         if (string.Equals(from, to, StringComparison.Ordinal))
             return File.Exists(receiptPath) ? store.DeserializeReceipt(File.ReadAllText(receiptPath)) : null;
 
-        foreach (string file in Directory.EnumerateFiles(deployedRoot, "*", SearchOption.AllDirectories))
-        {
-            string text = File.ReadAllText(file);
-            if (!text.Contains(from, StringComparison.Ordinal))
-                continue;
-
-            File.WriteAllText(file, text.Replace(from, to, StringComparison.Ordinal));
-        }
+        ReRootTextFiles(deployedRoot, from, to);
 
         if (!File.Exists(receiptPath))
             return null;
@@ -377,8 +366,139 @@ public static class SquadInstallCopy
                 })
             ]
         };
-        File.WriteAllText(receiptPath, store.SerializeReceipt(receipt));
+        WriteTextAtomically(receiptPath, store.SerializeReceipt(receipt));
         return receipt;
+    }
+
+    private static void CopyDirectoryContents(
+        string rootSource,
+        string currentSource,
+        string destination,
+        Func<string, bool>? include)
+    {
+        foreach (FileSystemInfo entry in new DirectoryInfo(currentSource).EnumerateFileSystemInfos("*", SearchOption.TopDirectoryOnly))
+        {
+            string relative = Path.GetRelativePath(rootSource, entry.FullName);
+            string target = Path.Combine(destination, relative);
+
+            if (entry.LinkTarget is not null)
+            {
+                if (include is not null && !include(relative))
+                    continue;
+
+                _ = Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                DeleteExistingTarget(target);
+                if (entry is DirectoryInfo)
+                    _ = Directory.CreateSymbolicLink(target, entry.LinkTarget);
+                else
+                    _ = File.CreateSymbolicLink(target, entry.LinkTarget);
+
+                continue;
+            }
+
+            if (entry is DirectoryInfo)
+            {
+                if (include is null || include(relative))
+                    _ = Directory.CreateDirectory(target);
+
+                CopyDirectoryContents(rootSource, entry.FullName, destination, include);
+                continue;
+            }
+
+            if (include is not null && !include(relative))
+                continue;
+
+            _ = Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(entry.FullName, target, overwrite: true);
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(target, File.GetUnixFileMode(entry.FullName));
+        }
+    }
+
+    private static void DeleteExistingTarget(string target)
+    {
+        if (File.Exists(target))
+        {
+            File.Delete(target);
+            return;
+        }
+
+        if (Directory.Exists(target))
+            Directory.Delete(target, recursive: false);
+    }
+
+    private static void ReRootTextFiles(string directory, string from, string to)
+    {
+        foreach (FileInfo entry in new DirectoryInfo(directory).EnumerateFiles("*", SearchOption.AllDirectories))
+        {
+            if (entry.LinkTarget is not null || !TextExtensions.Contains(entry.Extension))
+                continue;
+
+            string text = File.ReadAllText(entry.FullName);
+            if (TryReplaceRoot(text, from, to, out string updated))
+                WriteTextAtomically(entry.FullName, updated);
+        }
+    }
+
+    private static bool TryReplaceRoot(string text, string from, string to, out string updated)
+    {
+        int index = text.IndexOf(from, StringComparison.Ordinal);
+        if (index < 0)
+        {
+            updated = text;
+            return false;
+        }
+
+        bool endsWithSeparator = from[^1] is '/' or '\\';
+        StringBuilder? builder = null;
+        int cursor = 0;
+
+        while (index >= 0)
+        {
+            int after = index + from.Length;
+            bool isBoundary = endsWithSeparator
+                || after >= text.Length
+                || !(char.IsLetterOrDigit(text[after]) || text[after] is '-' or '_' or '.');
+
+            if (isBoundary)
+            {
+                builder ??= new StringBuilder(text.Length);
+                _ = builder.Append(text, cursor, index - cursor);
+                _ = builder.Append(to);
+                cursor = after;
+            }
+
+            index = text.IndexOf(from, after, StringComparison.Ordinal);
+        }
+
+        if (builder is null)
+        {
+            updated = text;
+            return false;
+        }
+
+        _ = builder.Append(text, cursor, text.Length - cursor);
+        updated = builder.ToString();
+        return true;
+    }
+
+    private static void WriteTextAtomically(string path, string content)
+    {
+        string directory = Path.GetDirectoryName(path)!;
+        string tempPath = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
+        try
+        {
+            File.WriteAllText(tempPath, content);
+            if (!OperatingSystem.IsWindows() && File.Exists(path))
+                File.SetUnixFileMode(tempPath, File.GetUnixFileMode(path));
+
+            File.Move(tempPath, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempPath))
+                File.Delete(tempPath);
+        }
     }
 
     /// <summary>The physical identity of <paramref name="path"/> as the product records it, existing or not.</summary>
