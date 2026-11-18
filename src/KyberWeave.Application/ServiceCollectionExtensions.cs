@@ -23,6 +23,7 @@ using KyberWeave.Core.Squad.Briefs;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data;
+using KyberWeave.Data.Hooks;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -45,6 +46,10 @@ public static class ServiceCollectionExtensions
 
         _ = services.AddWeaveDataServices();
         services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<IHooksConfigSource>(sp => new YamlHooksConfigSource(
+            sp.GetRequiredService<IFileSystem>(),
+            sp.GetRequiredService<IProcessEnvironment>()));
+        services.TryAddSingleton<ITestClassResolver>(sp => new ConventionTestClassResolver(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IEditHookService, EditHookService>();
         services.TryAddSingleton<IRunStartRunnerFactory, RunStartRunnerFactory>();
         services.TryAddSingleton<IRunStartEvidence, RunStartEvidenceService>();
