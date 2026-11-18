@@ -305,6 +305,14 @@ public sealed class InMemoryFileSystem : IWritableFileSystem
     }
 
     /// <inheritdoc />
+    public void WriteAllTextAtomic(string path, string contents, bool flushToDisk) =>
+        WriteAllTextAtomic(path, contents);
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] bytes, bool flushToDisk) =>
+        WriteAllBytesAtomic(path, bytes);
+
+    /// <inheritdoc />
     public void MoveFile(string sourcePath, string destinationPath) => MoveFile(sourcePath, destinationPath, overwrite: false);
 
     /// <inheritdoc />

@@ -124,6 +124,14 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public void WriteAllBytesAtomic(string path, byte[] bytes) => _fs.WriteAllBytesAtomic(path, bytes);
 
     /// <inheritdoc />
+    public void WriteAllTextAtomic(string path, string contents, bool flushToDisk) =>
+        _fs.WriteAllTextAtomic(path, contents, flushToDisk);
+
+    /// <inheritdoc />
+    public void WriteAllBytesAtomic(string path, byte[] bytes, bool flushToDisk) =>
+        _fs.WriteAllBytesAtomic(path, bytes, flushToDisk);
+
+    /// <inheritdoc />
     public void MoveFile(string sourcePath, string destinationPath) => _fs.MoveFile(sourcePath, destinationPath);
 
     /// <inheritdoc />
