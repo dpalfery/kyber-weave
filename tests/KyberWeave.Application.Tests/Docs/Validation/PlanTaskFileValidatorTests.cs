@@ -1,8 +1,7 @@
 using KyberWeave.Tests.Arbiter;
 using System.Reflection;
 using System.Text.Json;
-using KyberWeave.Cli.Commands.Arbiter;
-using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Application.Arbiter;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
@@ -95,7 +94,7 @@ public sealed class PlanTaskFileValidatorTests
     /// </summary>
     private static DocFixture CorpusWithTaskFields(string? difficulty, string? technology)
     {
-        DocFixture fixture = PlanTaskFileProbe.Corpus();
+        DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         string[] lines = PlanTaskFileProbe.TaskFile().Split('\n');
         List<string> edited = [];
         bool firstTask = false;
@@ -137,7 +136,7 @@ public sealed class PlanTaskFileValidatorTests
         new PlanTaskFileValidator(
             fixture.Root,
             KyberWeaveConfigDefaults.Product.WithOntology(ontology),
-            DocsPorts.Files).Validate(fixture.Load());
+            fixture.Store).Validate(fixture.Load());
 
     [Fact]
     public void AnUnknownDifficultyIsKWDOCTASKS015NamingTheThreeValues()
@@ -155,7 +154,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AVersionOneYamlFileWarnsAndNamesTheWriteCommand()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(schemaVersion: 1));
 
         DiagnosticReport report = ValidateScope(fixture, OntologyConfig.ProductDefaults);
@@ -219,7 +218,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ATruncatedTaskFileIsKWDOCTASKS001()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, "{\n  \"schema-version\": 1,\n  \"tasks\": [");
 
         ReportedFindings run = Validate(fixture);
@@ -236,7 +235,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ANonFiniteAgentConfidenceIsKWDOCTASKS001()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, """
             schema-version: 1
             plan: docs/plans/2026-08-01-task-file.md
@@ -260,7 +259,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ATaggedNonFiniteAgentConfidenceIsKWDOCTASKS001NamingTheField()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         string file = PlanTaskFileProbe.TaskFile();
         string tagged = file.Replace(
             $"- id: {PlanTaskFileProbe.FirstTask}\n",
@@ -284,7 +283,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ATaggedNonFiniteTaskKeyIsKWDOCTASKS001()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         string file = PlanTaskFileProbe.TaskFile();
         string tagged = file.Replace(
             $"- id: {PlanTaskFileProbe.FirstTask}\n",
@@ -303,7 +302,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ATaskFileLargerThanTheValidatorReadsIsKWDOCTASKS001AndNamesWhy()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, new string(' ', (int)BoundedFile.MaxBytes + 1));
 
         ReportedFindings run = Validate(fixture);
@@ -321,7 +320,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AnUnreadSchemaVersionIsKWDOCTASKS001()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(schemaVersion: 99));
 
         AssertReports(Validate(fixture), Malformed);
@@ -341,11 +340,11 @@ public sealed class PlanTaskFileValidatorTests
     [InlineData("depends-on")]
     public void ADriftFromThePlanIsKWDOCTASKS002(string edit)
     {
-        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        using DocFixture accepted = PlanTaskFileProbe.CorpusInMemory();
         accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), DiffersFromPlan);
 
-        using DocFixture drifted = PlanTaskFileProbe.Corpus();
+        using DocFixture drifted = PlanTaskFileProbe.CorpusInMemory();
         drifted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(edit: edit));
 
         AssertReports(Validate(drifted), DiffersFromPlan);
@@ -358,7 +357,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ANullTaskEntryIsKWDOCTASKS002()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         string taskFile = $$"""
             {
               "schema-version": 1,
@@ -380,7 +379,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ANullFileOrDependencyElementIsKWDOCTASKS002()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         string taskFile = $$"""
             {
               "schema-version": 1,
@@ -412,7 +411,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ABlankDependencyElementAgainstAnEmptyPlanScopeIsKWDOCTASKS002()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         string taskFile = $$"""
             {
               "schema-version": 1,
@@ -452,13 +451,13 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AStaleDigestIsKWDOCTASKS003()
     {
-        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        using DocFixture accepted = PlanTaskFileProbe.CorpusInMemory();
         accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), StaleDigest);
 
         // The plan gains a task after the file was written, so the recorded digest no longer
         // describes the plan it was written from.
-        using DocFixture stale = PlanTaskFileProbe.Corpus(PlanTaskFileProbe.PlanWithLateTask());
+        using DocFixture stale = PlanTaskFileProbe.CorpusInMemory(PlanTaskFileProbe.PlanWithLateTask());
         stale.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
 
         AssertReports(Validate(stale), StaleDigest);
@@ -481,11 +480,11 @@ public sealed class PlanTaskFileValidatorTests
     [InlineData("acceptance")]
     public void APromptWithoutACommandOrAcceptanceCriteriaIsKWDOCTASKS004(string missingPromptPart)
     {
-        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        using DocFixture accepted = PlanTaskFileProbe.CorpusInMemory();
         accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), IncompletePrompt);
 
-        using DocFixture incomplete = PlanTaskFileProbe.Corpus();
+        using DocFixture incomplete = PlanTaskFileProbe.CorpusInMemory();
         incomplete.Write(
             PlanTaskFileProbe.TaskFilePath,
             PlanTaskFileProbe.TaskFile(missingPromptPart: missingPromptPart));
@@ -502,11 +501,11 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void APromptThatTellsAWorkerToOpenThePlanIsKWDOCTASKS005()
     {
-        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        using DocFixture accepted = PlanTaskFileProbe.CorpusInMemory();
         accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), PlanReadInstruction);
 
-        using DocFixture readsThePlan = PlanTaskFileProbe.Corpus();
+        using DocFixture readsThePlan = PlanTaskFileProbe.CorpusInMemory();
         readsThePlan.Write(
             PlanTaskFileProbe.TaskFilePath,
             PlanTaskFileProbe.TaskFile(promptPrefix: PlanTaskFileProbe.PlanReadPrefix()));
@@ -521,11 +520,11 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AReadyPlanWithoutATaskFileWarnsWithoutFailing()
     {
-        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        using DocFixture accepted = PlanTaskFileProbe.CorpusInMemory();
         accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), MissingTaskFile);
 
-        using DocFixture missing = PlanTaskFileProbe.Corpus();
+        using DocFixture missing = PlanTaskFileProbe.CorpusInMemory();
 
         ReportedFindings run = Validate(missing);
 
@@ -547,11 +546,11 @@ public sealed class PlanTaskFileValidatorTests
     [InlineData("~")]
     public void ASidecarCopyOfATaskFileIsKWDOCTASKS007(string suffix)
     {
-        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        using DocFixture accepted = PlanTaskFileProbe.CorpusInMemory();
         accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), SidecarTaskFile);
 
-        using DocFixture sidecar = PlanTaskFileProbe.Corpus();
+        using DocFixture sidecar = PlanTaskFileProbe.CorpusInMemory();
         sidecar.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         sidecar.Write(PlanTaskFileProbe.SidecarPath(suffix), PlanTaskFileProbe.TaskFile());
 
@@ -572,11 +571,11 @@ public sealed class PlanTaskFileValidatorTests
     {
         const string OrphanSidecar = "6-Docs/plans/2026-11-05-archived-plan.tasks.json.new";
 
-        using DocFixture accepted = PlanTaskFileProbe.Corpus();
+        using DocFixture accepted = PlanTaskFileProbe.CorpusInMemory();
         accepted.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), SidecarTaskFile);
 
-        using DocFixture orphan = PlanTaskFileProbe.Corpus();
+        using DocFixture orphan = PlanTaskFileProbe.CorpusInMemory();
         orphan.Write(OrphanSidecar, PlanTaskFileProbe.TaskFile());
 
         ReportedFindings run = Validate(orphan);
@@ -594,7 +593,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void TheTaskFileItselfAndOtherJsonAreNotKWDOCTASKS007()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile());
         fixture.Write("6-Docs/plans/notes.json", "{\n  \"note\": \"unrelated\"\n}\n");
 
@@ -608,7 +607,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AnArchivedSidecarIsNotKWDOCTASKS007()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write("6-Docs/plans/archive/2026-11-05-archived-plan.tasks.json.new", "{}\n");
 
         AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
@@ -622,7 +621,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AnUnresolvablePlansFolderIsReportedAsAWarningNotSilence()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write("README.md", "# Plans\n");
         fixture.Write(".kyber-weave/kyber-weave.yml", "config-reg:\n  plan-index: README.md\n");
 
@@ -655,7 +654,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AFileWithTheSuffixInItsNameButOtherContentIsNotKWDOCTASKS007()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write("6-Docs/plans/notes.tasks.json.bak", "{\n  \"note\": \"unrelated\"\n}\n");
 
         AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
@@ -671,50 +670,22 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AnUnreadablePlansSubfolderIsReportedAndTheWalkContinues()
     {
-        if (OperatingSystem.IsWindows())
-        {
-            Assert.Skip("Unix file modes are the only way to make a folder unreadable here.");
-            return;
-        }
-
-        using DocFixture fixture = new();
+        using DocFixture fixture = DocFixture.CreateInMemory();
         fixture.Write("6-Docs/plans/locked/placeholder.txt", "x");
         fixture.Write("6-Docs/plans/zz-later.tasks.json.new", PlanTaskFileProbe.TaskFile());
         OntologyConfig ontology = OntologyConfig.ProductDefaults;
-        DocumentSet set = RealDocumentLoader.Create(fixture.Root, ontology).Load();
+        DocumentSet set = fixture.Loader(ontology).Load();
         KyberWeaveConfig config = KyberWeaveConfigDefaults.Product.WithOntology(ontology);
-        string locked = Path.Combine(fixture.Root, "6-Docs", "plans", "locked");
-        File.SetUnixFileMode(locked, UnixFileMode.None);
-        try
-        {
-            Assert.SkipWhen(CanList(locked), "Running with privileges that ignore file modes (such as root), so the folder stays readable.");
+        fixture.Memory!.DenyListing(fixture.FullPath("6-Docs/plans/locked"));
 
-            DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config, DocsPorts.Files).Validate(set);
+        DiagnosticReport report = new PlanTaskFileValidator(fixture.Root, config, fixture.Store).Validate(set);
 
-            Diagnostic warning = Assert.Single(report.Items, item => item.Code == SidecarTaskFile && item.Severity == Severity.Warning);
-            Assert.Contains("could not be read", warning.Message, StringComparison.OrdinalIgnoreCase);
-            Assert.Contains(
-                report.Items,
-                item => item.Code == SidecarTaskFile && item.Severity == Severity.Error
-                        && item.Message.Contains("zz-later.tasks.json.new", StringComparison.Ordinal));
-        }
-        finally
-        {
-            File.SetUnixFileMode(locked, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-    }
-
-    private static bool CanList(string directory)
-    {
-        try
-        {
-            _ = Directory.GetFileSystemEntries(directory);
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
-        {
-            return false;
-        }
+        Diagnostic warning = Assert.Single(report.Items, item => item.Code == SidecarTaskFile && item.Severity == Severity.Warning);
+        Assert.Contains("could not be read", warning.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(
+            report.Items,
+            item => item.Code == SidecarTaskFile && item.Severity == Severity.Error
+                    && item.Message.Contains("zz-later.tasks.json.new", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -724,7 +695,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AFileThatOnlyMentionsASchemaKeyInTextIsNotKWDOCTASKS007()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(
             "6-Docs/plans/notes.tasks.json.bak",
             "Scratch note: the task file's \"execution-digest\" and \"schema-version\" keys are documented.\n");
@@ -739,7 +710,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void UnrelatedJsonWithOnlyASchemaVersionKeyIsNotKWDOCTASKS007()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write("6-Docs/plans/other.tasks.json.bak", "{\n  \"schema-version\": 3,\n  \"name\": \"unrelated\"\n}\n");
 
         AssertDoesNotReport(Validate(fixture), SidecarTaskFile);
@@ -752,7 +723,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ASidecarWhoseDigestKeyFollowsALongPlanValueIsKWDOCTASKS007()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         string padding = new('x', 20000);
         fixture.Write(
             "6-Docs/plans/long.tasks.json.new",
@@ -808,14 +779,14 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ADigestReportedByArbiterPlanPassesKWDOCTASKS003()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        string reported = ArbiterCliCommandTests.ReportedDigestOf(
-            Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar)));
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
+        string reported = new ArbiterPlanService(fixture.Memory!, fixture.Paths)
+            .TryRead(fixture.Root, PlanTaskFileProbe.PlanPath, PlanTaskFileProbe.PlanPath, new DiagnosticReport())!.Digest!;
         fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(digest: reported));
 
         AssertDoesNotReport(Validate(fixture), StaleDigest);
 
-        using DocFixture control = PlanTaskFileProbe.Corpus();
+        using DocFixture control = PlanTaskFileProbe.CorpusInMemory();
         control.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(digest: new string('0', 64)));
 
         AssertReports(Validate(control), StaleDigest);
@@ -828,7 +799,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AStaleDigestHintNamesTheDigestCommand()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.TaskFilePath, PlanTaskFileProbe.TaskFile(digest: new string('0', 64)));
 
         ReportedFindings run = Validate(fixture);
@@ -847,13 +818,13 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ASpecTaskFileWithTheDigestArbiterPlanReportsPasses()
     {
-        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+        using DocFixture fixture = SpecTaskFileProbe.CorpusInMemory();
         string reported = SpecTaskFileProbe.ReportedDigest(fixture);
         fixture.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile(digest: reported));
 
         AssertNoTaskFileFinding(Validate(fixture));
 
-        using DocFixture control = SpecTaskFileProbe.Corpus();
+        using DocFixture control = SpecTaskFileProbe.CorpusInMemory();
         control.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile(digest: new string('0', 64)));
 
         AssertReports(Validate(control), StaleDigest);
@@ -866,7 +837,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ASpecTaskFileWithAStaleDigestIsKWDOCTASKS003()
     {
-        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+        using DocFixture fixture = SpecTaskFileProbe.CorpusInMemory();
         fixture.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile(digest: new string('0', 64)));
 
         ReportedFindings run = Validate(fixture);
@@ -883,11 +854,11 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ASpecTaskFileMissingATaskIsKWDOCTASKS002()
     {
-        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        using DocFixture accepted = SpecTaskFileProbe.CorpusInMemory();
         accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), DiffersFromPlan);
 
-        using DocFixture missing = SpecTaskFileProbe.Corpus();
+        using DocFixture missing = SpecTaskFileProbe.CorpusInMemory();
         missing.Write(
             SpecTaskFileProbe.TaskFilePath,
             SpecTaskFileProbe.TaskFile(edit: tasks => tasks.RemoveAt(1)));
@@ -902,11 +873,11 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ASpecTaskFileNamingAnotherArtifactIsKWDOCTASKS002()
     {
-        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        using DocFixture accepted = SpecTaskFileProbe.CorpusInMemory();
         accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), DiffersFromPlan);
 
-        using DocFixture drifted = SpecTaskFileProbe.Corpus();
+        using DocFixture drifted = SpecTaskFileProbe.CorpusInMemory();
         drifted.Write(
             SpecTaskFileProbe.TaskFilePath,
             SpecTaskFileProbe.TaskFile(planField: SpecTaskFileProbe.DesignPath));
@@ -920,7 +891,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AMalformedSpecTaskFileIsKWDOCTASKS001()
     {
-        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+        using DocFixture fixture = SpecTaskFileProbe.CorpusInMemory();
         fixture.Write(SpecTaskFileProbe.TaskFilePath, "{");
 
         AssertReports(Validate(fixture), Malformed);
@@ -933,11 +904,11 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ASpecPromptWithoutACommandIsKWDOCTASKS004()
     {
-        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        using DocFixture accepted = SpecTaskFileProbe.CorpusInMemory();
         accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), IncompletePrompt);
 
-        using DocFixture incomplete = SpecTaskFileProbe.Corpus();
+        using DocFixture incomplete = SpecTaskFileProbe.CorpusInMemory();
         incomplete.Write(
             SpecTaskFileProbe.TaskFilePath,
             SpecTaskFileProbe.TaskFile(edit: tasks => tasks[0]["prompt"] =
@@ -954,11 +925,11 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void ASpecPromptThatOpensTheSpecIsKWDOCTASKS005()
     {
-        using DocFixture accepted = SpecTaskFileProbe.Corpus();
+        using DocFixture accepted = SpecTaskFileProbe.CorpusInMemory();
         accepted.Write(SpecTaskFileProbe.TaskFilePath, SpecTaskFileProbe.TaskFile());
         AssertDoesNotReport(Validate(accepted), PlanReadInstruction);
 
-        using DocFixture readsTheSpec = SpecTaskFileProbe.Corpus();
+        using DocFixture readsTheSpec = SpecTaskFileProbe.CorpusInMemory();
         readsTheSpec.Write(
             SpecTaskFileProbe.TaskFilePath,
             SpecTaskFileProbe.TaskFile(edit: tasks => tasks[0]["prompt"] =
@@ -975,7 +946,7 @@ public sealed class PlanTaskFileValidatorTests
     [Fact]
     public void AReadySpecWithNoTaskFileWarnsKWDOCTASKS006()
     {
-        using DocFixture fixture = SpecTaskFileProbe.Corpus();
+        using DocFixture fixture = SpecTaskFileProbe.CorpusInMemory();
 
         ReportedFindings run = Validate(fixture);
 
@@ -997,7 +968,7 @@ public sealed class PlanTaskFileValidatorTests
         string rewritten = plan.Replace(PlanReadyLine, SpecReadyLine, StringComparison.Ordinal);
         Assert.Contains(SpecReadyLine, rewritten, StringComparison.Ordinal);
 
-        using DocFixture fixture = PlanTaskFileProbe.Corpus(rewritten);
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(rewritten);
 
         AssertReports(Validate(fixture), MissingTaskFile);
     }

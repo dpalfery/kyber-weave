@@ -75,7 +75,7 @@ public sealed class PlanTaskFileScopeTests : IDisposable
         Acceptance criteria: four cards show counts.
         """;
 
-    private readonly TempDirectory _repo = new();
+    private readonly DocFixture _repo = DocFixture.CreateInMemory();
 
     public void Dispose() => _repo.Dispose();
 
@@ -110,8 +110,7 @@ public sealed class PlanTaskFileScopeTests : IDisposable
         Assert.DoesNotContain(Validate().Items, item => item.Code == PlanTaskFileRules.DiffersFromPlan);
 
         // The control: the same check does report a file list that really differs from the plan's.
-        string path = Path.Combine(_repo.Path, TaskFile);
-        File.WriteAllText(path, File.ReadAllText(path).Replace("src/Data/JobRepository.cs", "src/Data/Other.cs", StringComparison.Ordinal));
+        _repo.Write(TaskFile, _repo.ReadText(TaskFile).Replace("src/Data/JobRepository.cs", "src/Data/Other.cs", StringComparison.Ordinal));
         Assert.Contains(Validate().Items, item => item.Code == PlanTaskFileRules.DiffersFromPlan);
     }
 
@@ -134,13 +133,12 @@ public sealed class PlanTaskFileScopeTests : IDisposable
         Assert.Contains("./.Agent_Scratchpad/T3/trace.zip", finding.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("web/tests/live-status-cards.spec.ts,", finding.Message, StringComparison.Ordinal);
         Assert.Null(outcome.Json);
-        Assert.False(File.Exists(Path.Combine(_repo.Path, TaskFile)));
+        Assert.False(_repo.Exists(TaskFile));
     }
 
     private void WritePlan(string tasks)
     {
-        Directory.CreateDirectory(Path.Combine(_repo.Path, "6-Docs", "plans"));
-        File.WriteAllText(Path.Combine(_repo.Path, Plan), FrontMatter + tasks + "\n");
+        _ = _repo.EnsureDirectory("6-Docs/plans").Write(Plan, FrontMatter + tasks + "\n");
     }
 
     /// <summary>
@@ -150,20 +148,19 @@ public sealed class PlanTaskFileScopeTests : IDisposable
     private void WorkersCreateFolders()
     {
         foreach (string folder in new[] { ".agent_scratchpad/t1", ".agent_scratchpad/t3/artifacts", "src/Data", "web/tests", "web/artifacts/t3", "web/src/cards" })
-            Directory.CreateDirectory(Path.Combine(_repo.Path, folder));
-        File.WriteAllText(Path.Combine(_repo.Path, "src/Data/JobRepository.cs"), "// written by T1");
-        File.WriteAllText(Path.Combine(_repo.Path, "web/src/cards/Card.tsx"), "// written by T3");
+            _ = _repo.EnsureDirectory(folder);
+        _ = _repo.Write("src/Data/JobRepository.cs", "// written by T1").Write("web/src/cards/Card.tsx", "// written by T3");
     }
 
     private static readonly KyberWeaveConfig Config = KyberWeaveConfigDefaults.Product.WithOntology(OntologyConfig.ProductDefaults);
 
     private PlanTaskFileOutcome Run(PlanTaskFileMode mode) =>
-        new PlanTaskFileGenerator(_repo.Path, Config, DocsPorts.Files).Run(Plan, mode);
+        new PlanTaskFileGenerator(_repo.Root, Config, _repo.Store).Run(Plan, mode);
 
     private DiagnosticReport Validate()
     {
-        DocumentSet corpus = RealDocumentLoader.Create(_repo.Path, Config.Ontology).Load();
-        return new PlanTaskFileValidator(_repo.Path, Config, DocsPorts.Files).Validate(corpus);
+        DocumentSet corpus = _repo.Loader(Config.Ontology).Load();
+        return new PlanTaskFileValidator(_repo.Root, Config, _repo.Store).Validate(corpus);
     }
 
     private static string Describe(DiagnosticReport report) =>

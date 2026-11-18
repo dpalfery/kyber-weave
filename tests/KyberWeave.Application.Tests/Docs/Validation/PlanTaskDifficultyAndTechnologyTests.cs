@@ -34,7 +34,7 @@ public sealed class PlanTaskDifficultyAndTechnologyTests
     [Fact]
     public void DifficultyAndTechnologyReachTheTaskFileEntry()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus(Plan(DifficultyTechnology));
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(Plan(DifficultyTechnology));
 
         PlanTaskFileEntry entry = OnlyEntry(fixture);
 
@@ -62,7 +62,7 @@ public sealed class PlanTaskDifficultyAndTechnologyTests
     [Fact]
     public void ATaskWithNeitherLineGetsMediumFromTheDefaultAndNoTechnology()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus(Plan(extra: null));
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory(Plan(extra: null));
 
         PlanTaskFileEntry entry = OnlyEntry(fixture);
 
@@ -105,7 +105,7 @@ public sealed class PlanTaskDifficultyAndTechnologyTests
         PlanTaskFileOutcome outcome = new PlanTaskFileGenerator(
             fixture.Root,
             KyberWeaveConfigDefaults.Product,
-            DocsPorts.Files).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Preview);
+            fixture.Store).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Preview);
 
         Assert.Null(outcome.Report.Items.FirstOrDefault(item => item.Severity == Core.Diagnostics.Severity.Error));
         PlanTaskFile file = Assert.IsType<PlanTaskFile>(outcome.File);

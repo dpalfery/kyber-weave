@@ -12,23 +12,20 @@ namespace KyberWeave.Tests;
 public sealed class PlanTaskFileYamlTests
 {
     private static PlanTaskFileOutcome Run(DocFixture fixture, PlanTaskFileMode mode) =>
-        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfigDefaults.Product, DocsPorts.Files)
+        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfigDefaults.Product, fixture.Store)
             .Run(PlanTaskFileProbe.PlanPath, mode);
-
-    private static string FullPath(DocFixture fixture, string relative) =>
-        Path.Combine(fixture.Root, relative.Replace('/', Path.DirectorySeparatorChar));
 
     [Fact]
     public void AWriteProducesYamlAndNoJsonFile()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
 
         PlanTaskFileOutcome outcome = Run(fixture, PlanTaskFileMode.Write);
 
         Assert.True(outcome.Wrote);
-        Assert.True(File.Exists(FullPath(fixture, PlanTaskFileProbe.TaskFilePath)));
-        Assert.False(File.Exists(FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath)));
-        string text = File.ReadAllText(FullPath(fixture, PlanTaskFileProbe.TaskFilePath));
+        Assert.True(fixture.Exists(PlanTaskFileProbe.TaskFilePath));
+        Assert.False(fixture.Exists(PlanTaskFileProbe.LegacyTaskFilePath));
+        string text = fixture.ReadText(PlanTaskFileProbe.TaskFilePath);
         Assert.Contains($"schema-version: {PlanTaskFileRules.SchemaVersion}", text, StringComparison.Ordinal);
 
         PlanTaskFile? file = PlanTaskFileFormat.Deserialize(PlanTaskFileProbe.TaskFilePath, text);
@@ -40,10 +37,8 @@ public sealed class PlanTaskFileYamlTests
     [Fact]
     public void ALegacyJsonFileIsReadWithOneWarningNamingTheConvertCommand()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        File.WriteAllText(
-            FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath),
-            PlanTaskFileProbe.LegacyJsonTaskFile());
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
+        _ = fixture.Write(PlanTaskFileProbe.LegacyTaskFilePath, PlanTaskFileProbe.LegacyJsonTaskFile());
 
         PlanTaskFileOutcome outcome = Run(fixture, PlanTaskFileMode.Check);
 
@@ -56,20 +51,18 @@ public sealed class PlanTaskFileYamlTests
     [Fact]
     public void ConvertRewritesTheJsonAsYamlAndRemovesIt()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        File.WriteAllText(
-            FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath),
-            PlanTaskFileProbe.LegacyJsonTaskFile());
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
+        _ = fixture.Write(PlanTaskFileProbe.LegacyTaskFilePath, PlanTaskFileProbe.LegacyJsonTaskFile());
 
         PlanTaskFileOutcome outcome = Run(fixture, PlanTaskFileMode.Convert);
 
         Assert.True(outcome.Wrote);
-        Assert.True(File.Exists(FullPath(fixture, PlanTaskFileProbe.TaskFilePath)));
-        Assert.False(File.Exists(FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath)));
+        Assert.True(fixture.Exists(PlanTaskFileProbe.TaskFilePath));
+        Assert.False(fixture.Exists(PlanTaskFileProbe.LegacyTaskFilePath));
 
         PlanTaskFile? converted = PlanTaskFileFormat.Deserialize(
             PlanTaskFileProbe.TaskFilePath,
-            File.ReadAllText(FullPath(fixture, PlanTaskFileProbe.TaskFilePath)));
+            fixture.ReadText(PlanTaskFileProbe.TaskFilePath));
         Assert.NotNull(converted);
         Assert.Equal(2, converted.Tasks?.Count);
         Assert.Equal(PlanTaskFileProbe.ExecutionDigest(PlanTaskFileProbe.PlanMarkdown()), converted.ExecutionDigest);
@@ -82,17 +75,15 @@ public sealed class PlanTaskFileYamlTests
     [Fact]
     public void AWriteRemovesALegacyJsonLeftBesideACurrentYamlAndReportsIt()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         Assert.True(Run(fixture, PlanTaskFileMode.Write).Wrote);
-        File.WriteAllText(
-            FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath),
-            PlanTaskFileProbe.LegacyJsonTaskFile());
+        _ = fixture.Write(PlanTaskFileProbe.LegacyTaskFilePath, PlanTaskFileProbe.LegacyJsonTaskFile());
 
         PlanTaskFileOutcome outcome = Run(fixture, PlanTaskFileMode.Write);
 
         Assert.False(outcome.Wrote);
-        Assert.True(File.Exists(FullPath(fixture, PlanTaskFileProbe.TaskFilePath)));
-        Assert.False(File.Exists(FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath)));
+        Assert.True(fixture.Exists(PlanTaskFileProbe.TaskFilePath));
+        Assert.False(fixture.Exists(PlanTaskFileProbe.LegacyTaskFilePath));
         Assert.Contains(
             outcome.Report.Items,
             item => item.Code == PlanTaskFileRules.LegacyJsonTaskFile
@@ -103,16 +94,14 @@ public sealed class PlanTaskFileYamlTests
     [Fact]
     public void ValidateReportsALegacyJsonLeftBesideTheYamlTaskFile()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         Assert.True(Run(fixture, PlanTaskFileMode.Write).Wrote);
-        File.WriteAllText(
-            FullPath(fixture, PlanTaskFileProbe.LegacyTaskFilePath),
-            PlanTaskFileProbe.LegacyJsonTaskFile());
+        _ = fixture.Write(PlanTaskFileProbe.LegacyTaskFilePath, PlanTaskFileProbe.LegacyJsonTaskFile());
 
         DiagnosticReport report = new PlanTaskFileValidator(
             fixture.Root,
             KyberWeaveConfigDefaults.Product,
-            DocsPorts.Files).Validate(fixture.Load());
+            fixture.Store).Validate(fixture.Load());
 
         Diagnostic leftover = Assert.Single(
             report.Items,
@@ -126,12 +115,12 @@ public sealed class PlanTaskFileYamlTests
     [Fact]
     public void ConvertWithNoJsonFileWritesNothing()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
 
         PlanTaskFileOutcome outcome = Run(fixture, PlanTaskFileMode.Convert);
 
         Assert.False(outcome.Wrote);
-        Assert.False(File.Exists(FullPath(fixture, PlanTaskFileProbe.TaskFilePath)));
+        Assert.False(fixture.Exists(PlanTaskFileProbe.TaskFilePath));
         Assert.Contains(
             outcome.Report.Items,
             item => item.Code == PlanTaskFileRules.LegacyJsonTaskFile

@@ -28,6 +28,14 @@ internal sealed class ReportedFindings
             Format = "json"
         };
 
+        if (fixture.Memory is not null)
+        {
+            Spectre.Console.Testing.TestConsole console = new() { EmitAnsiSequences = false };
+            Exit = DocsTestCommands.Validate(DocsMemoryServicesD.Services(fixture), console).Execute(null!, settings);
+            Output = console.Output;
+            return;
+        }
+
         CapturedConsoleExecution<int> execution =
             ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings));
         Exit = execution.Result;
@@ -456,9 +464,14 @@ internal static class SpecTaskFileProbe
             .Build();
 
     /// <summary>A corpus holding the specification index, the spec folder and its four files.</summary>
-    internal static DocFixture Corpus(string? tasksMarkdown = null)
+    internal static DocFixture Corpus(string? tasksMarkdown = null) => Populate(new DocFixture(), tasksMarkdown);
+
+    /// <summary>The same corpus on an in-memory file system, for a unit test.</summary>
+    internal static DocFixture CorpusInMemory(string? tasksMarkdown = null) => Populate(DocFixture.CreateInMemory(), tasksMarkdown);
+
+    private static DocFixture Populate(DocFixture fixture, string? tasksMarkdown)
     {
-        return new DocFixture().WithCatalog()
+        return fixture.WithCatalog()
             .Write(
                 ".kyber-weave/kyber-weave.yml",
                 """
@@ -615,6 +628,13 @@ internal static class SpecTaskFileProbe
     internal static string ReportedDigest(DocFixture fixture)
     {
         ArgumentNullException.ThrowIfNull(fixture);
+
+        if (fixture.Memory is not null)
+        {
+            // The digest the plan service reports, which the plan command prints, read over the in-memory checkout.
+            return new KyberWeave.Application.Arbiter.ArbiterPlanService(fixture.Memory, fixture.Paths)
+                .TryRead(fixture.Root, TasksPath, TasksPath, new DiagnosticReport())!.Digest!;
+        }
 
         string path = Path.Combine(fixture.Root, TasksPath.Replace('/', Path.DirectorySeparatorChar));
         ArbiterPlanCommand command = ArbiterTestServices.Command<ArbiterPlanCommand>();

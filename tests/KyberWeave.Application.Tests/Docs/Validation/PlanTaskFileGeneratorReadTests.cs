@@ -13,13 +13,13 @@ namespace KyberWeave.Tests;
 public sealed class PlanTaskFileGeneratorReadTests
 {
     private static PlanTaskFileOutcome Check(DocFixture fixture) =>
-        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfigDefaults.Product, DocsPorts.Files).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Check);
+        new PlanTaskFileGenerator(fixture.Root, KyberWeaveConfigDefaults.Product, fixture.Store).Run(PlanTaskFileProbe.PlanPath, PlanTaskFileMode.Check);
 
     [Fact]
     public void ATaskFileThatCannotBeReadIsOneMalformedFindingNotAnException()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        Directory.CreateDirectory(Path.Combine(fixture.Root, PlanTaskFileProbe.TaskFilePath.Replace('/', Path.DirectorySeparatorChar)));
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
+        _ = fixture.EnsureDirectory(PlanTaskFileProbe.TaskFilePath);
 
         PlanTaskFileOutcome outcome = Check(fixture);
 
@@ -31,7 +31,7 @@ public sealed class PlanTaskFileGeneratorReadTests
     [Fact]
     public void APlanOverTheReadCapIsOnePlanNotReadableFindingAndIsNotLoaded()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
         fixture.Write(PlanTaskFileProbe.PlanPath, new string(' ', (int)BoundedFile.MaxBytes + 1));
 
         PlanTaskFileOutcome outcome = Check(fixture);
@@ -44,19 +44,11 @@ public sealed class PlanTaskFileGeneratorReadTests
     [Fact]
     public void APlanThatIsASymbolicLinkIsNotReadThroughTheLink()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
-        string plan = Path.Combine(fixture.Root, PlanTaskFileProbe.PlanPath.Replace('/', Path.DirectorySeparatorChar));
-        string target = Path.Combine(fixture.Root, "real-plan.md");
-        File.Move(plan, target);
-        try
-        {
-            File.CreateSymbolicLink(plan, target);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            Assert.Skip("This host cannot create symbolic links, so a linked plan cannot be simulated.");
-            return;
-        }
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
+        string plan = fixture.FullPath(PlanTaskFileProbe.PlanPath);
+        string target = fixture.FullPath("real-plan.md");
+        fixture.Memory!.MoveFile(plan, target);
+        fixture.Memory.CreateFileLink(plan, target);
 
         PlanTaskFileOutcome outcome = Check(fixture);
 
@@ -68,7 +60,7 @@ public sealed class PlanTaskFileGeneratorReadTests
     [Fact]
     public void AnAbsentTaskFileIsStillTheMissingFileFinding()
     {
-        using DocFixture fixture = PlanTaskFileProbe.Corpus();
+        using DocFixture fixture = PlanTaskFileProbe.CorpusInMemory();
 
         PlanTaskFileOutcome outcome = Check(fixture);
 

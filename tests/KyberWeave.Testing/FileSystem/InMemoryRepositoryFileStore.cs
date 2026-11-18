@@ -32,10 +32,40 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public IEnumerable<string> ReadLines(string path) => _fs.ReadLines(path);
 
     /// <inheritdoc />
-    public string ReadAllTextBounded(string path) => _fs.ReadAllText(path);
+    public string ReadAllTextBounded(string path)
+    {
+        // The physical store refuses a file past the read cap before reading it; the fake refuses the same way.
+        if (_fs.GetLength(path) > KyberWeave.Core.Docs.Closeout.BoundedFile.MaxBytes)
+        {
+            throw new InvalidDataException(
+                $"the file is at least {KyberWeave.Core.Docs.Closeout.BoundedFile.MaxBytes + 1} bytes, more than the {KyberWeave.Core.Docs.Closeout.BoundedFile.MaxBytes} bytes this step reads");
+        }
+
+        return _fs.ReadAllText(path);
+    }
 
     /// <inheritdoc />
-    public string? ReadTextIfPresent(string path) => _fs.FileExists(path) ? _fs.ReadAllText(path) : null;
+    public string? ReadTextIfPresent(string path)
+    {
+        if (_fs.DirectoryExists(path))
+        {
+            throw new IOException($"'{Path.GetFileName(path)}' is a folder, not a file.");
+        }
+
+        if (!_fs.FileExists(path))
+        {
+            return null;
+        }
+
+        try
+        {
+            return ReadAllTextBounded(path);
+        }
+        catch (InvalidDataException exception)
+        {
+            throw new IOException($"'{Path.GetFileName(path)}' was not read: {exception.Message}", exception);
+        }
+    }
 
     /// <inheritdoc />
     public Stream OpenRead(string path) => _fs.OpenRead(path);
