@@ -34,7 +34,7 @@ from this file when it is marked Ready.
 | Phase | Tasks | Shippable because |
 |---|---|---|
 | 1. Seams and fakes | 1.1 to 1.8 | Additive |
-| 2. Layers and locators | 2.1 to 2.5 | Behaviour unchanged; smoke tests pass |
+| 2. Layers and locators | 2.1 to 2.6 | Behaviour unchanged; smoke tests pass |
 | 3. Squad deployment | 3.1 to 3.5 | Contract tests on real and fake; second reviewer |
 | 4. The rest of the product | 4.1 to 4.7 | Per folder |
 | 5. Tests | 5.1 to 5.6 | Measured |
@@ -135,13 +135,15 @@ from this file when it is marked Ready.
 
 ## Phase 2: Layers and locators
 
-- [ ] 2.1 Decide how Domain sees the seams
-  - **Objective:** measure `Domain` referencing `Contracts` against moving the seams into `Kernel`;
-    record D7.
-  - **Files:** project files, `tests/KyberWeave.Architecture.Tests/**`, the design's decisions table
-  - **Acceptance criteria:** the chosen reference builds with no cycle; the architecture tests state it.
+- [ ] 2.1 Plan the move of Domain's logic
+  - **Objective:** list every class in `KyberWeave.Domain` as data (stays) or logic (moves), and every
+    caller of that logic outside `Application`, with the route each caller takes: move to `Application`,
+    or take the service through its `Contracts` interface.
+  - **Files:** the core inventory, the design's layers section
+  - **Acceptance criteria:** every one of Domain's 440 files is classified; every caller in `Data`,
+    `Hooks`, `Core` and the hosts has a route; the moves are grouped into tasks of one Domain folder each.
   - **Depends on:** 1.8
-  - _Requirements: 4.2_
+  - _Requirements: 4.2, 4.3_
 
 - [ ] 2.2 Remove Core's references to Data and Application
   - **Objective:** `KyberWeave.Core` and `Core.Docs` depend on `Contracts` and `Domain` only.
@@ -150,7 +152,7 @@ from this file when it is marked Ready.
     `RunBaseState`, `LegacyPorts` and the rest in the core inventory) are deleted and their callers
     take services by injection.
   - **Depends on:** 2.1
-  - _Requirements: 1.5, 4.1, 4.3_
+  - _Requirements: 1.5, 4.1, 4.4_
 
 - [ ] 2.3 Retire the static configuration loader
   - **Objective:** the 23 callers of `KyberWeaveConfigLoader.TryLoad` take `IKyberWeaveConfigRepository`.
@@ -168,14 +170,23 @@ from this file when it is marked Ready.
   - **Depends on:** 1.5, 2.2
   - _Requirements: 1.5, 2.2_
 
-- [ ] 2.5 Domain onto seams
-  - **Objective:** the 33 direct resource sites and 17 services built inside services in `Domain`
-    move onto seams passed in.
-  - **Files:** `src/KyberWeave.Domain/**` per the core inventory (`DocSpecValidator`, renderers and others)
-  - **Acceptance criteria:** no non-adapter class in `Domain` calls a resource; each converted class
-    has a unit test.
+- [ ] 2.5 Move Domain's logic to Application, one Domain folder per task
+  - **Objective:** the logic classes in each of Domain's folders (`Agents`, `Arbiter`, `Docs`, `Review`,
+    `Squad` and the rest) move to the matching folder in `KyberWeave.Application`; the 33 direct resource
+    sites and 17 services built inside services among them move onto seams as they go.
+  - **Files:** `src/KyberWeave.Domain/<folder>/**`, `src/KyberWeave.Application/<folder>/**`, their callers
+    per the 2.1 plan; split any folder over about 30 classes
+  - **Acceptance criteria:** the folder in `Domain` holds data only; the moved classes call no resource
+    directly; each moved class keeps or gains a unit test through fakes; behaviour unchanged.
   - **Depends on:** 2.1
-  - _Requirements: 1.2, 2.1 to 2.9_
+  - _Requirements: 1.2, 1.4, 2.1 to 2.9, 4.2, 4.3_
+
+- [ ] 2.6 Domain holds data only
+  - **Objective:** confirm the end state once every 2.5 task is done.
+  - **Acceptance criteria:** no class in `KyberWeave.Domain` has a method beyond construction,
+    equality, formatting of itself, or validation of its own values; the count is reported.
+  - **Depends on:** 2.5
+  - _Requirements: 4.2_
 
 ## Phase 3: Squad deployment
 
@@ -288,8 +299,9 @@ For every task in phase 4:
 ## Closeout
 
 - [ ] 6.1 Closeout
-  - **Objective:** write the rules into `AGENTS.md`, the test standard and the review guidance; harvest
+  - **Objective:** write the rules into `AGENTS.md`, the test standard and the review guidance (no
+    build check or architecture test enforces them, D11); harvest
     the design into its target documents; record the decisions in an ADR; archive this specification.
   - **Acceptance criteria:** requirement 9 met; `docs validate . --merge-ready` reports no findings.
   - **Depends on:** 5.6
-  - _Requirements: 9.1, 9.2_
+  - _Requirements: 9.1, 9.2, 9.3_

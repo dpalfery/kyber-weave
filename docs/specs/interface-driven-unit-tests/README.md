@@ -22,6 +22,6 @@ is a sealed framework type with no interface.
 | Document | Covers |
 |---|---|
 | [Requirements](requirements.md) | 10 requirements in EARS form |
-| [Design](design.md) | Evidence, architecture, the seams, the in-memory file system, contract tests, what stays an integration test, phases, decisions D1 to D11, open questions Q1 to Q3 |
+| [Design](design.md) | Evidence, architecture, the seams, the in-memory file system, contract tests, what stays an integration test, phases, decisions D1 to D11, open question Q1 |
 | [Tasks](tasks.md) | 31 tasks in five phases plus closeout, test-first |
 | [Inventory](inventory/README.md) | Class-by-class evidence for every project and test project |

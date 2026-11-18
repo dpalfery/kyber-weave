@@ -49,7 +49,7 @@ branch, is in [inventory/](inventory/README.md). Summary:
 | `KyberWeave.Data` | 1,347 (about 145 in adapters) | 12 | 13 | 32 static classes hold logic; `Squad/` alone has 716 sites |
 | `KyberWeave.Application` | 171 | 12 | 78 (46 in roots) | `SelfUpdater` 29, `StandardsFolderMigration` has no seam at all |
 | `KyberWeave.Cli` | 181 | 5 | 6 | 23 calls to a static configuration loader; 28 `Console` sites |
-| `KyberWeave.Domain` | 33 | 0 | 17 | Cannot see `Contracts`; static classes over data |
+| `KyberWeave.Domain` | 33 | 0 | 17 | 210 of 440 files are static classes holding logic; 131 are data only |
 | `KyberWeave.Core`, `Core.Docs` | 0 | 4 | 50 | 17 static locators; references `Data` and `Application` |
 | `KyberWeave.Kernel` | 12 | 0 | 0 | The intended operating-system boundary |
 | `KyberWeave.Mcp` | 32 | 2 | 3 | `CodeGraphFreshness` is 17 of the 32 |
@@ -69,11 +69,11 @@ duplicated: 30 for `IArbiterProvider`, 11 each for `ISquadReleaseSource` and `IS
  Programs (composition roots)   Cli   Mcp   Arbiter   Hooks
         │ register adapters against seams; nothing else news a service
         ▼
- Application ── use cases; depends on seams and domain services only
+ Application ── all logic: use cases, services, rules, validators, parsers, renderers; depends on seams only
         │
  Core / Core.Docs ── domain services over Contracts only (no Data, no Application)
         │
- Domain ── rules, parsing, rendering; pure, or over seams passed in
+ Domain ── data only: records, DTOs, property bags, value objects, enums, options, constants
         │
  Contracts ── the seams (interfaces) and data records
         ▲
@@ -156,11 +156,19 @@ Pure static helpers (string formatting, parsing of a value passed in) stay stati
 
 ### Layers
 
-`KyberWeave.Core` and `Core.Docs` drop their references to `Data` and `Application`. `Domain` needs
-to see the seams: either `Domain` references `Contracts`, or the seams move down into `Kernel`, which
-`Domain` already references. The first task of phase 2 measures both against the project graph and the
-existing architecture tests and records the choice as D7; this design assumes the seams stay in
-`Contracts`.
+`KyberWeave.Core` and `Core.Docs` drop their references to `Data` and `Application`.
+
+`KyberWeave.Domain` holds data only (D7). Its logic, 210 static classes and about 38,000 lines,
+moves to `KyberWeave.Application`: a class that reads a resource or that another service depends on
+becomes an instance service behind an interface in `Contracts`; a pure function over its arguments stays
+a static helper. Because `Domain` then needs no seam, the seams stay in `Contracts`, which already
+references `Domain` for its records; no reference cycle arises.
+
+Moving logic out of `Domain` changes who can reach it. `Application` references `Data`, so code in
+`Data`, `Hooks` and `Core` that calls `Domain` logic today cannot call it in `Application`: each such
+caller either moves to `Application` too or takes the service through its `Contracts` interface,
+registered in a composition root. The first task of phase 2 lists these callers and picks one of the
+two for each.
 
 ### The squad deployment code
 
@@ -211,9 +219,9 @@ contract suites pin which errors each member raises, so the fake raises the same
 | Phase | Delivers | Shippable because |
 |---|---|---|
 | 1. Seams and fakes | Consolidated seams, adapters, the shared fakes library, the in-memory file system, contract suites | Additive; nothing calls the new members yet |
-| 2. Layers and locators | Core references fixed, Domain sees the seams, static locators removed, the static configuration loader and static process runner retired | Behaviour unchanged; smoke tests pass |
+| 2. Layers and locators | Core references fixed, Domain's logic moved to Application, static locators removed, the static configuration loader and static process runner retired | Behaviour unchanged; smoke tests pass |
 | 3. Squad deployment | The four squad deployment classes and the 32 static classes in `Data` onto seams, with crash-safety contract tests | Reviewed by a second reviewer; contract tests on real and fake |
-| 4. The rest of the product | Application, Cli, Mcp, Arbiter, Hooks, Domain bypasses onto seams | Per folder, each shippable |
+| 4. The rest of the product | Application (including the logic moved from Domain), Cli, Mcp, Arbiter, Hooks onto seams | Per folder, each shippable |
 | 5. Tests | Logic tests moved onto fakes; one unit test project per product project; adapter tests and smoke tests in the integration project; content tests through the corpus seam; unit run within 120 seconds | Measured |
 | Closeout | Rules in `AGENTS.md` and the test standard, review guidance, harvest, archive | After phase 5 |
 
@@ -227,19 +235,17 @@ contract suites pin which errors each member raises, so the fake raises the same
 | D4 | How is a fake kept honest? | One contract suite per seam, run against the fake (unit) and the adapter (integration). | A fake kept the suite green while real installs failed (`FakeSquadReleaseSource.cs`). | Proposed |
 | D5 | Monotonic clock interface? | No new interface: `TimeProvider` already has timestamps, elapsed time, timers and delay. | Framework type, not sealed against substitution; `FakeTimeProvider` exists in the framework's testing package. | Proposed |
 | D6 | Keep static entry points as shims? | No. Remove each once its callers move. | The layered refactor left 25 shim types; shims keep the old path reachable. | Proposed |
-| D7 | How does `Domain` see the seams? | Decided by phase 2's first task, after measuring both options. | Assumed: `Domain` references `Contracts`. | Open, see Q3 |
+| D7 | What does `Domain` hold, and how does it see the seams? | Data only. Its logic moves to `Application`, where the services live; `Domain` needs no seam, so the seams stay in `Contracts`. | Owner, 2026-11-17: "The domain project should house DTOs, property bags. It should not have logic. All logic should be in the application project where the services live." `Contracts` already references `Domain`, so `Domain` referencing `Contracts` would be a cycle. | Owner direction |
 | D8 | Where do integration tests run? | CI only, as their own required job; developer agents and task gates run unit projects. | Owner, 2026-11-17: "the integration tests become a safety net on the CI pipeline." | Owner direction |
 | D9 | The seven crash-safety weaknesses found on 2026-11-17 | Each becomes a contract test in phase 3 and is fixed there. | Independent review of the parked journal-batching branch. | Proposed |
 | D10 | Is a test that reads the shipped content a unit test? | See Q1. | | Open |
-| D11 | Enforce "only adapters touch resources" with an architecture test? | See Q2. | | Open |
+| D11 | Enforce "only adapters touch resources" with an architecture test? | No. Written guidance in `AGENTS.md` and the test standard, and reviewers raise direct resource access outside an adapter as a finding. | Owner, 2026-11-17, chose guidance and review over a build check; consistent with the standing rule that test rules are guidance, not guards. | Owner direction |
 
 ## Open questions
 
 | # | Question | Recommendation |
 |---|---|---|
 | Q1 | The 176 test classes (and two whole projects, `PromptContent.Tests` and `RepoPolicy.Tests`) that check the content we ship read the checkout. They cannot be in-memory: the content is the subject. Are they unit tests or integration tests? | Neither: a third kind, content tests, in `KyberWeave.Content.Tests`, reading through one read-only corpus seam. They write nothing, start nothing and are fast (prompt-content: under one second), so they run locally with the unit projects and count toward the 120 seconds. |
-| Q2 | Should an architecture test fail the build when a non-adapter class calls `System.IO`, `Process`, `Environment`, `Console`, the clock or `Mutex`? The owner has said no deterministic guards for test speed; this guard is about the design rule, and `KyberWeave.Architecture.Tests` already enforces layering this way. | Yes, as an architecture test, because written guidance alone let 2,800 sites accumulate. If not, written guidance and review only. |
-| Q3 | `Domain` referencing `Contracts`, or the seams moving into `Kernel`? | Measure first (phase 2, first task); prefer `Domain` referencing `Contracts`, which keeps one home for the seams. |
 
 ## Design harvest
 
@@ -249,4 +255,4 @@ contract suites pin which errors each member raises, so the fake raises the same
 | The test project layout and what is an integration test | CI Pipelines | `docs/standards/test/` and `AGENTS.md` |
 | The in-memory file system and contract suites | CI Pipelines | `docs/standards/test/` |
 | Crash-safety contract tests for squad deployment | KyberSquad | `docs/kyber-squad/architecture.md` |
-| D1 to D11 | CI Pipelines | An ADR for D2 to D6 and D8 |
+| D1 to D11 | CI Pipelines | An ADR for D2 to D8 and D11 |

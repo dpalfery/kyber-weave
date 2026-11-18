@@ -35,8 +35,9 @@ Measured on 2026-11-17 (the inventory is in [inventory/](inventory/README.md)):
   random ids, the console or locks directly; about 1,200 of them sit in classes that also hold logic.
 - 32 static classes in `KyberWeave.Data` hold logic and cannot receive an interface at all; 17 static
   service locators in `KyberWeave.Core` and `KyberWeave.Core.Docs` build production adapters with `new`.
-- `KyberWeave.Core` references `KyberWeave.Data` and `KyberWeave.Application`; `KyberWeave.Domain`
-  cannot see the interfaces in `KyberWeave.Contracts`.
+- `KyberWeave.Core` references `KyberWeave.Data` and `KyberWeave.Application`.
+- `KyberWeave.Domain` holds logic, not only data: of its 440 files, 210 are static classes holding logic
+  (about 38,000 lines) and 131 hold only records, enums or interfaces.
 - The interfaces that exist are thin and bypassed: `IProcessRunner` has one constructor consumer while
   a static `ProcessRunner.Run` is called 23 times; a static configuration loader is called 23 times
   while `IKyberWeaveConfigRepository` exists.
@@ -143,9 +144,15 @@ added to one layer cannot be bypassed from another.
 4.1. WHEN the build runs THEN `KyberWeave.Core` and `KyberWeave.Core.Docs` SHALL NOT reference
 `KyberWeave.Data` or `KyberWeave.Application`.
 
-4.2. WHEN code in `KyberWeave.Domain` needs a seam THEN the seam's interface SHALL be visible to it.
+4.2. WHEN the build runs THEN `KyberWeave.Domain` SHALL hold only data: records, DTOs, property bags,
+value objects, enums, options and constants. It SHALL hold no service, rule, validator, parser or
+renderer.
 
-4.3. WHEN adapters are registered THEN they SHALL be registered only in the composition roots of the
+4.3. WHEN logic sits in `KyberWeave.Domain` THEN it SHALL move to `KyberWeave.Application`, where the
+services live: as an instance service behind an interface, or, for a pure function over its arguments,
+as a static helper.
+
+4.4. WHEN adapters are registered THEN they SHALL be registered only in the composition roots of the
 programs (CLI, MCP server, rule-checker, hooks) and of the data layer.
 
 ### Requirement 5: Every behaviour has an in-memory unit test
@@ -234,7 +241,10 @@ interface; and that code testable only through a real resource is a design gap t
 to add a slow test.
 
 9.2. WHEN a reviewer reviews a change THEN the review guidance SHALL name direct resource access outside
-an adapter as a finding.
+an adapter, and logic in `KyberWeave.Domain`, as findings.
+
+9.3. The rules in 9.1 and 9.2 SHALL be enforced by written guidance and review, not by a build check or
+an architecture test.
 
 ### Requirement 10: The product keeps working at every step
 
