@@ -71,6 +71,46 @@ comes from bounded, allow-listed process sites ([ADR 0047](docs/adr/0047-kyberda
 `--config dash/playwright.isolated.config.ts`, and never start the dashboard to run a test. See
 [Running tests safely](docs/dash/runbook.md#running-tests-safely).
 
+### Seams: only an adapter touches a resource
+
+Every outside resource — the disk, a child process, the environment, the console, the clock,
+identifiers, a cross-process lease, an embedded resource, configuration, the network, the operating
+system's credential store, and the shipped content a test reads — is reached through one interface,
+a **seam**. The interface lives in `src/KyberWeave.Contracts`; its adapter lives in
+`src/KyberWeave.Data` (or `src/KyberWeave.Kernel` for the low-level file-system and process work);
+its fake lives in `tests/KyberWeave.Testing`, one fake per interface, and a shared contract suite
+runs that fake in a unit project and the adapter in `KyberWeave.Integration.Tests`.
+[`docs/reference/seams.md`](docs/reference/seams.md) is the register of every seam, adapter, fake,
+contract suite and allowed sealed framework type.
+
+- **Only an adapter, or a composition root wiring one at startup, calls `System.IO`, `Process`,
+  `Environment`, `Console`, the system clock, `Guid.NewGuid`, `Random`, `Mutex` or a network client
+  directly.** Any other class that does is a defect, and a reviewer raises it as a finding.
+- **New behaviour gets an in-memory unit test written against an interface.** The test lives in the
+  unit project of the code under test, runs over the shared fakes, and touches no disk, starts no
+  program, reads no environment variable, reads no real clock and opens no socket.
+- **Code testable only through a real resource is a design gap to raise, not a reason to add a slow
+  test.** Add or widen the seam first and write the unit test against it. The real-disk or
+  real-program proof stays in `KyberWeave.Integration.Tests`.
+- **`KyberWeave.Domain` holds data only**: records, DTOs, property bags, value objects, enums,
+  options and constants. Logic lives in `KyberWeave.Application`. A read-only property computed
+  from a type's own fields counts as data.
+- **Three kinds of test.** A unit test runs in memory with the unit projects. An integration test
+  performs a real deployment, starts a real program or needs a real file system, and runs only in
+  CI. A content test checks the shipped agents, skills, standards and documents, reads them through
+  the corpus seam, and runs with the unit projects. Developer agents, task gates and the review
+  council's gates run the unit and content projects; CI runs the integration project as its own
+  required job.
+- **Test roots are platform-qualified.** Derive a path from the fake's in-memory root or the test
+  temp root, never from a POSIX literal such as `/kw/work`, so the same test runs on Windows.
+
+No build check or architecture test enforces these rules, and none is to be added: written
+guidance and review do ([ADR 0089](docs/adr/0089-every-behaviour-is-testable-through-a-seam.md)).
+The one mechanical check is the repository-policy scan that keeps ambient I/O out of
+`KyberWeave.Domain`; it is deliberately narrower than the rule and does not check the seam rule
+elsewhere. The test rules themselves are in
+[the test standard](docs/standards/test/test.standards.md#three-kinds-of-test).
+
 ### Before opening a PR
 
 A change of at most 300 changed lines (added plus removed, from `git diff --numstat <base>...HEAD`)
