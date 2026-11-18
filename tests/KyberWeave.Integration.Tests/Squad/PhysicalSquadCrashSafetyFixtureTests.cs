@@ -83,6 +83,41 @@ public sealed class PhysicalSquadCrashSafetyFixtureTests
     }
 
     [Fact]
+    public void RecoveryThatFailsPartwayIsRepeatable()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Assert.Skip("A read-only directory attribute does not stop a file being created on Windows, so the partial recovery cannot be injected there.");
+            return;
+        }
+
+        using PhysicalSquadCrashSafetyFixture fixture = new();
+        fixture.CreateBaseline(SquadCrashFlow.Update);
+        IReadOnlyDictionary<string, SquadTreeEntry> oldTree = fixture.Capture();
+        IReadOnlyList<string> faultPoints = fixture.ExecuteClean(SquadCrashFlow.Update);
+        fixture.Restore(oldTree);
+        Assert.Null(fixture.ExecuteUnderFault(SquadCrashFlow.Update, faultPoints[^1]));
+
+        string blocked = Path.Combine(fixture.Root, ".codex", "agents");
+        UnixFileMode original = File.GetUnixFileMode(blocked);
+        File.SetUnixFileMode(blocked, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+        try
+        {
+            Assert.ThrowsAny<Exception>(fixture.Recover);
+            Assert.NotNull(SquadTreeComparison.Difference(oldTree, fixture.Capture()));
+        }
+        finally
+        {
+            File.SetUnixFileMode(blocked, original);
+        }
+
+        // A restarted process retries: the recovery that died partway must finish the prior tree.
+        fixture.Recover();
+
+        Assert.Null(SquadTreeComparison.Difference(oldTree, fixture.Capture()));
+    }
+
+    [Fact]
     public void RestoringASnapshotReproducesItExactly()
     {
         using PhysicalSquadCrashSafetyFixture fixture = new();

@@ -69,8 +69,8 @@ public abstract class SquadCrashSafetyFixture : IDisposable
     /// <summary>A managed file that an update changes.</summary>
     public const string ConductorPath = ".codex/agents/conductor.toml";
 
-    /// <summary>A second managed file that an update changes.</summary>
-    public const string TwoPath = ".codex/agents/two.toml";
+    /// <summary>A second managed file that an update changes, in a directory of its own so a recovery can be stopped between the two.</summary>
+    public const string TwoPath = ".warp/agents/two.md";
 
     /// <summary>A file the host already had, adopted by the install, whose bytes never change.</summary>
     public const string AdoptedPath = ".codex/agents/adopted.md";
