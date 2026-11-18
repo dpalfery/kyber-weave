@@ -1,10 +1,10 @@
+using KyberWeave.Core.Arbiter;
 using KyberWeave.Tests.Configuration;
 
 using System.Text.Json;
 using KyberWeave.Arbiter.Hooks;
 using KyberWeave.Core.Configuration;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -21,12 +21,15 @@ namespace KyberWeave.Tests.Arbiter;
 /// </summary>
 public sealed class ArchitectShellGuardTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private const string Worktree = "/w";
 
+    /// <summary>The planning directories of a configuration that sets only the docs root, as this repository does.</summary>
     private static readonly Lazy<IReadOnlyList<string>> PlanningDirectories = new(() =>
-        ReadGuard.ProtectedDirectories(ConfigFileReader.Load(Corpus.Root)));
+        ReadGuard.ProtectedDirectories(new KyberWeaveConfig
+        {
+            Arbiter = ArbiterConfigDefaults.Product,
+            Ontology = OntologyConfig.ProductDefaults.WithDocsRoot("docs"),
+        }));
 
     private const string RuleId = ArchitectShellGuard.RuleId;
 

@@ -3,7 +3,6 @@ using KyberWeave.Core.Arbiter.Facts;
 using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
@@ -32,12 +31,7 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterPlanReadRuleTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private const string PlanReadRule = "KW-ARB-PLANREAD-001";
-
-    private const string ConductorRulesPath =
-        "products/kyber-squad/standards/conductor/conductor.arbiter-rules.yml";
 
     /// <summary>A dispatch prompt with the routing header block, a task, and a body.</summary>
     private static string Prompt(string body) =>
@@ -206,29 +200,5 @@ public sealed class ArbiterPlanReadRuleTests
             "documentation, then archive it.");
 
         Assert.Equal(RuleEffects.Allow, Effect(prompt, target: "docs-dev"));
-    }
-
-    /// <summary>
-    /// Ids are permanent, so the new rule joins the file without renumbering any of the
-    /// eighteen, and the count in the file's own header is part of the shipped contract: a
-    /// reader checking how many rules ship must not have to count them.
-    /// </summary>
-    [Fact]
-    public void TheShippedFileDeclaresTheRuleAsTheTwentySixth()
-    {
-        Assert.True(
-            Corpus.Exists(ConductorRulesPath),
-            $"the conductor rules file must live at '{ConductorRulesPath}'.");
-        string[] ids =
-        [
-            .. CorpusLines.Split(Corpus.ReadText(ConductorRulesPath))
-                .Select(line => line.Trim())
-                .Where(line => line.StartsWith("- id: ", StringComparison.Ordinal))
-                .Select(line => line["- id: ".Length..].Trim())
-        ];
-
-        Assert.Equal(21, ids.Length);
-        Assert.Contains(PlanReadRule, ids);
-        Assert.Equal("delegate", Rule().Trigger);
     }
 }

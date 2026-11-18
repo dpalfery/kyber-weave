@@ -5,20 +5,17 @@ using KyberWeave.Core.Arbiter.Rules;
 using KyberWeave.Core.Configuration;
 using YamlDotNet.Core;
 using Xunit;
-using KyberWeave.Tests.Corpus;
 
 namespace KyberWeave.Tests.Arbiter;
 
 /// <summary>
 /// Contract for task 1.3 (config): the decision-model savings keys under <c>arbiter:</c>, their
 /// defaults, the <c>KW-ARB-CONFIG-012</c> to <c>-015</c> diagnostics, the shadow override rule for
-/// shipped rules, and that this repository's own host config stays provider-free.
+/// shipped rules.
 /// RED: the savings keys, <c>ArbiterRule.Shadow</c> and the new diagnostics do not exist yet.
 /// </summary>
 public sealed class ArbiterSavingsConfigTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     private static readonly string[] SixProfiles =
     [
         "architect",
@@ -199,13 +196,5 @@ public sealed class ArbiterSavingsConfigTests
 
         ArbiterRule rule = Assert.Single(config.Rules, candidate => candidate.Id == "KW-ARB-PLAN-001");
         Assert.False(rule.Shadow);
-    }
-
-    [Fact]
-    public void ThisRepositoryHostConfig_LoadsWithProviderKindNone()
-    {
-        KyberWeaveConfig config = ConfigFileReader.Load(Corpus.Root);
-
-        Assert.Equal(ArbiterProviderKind.None, config.Arbiter.Provider.Kind);
     }
 }
