@@ -162,7 +162,11 @@ public sealed class ScriptedProcessRunner : IProcessRunner
     public bool IsAlive(int processId) => _alive.TryGetValue(processId, out bool alive) && alive;
 
     /// <inheritdoc />
-    public string? FindOnPath(string program) => _onPath.TryGetValue(program, out string? path) ? path : null;
+    public string? FindOnPath(string program)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(program);
+        return _onPath.TryGetValue(program, out string? path) ? path : null;
+    }
 
     private sealed record Answer(
         string Program,

@@ -219,6 +219,15 @@ public abstract class ProcessRunnerContractTests : IDisposable
     }
 
     [Fact]
+    public void RejectsAnEmptyProgramNameWhenFindingOnThePath()
+    {
+        IProcessRunner runner = CreateRunner();
+
+        _ = Assert.ThrowsAny<ArgumentException>(() => runner.FindOnPath(null!));
+        _ = Assert.ThrowsAny<ArgumentException>(() => runner.FindOnPath(" "));
+    }
+
+    [Fact]
     public void ReportsWhetherAProcessIsAlive()
     {
         IProcessRunner runner = CreateRunner();
