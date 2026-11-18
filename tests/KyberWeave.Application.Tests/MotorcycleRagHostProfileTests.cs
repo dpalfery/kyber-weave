@@ -1,5 +1,4 @@
-using KyberWeave.Tests.Configuration;
-
+using KyberWeave.Application.Agents;
 using KyberWeave.Core.Agents.Model;
 using KyberWeave.Core.Agents.Parsing;
 using KyberWeave.Core.Agents.Validation;
@@ -8,6 +7,10 @@ using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
 using KyberWeave.Core.Docs.Validation;
+using KyberWeave.Data.Configuration;
+using KyberWeave.Data.Review;
+using KyberWeave.Tests.Fakes;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -18,6 +21,8 @@ namespace KyberWeave.Tests;
 /// </summary>
 public class MotorcycleRagHostProfileTests
 {
+    private readonly InMemoryFileSystem _disk = new();
+
     private const string HostProfileYaml = """
         ontology:
           docs-root: 6-Docs
@@ -61,7 +66,7 @@ public class MotorcycleRagHostProfileTests
     public void HostProfileRestoresDocsValidateExclusionExpectations()
     {
         KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(HostProfileYaml);
-        using HostProfileDocFixture fixture = new HostProfileDocFixture(config);
+        HostProfileDocFixture fixture = new(_disk, config);
 
         fixture.WithCatalog()
             .Write("6-Docs/archive/old-plan.md", "# archived\n")
@@ -79,7 +84,7 @@ public class MotorcycleRagHostProfileTests
     public void HostProfileRestoresCatalogColumnMapping()
     {
         KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(HostProfileYaml);
-        using HostProfileDocFixture fixture = new HostProfileDocFixture(config);
+        HostProfileDocFixture fixture = new(_disk, config);
 
         fixture.WithCatalog(
             """
@@ -113,7 +118,7 @@ public class MotorcycleRagHostProfileTests
     public void HostProfileRestoresConductorSyncCheckExpectations()
     {
         KyberWeaveConfig config = KyberWeaveConfigAssembler.FromYaml(HostProfileYaml);
-        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
+        HostProfileRepoFixture repo = new(_disk);
 
         repo.WithConductorSkillDirectory();
         repo.WithAgent(HarnessKind.Kilo, "conductor");
@@ -129,7 +134,7 @@ public class MotorcycleRagHostProfileTests
                 $"Host profile must map conductor for {harness}.");
         }
 
-        DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config.Harness, File.Exists);
+        DiagnosticReport report = AgentSyncLinter.LintSet(repo.LoadAgentSet(), repo.Root, config.Harness, _disk.FileExists);
 
         List<Diagnostic> conductorMissing = report.Items
             .Where(i => i is { Code: AgentSyncLinter.RuleUnsatisfiedRole, Subject: "conductor" })
@@ -158,10 +163,10 @@ public class MotorcycleRagHostProfileTests
     [Fact]
     public void HostProfileLoadsFromKyberWeaveFolder()
     {
-        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
+        HostProfileRepoFixture repo = new(_disk);
         repo.WriteHostConfig(HostProfileYaml);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(repo.Root);
+        KyberWeaveConfig config = repo.LoadConfig();
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
         Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
@@ -170,10 +175,10 @@ public class MotorcycleRagHostProfileTests
     [Fact]
     public void HostProfileLoadsFromLegacyRepoRootKyberWeaveYml()
     {
-        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
+        HostProfileRepoFixture repo = new(_disk);
         repo.WriteLegacyRootConfig(HostProfileYaml);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(repo.Root);
+        KyberWeaveConfig config = repo.LoadConfig();
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
         Assert.True(config.Harness.Profiles[HarnessKind.Codex].MappedRoleSkillOverrides.ContainsKey("conductor"));
@@ -182,11 +187,11 @@ public class MotorcycleRagHostProfileTests
     [Fact]
     public void HostProfileInKyberWeaveFolderWinsOverLegacyRootFile()
     {
-        using HostProfileRepoFixture repo = new HostProfileRepoFixture();
+        HostProfileRepoFixture repo = new(_disk);
         repo.WriteLegacyRootConfig("ontology:\n  docs-root: legacy-docs\n");
         repo.WriteHostConfig(HostProfileYaml);
 
-        KyberWeaveConfig config = ConfigFileReader.Load(repo.Root);
+        KyberWeaveConfig config = repo.LoadConfig();
 
         Assert.Equal("6-Docs", config.Ontology.DocsRoot);
     }
@@ -204,17 +209,24 @@ public class MotorcycleRagHostProfileTests
         # Current
         """;
 
-    private sealed class HostProfileDocFixture : IDisposable
+    private sealed class HostProfileDocFixture
     {
-        private string Root { get; }
+        private readonly InMemoryFileSystem _disk;
         private readonly KyberWeaveConfig _config;
+        private readonly FakePathResolver _paths;
+        private readonly FakeProcessEnvironment _environment;
 
-        public HostProfileDocFixture(KyberWeaveConfig config)
+        public HostProfileDocFixture(InMemoryFileSystem disk, KyberWeaveConfig config)
         {
+            _disk = disk;
             _config = config;
-            Root = Path.Combine(Path.GetTempPath(), "kw-host-docs-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Path.Combine(Root, _config.Ontology.DocsRoot));
+            Root = Path.Combine(disk.Root, "kw", "host-docs");
+            _paths = new FakePathResolver(disk);
+            _environment = new FakeProcessEnvironment(currentDirectory: Path.Combine(disk.Root, "kw", "work"));
+            _disk.CreateDirectory(Path.Combine(Root, _config.Ontology.DocsRoot));
         }
+
+        private string Root { get; }
 
         public HostProfileDocFixture WithCatalog(string? tableBody = null)
         {
@@ -244,47 +256,50 @@ public class MotorcycleRagHostProfileTests
 
         public void WithSourceRoot(string relativePath)
         {
-            Directory.CreateDirectory(Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            _disk.CreateDirectory(Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar)));
         }
 
         public HostProfileDocFixture Write(string relativePath, string content)
         {
             string full = Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(full)!);
-            File.WriteAllText(full, content);
+            _disk.CreateDirectory(Path.GetDirectoryName(full)!);
+            _disk.WriteAllText(full, content);
             return this;
         }
 
         public IReadOnlyList<DocumentModel> LoadSubjects() =>
-            RealDocumentLoader.Create(Root, _config.Ontology).Load().Documents
+            Loader().Load().Documents
                 .Where(d => d.RelativePath != "6-Docs/catalog.md")
                 .ToList();
 
         public DiagnosticReport Validate() =>
-            RealDocSpecValidator.Create(Root, _config.Ontology)
-                .Validate(RealDocumentLoader.Create(Root, _config.Ontology).Load());
+            new DocSpecValidator(Root, _config.Ontology, _disk, _paths, _environment).Validate(Loader().Load());
 
-        public void Dispose()
-        {
-            if (Directory.Exists(Root))
-                Directory.Delete(Root, recursive: true);
-        }
+        private DocumentLoader Loader() =>
+            new(new InMemoryRepositoryFileStore(_disk), Root, _paths, _environment, _config.Ontology);
     }
 
-    private sealed class HostProfileRepoFixture : IDisposable
+    private sealed class HostProfileRepoFixture
     {
-        public string Root { get; }
+        private readonly InMemoryFileSystem _disk;
+        private readonly FakePathResolver _paths;
+        private readonly FakeProcessEnvironment _environment;
 
-        public HostProfileRepoFixture()
+        public HostProfileRepoFixture(InMemoryFileSystem disk)
         {
-            Root = Path.Combine(Path.GetTempPath(), "kw-host-repo-" + Guid.NewGuid().ToString("N"));
-            Directory.CreateDirectory(Root);
+            _disk = disk;
+            Root = Path.Combine(disk.Root, "kw", "host-repo");
+            _paths = new FakePathResolver(disk);
+            _environment = new FakeProcessEnvironment(currentDirectory: Path.Combine(disk.Root, "kw", "work"));
+            _disk.CreateDirectory(Root);
         }
+
+        public string Root { get; }
 
         public void WithConductorSkillDirectory()
         {
-            Directory.CreateDirectory(Path.Combine(Root, ".agents", "skills", "conductor"));
-            File.WriteAllText(
+            _disk.CreateDirectory(Path.Combine(Root, ".agents", "skills", "conductor"));
+            _disk.WriteAllText(
                 Path.Combine(Root, ".agents", "skills", "conductor", "SKILL.md"),
                 "---\nname: conductor\n---\n");
         }
@@ -303,8 +318,8 @@ public class MotorcycleRagHostProfileTests
             };
 
             string dir = Path.Combine(Root, folder.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(dir);
-            File.WriteAllText(
+            _disk.CreateDirectory(dir);
+            _disk.WriteAllText(
                 Path.Combine(dir, $"{roleName}.md"),
                 $"""
                 ---
@@ -318,19 +333,20 @@ public class MotorcycleRagHostProfileTests
         public void WriteHostConfig(string yaml)
         {
             string dir = Path.Combine(Root, ".kyber-weave");
-            Directory.CreateDirectory(dir);
-            File.WriteAllText(Path.Combine(dir, "kyber-weave.yml"), yaml);
+            _disk.CreateDirectory(dir);
+            _disk.WriteAllText(Path.Combine(dir, "kyber-weave.yml"), yaml);
         }
 
         public void WriteLegacyRootConfig(string yaml) =>
-            File.WriteAllText(Path.Combine(Root, "kyber-weave.yml"), yaml);
+            _disk.WriteAllText(Path.Combine(Root, "kyber-weave.yml"), yaml);
 
-        public AgentSet LoadAgentSet() => GovernanceTestFiles.Agents.LoadAll(Root);
+        public AgentSet LoadAgentSet() => new AgentFileReader(_disk, _paths, _environment).LoadAll(Root);
 
-        public void Dispose()
-        {
-            if (Directory.Exists(Root))
-                Directory.Delete(Root, recursive: true);
-        }
+        public KyberWeaveConfig LoadConfig() =>
+            new FileKyberWeaveConfigRepository(
+                new FileRepositoryTreeProbe(_disk, _paths, _environment),
+                _disk,
+                _paths,
+                _environment).Load(Root);
     }
 }
