@@ -22,13 +22,11 @@ internal static class ArbiterDataServiceCollectionExtensions
         services.TryAddSingleton<IArbiterModelTargetsReader>(sp => new FileArbiterModelTargetsReader(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<IArbiterUserSettings>(sp => new FileArbiterUserSettings(sp.GetRequiredService<IFileSystem>()));
         services.TryAddSingleton<ICredentialStore>(_ => OperatingSystemCredentialStore.Create());
-        services.TryAddSingleton(sp => new ConfiguredArbiterProviderFactory(sp.GetRequiredService<IArbiterUserSettings>()));
         services.TryAddSingleton<IArbiterStateFactory, FileArbiterStateFactory>();
         services.TryAddSingleton<IGateReportFacts, GateReportFacts>();
         services.TryAddSingleton<IFileTextFacts, FileTextFacts>();
         services.TryAddSingleton<IPlanFileResolver, PlanPathResolver>();
         services.TryAddSingleton<IClaudeHookCoverage, ClaudeHookCoverage>();
-        services.TryAddSingleton<IArbiterProviderFactory, SystemOneProviderFactory>();
         services.TryAddSingleton<IArbiterHttpHandlers, SocketArbiterHttpHandlers>();
         services.TryAddSingleton<IFileStatReader, FileStatReader>();
         services.TryAddSingleton<IArbiterUserOverrideWriter>(sp => new FileArbiterUserOverrideWriter(sp.GetRequiredService<IWritableFileSystem>()));

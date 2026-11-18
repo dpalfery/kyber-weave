@@ -106,7 +106,7 @@ public sealed class ArbiterSystemOneClientTests
         string model = JevModel,
         int timeoutMs = 5000,
         Func<Uri, string?>? keyResolver = null) =>
-        new(handler, endpoint ?? RemoteEndpoint, model, timeoutMs, keyResolver);
+        new(handler, endpoint ?? RemoteEndpoint, model, timeoutMs, TimeProvider.System, keyResolver);
 
     private static HttpResponseMessage JsonResponse(string json, HttpStatusCode status = HttpStatusCode.OK) =>
         new(status)
@@ -258,7 +258,7 @@ public sealed class ArbiterSystemOneClientTests
     {
         const string json = "{\"model\":\"" + JevModel + "\",\"answers\":{\"" + NoulRuleId + "\":{\"type\":\"noul\",\"noul\":0.5}}}";
         using StubHandler handler = new(JsonResponse(json));
-        using SystemOneClient client = SystemOneClient.CreateForProduct(handler, RemoteEndpoint, JevModel, 5000, null);
+        using SystemOneClient client = SystemOneClient.CreateForProduct(handler, RemoteEndpoint, JevModel, 5000, TimeProvider.System, null);
         await client.AskStep1Async([rule], facts);
         using JsonDocument body = JsonDocument.Parse(handler.Requests[0].Body);
         return body.RootElement.GetProperty("questions").GetProperty(NoulRuleId).GetProperty("instructions").GetString()!;
