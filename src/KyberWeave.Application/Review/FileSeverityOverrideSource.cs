@@ -37,7 +37,12 @@ public sealed class FileSeverityOverrideSource(
 
         try
         {
-            return SeverityOverrideRules.Parse(files.ReadAllText(path), Path.GetRelativePath(root, path).Replace('\\', '/'));
+            // The name a problem cites is repository-relative, so the root it is taken from is resolved the same way
+            // the guidance path was: a relative root names the same file on every host.
+            string resolvedRoot = paths.GetFullPath(root, environment.CurrentDirectory);
+            return SeverityOverrideRules.Parse(
+                files.ReadAllText(path),
+                Path.GetRelativePath(resolvedRoot, path).Replace('\\', '/'));
         }
         catch (Exception ex) when (FileFailure.Is(ex))
         {

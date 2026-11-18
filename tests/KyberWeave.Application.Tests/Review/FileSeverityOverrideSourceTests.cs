@@ -94,6 +94,31 @@ public sealed class FileSeverityOverrideSourceTests
     }
 
     [Fact]
+    public void LoadNamesTheFileRelativeToARelativeRoot()
+    {
+        string path = Path.Combine("/work", "repo", SeverityOverrides.DefaultGuidancePath);
+        _files.CreateDirectory(Path.GetDirectoryName(path)!);
+        _files.WriteAllText(path, """
+            # Review guidance
+
+            ## Severity overrides
+
+            | Id | Finding class | Severity | Applies to | Why |
+            |---|---|---|---|---|
+            | SO-1 | Some class | blocker | | |
+
+            """);
+        FileSeverityOverrideSource source = new(
+            _files,
+            new FakePathResolver(_files),
+            new FakeProcessEnvironment(currentDirectory: "/work"));
+
+        SeverityOverrides overrides = source.Load("repo", ConfigRegConfig.ProductDefaults);
+
+        Assert.Equal(SeverityOverrides.DefaultGuidancePath, Assert.Single(overrides.Problems).FilePath);
+    }
+
+    [Fact]
     public void ValidateReportsNothingWhenTheDeclaredFileIsMissing()
     {
         Assert.Empty(Source().Validate(Root, ConfigRegConfig.ProductDefaults).Items);
