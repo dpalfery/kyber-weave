@@ -635,10 +635,19 @@ not reference `Application`, so an unrouted caller of a moved type breaks the mo
 
 **Step 1 — the folder moves.** Then each task below is a `git mv` of a folder's logic files and their
 tests, plus the path-keyed artefacts in the rules below, and the namespace does not change. The order
-inside step 1 barely matters: after steps 0a and 0b, every remaining reference is either inside
-`Application` or through a `Contracts` interface, so a `depends on` cycle between groups is harmless.
-The groups are still listed most-named first, because that is the order that keeps each move's
-call-site diff smallest.
+inside step 1 is a schedule, not a preference: `KyberWeave.Domain` references `Kernel` only, so a
+group can move only once every group whose code names its types has left `Domain` — the caller goes
+first, then the callee is free. Moving a callee early does not build: moving `FileSystem/DocsRootPath.cs`
+on its own fails `dotnet build src/KyberWeave.Domain` with `CS0234` in six files
+(`Arbiter/Plans/PlanReadInstruction`, `Configuration/ConfigRegConfigLoader`,
+`Configuration/DocsAnalysisConfigLoader`, `Configuration/OntologyConfig`,
+`Configuration/OntologyConfigLoader`, `Docs/Validation/DocSpecValidator`), and those are not all of
+its callers. The `depends on` column lists the groups a group's code names, so read it as "moves
+before": a group moves before the groups it names, which puts every caller ahead of its callee. A group
+that names and is named by another moves with it in one commit, which is still `git mv`-only for its
+files. `2.5.4` is the correction this analysis produced: `Arbiter/Plans/PlanReadInstruction.cs` names
+`DocsRootPath`, so `Arbiter: root` moves before `FileSystem`, and its cell was the one of the four that
+omitted `FileSystem`.
 
 The first version of this part claimed the moves need no particular order. That holds only for the
 callers that reference `Application` — `Cli`, `Mcp`, `Arbiter`, `Hooks` and every test project — which
@@ -647,10 +656,14 @@ why they are steps 0a and 0b.
 
 ### Rules every move task follows
 
-1. **A move commit is `git mv` only.** No file it moves changes content in that commit, and the build
-   and the tests that covered the class are green before and after it. Anything else — a namespace, a
-   `using`, a call site that has to change — is either the build fix the move forces, in its own
-   commit, or a step 0b change that should already be in place.
+1. **A move commit is `git mv` only, and it is green.** No file it moves changes content in that
+   commit, and the build and the tests that covered the class are green before and after it. That is
+   possible only in the schedule above: every caller outside `Domain` was rerouted in step 0b, and
+   every group that names the moved types already left `Domain`, because `Domain` has no `Application`
+   reference. The check that proves the order is `dotnet build src/KyberWeave.Domain` after the move:
+   a `CS0234` or `CS0246` naming a file means that file's group moves first. Anything else — a
+   namespace, a `using`, a call site — is either the build fix the move forces, in its own commit, or
+   a step 0b change that must already be in place.
 2. **A seam conversion is a separate commit.** Turning a static class into an instance service,
    replacing a resource call with a seam, or taking a `Contracts` interface in a caller lands on its
    own, before or after the move, never inside it, so a review reads one commit as movement and the
@@ -673,7 +686,7 @@ why they are steps 0a and 0b.
 | 2.5.1 | `Configuration` | 23 | 23 | task 2.3, then Arbiter: root, FileSystem, Review: catalogue and commands, Review: gates and cycles, Squad: deployment, briefs and the rest | KyberWeave.Application.Tests, KyberWeave.Arbiter, KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Mcp, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.2 | `Arbiter: Rules and providers` | 18 | 16 | Arbiter: Facts, Arbiter: root, FileSystem | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.3 | `Squad: deployment, briefs and the rest` | 24 | 23 | Configuration | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.RepoPolicy.Tests, KyberWeave.Testing, KyberWeave.Tests |
-| 2.5.4 | `Arbiter: root` | 16 | 12 | Arbiter: Facts, Arbiter: Rules and providers, Configuration, Squad: deployment, briefs and the rest | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Testing, KyberWeave.Tests |
+| 2.5.4 | `Arbiter: root` | 16 | 12 | Arbiter: Facts, Arbiter: Rules and providers, Configuration, FileSystem, Squad: deployment, briefs and the rest | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Testing, KyberWeave.Tests |
 | 2.5.5 | `Arbiter: Facts` | 26 | 23 | Arbiter: Rules and providers, Arbiter: root | KyberWeave.Cli, KyberWeave.Contracts, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Tests |
 | 2.5.6 | `FileSystem` | 1 | 1 | none | KyberWeave.Data, KyberWeave.Tests |
 | 2.5.7 | `Review: gates and cycles` | 15 | 14 | Arbiter: Rules and providers, Configuration, Review: duplicates and suppression, Review: seats and verdicts | KyberWeave.Cli, KyberWeave.Core, KyberWeave.Data, KyberWeave.Integration.Tests, KyberWeave.Tests |
