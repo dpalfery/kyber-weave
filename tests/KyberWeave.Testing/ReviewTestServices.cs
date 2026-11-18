@@ -96,6 +96,7 @@ internal static class ReviewTestServices
             rules,
             logDirectory is null ? null : RealArbiterState.Decisions(logDirectory),
             clock,
+            new FakeIdGenerator(),
             unavailableReason,
             cacheStore ?? new FakeReviewDecisionCacheStore(),
             cachePath);

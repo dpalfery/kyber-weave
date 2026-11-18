@@ -112,7 +112,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
+            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
 
@@ -133,7 +133,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
+            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
 
@@ -161,7 +161,7 @@ public sealed class ArbiterForEachExpansionTests : IDisposable
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
+            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
 
         await evaluator.EvaluateAsync(DelegateEvent(), ConfigWith([ForEachRule()]));
 

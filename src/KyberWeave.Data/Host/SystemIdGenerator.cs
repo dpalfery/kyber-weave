@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using KyberWeave.Contracts.Repositories;
 
@@ -14,4 +15,9 @@ public sealed class SystemIdGenerator : IIdGenerator
 
     /// <inheritdoc />
     public string NewRandomFileName() => Path.GetRandomFileName();
+
+    /// <inheritdoc />
+    public string NewSortableId(DateTimeOffset at) =>
+        $"{at.ToUniversalTime().UtcTicks.ToString("x16", CultureInfo.InvariantCulture)}-"
+        + RandomNumberGenerator.GetHexString(8, lowercase: true);
 }

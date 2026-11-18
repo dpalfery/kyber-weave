@@ -94,13 +94,14 @@ public static class ArbiterApplicationServiceCollectionExtensions
         services.TryAddSingleton(sp =>
         {
             TimeProvider clock = sp.GetRequiredService<TimeProvider>();
+            IIdGenerator ids = sp.GetRequiredService<IIdGenerator>();
             return new HookCommand(
                 sp.GetRequiredService<HarnessAdapterRegistry>(),
                 sp.GetRequiredService<IArbiterHostConfig>(),
                 sp.GetRequiredService<IDispatchClaimStore>(),
                 sp.GetRequiredService<IClaudeHookCoverage>(),
                 sp.GetRequiredService<IProcessEnvironment>(),
-                () => ArbiterRecordId.New(clock.GetUtcNow()),
+                () => ids.NewSortableId(clock.GetUtcNow()),
                 sp.GetRequiredService<ITaskPromptServiceFactory>());
         });
         services.TryAddSingleton<IArbiterHookHost>(sp => sp.GetRequiredService<HookCommand>());

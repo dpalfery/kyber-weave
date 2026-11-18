@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -19,6 +20,8 @@ namespace KyberWeave.Integration.Tests.Arbiter;
 /// </summary>
 public sealed class ArbiterEvaluatorTests : IDisposable
 {
+    private static readonly FakeIdGenerator Ids = new();
+
     private readonly string _root = Path.Combine(
         Path.GetTempPath(), "kw-arbiter-eval-" + Guid.NewGuid().ToString("N"));
 
@@ -189,6 +192,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(fixedNow),
+            new FakeIdGenerator(),
             modelTargetsDirectory: modelTargetsDirectory);
     }
 
@@ -357,7 +361,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
             new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)));
+            new FixedClock(new DateTimeOffset(2025, 10, 1, 12, 0, 0, TimeSpan.Zero)), new FakeIdGenerator());
         KyberWeaveConfig config = ConfigWith([
             AskRule("KW-ARB-ASK-001", "delegate", "within-task", RuleEffects.Allow),
         ]);
@@ -516,7 +520,7 @@ public sealed class ArbiterEvaluatorTests : IDisposable
         InFlightLedger ledger = RealArbiterState.Ledger(ArbiterDirectory);
         DateTimeOffset at = new(2025, 10, 1, 12, 0, 0, TimeSpan.Zero);
         await ledger.AppendAsync(new ArbiterLedgerEvent(
-            ArbiterRecordId.New(at), at, ArbiterSources.Hook, "claude", "s1", ArbiterLedgerPhases.Pre));
+            Ids.NewSortableId(at), at, ArbiterSources.Hook, "claude", "s1", ArbiterLedgerPhases.Pre));
         int filesBefore = Directory.Exists(ArbiterDirectory)
             ? Directory.GetFiles(ArbiterDirectory).Length
             : 0;

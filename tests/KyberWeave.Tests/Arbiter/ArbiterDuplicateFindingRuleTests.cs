@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Plans;
 using KyberWeave.Data.Arbiter;
@@ -170,6 +171,7 @@ public sealed class ArbiterDuplicateFindingRuleTests : IDisposable
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
             new FixedClock(Now),
+            new FakeIdGenerator(),
             (_, _) => []);
 
     /// <summary>A stored earlier finding on <paramref name="file"/> at <paramref name="line"/>.</summary>

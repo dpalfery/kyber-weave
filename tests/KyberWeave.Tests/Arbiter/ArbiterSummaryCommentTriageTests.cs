@@ -73,7 +73,7 @@ public sealed class ArbiterSummaryCommentTriageTests : IDisposable
     }
 
     private CommentTriageService Service(IArbiterProvider provider, IReadOnlyList<string>? botLogins) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins);
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>(), botLogins: botLogins);
 
     private static CommentSummaryRequest Summary(string? author, string body = KiloSummary) => new(body, author);
 

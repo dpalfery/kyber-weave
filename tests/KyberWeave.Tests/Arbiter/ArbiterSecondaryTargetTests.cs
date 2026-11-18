@@ -65,7 +65,7 @@ public sealed class ArbiterSecondaryTargetTests : IDisposable
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-        TimeProvider.System);
+        TimeProvider.System, new FakeIdGenerator());
 
     /// <summary>A multi-dispatch event. The event's own target is left unset: each dispatch names its own.</summary>
     private ArbiterEvent MultiDispatch(string first, string second) => new()

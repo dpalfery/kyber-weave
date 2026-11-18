@@ -52,7 +52,7 @@ public sealed class ArbiterFailOpenContractTests : IDisposable
         new FileArbiterModelTargetsReader(new PhysicalFileSystem()),
             RealGateReportFacts.Create(),
             RealArbiterState.Factory(),
-        TimeProvider.System);
+        TimeProvider.System, new FakeIdGenerator());
 
     private static KyberWeaveConfig ShippedConfig() =>
         ArbiterEvaluatorFixtures.ConfigWith(ArbiterConfigDefaults.Product.Rules);

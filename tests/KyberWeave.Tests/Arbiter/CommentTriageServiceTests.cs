@@ -52,7 +52,7 @@ public sealed class CommentTriageServiceTests : IDisposable
     }
 
     private CommentTriageService Service(IArbiterProvider provider) =>
-        new(provider, Root, ArbiterDirectory, new FixedClock(Now), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
+        new(provider, Root, ArbiterDirectory, new FixedClock(Now), new FakeIdGenerator(), ArbiterTestServices.Get<IFileTextFacts>(), ArbiterTestServices.Get<IArbiterStateFactory>());
 
     private static CommentTriageRequest Request() =>
         new(CitedPath, 12, "Rename this variable to something clearer.", null);

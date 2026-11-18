@@ -1,3 +1,4 @@
+using KyberWeave.Tests.Fakes;
 using System.Security.Cryptography;
 using System.Text;
 using KyberWeave.Core.Arbiter.Facts;
@@ -25,6 +26,8 @@ namespace KyberWeave.Tests.Arbiter;
 /// </remarks>
 public sealed class ArbiterRunStoreTests : IDisposable
 {
+    private static readonly FakeIdGenerator Ids = new();
+
     private const string SentinelSecret = "KW-TEST-SENTINEL-SECRET-do-not-store-4d1e";
 
     private static readonly string[] NoRuleIds = ["KW-ARB-SCOPE-002"];
@@ -51,7 +54,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
         RealArbiterState.RunStore(ArbiterDirectory, options, () => at);
 
     private static ArbiterLedgerEvent PreEvent(DateTimeOffset at) =>
-        new(ArbiterRecordId.New(at), at, ArbiterSources.Hook, "test-harness", "session-1", ArbiterLedgerPhases.Pre)
+        new(Ids.NewSortableId(at), at, ArbiterSources.Hook, "test-harness", "session-1", ArbiterLedgerPhases.Pre)
         {
             Trigger = "delegate",
             Target = "dev-medium",
@@ -60,7 +63,7 @@ public sealed class ArbiterRunStoreTests : IDisposable
 
     private static ArbiterDecisionRecord Decision(DateTimeOffset at, string ledgerId) =>
         new(
-            ArbiterRecordId.New(at),
+            Ids.NewSortableId(at),
             at,
             ArbiterSources.Hook,
             "test-harness",

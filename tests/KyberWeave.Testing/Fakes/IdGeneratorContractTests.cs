@@ -62,6 +62,42 @@ public abstract partial class IdGeneratorContractTests
         }
     }
 
+    [Fact]
+    public void EverySortableIdLeadsWithTheUtcTicksAndIsNewForTheSameInstant()
+    {
+        IIdGenerator generator = CreateGenerator();
+        DateTimeOffset at = new(2026, 11, 18, 9, 30, 0, TimeSpan.FromHours(-8));
+        string expectedPrefix = at.UtcTicks.ToString("x16", System.Globalization.CultureInfo.InvariantCulture) + "-";
+        HashSet<string> seen = new(StringComparer.Ordinal);
+        for (int index = 0; index < SampleSize; index++)
+        {
+            string id = generator.NewSortableId(at);
+
+            Assert.Matches(SortableIdPattern(), id);
+            Assert.StartsWith(expectedPrefix, id, StringComparison.Ordinal);
+            Assert.True(seen.Add(id), $"The generator returned '{id}' twice.");
+        }
+    }
+
+    [Fact]
+    public void SortableIdsOrderChronologically()
+    {
+        IIdGenerator generator = CreateGenerator();
+        DateTimeOffset start = new(2026, 11, 18, 0, 0, 0, TimeSpan.Zero);
+        List<string> ids = [];
+        for (int index = 0; index < 20; index++)
+        {
+            ids.Add(generator.NewSortableId(start.AddTicks(index * 1000L)));
+        }
+
+        Assert.Equal(ids, ids.Order(StringComparer.Ordinal).ToList());
+    }
+
+    /// <summary>The shape a sortable id must have: sixteen hex digits, a hyphen, eight hex characters.</summary>
+    /// <returns>The pattern.</returns>
+    [GeneratedRegex("^[0-9a-f]{16}-[0-9a-f]{8}$")]
+    private static partial Regex SortableIdPattern();
+
     /// <summary>The shape a token must have: letters, digits, hyphens and underscores, at least one character.</summary>
     /// <returns>The pattern.</returns>
     [GeneratedRegex("^[A-Za-z0-9_-]+$")]
