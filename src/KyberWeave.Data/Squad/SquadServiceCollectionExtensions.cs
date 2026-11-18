@@ -40,8 +40,7 @@ public static class SquadServiceCollectionExtensions
         services.TryAddSingleton<ISquadDeploymentPlanner>(sp => new SquadDeploymentPlanner(
             sp.GetRequiredService<IFileSystem>(),
             sp.GetRequiredService<IFileSystemPathSemantics>(),
-            sp.GetRequiredService<IPathResolver>(),
-            sp.GetRequiredService<IProcessEnvironment>()));
+            sp.GetRequiredService<IPathResolver>()));
         services.TryAddSingleton<ISquadTransactionFactory>(sp => new SquadTransactionFactory(sp.GetRequiredService<ISquadStateStore>()));
         services.TryAddSingleton<ISquadResponseGuidanceStore, FileSquadResponseGuidanceStore>();
         services.TryAddSingleton<ISquadFactoryHooksShadowing, FileFactoryHooksShadowing>();

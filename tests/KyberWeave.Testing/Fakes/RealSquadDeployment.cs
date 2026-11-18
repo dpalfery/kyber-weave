@@ -1,6 +1,5 @@
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Data.Hooks;
-using KyberWeave.Data.Host;
 using KyberWeave.Data.Paths;
 
 namespace KyberWeave.Tests.Fakes;
@@ -15,6 +14,5 @@ public static class RealSquadDeployment
     public static SquadDeploymentPlanner Planner { get; } = new(
         new PhysicalFileSystem(),
         SquadFileSystemPathSemantics.Instance,
-        new PhysicalPathResolver(new PhysicalFileSystem()),
-        new ProcessEnvironment());
+        new PhysicalPathResolver(new PhysicalFileSystem()));
 }

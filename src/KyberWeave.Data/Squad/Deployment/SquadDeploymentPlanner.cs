@@ -15,27 +15,22 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
     private readonly IFileSystem _files;
     private readonly IFileSystemPathSemantics _semantics;
     private readonly IPathResolver _paths;
-    private readonly IProcessEnvironment _environment;
 
     /// <summary>Creates a planner over the file-system, path and environment seams.</summary>
     /// <param name="files">Every tree read the preflight performs.</param>
     /// <param name="semantics">The canonical spelling and containment rules the plan is resolved with.</param>
     /// <param name="paths">Turns a caller's root spelling into a full path.</param>
-    /// <param name="environment">Supplies the working directory a relative root resolves against.</param>
     public SquadDeploymentPlanner(
         IFileSystem files,
         IFileSystemPathSemantics semantics,
-        IPathResolver paths,
-        IProcessEnvironment environment)
+        IPathResolver paths)
     {
         ArgumentNullException.ThrowIfNull(files);
         ArgumentNullException.ThrowIfNull(semantics);
         ArgumentNullException.ThrowIfNull(paths);
-        ArgumentNullException.ThrowIfNull(environment);
         _files = files;
         _semantics = semantics;
         _paths = paths;
-        _environment = environment;
     }
 
     /// <inheritdoc />
@@ -126,7 +121,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
 
         SquadReceipt receipt = NewReceipt(scope, root, timeProvider, degradations, ownedFiles, ownedBlocks);
         return new SquadDeploymentPlan(
-            _paths.GetFullPath(targetRoot, _environment.CurrentDirectory),
+            _paths.GetFullPath(targetRoot, root),
             identity,
             scope,
             squadLock,
@@ -372,7 +367,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
             HomeFiles = previousReceipt.HomeFiles
         };
         return new SquadDeploymentPlan(
-            _paths.GetFullPath(targetRoot, _environment.CurrentDirectory),
+            _paths.GetFullPath(targetRoot, root),
             identity,
             scope,
             squadLock,
@@ -500,7 +495,7 @@ public sealed class SquadDeploymentPlanner : ISquadDeploymentPlanner
         };
         bool hasRetainedFiles = retained.Count > 0 || retainedBlocks.Count > 0;
         return new SquadDeploymentPlan(
-            _paths.GetFullPath(targetRoot, _environment.CurrentDirectory),
+            _paths.GetFullPath(targetRoot, root),
             identity,
             scope,
             null,

@@ -21,7 +21,7 @@ public sealed class SquadDeploymentPlannerTests
     private readonly InMemorySquadState _state = new();
 
     private SquadDeploymentPlanner Planner =>
-        new(_state.Files, _state.Semantics, _state.Paths, _state.Environment);
+        new(_state.Files, _state.Semantics, _state.Paths);
 
     [Fact]
     public void CreateInstallPlansAWriteForAMissingFileAndRecordsItsDigest()
