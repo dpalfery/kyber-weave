@@ -58,6 +58,43 @@ public sealed class FakeSquadUserPathsTests
     }
 
     [Fact]
+    public void FromHomeRefusesAHomeWithNoParentDirectory()
+    {
+        string? root = Path.GetPathRoot(Path.GetTempPath());
+        Assert.NotNull(root);
+
+        Assert.Throws<ArgumentException>(() => FakeSquadUserPaths.FromHome(root));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void FromHomeRefusesABlankHome(string homeDirectory)
+    {
+        Assert.Throws<ArgumentException>(() => FakeSquadUserPaths.FromHome(homeDirectory));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ABlankApplicationDataDirectoryIsRefused(string applicationDataDirectory)
+    {
+        Assert.Throws<ArgumentException>(() => new FakeSquadUserPaths(applicationDataDirectory));
+    }
+
+    [Fact]
+    public void ANullApplicationDataDirectoryIsRefused()
+    {
+        Assert.Throws<ArgumentNullException>(() => new FakeSquadUserPaths(null!, "/tmp/home"));
+    }
+
+    [Fact]
+    public void ANullHomeIsRefused()
+    {
+        Assert.Throws<ArgumentNullException>(() => new FakeSquadUserPaths("/tmp/app-data", null!));
+    }
+
+    [Fact]
     public void FromHomePutsTheApplicationDataDirectoryBesideTheHome()
     {
         FakeSquadUserPaths userPaths = FakeSquadUserPaths.FromHome(Path.Combine(Path.GetTempPath(), "from-home"));
