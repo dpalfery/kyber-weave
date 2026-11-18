@@ -184,7 +184,7 @@ public sealed class SquadLegacySingleRootCliTests
             State = new InMemorySquadState();
             Root = Path.Combine(State.Files.Root, "legacy-cli");
             State.Files.CreateDirectory(Root);
-            ReleaseSource = new FakeSquadReleaseSource();
+            ReleaseSource = new FakeSquadReleaseSource { Files = State.Files };
             GlobalRoots = new TempGlobalRoots(Path.Combine(Root, "global-roots"));
         }
 

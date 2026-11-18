@@ -1,3 +1,4 @@
+using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Testing.Squad;
 using System.Security.Cryptography;
 using System.Text;
@@ -6,7 +7,7 @@ using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 ///     CLI tests for Kyber-Squad harness instances:
@@ -17,13 +18,19 @@ namespace KyberWeave.Integration.Tests;
 ///     - 7.3: Instance folder management under ~/.kyber-weave/.
 ///     - 7.8: Safe deletion/refresh of instance entries without affecting target files in main home.
 /// </summary>
-public sealed class SquadInstanceCliTests : IDisposable
+public sealed class SquadInstanceCliTests
 {
-    private readonly TempDirectory _temp = new();
+    private readonly InMemorySquadState _state = new();
+    private readonly string _source;
+    private readonly ISquadRenderer _renderer;
 
-    public void Dispose()
+    public SquadInstanceCliTests()
     {
-        _temp.Dispose();
+        _source = Path.Combine(_state.Files.Root, "release", "kyber-squad");
+        _ = CanonicalSquadTree.CopyInto(_state.Files, _source);
+        _renderer = new SquadRendererRegistry(
+            SquadHostDefaults.CreateRenderers(),
+            new InMemorySquadServices(_state.Files).RenderInputReader());
     }
 
     #region squad instance remove Tests
@@ -35,11 +42,11 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void InstanceRemoveDeletesInstanceDirectoryAndStateWhenYesFlagSpecified()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        ISquadUserPaths userPaths = _state.UserPaths;
         string mainClaudeHome = Path.Combine(userPaths.HomeDirectory, ".claude");
-        Directory.CreateDirectory(mainClaudeHome);
+        _state.Files.CreateDirectory(mainClaudeHome);
         string mainFile = Path.Combine(mainClaudeHome, "main-config.json");
-        File.WriteAllText(mainFile, "{\"preserved\": true}", Encoding.UTF8);
+        _state.Files.WriteAllText(mainFile, "{\"preserved\": true}");
 
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
             (".claude/agents/architect.md", "You are architect."));
@@ -48,8 +55,8 @@ public sealed class SquadInstanceCliTests : IDisposable
         string instanceRoot = Path.Combine(home, ".kyber-weave", "squad", "instances", "claude", "fast");
         string instanceStateDir = Path.Combine(home, ".kyber-weave", "squad", "instance-state", "claude", "fast");
 
-        Assert.True(Directory.Exists(instanceRoot));
-        Assert.True(Directory.Exists(instanceStateDir));
+        Assert.True(_state.Files.DirectoryExists(instanceRoot));
+        Assert.True(_state.Files.DirectoryExists(instanceStateDir));
 
         SquadInstanceRemoveCommand command = CreateRemoveCommand(
             userPaths,
@@ -65,9 +72,9 @@ public sealed class SquadInstanceCliTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.False(Directory.Exists(instanceRoot), "Instance directory must be deleted.");
-        Assert.False(Directory.Exists(instanceStateDir), "Instance state directory must be deleted.");
-        Assert.True(File.Exists(mainFile), "Target files in main harness home must remain intact (AC 7.8).");
+        Assert.False(_state.Files.DirectoryExists(instanceRoot), "Instance directory must be deleted.");
+        Assert.False(_state.Files.DirectoryExists(instanceStateDir), "Instance state directory must be deleted.");
+        Assert.True(_state.Files.FileExists(mainFile), "Target files in main harness home must remain intact (AC 7.8).");
     }
 
     /// <summary>
@@ -77,7 +84,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void InstanceRemoveDeclinedConfirmationPreservesInstanceAndExitsTwo()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        ISquadUserPaths userPaths = _state.UserPaths;
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
             (".claude/agents/architect.md", "You are architect."));
 
@@ -101,8 +108,8 @@ public sealed class SquadInstanceCliTests : IDisposable
 
         Assert.Equal(2, execution.ExitCode);
         Assert.Contains("Declined", execution.Output, StringComparison.OrdinalIgnoreCase);
-        Assert.True(Directory.Exists(instanceRoot), "Instance directory must be preserved when prompt is declined.");
-        Assert.True(Directory.Exists(instanceStateDir),
+        Assert.True(_state.Files.DirectoryExists(instanceRoot), "Instance directory must be preserved when prompt is declined.");
+        Assert.True(_state.Files.DirectoryExists(instanceStateDir),
             "Instance state directory must be preserved when prompt is declined.");
     }
 
@@ -112,7 +119,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void InstanceRemoveConfirmedPromptDeletesInstanceAndExitsZero()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        ISquadUserPaths userPaths = _state.UserPaths;
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
             (".claude/agents/architect.md", "You are architect."));
 
@@ -135,8 +142,8 @@ public sealed class SquadInstanceCliTests : IDisposable
             }));
 
         Assert.Equal(0, execution.ExitCode);
-        Assert.False(Directory.Exists(instanceRoot));
-        Assert.False(Directory.Exists(instanceStateDir));
+        Assert.False(_state.Files.DirectoryExists(instanceRoot));
+        Assert.False(_state.Files.DirectoryExists(instanceStateDir));
     }
 
     /// <summary>
@@ -145,7 +152,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void InstanceRemoveExitsTwoWhenInstanceDoesNotExist()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        ISquadUserPaths userPaths = _state.UserPaths;
 
         SquadInstanceRemoveCommand command = CreateRemoveCommand(
             userPaths,
@@ -170,7 +177,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void InstanceRemoveExitsTwoWhenTargetIsInvalid()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        ISquadUserPaths userPaths = _state.UserPaths;
 
         SquadInstanceRemoveCommand command = CreateRemoveCommand(
             userPaths,
@@ -195,7 +202,7 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void InstanceRemoveExitsTwoWhenPresetIsMissing()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        ISquadUserPaths userPaths = _state.UserPaths;
 
         SquadInstanceRemoveCommand command = CreateRemoveCommand(
             userPaths,
@@ -224,11 +231,11 @@ public sealed class SquadInstanceCliTests : IDisposable
     public void InstanceRemoveRejectsPathTraversalAttemptExitingTwoWithoutTouchingExternalDirectories(
         string invalidPreset)
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
+        ISquadUserPaths userPaths = _state.UserPaths;
         string outsideDir = Path.Combine(userPaths.HomeDirectory, "outside");
-        Directory.CreateDirectory(outsideDir);
+        _state.Files.CreateDirectory(outsideDir);
         string canaryFile = Path.Combine(outsideDir, "canary.txt");
-        File.WriteAllText(canaryFile, "protected", Encoding.UTF8);
+        _state.Files.WriteAllText(canaryFile, "protected");
 
         SquadInstanceRemoveCommand command = CreateRemoveCommand(
             userPaths,
@@ -244,9 +251,9 @@ public sealed class SquadInstanceCliTests : IDisposable
             }));
 
         Assert.Equal(2, execution.ExitCode);
-        Assert.True(Directory.Exists(outsideDir));
-        Assert.True(File.Exists(canaryFile));
-        Assert.Equal("protected", File.ReadAllText(canaryFile, Encoding.UTF8));
+        Assert.True(_state.Files.DirectoryExists(outsideDir));
+        Assert.True(_state.Files.FileExists(canaryFile));
+        Assert.Equal("protected", _state.Files.ReadAllText(canaryFile));
     }
 
     #endregion
@@ -260,15 +267,14 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void StatusGlobalListsDeployedInstancesUnderInstancesHeading()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
             (".claude/agents/architect.md", "You are architect."));
         SeedInstance(userPaths, SquadTarget.Codex, "precise", "1.2.4",
             (".codex/agents/architect.toml", "name = \"architect\""));
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.InMemoryStatus(_state);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -292,11 +298,10 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void StatusGlobalShowsNoneUnderInstancesHeadingWhenNoInstancesExist()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        ISquadUserPaths userPaths = _state.UserPaths;
         SeedGlobalDeployment(userPaths);
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.InMemoryStatus(_state);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -320,10 +325,9 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void StatusGlobalWithNeitherDeploymentNorInstancesKeepsNoDeploymentExitOne()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
-        SquadStatusCommand command = SquadTestCommands.Status(userPaths, stateStore);
+        SquadStatusCommand command = SquadTestCommands.InMemoryStatus(_state);
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -347,16 +351,12 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void UpdateGlobalRefreshesDeployedInstances()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.0",
             (".claude/agents/architect.md", "Old content"));
 
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths,
-            stateStore,
-            isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -370,7 +370,7 @@ public sealed class SquadInstanceCliTests : IDisposable
 
         string home = userPaths.HomeDirectory;
         string instanceRoot = Path.Combine(home, ".kyber-weave", "squad", "instances", "claude", "fast");
-        Assert.True(Directory.Exists(instanceRoot), "Instance directory must still exist after refresh.");
+        Assert.True(_state.Files.DirectoryExists(instanceRoot), "Instance directory must still exist after refresh.");
     }
 
     /// <summary>
@@ -380,17 +380,13 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void UpdateGlobalRefreshesDeployedInstancesEvenWithoutGlobalDeployment()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
         // Seed instance state only — no global receipt in user-home
         SeedInstance(userPaths, SquadTarget.Claude, "fast", "1.2.3",
             (".claude/agents/architect.md", "You are architect."));
 
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths,
-            stateStore,
-            isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -409,19 +405,15 @@ public sealed class SquadInstanceCliTests : IDisposable
     [Fact]
     public void UpdateGlobalExitsOneWhenInstanceRefreshFails()
     {
-        FakeSquadUserPaths userPaths = new(Path.Combine(_temp.Path, "user-home"));
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
+        ISquadUserPaths userPaths = _state.UserPaths;
 
         // Seed an instance with corrupted receipt JSON to force a refresh failure
         string home = userPaths.HomeDirectory;
         string instanceStateDir = Path.Combine(home, ".kyber-weave", "squad", "instance-state", "claude", "broken");
-        Directory.CreateDirectory(instanceStateDir);
-        File.WriteAllText(Path.Combine(instanceStateDir, "squad.receipt.json"), "{ invalid json }", Encoding.UTF8);
+        _state.Files.CreateDirectory(instanceStateDir);
+        _state.Files.WriteAllText(Path.Combine(instanceStateDir, "squad.receipt.json"), "{ invalid json }");
 
-        SquadUpdateCommand command = SquadTestCommands.Update(
-            userPaths,
-            stateStore,
-            isInteractive: false);
+        SquadUpdateCommand command = UpdateCommand();
 
         CommandExecution execution = Capture(() => command.Execute(
             null!,
@@ -438,26 +430,31 @@ public sealed class SquadInstanceCliTests : IDisposable
 
     #region Helpers
 
-    private static SquadInstanceRemoveCommand CreateRemoveCommand(
-        ISquadUserPaths? userPaths = null,
-        SquadInstanceService? instanceService = null,
-        bool? isInteractive = null,
+    private SquadInstanceRemoveCommand CreateRemoveCommand(
+        ISquadUserPaths userPaths,
+        bool isInteractive,
         Func<string, bool>? readAnswer = null)
     {
-        return SquadTestCommands.InstanceRemove(
-            userPaths,
-            instanceService,
-            isInteractive,
-            readAnswer);
+        Assert.Same(_state.UserPaths, userPaths);
+        return SquadTestCommands.InMemoryInstanceRemove(_state, Instances(), isInteractive, readAnswer);
     }
 
-    private static void SeedGlobalDeployment(
+    private SquadInstanceService Instances() =>
+        SquadTestCommands.InMemoryInstances(_state, ReleaseSource(), _renderer);
+
+    private FakeSquadReleaseSource ReleaseSource() =>
+        FakeSquadReleaseSource.FromDirectory(_source, _state.Files);
+
+    private SquadUpdateCommand UpdateCommand() =>
+        SquadTestCommands.InMemoryUpdate(_state, ReleaseSource(), _renderer, instances: Instances());
+
+    private void SeedGlobalDeployment(
         ISquadUserPaths userPaths,
         string version = "1.2.3")
     {
         string home = userPaths.HomeDirectory;
         string globalStateDir = Path.Combine(home, ".kyber-weave", "squad", "global");
-        Directory.CreateDirectory(globalStateDir);
+        _state.Files.CreateDirectory(globalStateDir);
 
         SquadReceipt receipt = new(
             SquadStateSchemas.ReceiptSchemaV1,
@@ -480,18 +477,15 @@ public sealed class SquadInstanceCliTests : IDisposable
             "b".PadRight(64, '0'),
             new SquadApmIdentity("0.28.0", "c".PadRight(40, '0'), "d".PadRight(64, '0')));
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        File.WriteAllText(
+        _state.Files.WriteAllText(
             Path.Combine(globalStateDir, "squad.receipt.json"),
-            stateStore.SerializeReceipt(receipt),
-            Encoding.UTF8);
-        File.WriteAllText(
+            _state.Store.SerializeReceipt(receipt));
+        _state.Files.WriteAllText(
             Path.Combine(globalStateDir, "squad.lock.yml"),
-            stateStore.SerializeLock(squadLock),
-            Encoding.UTF8);
+            _state.Store.SerializeLock(squadLock));
     }
 
-    private static void SeedInstance(
+    private void SeedInstance(
         ISquadUserPaths userPaths,
         SquadTarget target,
         string presetName,
@@ -504,13 +498,13 @@ public sealed class SquadInstanceCliTests : IDisposable
         string instanceStateDir =
             Path.Combine(home, ".kyber-weave", "squad", "instance-state", targetToken, presetName);
 
-        Directory.CreateDirectory(instanceRoot);
-        Directory.CreateDirectory(instanceStateDir);
+        _state.Files.CreateDirectory(instanceRoot);
+        _state.Files.CreateDirectory(instanceStateDir);
 
         string presetsDir = Path.Combine(home, ".kyber-weave", "squad", "presets");
-        Directory.CreateDirectory(presetsDir);
+        _state.Files.CreateDirectory(presetsDir);
         string presetFilePath = Path.Combine(presetsDir, $"{presetName}.yml");
-        if (!File.Exists(presetFilePath))
+        if (!_state.Files.FileExists(presetFilePath))
         {
             string defaultPresetYaml = $"""
                                         schema: kyber-squad.model-preset/v1
@@ -519,19 +513,19 @@ public sealed class SquadInstanceCliTests : IDisposable
                                             default: gpt-4o-mini
                                             {targetToken}: gpt-4o-mini
                                         """;
-            File.WriteAllText(presetFilePath, defaultPresetYaml, Encoding.UTF8);
+            _state.Files.WriteAllText(presetFilePath, defaultPresetYaml);
         }
 
-        byte[] presetBytes = File.ReadAllBytes(presetFilePath);
+        byte[] presetBytes = _state.Files.ReadAllBytes(presetFilePath);
         string presetDigest = Convert.ToHexStringLower(SHA256.HashData(presetBytes));
 
         List<SquadOwnedFile> ownedFiles = [];
         foreach ((string relPath, string content) in instanceFiles)
         {
             string fullPath = Path.Combine(instanceRoot, relPath);
-            Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
+            _state.Files.CreateDirectory(Path.GetDirectoryName(fullPath)!);
             byte[] bytes = Encoding.UTF8.GetBytes(content);
-            File.WriteAllBytes(fullPath, bytes);
+            _state.Files.WriteAllBytes(fullPath, bytes);
             string sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes));
             ownedFiles.Add(new SquadOwnedFile(relPath, sha256, targetToken, false));
         }
@@ -561,15 +555,12 @@ public sealed class SquadInstanceCliTests : IDisposable
                 [target] = new(presetName, presetDigest)
             });
 
-        SquadStateStore stateStore = RealSquadState.Store(userPaths);
-        File.WriteAllText(
+        _state.Files.WriteAllText(
             Path.Combine(instanceStateDir, "squad.receipt.json"),
-            stateStore.SerializeReceipt(receipt),
-            Encoding.UTF8);
-        File.WriteAllText(
+            _state.Store.SerializeReceipt(receipt));
+        _state.Files.WriteAllText(
             Path.Combine(instanceStateDir, "squad.lock.yml"),
-            stateStore.SerializeLock(squadLock),
-            Encoding.UTF8);
+            _state.Store.SerializeLock(squadLock));
     }
 
     private static CommandExecution Capture(Func<int> execute)

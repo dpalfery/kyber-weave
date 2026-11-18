@@ -259,12 +259,13 @@ internal static class SquadTestCommands
         ISquadReleaseSource releaseSource,
         ISquadRenderer renderer,
         SquadConsole? output = null,
-        ISquadGlobalRootResolver? globalRoots = null)
+        ISquadGlobalRootResolver? globalRoots = null,
+        ISquadInstanceService? instances = null)
     {
         SquadConsole console = output ?? CapturedSquadConsole();
         return new SquadUpdateCommand(
             InMemoryLifecycle(state, releaseSource, renderer, globalRoots),
-            new FuncInstanceService((_, _) => throw new NotSupportedException("The test reached the instance ensure.")),
+            instances ?? new FuncInstanceService((_, _) => throw new NotSupportedException("The test reached the instance ensure.")),
             state.Store,
             state.Migration,
             new SquadTargetResolver(state.Files, state.Semantics, state.Environment),
@@ -278,6 +279,46 @@ internal static class SquadTestCommands
             new FakeKyberWeaveConfigRepository(),
             null,
             null);
+    }
+
+    /// <summary>The real instance service over the in-memory state, link file system, link sync and lifecycle of <paramref name="state"/>.</summary>
+    public static SquadInstanceService InMemoryInstances(
+        InMemorySquadState state,
+        ISquadReleaseSource releaseSource,
+        ISquadRenderer renderer,
+        ISquadGlobalRootResolver? globalRoots = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ISquadGlobalRootResolver roots = globalRoots ?? new FakeSquadGlobalRootResolver(state.UserPaths.HomeDirectory);
+        return new SquadInstanceService(
+            InMemoryLifecycle(state, releaseSource, renderer, roots),
+            new SquadModelPresetStore(state.UserPaths, state.Files),
+            new FileSystemSquadLinkFileSystem(state.Files),
+            roots,
+            new SquadInstanceLinkSync(state.Files, state.Paths, new InProcessLease(state.LeaseHost), state.Environment),
+            new InMemorySquadFileAccess(state.Files),
+            state.Paths,
+            state.Environment,
+            state.Store);
+    }
+
+    /// <summary><c>squad instance remove</c> over the in-memory state of <paramref name="state"/> and an instance service.</summary>
+    public static SquadInstanceRemoveCommand InMemoryInstanceRemove(
+        InMemorySquadState state,
+        ISquadInstanceService instances,
+        bool isInteractive = false,
+        Func<string, bool>? readAnswer = null,
+        SquadConsole? output = null)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        return new SquadInstanceRemoveCommand(
+            instances,
+            state.UserPaths,
+            new InMemorySquadFileAccess(state.Files),
+            new SquadConsoleOptions(isInteractive, readAnswer),
+            output ?? CapturedSquadConsole(),
+            state.Paths,
+            state.Environment);
     }
 
     /// <summary><c>squad status</c> over the in-memory state, file system and environment of <paramref name="state"/>.</summary>
