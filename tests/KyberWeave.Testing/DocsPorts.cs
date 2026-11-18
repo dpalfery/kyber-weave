@@ -1,8 +1,11 @@
+using KyberWeave.Contracts.Paths;
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Docs.Validation;
 using KyberWeave.Data.Docs.Closeout;
 using KyberWeave.Data.Docs.FileSystem;
+using KyberWeave.Data.Host;
+using KyberWeave.Data.Paths;
 
 namespace KyberWeave.Tests;
 
@@ -14,5 +17,9 @@ internal static class DocsPorts
 
     internal static readonly IExclusiveFileWriter Exclusive = new ExclusiveFileWriter();
 
-    internal static IPlanTaskService Tasks => new PlanTaskService(Files);
+    internal static readonly IPathResolver Paths = new PhysicalPathResolver(Files);
+
+    internal static readonly IProcessEnvironment Environment = new ProcessEnvironment();
+
+    internal static IPlanTaskService Tasks => new PlanTaskService(Files, Paths, Environment);
 }

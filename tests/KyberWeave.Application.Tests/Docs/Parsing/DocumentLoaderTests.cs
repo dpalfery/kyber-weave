@@ -1,6 +1,7 @@
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Core.Docs.Parsing;
+using KyberWeave.Tests.Fakes;
 using KyberWeave.Tests.FileSystem;
 using Xunit;
 
@@ -11,10 +12,37 @@ public sealed class DocumentLoaderTests
 {
     private const string Root = "/repo";
 
+    private const string RelativeRoot = "repo";
+
     private readonly InMemoryFileSystem _disk = new();
 
+    private readonly FakePathResolver _paths;
+
+    private readonly FakeProcessEnvironment _environment = new(currentDirectory: Root);
+
+    public DocumentLoaderTests() => _paths = new FakePathResolver(_disk);
+
     private DocumentLoader Loader(OntologyConfig? config = null) =>
-        new(new InMemoryRepositoryFileStore(_disk), Root, config ?? OntologyConfig.ProductDefaults.WithDocsRoot("docs"));
+        new(new InMemoryRepositoryFileStore(_disk), Root, _paths, _environment,
+            config ?? OntologyConfig.ProductDefaults.WithDocsRoot("docs"));
+
+    [Fact]
+    public void ARelativeRepositoryRootIsResolvedAgainstTheInjectedWorkingDirectory()
+    {
+        const string working = "/kw/work";
+        _disk.CreateDirectory($"{working}/{RelativeRoot}/docs");
+        _disk.WriteAllText($"{working}/{RelativeRoot}/docs/a.md", "plain text\n");
+        DocumentLoader loader = new(
+            new InMemoryRepositoryFileStore(_disk),
+            RelativeRoot,
+            _paths,
+            new FakeProcessEnvironment(currentDirectory: working),
+            OntologyConfig.ProductDefaults.WithDocsRoot("docs"));
+
+        DocumentSet set = loader.Load();
+
+        Assert.Equal(["docs/a.md"], set.Documents.Select(document => document.RelativePath).ToArray());
+    }
 
     private void Write(string relative, string text)
     {

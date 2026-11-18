@@ -13,17 +13,17 @@ internal static class RealDocumentLoader
 {
     /// <summary>The loader over <paramref name="repoRoot"/> with the default documentation root.</summary>
     /// <param name="repoRoot">The checkout root.</param>
-    internal static DocumentLoader Create(string repoRoot) => new(new PhysicalRepositoryFileStore(), repoRoot);
+    internal static DocumentLoader Create(string repoRoot) => new(new PhysicalRepositoryFileStore(), repoRoot, DocsPorts.Paths, DocsPorts.Environment);
 
     /// <summary>The loader over <paramref name="repoRoot"/> with one documentation root.</summary>
     /// <param name="repoRoot">The checkout root.</param>
     /// <param name="docsRelativeRoot">The documentation root, relative to the checkout.</param>
     internal static DocumentLoader Create(string repoRoot, string docsRelativeRoot) =>
-        new(new PhysicalRepositoryFileStore(), repoRoot, docsRelativeRoot);
+        new(new PhysicalRepositoryFileStore(), repoRoot, DocsPorts.Paths, DocsPorts.Environment, docsRelativeRoot);
 
     /// <summary>The loader over <paramref name="repoRoot"/> with the given ontology.</summary>
     /// <param name="repoRoot">The checkout root.</param>
     /// <param name="config">The ontology naming the roots, exclusions and catalog.</param>
     internal static DocumentLoader Create(string repoRoot, OntologyConfig config) =>
-        new(new PhysicalRepositoryFileStore(), repoRoot, config);
+        new(new PhysicalRepositoryFileStore(), repoRoot, DocsPorts.Paths, DocsPorts.Environment, config);
 }

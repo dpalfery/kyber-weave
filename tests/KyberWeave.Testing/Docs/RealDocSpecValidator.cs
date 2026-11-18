@@ -19,5 +19,5 @@ internal static class RealDocSpecValidator
     /// <param name="repoRoot">The checkout root.</param>
     /// <param name="config">The ontology the documents are checked against.</param>
     internal static DocSpecValidator Create(string repoRoot, OntologyConfig config) =>
-        new(repoRoot, config, new PhysicalRepositoryFileStore());
+        new(repoRoot, config, new PhysicalRepositoryFileStore(), DocsPorts.Paths, DocsPorts.Environment);
 }
