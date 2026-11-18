@@ -59,6 +59,15 @@ public sealed class GateReportFactsOverSeamsTests
     }
 
     [Fact]
+    public void AFailingClaimForTheSameReportInARelativeSpellingInvalidatesThePass()
+    {
+        _ = Write(ReportPath, Passing());
+        string text = Claim("artifacts/task-gate.json", "FAIL") + "\n" + Claim(ReportPath, "PASS");
+
+        Assert.False(Facts().Agrees(text, Root));
+    }
+
+    [Fact]
     public void AReportInTheRepositoryRootIsReadFromItsDefaultPath()
     {
         _ = Write("/repo/artifacts/gates.json", Failing());

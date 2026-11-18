@@ -165,7 +165,7 @@ public sealed class GateReportFacts(
         if (string.IsNullOrWhiteSpace(returnedText))
             return null;
 
-        DigestClaim? claim = ReadClaim(returnedText);
+        DigestClaim? claim = ReadClaim(returnedText, repositoryRoot);
         if (claim is null)
             return null;
 
@@ -197,7 +197,7 @@ public sealed class GateReportFacts(
         if (Agrees(returnedText, repositoryRoot) is not true)
             return null;
 
-        DigestClaim claim = ReadClaim(returnedText!)!;
+        DigestClaim claim = ReadClaim(returnedText!, repositoryRoot)!;
         string? path = Resolve(claim.ReportPath, repositoryRoot);
         if ((path is null || !store.FileExists(path)) && claim.WholeLinePath is not null)
             path = Resolve(claim.WholeLinePath, repositoryRoot) ?? path;
@@ -228,7 +228,12 @@ public sealed class GateReportFacts(
             && gate.Summary is not null
             && gate.Summary.StartsWith(RedAcceptedSummaryPrefix, StringComparison.Ordinal));
 
-    private DigestClaim? ReadClaim(string returnedText)
+    /// <summary>
+    /// The claim a returned digest makes. Report paths are compared after resolving them against
+    /// <paramref name="repositoryRoot"/>, the base the verdict reads them against, so one report cited in a relative
+    /// and in an absolute spelling is recognised as the same file.
+    /// </summary>
+    private DigestClaim? ReadClaim(string returnedText, string? repositoryRoot)
     {
         List<DigestClaim> claims = [];
         foreach (string line in returnedText.Split('\n'))
@@ -271,11 +276,12 @@ public sealed class GateReportFacts(
             ? StringComparison.OrdinalIgnoreCase
             : StringComparison.Ordinal;
 
-        string finalCanonical = CanonicalReportPath(finalClaim.ReportPath);
+        string? readBase = FullRoot(repositoryRoot);
+        string finalCanonical = CanonicalReportPath(finalClaim.ReportPath, readBase);
 
         // Any claim for the final report path that says non-PASS invalidates a PASS on the same report.
         if (string.Equals(finalClaim.Claimed, PassedStatus, StringComparison.Ordinal) &&
-            claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath), finalCanonical, pathComparison) &&
+            claims.Any(c => string.Equals(CanonicalReportPath(c.ReportPath, readBase), finalCanonical, pathComparison) &&
                             !string.Equals(c.Claimed, PassedStatus, StringComparison.Ordinal)))
         {
             return finalClaim with { Claimed = "FAIL" };
@@ -284,15 +290,32 @@ public sealed class GateReportFacts(
         return finalClaim;
     }
 
-    private string CanonicalReportPath(string path)
+    private string CanonicalReportPath(string path, string? readBase)
     {
+        string normalized = path.Replace('\\', '/');
         try
         {
-            return paths.GetFullPath(path.Replace('\\', '/'), environment.CurrentDirectory);
+            return paths.GetFullPath(normalized, readBase ?? environment.CurrentDirectory);
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            return path.Replace('\\', '/');
+            return normalized;
+        }
+    }
+
+    /// <summary>The repository root as a full path, or null when the caller gave none or it cannot be resolved.</summary>
+    private string? FullRoot(string? repositoryRoot)
+    {
+        if (string.IsNullOrWhiteSpace(repositoryRoot))
+            return null;
+
+        try
+        {
+            return paths.GetFullPath(repositoryRoot, environment.CurrentDirectory);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
         }
     }
 
