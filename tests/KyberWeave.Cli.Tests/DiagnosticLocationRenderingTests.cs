@@ -1,7 +1,8 @@
-using Spectre.Console;
 using System.Text.Json;
 using KyberWeave.Cli.Rendering;
 using KyberWeave.Core.Diagnostics;
+using KyberWeave.Tests.FileSystem;
+using Spectre.Console.Testing;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -152,9 +153,11 @@ public sealed class DiagnosticLocationRenderingTests
     }
 
     [Fact]
-    public void RenderTableRelativizesAbsolutePathsUnderTheCurrentDirectory()
+    public void RenderTableRelativizesAbsolutePathsUnderTheDisplayRoot()
     {
-        string absolute = Path.GetFullPath(Path.Combine(Environment.CurrentDirectory, "docs", "primary.md"));
+        InMemoryFileSystem files = new();
+        string displayRoot = files.CreateTemporaryDirectory("kw-render-");
+        string absolute = Path.Combine(displayRoot, "docs", "primary.md");
         DiagnosticReport report = new DiagnosticReport();
         report.Add(new Diagnostic(
             "KW-DOC-ANALYSIS-001",
@@ -171,7 +174,7 @@ public sealed class DiagnosticLocationRenderingTests
         string output;
         try
         {
-            ReportRenderer.DisplayRoot = Environment.CurrentDirectory;
+            ReportRenderer.DisplayRoot = displayRoot;
             output = Render(OutputFormat.Table, report);
         }
         finally
@@ -255,12 +258,9 @@ public sealed class DiagnosticLocationRenderingTests
 
     private static string Render(OutputFormat format, DiagnosticReport? report = null)
     {
-        CapturedConsoleExecution<bool> execution = ProcessConsoleCapture.Run(() =>
-        {
-            ReportRenderer.Render(AnsiConsole.Console, report ?? CreateReport(), format, "docs integrity-check", "Claim");
-            return true;
-        });
-        return execution.Output;
+        TestConsole console = new() { EmitAnsiSequences = false };
+        ReportRenderer.Render(console, report ?? CreateReport(), format, "docs integrity-check", "Claim");
+        return console.Output;
     }
 
     private static void AssertMetricsRenderedInOrder(string output)
