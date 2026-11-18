@@ -41,7 +41,7 @@ public sealed class InMemoryRepositoryFileStore(InMemoryFileSystem files) : IRep
     public Stream OpenRead(string path) => _fs.OpenRead(path);
 
     /// <inheritdoc />
-    public Stream OpenAppend(string path) => throw new NotSupportedException("The in-memory store does not append.");
+    public Stream OpenAppend(string path) => _fs.OpenAppendShared(path);
 
     /// <inheritdoc />
     public string[] GetFiles(string directory) => [.. _fs.EnumerateFiles(directory, "*", recursive: false)];

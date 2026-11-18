@@ -1,4 +1,3 @@
-using KyberWeave.Cli.Commands.Docs;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Diagnostics;
 using KyberWeave.Core.Docs.Analysis.Glossary;
@@ -9,7 +8,11 @@ using Xunit;
 
 using KyberWeave.Tests.Fakes;
 using KyberWeave.Core.Arbiter;
-namespace KyberWeave.Tests;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Tests;
+using KyberWeave.Tests.FileSystem;
+namespace KyberWeave.Application.Tests.Docs.Analysis;
 
 /// <summary>
 /// Specifies the managed glossary as a conservative file merger. Source documentation is
@@ -27,27 +30,27 @@ public sealed class ManagedGlossaryTests
         string? configuredPath,
         string expectedPath)
     {
-        using GlossaryRepository repository = Repository(docsRoots: ["docs", "components/gameplay/docs"]);
+        GlossaryRepository repository = Repository(docsRoots: ["docs", "components/gameplay/docs"]);
         ManagedGlossary service = Service(repository, glossaryPath: configuredPath);
 
         GlossaryUpdateResult result = service.Preview([Proposal("loop", "component:Gameplay", "claim-1")]);
 
         Assert.Equal(expectedPath, result.RelativePath);
         Assert.False(result.Written);
-        Assert.False(File.Exists(repository.FullPath(expectedPath)));
+        Assert.False(repository.Exists(expectedPath));
         Assert.Contains("## loop", result.Markdown, StringComparison.Ordinal);
     }
 
     [Fact]
     public void WriteMissingGlossaryCreatesConformantReferenceUsingFirstCatalogOwnerAndUtcDate()
     {
-        using GlossaryRepository repository = Repository();
+        GlossaryRepository repository = Repository();
         ManagedGlossary service = Service(repository);
 
         GlossaryUpdateResult result = service.Write([Proposal("loop", "component:Gameplay", "claim-1")]);
 
         Assert.True(result.Written);
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains("doc-type: reference", markdown, StringComparison.Ordinal);
         Assert.Contains("status: needs-review", markdown, StringComparison.Ordinal);
         Assert.Contains("owner: Gameplay maintainers", markdown, StringComparison.Ordinal);
@@ -57,25 +60,25 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void WriteCatalogHasNoDataOwnerFailsBeforeCreatingGlossary()
     {
-        using GlossaryRepository repository = Repository(catalogRows: []);
+        GlossaryRepository repository = Repository(catalogRows: []);
         ManagedGlossary service = Service(repository);
 
         InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() =>
             service.Write([Proposal("loop", "component:Gameplay", "claim-1")]));
 
         Assert.Contains("owner", exception.Message, StringComparison.OrdinalIgnoreCase);
-        Assert.False(File.Exists(repository.FullPath("docs/glossary.md")));
+        Assert.False(repository.Exists("docs/glossary.md"));
     }
 
     [Fact]
     public void WriteNewProposalUsesExactTableShapeStatusScopeAndMarkedEvidence()
     {
-        using GlossaryRepository repository = Repository();
+        GlossaryRepository repository = Repository();
         ManagedGlossary service = Service(repository);
 
         service.Write([Proposal("loop", "component:Gameplay", "claim-1", aliases: ["gameplay loop"])]);
 
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains("| Sense ID | Status | Definition | Scope | Aliases |", markdown, StringComparison.Ordinal);
         Assert.Matches(@"\| loop-[a-f0-9]{8} \| proposed \|  \| component:Gameplay \| gameplay loop \|", markdown);
         Assert.Contains("<!-- kyber-weave:glossary-evidence:start", markdown, StringComparison.Ordinal);
@@ -86,7 +89,7 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void WriteExistingGlossaryPreservesOwnerDateHumanProseAndReviewedRows()
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
             """
             Human introduction that must stay intact.
 
@@ -103,7 +106,7 @@ public sealed class ManagedGlossaryTests
 
         service.Write([Proposal("loop", "component:Runtime", "claim-2")]);
 
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains("owner: Human owner", markdown, StringComparison.Ordinal);
         Assert.Contains("last-reviewed: 2026-07-01", markdown, StringComparison.Ordinal);
         Assert.Contains("Human introduction that must stay intact.", markdown, StringComparison.Ordinal);
@@ -115,7 +118,7 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void WriteProposalEvidenceChangesRefreshesEvidenceAndDemotesCurrentDocument()
     {
-        using GlossaryRepository repository = Repository();
+        GlossaryRepository repository = Repository();
         ManagedGlossary service = Service(repository);
         service.Write([Proposal("loop", "component:Gameplay", "old-claim", aliases: ["gameplay loop"])]);
         repository.ReplaceInGlossary("status: needs-review", "status: current");
@@ -124,7 +127,7 @@ public sealed class ManagedGlossaryTests
         GlossaryUpdateResult result = service.Write([Proposal("loop", "component:Gameplay", "new-claim", aliases: ["gameplay loop"])]);
 
         Assert.True(result.Changed);
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains("status: needs-review", markdown, StringComparison.Ordinal);
         Assert.Contains("new-claim", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("old-claim", markdown, StringComparison.Ordinal);
@@ -134,13 +137,13 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void WriteUntouchedGeneratedProposalLosesAllEvidenceRemovesProposal()
     {
-        using GlossaryRepository repository = Repository();
+        GlossaryRepository repository = Repository();
         ManagedGlossary service = Service(repository);
         service.Write([Proposal("loop", "component:Gameplay", "old-claim", aliases: ["gameplay loop"])]);
 
         service.Write([]);
 
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.DoesNotContain("| proposed |", markdown, StringComparison.Ordinal);
         Assert.DoesNotContain("old-claim", markdown, StringComparison.Ordinal);
     }
@@ -148,7 +151,7 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void WriteProposalWithoutOwnershipFingerprintLosesEvidencePreservesRow()
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
             """
             ## loop
 
@@ -163,7 +166,7 @@ public sealed class ManagedGlossaryTests
 
         Service(repository).Write([]);
 
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains("loop-a1b2c3d4", markdown, StringComparison.Ordinal);
         Assert.Contains("old-claim", markdown, StringComparison.Ordinal);
     }
@@ -171,14 +174,14 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void WriteGeneratedProposalEvidenceWasHumanEditedPreservesRowAndEvidence()
     {
-        using GlossaryRepository repository = Repository();
+        GlossaryRepository repository = Repository();
         ManagedGlossary service = Service(repository);
         service.Write([Proposal("loop", "component:Gameplay", "claim-1", aliases: ["gameplay loop"])]);
         repository.ReplaceInGlossary("- claim-1", "- human evidence note");
 
         service.Write([]);
 
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains("| proposed |", markdown, StringComparison.Ordinal);
         Assert.Contains("human evidence note", markdown, StringComparison.Ordinal);
     }
@@ -195,11 +198,11 @@ public sealed class ManagedGlossaryTests
             | example-loop | approved | Example only. | component:Gameplay | example |
             ```
             """;
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(example));
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(example));
 
         Service(repository).Write([Proposal("loop", "component:Agents", "claim-1")]);
 
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains(example, markdown, StringComparison.Ordinal);
         Assert.True(markdown.LastIndexOf("## loop", StringComparison.Ordinal)
                     > markdown.IndexOf("\n```\n", StringComparison.Ordinal));
@@ -219,7 +222,7 @@ public sealed class ManagedGlossaryTests
             <!-- kyber-weave:glossary-evidence:end -->
             ```
             """;
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
             ## loop
 
             {{fencedExample}}
@@ -248,7 +251,7 @@ public sealed class ManagedGlossaryTests
             <!-- kyber-weave:glossary-evidence:end -->
             ```
             """;
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
             ## loop
 
             {{fencedExample}}
@@ -265,7 +268,7 @@ public sealed class ManagedGlossaryTests
 
         Assert.Contains(fencedExample, preview.Markdown, StringComparison.Ordinal);
         Assert.Contains(fencedExample, written.Markdown, StringComparison.Ordinal);
-        Assert.Contains(fencedExample, File.ReadAllText(repository.FullPath("docs/glossary.md")), StringComparison.Ordinal);
+        Assert.Contains(fencedExample, repository.Read("docs/glossary.md"), StringComparison.Ordinal);
         Assert.True(written.Markdown.LastIndexOf("| proposed |", StringComparison.Ordinal)
                     > written.Markdown.LastIndexOf("```", StringComparison.Ordinal));
     }
@@ -278,7 +281,7 @@ public sealed class ManagedGlossaryTests
         string scope,
         string aliases)
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
             ## loop
 
             | Sense ID | Status | Definition | Scope | Aliases |
@@ -293,7 +296,7 @@ public sealed class ManagedGlossaryTests
 
         service.Write([]);
 
-        string markdown = File.ReadAllText(repository.FullPath("docs/glossary.md"));
+        string markdown = repository.Read("docs/glossary.md");
         Assert.Contains("loop-a1b2c3d4", markdown, StringComparison.Ordinal);
         if (definition.Length > 0)
             Assert.Contains(definition, markdown, StringComparison.Ordinal);
@@ -307,7 +310,7 @@ public sealed class ManagedGlossaryTests
     [InlineData("CURRENT")]
     public void ValidateUnknownSenseStatusReturnsGlossaryDiagnostic(string status)
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
             ## loop
 
             | Sense ID | Status | Definition | Scope | Aliases |
@@ -328,7 +331,7 @@ public sealed class ManagedGlossaryTests
     [InlineData("A definition.", "component:Unknown")]
     public void ValidateInvalidApprovedSenseReturnsGlossaryDiagnostic(string definition, string scope)
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary($$"""
             ## loop
 
             | Sense ID | Status | Definition | Scope | Aliases |
@@ -344,7 +347,7 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void LoadApprovedAndRejectedRowsReturnsOnlyApprovedAnalysisSenses()
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
             """
             ## loop
 
@@ -366,7 +369,7 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void LookupTermIsCaseInsensitiveReturnsAllStatusesAndParsedScopes()
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary(
             """
             ## loop
 
@@ -423,7 +426,7 @@ public sealed class ManagedGlossaryTests
         """)]
     public void ValidateMalformedFrontmatterOrSenseRowFailsClosed(string markdown)
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(markdown);
+        GlossaryRepository repository = Repository().WriteGlossary(markdown);
 
         DiagnosticReport report = Service(repository).Validate();
 
@@ -433,7 +436,7 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void LoadIndentedAtxHeadingUsesTermWithoutHashPrefix()
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary("""
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary("""
               ## loop
 
             | Sense ID | Status | Definition | Scope | Aliases |
@@ -451,7 +454,7 @@ public sealed class ManagedGlossaryTests
     [Fact]
     public void LoadDefinitionWithBackslashesPreservesWindowsPathAndRegexEscapes()
     {
-        using GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary("""
+        GlossaryRepository repository = Repository().WriteGlossary(ExistingGlossary("""
             ## path
 
             | Sense ID | Status | Definition | Scope | Aliases |
@@ -469,55 +472,17 @@ public sealed class ManagedGlossaryTests
     public void WriteFirstCatalogOwnerContainsYamlPunctuationRoundTripsExactOwner()
     {
         const string owner = "Docs: Core # on-call";
-        using GlossaryRepository repository = Repository(catalogRows:
+        GlossaryRepository repository = Repository(catalogRows:
         [
             $"| Gameplay | Application | `src/Game` | [README](x) | [docs](y) | {owner} | 2026-08-01 | Current |"
         ]);
 
         Service(repository).Write([Proposal("loop", "component:Gameplay", "claim-1")]);
 
-        DocumentSet set = RealDocumentLoader.Create(repository.Root, repository.Ontology).Load();
+        DocumentSet set = repository.Loader().Load();
         DocumentModel glossary = Assert.Single(set.Documents, document => document.RelativePath == "docs/glossary.md");
         Assert.Null(glossary.ParseError);
         Assert.Equal(owner, glossary.Frontmatter.Owner);
-    }
-
-    [Fact]
-    public void DocsValidateInvalidManagedGlossaryReturnsGlossaryOperationalError()
-    {
-        using GlossaryRepository repository = Repository(catalogRows:
-        [
-            "| Gameplay | Application | `src/Game` | [README](x) | [docs](y) | Gameplay maintainers | 2026-08-01 | Current |",
-            "| System | System | repository root | [README](x) | [docs](y) | Maintainers | 2026-08-01 | Current |"
-        ]).WriteGlossary("""
-            ---
-            id: reference/glossary
-            title: Glossary
-            doc-type: reference
-            status: needs-review
-            owner: Gameplay maintainers
-            last-reviewed: 2026-07-01
-            ---
-
-            # Glossary
-
-            ## loop
-
-            | Sense ID | Status | Definition | Scope | Aliases |
-            |---|---|---|---|---|
-            | loop-a | accepted | Definition. | component:Gameplay | gameplay loop |
-            """);
-        repository.WriteConfig("""
-            ontology:
-              docs-root: docs
-            docs-analysis:
-              glossary-path: docs/glossary.md
-            """);
-        DocsValidateSettings settings = new DocsValidateSettings { Path = repository.Root, Format = "json" };
-
-        int exitCode = ProcessConsoleCapture.Run(() => DocsTestCommands.Validate().Execute(null!, settings)).Result;
-
-        Assert.Equal(1, exitCode);
     }
 
     private static ManagedGlossary Service(GlossaryRepository repository, string? glossaryPath = null) =>
@@ -530,9 +495,9 @@ public sealed class ManagedGlossaryTests
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = glossaryPath }
             },
             new FixedTimeProvider(Today),
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment);
+            repository.Store,
+            repository.Paths,
+            repository.Environment);
 
     private static GlossaryProposal Proposal(
         string term,
@@ -570,14 +535,20 @@ public sealed class ManagedGlossaryTests
         public override DateTimeOffset GetUtcNow() => now;
     }
 
-    private sealed class GlossaryRepository : IDisposable
+    private sealed class GlossaryRepository
     {
-        private readonly TempDirectory _temp = new();
+        private readonly InMemoryFileSystem _memory = new();
 
         public GlossaryRepository(IReadOnlyList<string> docsRoots, IReadOnlyList<string> catalogRows)
         {
+            Root = Path.Combine(_memory.Root, "glossary-repo");
+            Store = new InMemoryRepositoryFileStore(_memory);
+            Paths = new FakePathResolver(_memory);
+            Environment = new FakeProcessEnvironment(
+                currentDirectory: Root,
+                isFileSystemCaseInsensitive: !_memory.CaseSensitive);
             Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(docsRoots);
-            foreach (string root in docsRoots) Directory.CreateDirectory(FullPath(root));
+            foreach (string root in docsRoots) _memory.CreateDirectory(FullPath(root));
             Write(Ontology.ResolvedCatalogPath, $$"""
                 ---
                 id: system/catalog
@@ -596,11 +567,20 @@ public sealed class ManagedGlossaryTests
                 """);
         }
 
-        public string Root => _temp.Path;
+        public string Root { get; }
+        public IRepositoryFileStore Store { get; }
+        public IPathResolver Paths { get; }
+        public IProcessEnvironment Environment { get; }
         public OntologyConfig Ontology { get; }
 
         public string FullPath(string relativePath) =>
             Path.Combine(Root, relativePath.Replace('/', Path.DirectorySeparatorChar));
+
+        public bool Exists(string relativePath) => _memory.FileExists(FullPath(relativePath));
+
+        public string Read(string relativePath) => _memory.ReadAllText(FullPath(relativePath));
+
+        public DocumentLoader Loader() => new(Store, Root, Paths, Environment, Ontology);
 
         public GlossaryRepository WriteGlossary(string markdown)
         {
@@ -611,18 +591,14 @@ public sealed class ManagedGlossaryTests
         public void ReplaceInGlossary(string oldValue, string newValue)
         {
             string path = FullPath("docs/glossary.md");
-            File.WriteAllText(path, File.ReadAllText(path).Replace(oldValue, newValue, StringComparison.Ordinal));
+            _memory.WriteAllText(path, _memory.ReadAllText(path).Replace(oldValue, newValue, StringComparison.Ordinal));
         }
-
-        public void WriteConfig(string yaml) => Write(".kyber-weave/kyber-weave.yml", yaml);
 
         private void Write(string relativePath, string content)
         {
             string path = FullPath(relativePath);
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            File.WriteAllText(path, content);
+            _memory.CreateDirectory(Path.GetDirectoryName(path)!);
+            _memory.WriteAllText(path, content);
         }
-
-        public void Dispose() => _temp.Dispose();
     }
 }

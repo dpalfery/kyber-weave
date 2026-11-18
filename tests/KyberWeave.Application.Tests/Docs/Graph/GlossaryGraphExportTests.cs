@@ -8,32 +8,40 @@ using KyberWeave.Core.Docs.Export;
 using KyberWeave.Core.Docs.Graph;
 using KyberWeave.Core.Docs.Model;
 using KyberWeave.Domain.CodeGraph;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 using KyberWeave.Core.Arbiter;
+using KyberWeave.Tests;
 
-namespace KyberWeave.Tests;
+namespace KyberWeave.Application.Tests.Docs.Graph;
 
 /// <summary>
 /// T11 RED — docs export-graph exports only approved managed-glossary knowledge while
 /// preserving the existing deterministic JSONL contract.
 /// </summary>
-public sealed class GlossaryGraphExportTests
+public sealed class GlossaryGraphExportTests : IDisposable
 {
+    private readonly DocFixture _fixture = DocFixture.CreateInMemory();
+
+    private string OutputDirectory(string name) => Path.Combine(_fixture.Memory!.Root, name);
+
+    public void Dispose() => _fixture.Dispose();
+
     [Fact]
     public void ExportApprovedManagedSensesEmitsTermSenseAliasScopeAndEvidenceGraph()
     {
-        using TempDirectory repository = GlossaryRepository();
-        using TempDirectory firstOutput = new TempDirectory();
-        using TempDirectory secondOutput = new TempDirectory();
-        ManagedGlossaryLoadResult glossary = GlossaryService(repository.Path).Load();
+        GlossaryRepository();
+        string firstOutput = OutputDirectory("first-output");
+        string secondOutput = OutputDirectory("second-output");
+        ManagedGlossaryLoadResult glossary = GlossaryService(_fixture.Root).Load();
         FakeCodeGraphResolver resolver = Resolver();
         ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(glossary);
-        DocGraphExporter exporter = RealDocGraphExporter.Create(resolver);
+        DocGraphExporter exporter = new DocGraphExporter(resolver, _fixture.Memory!);
 
-        DocGraphExportResult first = exporter.Export(Documents(), firstOutput.Path, contributors: [contributor]);
-        DocGraphExportResult second = exporter.Export(Documents(), secondOutput.Path, contributors: [contributor]);
-        JsonElement[] nodes = File.ReadAllLines(first.NodesPath).Select(Parse).ToArray();
-        JsonElement[] edges = File.ReadAllLines(first.EdgesPath).Select(Parse).ToArray();
+        DocGraphExportResult first = exporter.Export(Documents(), firstOutput, contributors: [contributor]);
+        DocGraphExportResult second = exporter.Export(Documents(), secondOutput, contributors: [contributor]);
+        JsonElement[] nodes = _fixture.Memory!.ReadLines(first.NodesPath).Select(Parse).ToArray();
+        JsonElement[] edges = _fixture.Memory!.ReadLines(first.EdgesPath).Select(Parse).ToArray();
 
         Assert.Contains(nodes, node => IsNode(node, "term:loop", "Term")
             && node.GetProperty("name").GetString() == "loop");
@@ -61,22 +69,21 @@ public sealed class GlossaryGraphExportTests
             Assert.True(edge.TryGetProperty("from", out _));
             Assert.True(edge.TryGetProperty("to", out _));
         });
-        Assert.Equal(File.ReadAllText(first.NodesPath), File.ReadAllText(second.NodesPath));
-        Assert.Equal(File.ReadAllText(first.EdgesPath), File.ReadAllText(second.EdgesPath));
+        Assert.Equal(_fixture.Memory!.ReadAllText(first.NodesPath), _fixture.Memory!.ReadAllText(second.NodesPath));
+        Assert.Equal(_fixture.Memory!.ReadAllText(first.EdgesPath), _fixture.Memory!.ReadAllText(second.EdgesPath));
     }
 
     [Fact]
     public void ExportProposedAndRejectedSensesExcludesTheirNodesAndEveryDerivedEdge()
     {
-        using TempDirectory repository = GlossaryRepository();
-        using TempDirectory output = new TempDirectory();
-        ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(GlossaryService(repository.Path).Load());
+        GlossaryRepository();
+        ManagedGlossaryGraphContributor contributor = new ManagedGlossaryGraphContributor(GlossaryService(_fixture.Root).Load());
 
-        DocGraphExportResult result = RealDocGraphExporter.Create(Resolver()).Export(
+        DocGraphExportResult result = new DocGraphExporter(Resolver(), _fixture.Memory!).Export(
             Documents(),
-            output.Path,
+            OutputDirectory("output"),
             contributors: [contributor]);
-        string allLines = File.ReadAllText(result.NodesPath) + File.ReadAllText(result.EdgesPath);
+        string allLines = _fixture.Memory!.ReadAllText(result.NodesPath) + _fixture.Memory!.ReadAllText(result.EdgesPath);
 
         Assert.DoesNotContain("loop-agent", allLines, StringComparison.Ordinal);
         Assert.DoesNotContain("churn loop", allLines, StringComparison.Ordinal);
@@ -163,7 +170,7 @@ public sealed class GlossaryGraphExportTests
         Assert.DoesNotContain(contribution.Edges, edge => edge.To.Contains("mutated", StringComparison.Ordinal));
     }
 
-    private static ManagedGlossary GlossaryService(string repositoryRoot) =>
+    private ManagedGlossary GlossaryService(string repositoryRoot) =>
         new(
             repositoryRoot,
             new KyberWeaveConfig
@@ -172,10 +179,10 @@ public sealed class GlossaryGraphExportTests
                 Ontology = OntologyConfig.ProductDefaults.WithDocsRoots(["docs"]),
                 DocsAnalysis = new DocsAnalysisConfig { GlossaryPath = "docs/glossary.md" }
             },
-            TimeProvider.System,
-            DocsPorts.Files,
-            DocsPorts.Paths,
-            DocsPorts.Environment);
+            new FakeTimeProvider(),
+            _fixture.Store,
+            _fixture.Paths,
+            _fixture.Environment);
 
     private static ManagedGlossaryLoadResult CreateLoad(params GlossaryLookupResult[] terms) =>
         new(new AnalysisGlossary([]), terms);
@@ -194,18 +201,15 @@ public sealed class GlossaryGraphExportTests
             aliases ?? [],
             ["claim-" + id]);
 
-    private static TempDirectory GlossaryRepository()
+    private void GlossaryRepository()
     {
-        TempDirectory repository = new TempDirectory();
-        string docs = Path.Combine(repository.Path, "docs");
-        Directory.CreateDirectory(docs);
-        File.WriteAllText(Path.Combine(docs, "catalog.md"), """
+        _fixture.Write("docs/catalog.md", """
             | Component | Type | Source root | Overview | Detailed documentation | Owner | Last reviewed | Status |
             | --- | --- | --- | --- | --- | --- | --- | --- |
             | Gameplay | Application | `src/Game` | [README](x) | [docs](y) | Gameplay maintainers | 2026-08-01 | Current |
             | Agents | Tool | `src/Agents` | [README](x) | [docs](y) | Agent maintainers | 2026-08-01 | Current |
             """);
-        File.WriteAllText(Path.Combine(docs, "glossary.md"), """
+        _fixture.Write("docs/glossary.md", """
             ---
             id: reference/glossary
             title: Glossary
@@ -237,7 +241,6 @@ public sealed class GlossaryGraphExportTests
             - claim-legacy
             <!-- kyber-weave:glossary-evidence:end -->
             """);
-        return repository;
     }
 
     private static FakeCodeGraphResolver Resolver() => FakeCodeGraphResolver.WithSymbols(
