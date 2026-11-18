@@ -135,6 +135,34 @@ public sealed partial class ProseRuleCatalogTests
             Assert.True(rows.ContainsKey(id), $"Catalog rule {id} carries a rule-map id the map has no row for."));
     }
 
+    /// <summary>
+    /// A glob needs no directory prefix: the catalog allows <c>*</c> and <c>**</c> anywhere, so a rule may
+    /// cover root files or a whole subtree without naming a directory the corpus must list first.
+    /// </summary>
+    [Fact]
+    public void Resolve_ExpandsAGlobAtTheCorpusRoot()
+    {
+        InMemoryCorpusSource corpus = new InMemoryCorpusSource()
+            .Add("AGENTS.md", "root")
+            .Add("docs/AGENTS.md", "nested")
+            .Add("docs/guides/AGENTS.md", "deeper")
+            .Add("docs/notes.txt", "other");
+
+        Assert.Equal(["AGENTS.md"], ProseRuleCatalog.Resolve(corpus, new ProseDocumentRef("*.md", null)));
+        Assert.Equal(
+            ["AGENTS.md", "docs/AGENTS.md", "docs/guides/AGENTS.md"],
+            ProseRuleCatalog.Resolve(corpus, new ProseDocumentRef("**/AGENTS.md", null)));
+    }
+
+    /// <summary>The checkout answers a root listing the same way the in-memory corpus does.</summary>
+    [Fact]
+    public void TheCheckoutListsFilesAtItsRoot()
+    {
+        Assert.Contains(
+            "AGENTS.md",
+            CheckoutCorpusSource.Checkout.EnumerateFiles(string.Empty, "AGENTS.md", recursive: false));
+    }
+
     [Fact]
     public void Section_EndsAtTheNextHeadingOfTheSameOrHigherLevel()
     {

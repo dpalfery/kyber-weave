@@ -16,7 +16,7 @@ internal static class CorpusListing
     /// <returns>True when a directory between the listing's directory and the file is a skipped one.</returns>
     public static bool HasSkippedDirectory(string directory, string path, StringComparison comparison)
     {
-        string prefix = directory + "/";
+        string prefix = directory.Length == 0 ? string.Empty : directory + "/";
         if (!path.StartsWith(prefix, comparison))
             return false;
 

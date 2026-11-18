@@ -48,6 +48,22 @@ internal static class CorpusPath
         return string.Join(Separator, kept);
     }
 
+    /// <summary>
+    /// Canonicalizes a directory path relative to the corpus root, where the empty string and <c>.</c> name the root
+    /// itself, so a listing can start there.
+    /// </summary>
+    /// <param name="relativeDirectory">The directory a caller supplied, with either slash.</param>
+    /// <returns>The canonical directory path, or the empty string for the corpus root.</returns>
+    /// <exception cref="ArgumentException">The path is rooted, or climbs above the root with <c>..</c>.</exception>
+    public static string NormalizeDirectory(string relativeDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(relativeDirectory))
+            return string.Empty;
+
+        string candidate = relativeDirectory.Replace('\\', '/');
+        return candidate is "." or "./" ? string.Empty : Normalize(relativeDirectory);
+    }
+
     /// <summary>Resolves a canonical corpus path against a root.</summary>
     /// <param name="root">The absolute corpus root.</param>
     /// <param name="canonicalPath">A path <see cref="Normalize"/> returned.</param>
@@ -60,7 +76,9 @@ internal static class CorpusPath
     /// <param name="path">The file's canonical path.</param>
     /// <param name="comparison">The corpus's name comparison, which follows its host file system.</param>
     /// <returns>True when the file sits directly in the directory.</returns>
-    public static bool IsDirectChild(string directory, string path, StringComparison comparison) =>
-        path.StartsWith(directory + Separator, comparison)
-        && path.IndexOf('/', directory.Length + 1) < 0;
+    public static bool IsDirectChild(string directory, string path, StringComparison comparison)
+    {
+        string prefix = directory.Length == 0 ? string.Empty : directory + Separator;
+        return path.StartsWith(prefix, comparison) && path.IndexOf('/', prefix.Length) < 0;
+    }
 }

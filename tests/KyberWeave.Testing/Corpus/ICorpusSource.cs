@@ -44,7 +44,9 @@ public interface ICorpusSource
     byte[] ReadBytes(string relativePath);
 
     /// <summary>Lists the files under a directory, as paths relative to <see cref="Root"/> with forward slashes.</summary>
-    /// <param name="relativeDirectory">The directory's path relative to <see cref="Root"/>, with forward slashes.</param>
+    /// <param name="relativeDirectory">
+    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root itself.
+    /// </param>
     /// <param name="searchPattern">A file name pattern such as <c>*.md</c>; <c>*</c> when null.</param>
     /// <param name="recursive">True to descend into subdirectories; false to list the directory's own files.</param>
     /// <returns>
@@ -61,7 +63,9 @@ public interface ICorpusSource
         bool recursive = true);
 
     /// <summary>Lists the child directories of a directory, as paths relative to <see cref="Root"/>.</summary>
-    /// <param name="relativeDirectory">The directory's path relative to <see cref="Root"/>, with forward slashes.</param>
+    /// <param name="relativeDirectory">
+    /// The directory's path relative to <see cref="Root"/>, with forward slashes; the empty string names the root itself.
+    /// </param>
     /// <returns>
     /// One path per immediate child directory, relative to <see cref="Root"/> with forward slashes; empty when the
     /// directory is missing. The listing is complete when the call returns, so a caller may hold it while the tree

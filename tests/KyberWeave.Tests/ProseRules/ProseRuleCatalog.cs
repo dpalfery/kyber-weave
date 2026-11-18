@@ -109,11 +109,6 @@ internal sealed partial record ProseRuleCatalog(double ConfidenceFloor, IReadOnl
         int wildcard = document.Pattern.IndexOf('*', StringComparison.Ordinal);
         int lastSlash = document.Pattern.LastIndexOf('/', wildcard);
         string prefix = lastSlash < 0 ? string.Empty : document.Pattern[..lastSlash];
-        if (prefix.Length == 0)
-        {
-            throw new InvalidOperationException(
-                $"'{document.Pattern}' is a glob at the corpus root, which the corpus seam cannot list; name a directory.");
-        }
 
         return [.. corpus.EnumerateFiles(prefix)
             .Where(relative => PathGlob.IsMatch(document.Pattern, relative))
