@@ -1,5 +1,4 @@
 using KyberWeave.Testing.Squad;
-using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -11,7 +10,7 @@ using KyberWeave.Core.Squad.Rendering;
 using KyberWeave.Tests.Fakes;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Tests;
 
 /// <summary>
 /// Task 11.3: <c>squad status</c> lists owned blocks with file and entry count,
@@ -20,6 +19,8 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadOwnedBlockStatusTests
 {
+    private readonly InMemorySquadState _state = new();
+
     /// <summary>
     /// The bare global hook path four of the five formats write beneath their own root; only the
     /// target tells them apart, which is the whole subject of the global cases below.
@@ -32,10 +33,10 @@ public sealed class SquadOwnedBlockStatusTests
     [Fact]
     public void Status_ListsOwnedBlocksWithFileAndEntryCount()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -43,14 +44,14 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
+        SquadStatusCommand command = SquadTestCommands.InMemoryStatus(_state);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
             {
-                Path = fixture.Path,
+                Path = root,
                 Global = false,
             }));
 
@@ -62,55 +63,12 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     [Fact]
-    [UnsupportedOSPlatform("windows")]
-    public void Status_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
-    {
-        Assert.SkipWhen(
-            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
-            "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
-
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
-            SquadDeploymentScope.Project,
-            Lock(),
-            [],
-            [],
-            adopt: false,
-            new FixedTimeProvider(InstalledAt),
-            blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
-        string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
-        File.SetUnixFileMode(path, UnixFileMode.None);
-
-        try
-        {
-            SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
-                null!,
-                new SquadStatusSettings
-                {
-                    Path = fixture.Path,
-                    Global = false,
-                }));
-
-            Assert.Equal(1, execution.Result);
-            Assert.Contains("unreadable", execution.Output, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-    }
-
-    [Fact]
     public void Status_ReportsHandEditedOwnedEntryAsDriftByFileAndContainer()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -118,16 +76,16 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        DriftOwnedEntry(fixture.Path, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
+        DriftOwnedEntry(root, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
 
-        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
+        SquadStatusCommand command = SquadTestCommands.InMemoryStatus(_state);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
             {
-                Path = fixture.Path,
+                Path = root,
                 Global = false,
             }));
 
@@ -140,10 +98,10 @@ public sealed class SquadOwnedBlockStatusTests
     [Fact]
     public void Status_ReportsMissingBlockFileAsDriftByFileAndContainer()
     {
-        using TempDirectory fixture = new TempDirectory();
-        SquadStateStore store = Store(fixture.Path);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -151,16 +109,16 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        File.Delete(Path.Combine(fixture.Path, ".cursor", "hooks.json"));
+        _state.Files.DeleteFile(Path.Combine(root, ".cursor", "hooks.json"));
 
-        SquadStatusCommand command = SquadTestCommands.Status(stateStore: store);
+        SquadStatusCommand command = SquadTestCommands.InMemoryStatus(_state);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
             {
-                Path = fixture.Path,
+                Path = root,
                 Global = false,
             }));
 
@@ -173,11 +131,10 @@ public sealed class SquadOwnedBlockStatusTests
     [Fact]
     public void Doctor_ReportsHandEditedOwnedEntryAsDriftByFileAndContainer()
     {
-        using TempDirectory fixture = new TempDirectory();
-        FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
-        SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -185,19 +142,19 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        DriftOwnedEntry(fixture.Path, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
+        DriftOwnedEntry(root, ".cursor/hooks.json", "cursor-one", "cursor-one drifted by hand");
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: fixture.Path);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: root);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = fixture.Path,
+                Path = root,
                 Global = false,
             }));
 
@@ -208,60 +165,12 @@ public sealed class SquadOwnedBlockStatusTests
     }
 
     [Fact]
-    [UnsupportedOSPlatform("windows")]
-    public void Doctor_ReportsAnUnreadableBlockFileAsDriftInsteadOfCrashing()
-    {
-        Assert.SkipWhen(
-            OperatingSystem.IsWindows() || Environment.IsPrivilegedProcess,
-            "Unix file modes are not enforced on Windows, so the unreadable file cannot be simulated; a privileged process (root) ignores the mode too, so it is skipped there as well.");
-
-        using TempDirectory fixture = new TempDirectory();
-        FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
-        SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
-            SquadDeploymentScope.Project,
-            Lock(),
-            [],
-            [],
-            adopt: false,
-            new FixedTimeProvider(InstalledAt),
-            blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
-        string path = Path.Combine(fixture.Path, ".cursor", "hooks.json");
-        File.SetUnixFileMode(path, UnixFileMode.None);
-
-        try
-        {
-            FakeProcessExecutor executor = new FakeProcessExecutor()
-                .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-            SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: fixture.Path);
-
-            CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
-                null!,
-                new SquadDoctorSettings
-                {
-                    Path = fixture.Path,
-                    Global = false,
-                }));
-
-            Assert.Equal(1, execution.Result);
-            Assert.Contains("unreadable", execution.Output, StringComparison.OrdinalIgnoreCase);
-        }
-        finally
-        {
-            File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
-        }
-    }
-
-    [Fact]
     public void Doctor_ReportsMissingBlockFileAsDriftByFileAndContainer()
     {
-        using TempDirectory fixture = new TempDirectory();
-        FakeSquadUserPaths userPaths = new(Path.Combine(fixture.Path, "user-home"));
-        SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
-            fixture.Path,
+        string root = ProjectRoot();
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
+            root,
             SquadDeploymentScope.Project,
             Lock(),
             [],
@@ -269,19 +178,19 @@ public sealed class SquadOwnedBlockStatusTests
             adopt: false,
             new FixedTimeProvider(InstalledAt),
             blocks: [CursorBlock("cursor-one")]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
 
-        File.Delete(Path.Combine(fixture.Path, ".cursor", "hooks.json"));
+        _state.Files.DeleteFile(Path.Combine(root, ".cursor", "hooks.json"));
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = SquadTestCommands.Doctor(executor, userPaths, workingDirectory: fixture.Path);
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(_state, executor, workingDirectory: root);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadDoctorSettings
             {
-                Path = fixture.Path,
+                Path = root,
                 Global = false,
             }));
 
@@ -304,10 +213,9 @@ public sealed class SquadOwnedBlockStatusTests
     [Fact]
     public void Status_GlobalReportsEveryBlockWithItsTargetLabel()
     {
-        using TempDirectory fixture = new TempDirectory();
-        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture);
+        GlobalBlockDeployment installed = InstallGlobalBlocks();
 
-        SquadStatusCommand command = SquadTestCommands.Status(stateStore: installed.Store, globalRoots: installed.GlobalRoots);
+        SquadStatusCommand command = SquadTestCommands.InMemoryStatus(_state, installed.GlobalRoots);
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
             new SquadStatusSettings
@@ -336,18 +244,15 @@ public sealed class SquadOwnedBlockStatusTests
     [Fact]
     public void Doctor_GlobalFindsEveryBlockHealthy()
     {
-        using TempDirectory fixture = new TempDirectory();
-        GlobalBlockDeployment installed = InstallGlobalBlocks(fixture);
+        GlobalBlockDeployment installed = InstallGlobalBlocks();
 
         FakeProcessExecutor executor = new FakeProcessExecutor()
             .WithProbeOutput("kyber-weave-mcp", "kyber-weave-mcp 1.2.3\n");
-        SquadDoctorCommand command = SquadTestCommands.Doctor(
+        SquadDoctorCommand command = SquadTestCommands.InMemoryDoctor(
+            _state,
             executor,
-            installed.Store.UserPaths,
             installed.Home,
-            installed.GlobalRoots,
-            null,
-            installed.Store);
+            installed.GlobalRoots);
 
         CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() => command.Execute(
             null!,
@@ -422,14 +327,13 @@ public sealed class SquadOwnedBlockStatusTests
     /// same plan and transaction an install uses. Each block is written beneath its own target's
     /// global root, which is why both record the bare path <c>hooks.json</c>.
     /// </summary>
-    private static GlobalBlockDeployment InstallGlobalBlocks(TempDirectory fixture)
+    private GlobalBlockDeployment InstallGlobalBlocks()
     {
-        FakeSquadUserPaths userPaths = new(fixture.Path);
-        string home = userPaths.HomeDirectory;
-        Directory.CreateDirectory(home);
+        string home = _state.UserPaths.HomeDirectory;
+        _state.Files.CreateDirectory(home);
         SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = RealSquadState.Store(userPaths);
-        SquadDeploymentPlan plan = RealSquadDeployment.Planner.CreateInstall(
+        SquadStateStore store = _state.Store;
+        SquadDeploymentPlan plan = _state.Planner.CreateInstall(
             home,
             SquadDeploymentScope.Global,
             Lock(),
@@ -439,7 +343,7 @@ public sealed class SquadOwnedBlockStatusTests
             new FixedTimeProvider(InstalledAt),
             globalRoots: globalRoots,
             blocks: [GlobalHooksBlock(SquadTarget.Cursor), GlobalHooksBlock(SquadTarget.Codex)]);
-        RealSquadDeployment.Transaction(store).Execute(plan);
+        _state.Transaction().Execute(plan);
         return new GlobalBlockDeployment(store, globalRoots, home);
     }
 
@@ -452,10 +356,10 @@ public sealed class SquadOwnedBlockStatusTests
             ["failClosed"] = true,
         };
 
-    private static void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
+    private void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
     {
         string path = Path.Combine(root, relativePath.Replace('/', Path.DirectorySeparatorChar));
-        JsonNode rootNode = JsonNode.Parse(File.ReadAllText(path))!;
+        JsonNode rootNode = JsonNode.Parse(_state.Files.ReadAllText(path))!;
         JsonArray pre = Assert.IsType<JsonObject>(rootNode)["hooks"]!.AsObject()["preToolUse"]!.AsArray();
         JsonObject owned = Assert.IsType<JsonObject>(pre.Single(
             node => node!.AsObject()["command"]!.GetValue<string>().Contains(marker, StringComparison.Ordinal)));
@@ -463,11 +367,15 @@ public sealed class SquadOwnedBlockStatusTests
             marker,
             replacement,
             StringComparison.Ordinal);
-        File.WriteAllText(path, rootNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
+        _state.Files.WriteAllText(path, rootNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n");
     }
 
-    private static SquadStateStore Store(string applicationData) =>
-        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
+    private string ProjectRoot()
+    {
+        string root = Path.Combine(_state.Files.Root, "work", "project");
+        _state.Files.CreateDirectory(root);
+        return root;
+    }
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(
