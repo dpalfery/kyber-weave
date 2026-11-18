@@ -155,11 +155,11 @@ public abstract class SquadStateMigrationCrashSafetyContractTests
             string? difference = SquadTreeComparison.Difference(after, workspace.Capture());
             if (difference is not null)
             {
-                failures.Add((point, $"after running again the tree is not the clean run's tree: {difference}"));
+                failures.Add((point, $"after running again the tree is not the clean run's tree: {difference} (stopped at: {stop.Message})"));
             }
         }
 
-        Report(flow, failures);
+        Report(flow, failures, operations);
     }
 
     private static IEnumerable<string> AfterStop(
@@ -209,7 +209,7 @@ public abstract class SquadStateMigrationCrashSafetyContractTests
         }
     }
 
-    private void Report(SquadStateMigrationFlow flow, List<(int Point, string Detail)> failures)
+    private void Report(SquadStateMigrationFlow flow, List<(int Point, string Detail)> failures, int operations)
     {
         if (failures.Count == 0)
         {
@@ -230,7 +230,14 @@ public abstract class SquadStateMigrationCrashSafetyContractTests
                 " ",
                 KnownWeaknesses
                     .Where(weakness => failures.Any(failure => Explains(weakness, flow, failure.Detail)))
-                    .Select(weakness => $"[{weakness.Flow}] {weakness.Reason}")));
+                    .Select(weakness =>
+                    {
+                        List<(int Point, string Detail)> matched = failures
+                            .Where(failure => Explains(weakness, flow, failure.Detail))
+                            .ToList();
+                        return $"[{weakness.Flow}] {weakness.Reason} It shows at {matched.Count} of {operations} operations, " +
+                            $"from {matched[0].Point} to {matched[^1].Point}; the first stop was {matched[0].Detail}";
+                    })));
     }
 
     private static bool Explains(SquadStateMigrationKnownWeakness weakness, SquadStateMigrationFlow flow, string detail) =>

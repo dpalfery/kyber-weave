@@ -1,3 +1,4 @@
+using KyberWeave.Data.Host;
 using KyberWeave.Data.Hooks;
 using KyberWeave.Testing.Squad;
 using System.Runtime.Versioning;
@@ -598,6 +599,23 @@ public sealed class SquadStateMigrationTests
 
         Assert.NotEmpty(afterRelease.MigratedItems);
         Assert.True(File.Exists(Path.Combine(HomeGlobalDirectory(scenario), "squad.receipt.json")));
+    }
+
+    /// <summary>
+    /// The lease the migration takes and the lease a transaction takes are the same operating-system mutex, so a
+    /// transaction refuses to start while the migration's lease is held: the other direction of the interlock.
+    /// </summary>
+    [Fact]
+    public void ATransactionIsRefusedWhileTheMigrationLeaseIsHeld()
+    {
+        string leaseKey = $"interlock-{Guid.NewGuid():N}";
+
+        using (new MutexLease().Acquire(SquadLeaseNames.ForRoot(leaseKey), TimeSpan.Zero))
+        {
+            _ = Assert.Throws<InvalidOperationException>(() => SquadTransaction.AcquireLease(leaseKey));
+        }
+
+        using TransactionLease afterRelease = SquadTransaction.AcquireLease(leaseKey);
     }
 
     /// <summary>
