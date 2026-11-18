@@ -24,7 +24,6 @@ public sealed class ArbiterStatusCommand(
     IUserHostConfigStore userConfig,
     IArbiterRepositoryLocator locator,
     IArbiterHarnessGating gating,
-    ArbiterGatingConsole gatingConsole,
     IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary>A remote provider is configured, and no key resolves for its origin.</summary>
@@ -114,7 +113,7 @@ public sealed class ArbiterStatusCommand(
     private void WriteProjectScope(HarnessGatingReport gating)
     {
         console.MarkupLine("[bold]PROJECT scope[/]");
-        gatingConsole.WriteRows(gating, TargetDisplayName);
+        ArbiterGatingConsole.WriteRows(console, gating, TargetDisplayName);
     }
 
     private static string GlobalReason(string token)

@@ -94,9 +94,8 @@ public sealed class ArbiterConsoleSeamTests
     public void GatingConsole_WritesTheEmptyNoticeUnchanged()
     {
         TestConsole console = new();
-        ArbiterGatingConsole gating = new(console);
 
-        gating.WriteRows(new HarnessGatingReport([], []), token => token);
+        ArbiterGatingConsole.WriteRows(console, new HarnessGatingReport([], []), token => token);
 
         Assert.Equal($"  no harness installed for this project.{System.Environment.NewLine}", console.Output);
     }
@@ -106,16 +105,44 @@ public sealed class ArbiterConsoleSeamTests
     public void GatingConsole_WritesARowWithItsFixCommand()
     {
         TestConsole console = new();
-        ArbiterGatingConsole gating = new(console);
         HarnessGatingReport report = new(
             [new HarnessGatingRow("claude", "gated", "kyber-weave arbiter install --target claude", Ungated: false)],
             []);
 
-        gating.WriteRows(report, token => token.ToUpperInvariant());
+        ArbiterGatingConsole.WriteRows(console, report, token => token.ToUpperInvariant());
 
         Assert.Equal(
             $"  CLAUDE: gated; run kyber-weave arbiter install --target claude{System.Environment.NewLine}",
             console.Output);
+    }
+
+    /// <summary>
+    /// <c>arbiter status</c> writes its gating rows to the same console as the rest of its report. The command takes one
+    /// console, so there is no second one for a row to go to; before that it took a renderer wrapping its own console,
+    /// and the lifting applied to one console while rows were written to the other.
+    /// </summary>
+    [Fact]
+    public void Status_WritesItsGatingRowsToItsOwnConsole()
+    {
+        TestConsole console = new();
+        console.Profile.Width = 200;
+        ArbiterStatusCommand command = new(
+            new FixedArbiterConfigs(),
+            new NoKeyService(),
+            new FakeProcessEnvironment(homeDirectory: "/kw/home"),
+            new NoUserConfigStore(),
+            new NoRepositoryLocator(),
+            new OneRowGating(),
+            console);
+
+        _ = command.Execute(null!, new ArbiterSettings { Path = NoRepository });
+
+        Assert.Contains("GLOBAL scope", console.Output, StringComparison.Ordinal);
+        Assert.Contains("PROJECT scope", console.Output, StringComparison.Ordinal);
+        Assert.Contains(
+            "  Claude: gated; run kyber-weave arbiter install --project --target claude",
+            console.Output,
+            StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -233,6 +260,59 @@ public sealed class ArbiterConsoleSeamTests
         public void Write(IRenderable renderable) => _current.Write(renderable);
 
         public void WriteAnsi(Action<AnsiWriter> action) => _current.WriteAnsi(action);
+    }
+
+    /// <summary>Resolves no key: the provider in these tests is <c>none</c>, which needs none.</summary>
+    private sealed class NoKeyService : IArbiterKeyService
+    {
+        public string? ResolveKey(KyberWeaveConfig config, string endpoint) => null;
+
+        public string? TryResolveKey(KyberWeaveConfig config, string endpoint) => null;
+
+        public Func<Uri, string?> CreateKeyResolver(KyberWeaveConfig config) => _ => null;
+    }
+
+    /// <summary>Holds no global targets, so the status report's GLOBAL section is the empty notice.</summary>
+    private sealed class NoUserConfigStore : IUserHostConfigStore
+    {
+        public string EnsureUserConfig(string home) => string.Empty;
+
+        public void WriteGlobalTargets(string home, IReadOnlyList<string> targets)
+        {
+        }
+
+        public void RemoveGlobalTarget(string home, string target)
+        {
+        }
+
+        public IReadOnlyList<string> ReadGlobalTargets(string home) => [];
+    }
+
+    /// <summary>Names the path it is given as the repository root, without running git.</summary>
+    private sealed class NoRepositoryLocator : IArbiterRepositoryLocator
+    {
+        public string ResolveRepositoryRoot(string path) => path;
+
+        public string ResolveArbiterDirectory(string path) => path + "/artifacts/arbiter";
+
+        public string FindGitRoot(string start) => start;
+    }
+
+    /// <summary>Reports one gated harness, so a gating row is written.</summary>
+    private sealed class OneRowGating : IArbiterHarnessGating
+    {
+        public HarnessGatingReport Build(
+            string root,
+            string home,
+            KyberWeaveConfig config,
+            IReadOnlyList<string> globalTargets) =>
+            new(
+                [new HarnessGatingRow(
+                    "claude",
+                    "gated",
+                    "kyber-weave arbiter install --project --target claude",
+                    Ungated: false)],
+                []);
     }
 
     /// <summary>A configuration resolver that answers with the product defaults and reads nothing.</summary>

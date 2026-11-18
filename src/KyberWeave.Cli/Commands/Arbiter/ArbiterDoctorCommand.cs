@@ -19,7 +19,6 @@ namespace KyberWeave.Cli.Commands.Arbiter;
 /// </remarks>
 public sealed class ArbiterDoctorCommand(
     IArbiterDoctorService doctor,
-    ArbiterGatingConsole gating,
     IAnsiConsole console) : Command<ArbiterSettings>
 {
     /// <summary><c>artifacts/arbiter/</c> is not ignored by git.</summary>
@@ -94,7 +93,7 @@ public sealed class ArbiterDoctorCommand(
             console.MarkupLine("  arbiter.enabled: true");
         }
 
-        gating.WriteRows(inspected.Gating, ArbiterDoctorService.TargetDisplayName);
+        ArbiterGatingConsole.WriteRows(console, inspected.Gating, ArbiterDoctorService.TargetDisplayName);
 
         foreach (ArbiterDoctorLine line in inspected.Lines)
         {
