@@ -1,7 +1,9 @@
 using KyberWeave.Contracts.Repositories;
 using KyberWeave.Core.Arbiter.Credentials;
+using KyberWeave.Data;
 using KyberWeave.Data.Arbiter.Credentials;
 using KyberWeave.Tests.Fakes;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace KyberWeave.Tests.Credentials;
@@ -31,5 +33,17 @@ public sealed class OperatingSystemCredentialStoreTests
     public void RejectsAMissingEnvironment()
     {
         _ = Assert.Throws<ArgumentNullException>(() => OperatingSystemCredentialStore.Create(null!));
+    }
+
+    [Fact]
+    public void TheDataCompositionResolvesTheCredentialStore()
+    {
+        ServiceCollection services = new();
+        services.AddSingleton<IProcessEnvironment>(new FakeProcessEnvironment(operatingSystem: OperatingSystemKind.Linux));
+        _ = services.AddWeaveDataServices();
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Assert.IsType<SecretServiceCredentialStore>(provider.GetRequiredService<ICredentialStore>());
     }
 }
