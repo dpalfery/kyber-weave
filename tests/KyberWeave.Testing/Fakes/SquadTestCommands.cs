@@ -209,7 +209,7 @@ internal static class SquadTestCommands
             renderer ?? SquadHostDefaults.ResolveRenderer(),
             new SquadModelPresetStore(store.UserPaths),
             RealSquadDeployment.Planner,
-            new FileSquadResponseGuidanceStore(),
+            new SquadResponseGuidanceReader(new PhysicalFileSystem()),
             new FakeProcessEnvironment(readVariable: environmentReader),
             RealSquadServices.SourceLocator(),
             RealSquadServices.SourceLoader(),

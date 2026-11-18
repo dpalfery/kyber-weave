@@ -14,6 +14,7 @@ namespace KyberWeave.Tests.Squad;
 public sealed class SquadDeploymentProbeSeamTests
 {
     private const string Root = "/work";
+    private const string Home = "/home/dev";
 
     private readonly InMemoryFileSystem _files = new(caseSensitive: true);
     private readonly FakeProcessEnvironment _environment = new();
@@ -25,6 +26,8 @@ public sealed class SquadDeploymentProbeSeamTests
     private SquadSkillShadowing SkillShadowing => new(_files, Paths, _environment);
 
     private FactoryHooksShadowing HooksShadowing => new(_files);
+
+    private SquadResponseGuidanceReader Guidance => new(_files);
 
     private static SquadTargetResolutionRequest Install(string root) =>
         new() { RootPath = root, Operation = SquadTargetOperation.Install };
@@ -206,6 +209,39 @@ public sealed class SquadDeploymentProbeSeamTests
 
         Assert.Equal(["factory", "claude"], outcome.Blocks!.Select(block => block.Target));
         Assert.Empty(outcome.Degradations);
+    }
+
+    [Fact]
+    public void TheUserGuidanceFileIsPreferredOverTheShippedDefault()
+    {
+        string path = Path.Combine(Home, SquadResponseGuidanceDeployer.FileName);
+        _files.CreateDirectory(Home);
+        _files.WriteAllText(path, "Use short tool calls.");
+        List<string> warnings = [];
+
+        Assert.Equal("Use short tool calls.", Guidance.ReadEffective(Home, warnings));
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public void MissingGuidanceFallsBackToTheShippedDefaultWithoutAWarning()
+    {
+        List<string> warnings = [];
+
+        Assert.Equal(SquadResponseGuidanceSource.DefaultText, Guidance.ReadEffective(Home, warnings));
+        Assert.Empty(warnings);
+    }
+
+    [Fact]
+    public void BlankGuidanceFallsBackToTheShippedDefaultAndWarnsOnce()
+    {
+        string path = Path.Combine(Home, SquadResponseGuidanceDeployer.FileName);
+        _files.CreateDirectory(Home);
+        _files.WriteAllText(path, " \r\n\t");
+        List<string> warnings = [];
+
+        Assert.Equal(SquadResponseGuidanceSource.DefaultText, Guidance.ReadEffective(Home, warnings));
+        Assert.Contains("response-guidance", Assert.Single(warnings), StringComparison.OrdinalIgnoreCase);
     }
 
     private void InstallSkill(string path, string body)

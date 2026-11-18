@@ -217,7 +217,6 @@ all of them `ProcessStartInfo` in an interface or a request record; it holds no 
 | `SquadHookJsonFile` (`Squad/Deployment/SquadHookJsonFile.cs`) | file system, paths | 3.5 |
 | `SquadMigrationLedger` (`Squad/Deployment/SquadMigrationLedger.cs`) | file system | 3.5 |
 | `SquadResponseGuidanceDeployer` (`Squad/Deployment/SquadResponseGuidanceDeployer.cs`) | file system, paths, identifiers | 3.5 |
-| `SquadResponseGuidanceReader` (`Squad/Deployment/SquadResponseGuidanceReader.cs`) | file system | 3.5 |
 | `SquadTransaction` (`Squad/Deployment/SquadTransaction.cs`) | file system, paths, identifiers, lease | 3.4 |
 | `SquadWorkerBaselineFile` (`Squad/Deployment/SquadWorkerBaselineFile.cs`) | file system, paths | 3.5 |
 | `SquadWorktreeMcp` (`Squad/Deployment/SquadWorktreeMcp.cs`) | file system, paths | 3.5 |

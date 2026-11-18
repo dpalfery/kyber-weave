@@ -14,20 +14,6 @@ public sealed class SquadTransactionFactory(ISquadStateStore stateStore) : ISqua
     public ISquadTransaction Create(ISquadTransactionObserver? observer) => new SquadTransaction(stateStore, observer);
 }
 
-/// <summary>Reads and deploys the response guidance under the user's home.</summary>
-public sealed class FileSquadResponseGuidanceStore : ISquadResponseGuidanceStore
-{
-    /// <inheritdoc />
-    public string ReadEffective(string homeDirectory, ICollection<string> warnings) =>
-        SquadResponseGuidanceReader.ReadEffective(homeDirectory, warnings);
-
-    /// <inheritdoc />
-    public ISquadResponseGuidanceDeployer CreateDeployer(string homeStateRoot) => new SquadResponseGuidanceDeployer(homeStateRoot);
-
-    /// <inheritdoc />
-    public bool IsDegradableFailure(Exception exception) => SquadResponseGuidanceDeployer.IsDegradableFailure(exception);
-}
-
 /// <summary>Probes the files of a release's extraction tree and of the checkout the binary runs from.</summary>
 public sealed class PhysicalSquadFileAccess : ISquadFileAccess
 {
