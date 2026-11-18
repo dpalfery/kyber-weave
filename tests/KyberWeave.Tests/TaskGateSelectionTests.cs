@@ -1,5 +1,9 @@
+using KyberWeave.Application.Review;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Review;
+using KyberWeave.Tests.Fakes;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -13,6 +17,11 @@ namespace KyberWeave.Tests;
 public sealed class TaskGateSelectionTests
 {
     private static readonly string[] Changed = ["src/KyberWeave.Core/Review/PathGlob.cs"];
+
+    private static ITaskGateSelectionService GateSelection(ITestClassSources? sources = null) =>
+        new TaskGateSelectionService(
+            new FakeRepositoryTreeProbe(),
+            sources ?? new FakeTestClassSources());
 
     [Theory]
     [InlineData("macos")]
@@ -212,14 +221,24 @@ public sealed class TaskGateSelectionTests
     [Fact]
     public void TestClassMappingInvalidRootReturnsEmptyWithoutThrowing()
     {
-        IReadOnlyList<string> resolved = TestClassMapping.Resolve("non_existent_directory_xyz", Changed);
+        IReadOnlyList<string> resolved = GateSelection(new FakeTestClassSources { Missing = true })
+            .ResolveTestClasses("non_existent_directory_xyz", Changed);
         Assert.Empty(resolved);
     }
 
     [Fact]
     public void TestClassMappingMatchesDirectoryIgnoringCase()
     {
-        IReadOnlyList<string> resolved = TestClassMapping.Resolve(null, ["Tests/KyberWeave.Tests/TaskGateSelectionTests.cs"]);
+        const string File = "/repo/Tests/KyberWeave.Tests/TaskGateSelectionTests.cs";
+        FakeTestClassSources sources = new()
+        {
+            SourcesByName = new Dictionary<string, string>(StringComparer.Ordinal) { ["TaskGateSelectionTests"] = File },
+            NamespacesByPath = new Dictionary<string, string>(StringComparer.Ordinal) { [File] = "KyberWeave.Tests" },
+        };
+
+        IReadOnlyList<string> resolved = GateSelection(sources)
+            .ResolveTestClasses(null, ["Tests/KyberWeave.Tests/TaskGateSelectionTests.cs"]);
+
         Assert.Contains(typeof(TaskGateSelectionTests).FullName!, resolved);
     }
 
