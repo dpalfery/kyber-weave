@@ -47,7 +47,7 @@ public sealed class ArbiterGuardCompositionTests
     }
 
     [Fact]
-    public void TheGuardsContainerResolvesTheArbiterStateTheWorkerGuardReadsTheLedgerThrough()
+    public void TheGuardsContainerResolvesTheArbiterStateFactoryOverTheLogAndFileSystemSeams()
     {
         using ServiceProvider services = (ServiceProvider)ArbiterContainer.CreateGuards();
         string directory = Path.Combine(AppContext.BaseDirectory, "no-such-arbiter-state");
