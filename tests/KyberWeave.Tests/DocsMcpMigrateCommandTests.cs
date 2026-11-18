@@ -5,6 +5,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using KyberWeave.Cli.Commands.Docs;
+using KyberWeave.Contracts.Paths;
+using KyberWeave.Contracts.Repositories;
+using KyberWeave.Contracts.Services;
 using KyberWeave.Core.Configuration;
 using KyberWeave.Core.Docs.Mcp;
 using Xunit;
@@ -1203,6 +1206,78 @@ public sealed class DocsMcpMigrateCommandTests : IDisposable
     /// qualified, and a Unix-absolute base is drive-relative on Windows.
     /// </summary>
     private static string FakeAnchor => OperatingSystem.IsWindows() ? @"C:\kw" : "/kw";
+
+    /// <summary>
+    /// A root the path seam cannot canonicalize is refused, not treated as "not the home": the
+    /// refusal is a promise never to read or write user-scope files, and a comparison that failed
+    /// has proved nothing about which tree the operator pointed the command at.
+    /// </summary>
+    [Fact]
+    public void AnUnresolvableRootIsRefusedInsteadOfTreatedAsNotTheHome()
+    {
+        string home = Path.Combine(FakeAnchor, "home");
+
+        CapturedConsoleExecution<int> execution = ProcessConsoleCapture.Run(() =>
+            new DocsMcpMigrateCommand(
+                new UnreachedWiringService(),
+                new UnresolvableCanonicalPathResolver(FakePathResolver.OverEmptyFileSystem()),
+                new FakeProcessEnvironment(
+                    currentDirectory: Path.Combine(FakeAnchor, "work"),
+                    homeDirectory: home)).Execute(
+                null!,
+                new DocsMcpMigrateSettings { Path = home }));
+
+        Assert.Equal(1, execution.Result);
+        Assert.Contains(ErrorCode, execution.Output, StringComparison.Ordinal);
+    }
+
+    /// <summary>A path seam whose canonicalization fails the way an unreadable parent directory does.</summary>
+    private sealed class UnresolvableCanonicalPathResolver(IPathResolver inner) : IPathResolver
+    {
+        public string GetFullPath(string path, string baseDirectory) => inner.GetFullPath(path, baseDirectory);
+
+        public bool AreSame(string first, string second) => inner.AreSame(first, second);
+
+        public bool IsWithin(string root, string candidate) => inner.IsWithin(root, candidate);
+
+        public string Canonicalize(string path) => throw new IOException("a parent directory could not be read");
+
+        public string ResolvePhysicalRoot(string targetRoot) => inner.ResolvePhysicalRoot(targetRoot);
+    }
+
+    /// <summary>An MCP wiring service a refusal must stop the command before it reaches.</summary>
+    private sealed class UnreachedWiringService : IMcpWiringService
+    {
+        public ILaunchCommandResolver ResolverFor(string repositoryRoot) => throw Unreached();
+
+        public McpWiringReport Inspect(string repositoryRoot, McpConfig config) => throw Unreached();
+
+        public McpWiringReport Inspect(string repositoryRoot, McpConfig config, ILaunchCommandResolver resolver) =>
+            throw Unreached();
+
+        public IReadOnlyList<McpWiringFix> Derive(McpWiringReport report, string repositoryRoot) => throw Unreached();
+
+        public IReadOnlyList<string> Harnesses(IEnumerable<McpWiringFix> fixes) => throw Unreached();
+
+        public McpWiringRepairReport Repair(
+            string repositoryRoot,
+            McpConfig config,
+            ILaunchCommandResolver resolver,
+            IReadOnlyList<string> targets,
+            bool dryRun = false) => throw Unreached();
+
+        public McpWiringRepairReport Unwire(string repositoryRoot, IReadOnlyList<string> targets) => throw Unreached();
+
+        public IReadOnlyList<McpRenameChange> Scan(string repositoryRoot, string? harness = null) => throw Unreached();
+
+        public IReadOnlyList<McpRenameChange> Migrate(
+            string repositoryRoot,
+            IReadOnlyList<string> targets,
+            bool dryRun = false) => throw Unreached();
+
+        private static InvalidOperationException Unreached() =>
+            new("the command reached the MCP wiring service, so the home refusal did not stop it");
+    }
 
     /// <summary>
     /// A declaration that is a symbolic link is refused before it is read: reading it would read a

@@ -159,7 +159,10 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
     /// The comparison is on the resolved directory, never on the spelling: a home reached through a
     /// symbolic link, a relative path, or a <c>..</c> that lands there is the same directory, and a
     /// refusal that let one spelling through would be a refusal an operator could walk around by
-    /// accident. A home this process cannot resolve, or does not have, cannot equal anything.
+    /// accident. It fails closed: a root this process cannot resolve has not been proved to be
+    /// anything other than the home, so it is refused. Where only the link-resolving walk fails, the
+    /// two full paths are compared lexically, which still refuses the home written verbatim. A home
+    /// this process cannot resolve, or does not have, cannot equal anything.
     /// </remarks>
     private bool IsOperatorHome(string root)
     {
@@ -168,33 +171,25 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
         if (string.IsNullOrWhiteSpace(home))
             return false;
 
-        string? canonicalRoot = Canonical(root);
-        string? canonicalHome = Canonical(home);
+        string? fullRoot = FullPath(root);
+        if (fullRoot is null)
+            return true;
 
-        return canonicalRoot is not null
-            && canonicalHome is not null
-            && string.Equals(
-                canonicalRoot,
-                canonicalHome,
-                _environment.OperatingSystem == OperatingSystemKind.Windows
-                    ? StringComparison.OrdinalIgnoreCase
-                    : StringComparison.Ordinal);
+        string? fullHome = FullPath(home);
+        if (fullHome is null)
+            return false;
+
+        return Same(Canonical(fullRoot) ?? fullRoot, Canonical(fullHome) ?? fullHome);
     }
 
-    /// <summary>The directory a path names, with its own link resolved and its trailing separator removed.</summary>
-    private string? Canonical(string path)
+    /// <summary>The full spelling of a path, resolved against the named base, or null when the seam refuses it.</summary>
+    private string? FullPath(string path)
     {
         try
         {
             // The base is named rather than read from the process: the path seam resolves a relative
             // spelling against it and never falls back to the working directory.
-            string full = _paths.GetFullPath(path, _environment.CurrentDirectory);
-
-            string trimmed = _paths.Canonicalize(full)
-                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-
-            // A filesystem root trims to nothing, and "" is not a directory name this can compare.
-            return trimmed.Length == 0 ? full : trimmed;
+            return _paths.GetFullPath(path, _environment.CurrentDirectory);
         }
         catch (Exception exception) when (exception is
             ArgumentException or IOException or NotSupportedException
@@ -203,6 +198,33 @@ public sealed class DocsMcpMigrateCommand : Command<DocsMcpMigrateSettings>
             return null;
         }
     }
+
+    /// <summary>The directory a full path names, with every link resolved and its trailing separator removed.</summary>
+    private string? Canonical(string fullPath)
+    {
+        try
+        {
+            string trimmed = _paths.Canonicalize(fullPath)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+            // A filesystem root trims to nothing, and "" is not a directory name this can compare.
+            return trimmed.Length == 0 ? fullPath : trimmed;
+        }
+        catch (Exception exception) when (exception is
+            ArgumentException or IOException or NotSupportedException
+            or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            return null;
+        }
+    }
+
+    private bool Same(string first, string second) =>
+        string.Equals(
+            first,
+            second,
+            _environment.OperatingSystem == OperatingSystemKind.Windows
+                ? StringComparison.OrdinalIgnoreCase
+                : StringComparison.Ordinal);
 
     /// <summary>
     /// The whole report for a root that is the home directory: one refusal naming the reason, and no
