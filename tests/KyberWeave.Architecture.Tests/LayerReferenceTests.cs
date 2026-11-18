@@ -1,4 +1,5 @@
 using System.Xml.Linq;
+using KyberWeave.Tests.Corpus;
 using Xunit;
 
 namespace KyberWeave.Tests;
@@ -15,6 +16,8 @@ namespace KyberWeave.Tests;
 /// </remarks>
 public sealed class LayerReferenceTests
 {
+    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
+
     private static readonly string[] LegacyProjects = ["KyberWeave.Core", "KyberWeave.Core.Docs", "KyberWeave.Core.Squad"];
 
     /// <summary>Each layer and the only repository projects it may reference.</summary>
@@ -78,10 +81,10 @@ public sealed class LayerReferenceTests
 
     private static string[] References(string project)
     {
-        string path = Path.Combine(KyberWeaveTestPaths.ToolRoot, "src", project, $"{project}.csproj");
+        string path = $"src/{project}/{project}.csproj";
         return
         [
-            .. XDocument.Load(path)
+            .. XDocument.Parse(Corpus.ReadText(path))
                 .Descendants("ProjectReference")
                 .Select(element => element.Attribute("Include")?.Value ?? string.Empty)
                 .Select(include => Path.GetFileNameWithoutExtension(include.Replace('\\', '/')))
