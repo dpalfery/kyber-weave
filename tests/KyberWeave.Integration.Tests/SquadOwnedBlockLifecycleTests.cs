@@ -23,8 +23,6 @@ namespace KyberWeave.Integration.Tests;
 /// </summary>
 public sealed class SquadOwnedBlockLifecycleTests
 {
-    private static readonly ICorpusSource Corpus = CheckoutCorpusSource.Checkout;
-
     /// <summary>
     /// The bare global hook path four of the five formats write beneath their own root; only the
     /// target tells them apart, which is the subject of the global cases below.
@@ -1056,11 +1054,11 @@ public sealed class SquadOwnedBlockLifecycleTests
 
     /// <summary>
     /// The two-block global receipt 0.1.8-rc.20's own bytes describe, assembled per the recipe in
-    /// <see cref="SquadGlobalBlockReceiptTests"/>. Nothing here is invented: it is the shipped
+    /// <c>SquadGlobalBlockReceiptTests</c>. Nothing here is invented: it is the shipped
     /// shape, which is what makes it evidence that an upgrade keeps its state.
     /// </summary>
     private static string Rc20GlobalReceiptJson() =>
-        Corpus.ReadText("tests/KyberWeave.Integration.Tests/Fixtures/squad-rc20-global/two-blocks.receipt.json");
+        SquadRc20Fixtures.TwoBlocksReceipt();
 
     private static void DriftOwnedEntry(string root, string relativePath, string marker, string replacement)
     {

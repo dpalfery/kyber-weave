@@ -1,14 +1,13 @@
-using KyberWeave.Testing.Squad;
-using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Nodes;
 using KyberWeave.Core.Squad.Deployment;
 using KyberWeave.Core.Squad.Rendering;
-using KyberWeave.Tests.Fakes;
+using KyberWeave.Testing.Squad;
+using KyberWeave.Tests.FileSystem;
 using Xunit;
 
-namespace KyberWeave.Integration.Tests;
+namespace KyberWeave.Application.Tests.Squad.Deployment;
 
 /// <summary>
 /// Pins one thing: under global scope a stored hook block is identified by its target as well as
@@ -31,7 +30,6 @@ namespace KyberWeave.Integration.Tests;
 /// </remarks>
 public sealed class SquadGlobalBlockReceiptTests
 {
-    private const string FixtureRelativePath = "tests/KyberWeave.Integration.Tests/Fixtures/squad-rc20-global";
     private const string SharedHooksPath = "hooks.json";
 
     private static readonly DateTimeOffset InstalledAt = new(2026, 11, 06, 9, 30, 00, TimeSpan.Zero);
@@ -47,15 +45,13 @@ public sealed class SquadGlobalBlockReceiptTests
     [Fact]
     public void GlobalInstallOfTwoThenThreeBlocksSharingOnePathRecordsEveryTargetInOneReceipt()
     {
-        using TempDirectory fixture = new();
-        string home = Path.Combine(fixture.Path, "home");
-        Directory.CreateDirectory(home);
-        SquadGlobalRoots globalRoots = new(_ => null, home);
-        SquadStateStore store = Store(fixture.Path);
-        string targetRoot = Path.Combine(fixture.Path, "install-root");
-        Directory.CreateDirectory(targetRoot);
+        InMemorySquadState state = new();
+        SquadGlobalRoots globalRoots = new(_ => null, state.UserPaths.HomeDirectory);
+        SquadStateStore store = state.Store;
+        string targetRoot = Path.Combine(state.Files.Root, "install-root");
+        state.Files.CreateDirectory(targetRoot);
 
-        SquadDeploymentPlan two = RealSquadDeployment.Planner.CreateInstall(
+        SquadDeploymentPlan two = state.Planner.CreateInstall(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -66,17 +62,17 @@ public sealed class SquadGlobalBlockReceiptTests
             globalRoots: globalRoots,
             blocks: [HooksBlock(SquadTarget.Cursor), HooksBlock(SquadTarget.Codex)]);
 
-        RealSquadDeployment.Transaction(store).Execute(two);
+        state.Transaction().Execute(two);
 
         SquadReceipt afterTwo = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(targetRoot, SquadDeploymentScope.Global));
         Assert.Equal("kyber-squad.receipt/v3", afterTwo.Schema);
         Assert.Equal(SquadDeploymentScope.Global, afterTwo.Scope);
         AssertBlocks(afterTwo, TwoBlockTargets);
-        AssertGlobalHookFile(globalRoots, SquadTarget.Cursor);
-        AssertGlobalHookFile(globalRoots, SquadTarget.Codex);
+        AssertGlobalHookFile(state.Files, globalRoots, SquadTarget.Cursor);
+        AssertGlobalHookFile(state.Files, globalRoots, SquadTarget.Codex);
 
-        SquadDeploymentPlan three = RealSquadDeployment.Planner.CreateUpdate(
+        SquadDeploymentPlan three = state.Planner.CreateUpdate(
             targetRoot,
             SquadDeploymentScope.Global,
             Lock(),
@@ -93,12 +89,12 @@ public sealed class SquadGlobalBlockReceiptTests
                 HooksBlock(SquadTarget.Factory),
             ]);
 
-        RealSquadDeployment.Transaction(store).Execute(three);
+        state.Transaction().Execute(three);
 
         SquadReceipt afterThree = Assert.IsType<SquadReceipt>(
             store.ReadReceipt(targetRoot, SquadDeploymentScope.Global));
         AssertBlocks(afterThree, ThreeBlockTargets);
-        AssertGlobalHookFile(globalRoots, SquadTarget.Factory);
+        AssertGlobalHookFile(state.Files, globalRoots, SquadTarget.Factory);
     }
 
     /// <summary>
@@ -131,9 +127,8 @@ public sealed class SquadGlobalBlockReceiptTests
     [Fact]
     public void Rc20GlobalReceiptCarryingTwoBlocksReadsBackAndReserializesIdentically()
     {
-        using TempDirectory fixture = new();
-        SquadStateStore store = Store(fixture.Path);
-        string json = ReadFixture("two-blocks.receipt.json");
+        SquadStateStore store = new InMemorySquadState().Store;
+        string json = SquadRc20Fixtures.TwoBlocksReceipt();
 
         SquadReceipt receipt = store.DeserializeReceipt(json);
 
@@ -181,14 +176,14 @@ public sealed class SquadGlobalBlockReceiptTests
         Assert.All(receipt.Blocks, block => Assert.NotEmpty(block.Entries));
     }
 
-    private static void AssertGlobalHookFile(SquadGlobalRoots globalRoots, SquadTarget target)
+    private static void AssertGlobalHookFile(InMemoryFileSystem files, SquadGlobalRoots globalRoots, SquadTarget target)
     {
         string token = SquadTargetCatalog.GetToken(target);
         string path = Path.Combine(globalRoots.ResolveGlobalRoot(target), SharedHooksPath);
-        Assert.True(File.Exists(path), $"Expected the {token} global hook file at '{path}'.");
+        Assert.True(files.FileExists(path), $"Expected the {token} global hook file at '{path}'.");
         Assert.Contains(
             $"kyber-weave-arbiter hook --harness {token} --scope global",
-            File.ReadAllText(path),
+            files.ReadAllText(path),
             StringComparison.Ordinal);
     }
 
@@ -242,19 +237,8 @@ public sealed class SquadGlobalBlockReceiptTests
                 }),
         };
 
-    private static string ReadFixture(string name) =>
-        File.ReadAllText(
-            Path.Combine(RepositoryRoot(), FixtureRelativePath, name),
-            Encoding.UTF8);
-
     private static string NormalizeLineEndings(string value) =>
         value.Replace("\r\n", "\n", StringComparison.Ordinal);
-
-    private static string RepositoryRoot([CallerFilePath] string sourcePath = "") =>
-        Path.GetFullPath(Path.Combine(Path.GetDirectoryName(sourcePath)!, "..", ".."));
-
-    private static SquadStateStore Store(string applicationData) =>
-        RealSquadState.Store(new FakeSquadUserPaths(applicationData));
 
     private static SquadLock Lock(string version = "1.2.3") =>
         new(
